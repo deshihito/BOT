@@ -4,9 +4,13 @@
 // 契約: view.state.yourHand は自分の手札（牌 id 配列）、他人は others[].count
 // （枚数）だけが見える。場は board（向き付きチェーン）、両端は leftEnd/rightEnd。
 // 操作は { type: "place", tile, side } / { type: "draw" } / { type: "pass" }。
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import { dominoTilePips } from "@/lib/online/games/domino";
 import { playSe } from "@/lib/balku-sound";
+
+// 3D シーンは three を含むため遅延読み込み（このページ専用チャンクに閉じる）。
+const DominoScene3D = dynamic(() => import("./DominoScene3D"), { ssr: false });
 import OnlineShell from "../online/OnlineShell";
 import type { OnlineRoomApi, OnlineRoomView } from "../online/useOnlineRoom";
 
@@ -82,6 +86,9 @@ export default function DominoClient() {
 function DominoTable({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
   const state = view.state as DominoState | null;
   const mySeat = view.player.seat;
+  const [webglFailed, setWebglFailed] = useState(false);
+  // 両端どちらにも置ける牌を選んだ状態（3D の置く側選択用。2D は側ボタンで直接置く）。
+  const [selectedTile, setSelectedTile] = useState<number | null>(null);
   const turnRef = useRef<number | null>(null);
   const finishRef = useRef<string | null>(null);
 
@@ -101,6 +108,14 @@ function DominoTable({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }
     playSe(state.winners.includes(mySeat) ? "win" : "lose");
   }, [state?.finished, state?.winners, mySeat, view.code]);
 
+  // 選択中の牌が手札から消えた／手番でなくなったら選択を解除する。
+  useEffect(() => {
+    if (selectedTile === null) return;
+    if (!state || state.finished || state.turn !== mySeat || !state.yourHand.includes(selectedTile)) {
+      setSelectedTile(null);
+    }
+  }, [state, mySeat, selectedTile]);
+
   if (!state) return <p className="muted">読み込み中です…</p>;
 
   const myTurn = !state.finished && state.turn === mySeat;
@@ -117,6 +132,33 @@ function DominoTable({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }
     return sides;
   };
 
+  // 配置の送信（2D の側ボタンと 3D の牌タップで共有。api.move 経路）。
+  const placeTile = (tile: number, side: "left" | "right") => {
+    playSe("play");
+    void api.move({ type: "place", tile, side });
+    setSelectedTile(null);
+  };
+
+  // 3D の牌タップ: 置ける側が1つなら即配置、両方なら選択状態にして
+  // 両端マーカーのタップ（置く側の決定）を待つ。
+  const handleHandTap = (tile: number) => {
+    if (!myTurn) return;
+    const sides = placeableSides(tile);
+    if (sides.length === 0) return;
+    if (sides.length === 1) {
+      placeTile(tile, sides[0]);
+      return;
+    }
+    playSe("click");
+    setSelectedTile((cur) => (cur === tile ? null : tile));
+  };
+
+  const handleEndTap = (side: "left" | "right") => {
+    if (selectedTile === null) return;
+    if (!placeableSides(selectedTile).includes(side)) return;
+    placeTile(selectedTile, side);
+  };
+
   // 最後に置かれた牌（ログ末尾の place が指す端）を演出対象にする
   const lastLog = state.log[state.log.length - 1];
   const newestTileIndex =
@@ -128,46 +170,15 @@ function DominoTable({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }
       : `勝者: ${state.winners.map((s) => nameOf(s)).join("、")}`
     : myTurn
       ? state.yourPlayable.length > 0
-        ? "出せる牌が光っています。置く側のボタンを押してください。"
+        ? "出せる牌が光っています。牌を選んでください。"
         : state.canDraw
           ? "出せる牌がありません。山から引いてください。"
           : "出せる牌がなく、山も尽きました。パスしてください。"
       : `${nameOf(state.turn)}の手番です。`;
 
-  return (
-    <div>
-      <p className={`classic-status${myTurn ? " juice-pulse" : ""}`} role="status">
-        {statusText}
-      </p>
-
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
-        {state.others.map((o) => (
-          <span
-            key={o.seat}
-            style={{
-              border: "1px solid #cbd5e1",
-              borderRadius: 999,
-              padding: "3px 10px",
-              fontSize: 13,
-              background: state.turn === o.seat && !state.finished ? "#fef3c7" : "#ffffff",
-            }}
-          >
-            {o.name}: 残り{o.count}枚{o.left ? "（退出）" : ""}
-          </span>
-        ))}
-        <span
-          style={{
-            border: "1px solid #cbd5e1",
-            borderRadius: 999,
-            padding: "3px 10px",
-            fontSize: 13,
-            background: "#f8fafc",
-          }}
-        >
-          山 {state.boneyardCount}枚
-        </span>
-      </div>
-
+  // 2D 盤（場のチェーン＋手札。WebGL が使えない場合のフォールバックとしてそのまま使う）。
+  const board2d = (
+    <>
       <div
         role="group"
         aria-label="場のチェーン"
@@ -241,10 +252,7 @@ function DominoTable({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }
                       className="classic-btn"
                       style={{ padding: "2px 8px", fontSize: 12 }}
                       aria-label={`${a}と${b}の牌を${side === "left" ? "左" : "右"}端に置く`}
-                      onClick={() => {
-                        playSe("play");
-                        void api.move({ type: "place", tile, side });
-                      }}
+                      onClick={() => placeTile(tile, side)}
                     >
                       {state.board.length === 0 ? "置く" : side === "left" ? "←左" : "右→"}
                     </button>
@@ -255,6 +263,72 @@ function DominoTable({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }
           );
         })}
       </div>
+    </>
+  );
+
+  return (
+    <div>
+      <p className={`classic-status${myTurn ? " juice-pulse" : ""}`} role="status">
+        {statusText}
+      </p>
+
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+        {state.others.map((o) => (
+          <span
+            key={o.seat}
+            style={{
+              border: "1px solid #cbd5e1",
+              borderRadius: 999,
+              padding: "3px 10px",
+              fontSize: 13,
+              background: state.turn === o.seat && !state.finished ? "#fef3c7" : "#ffffff",
+            }}
+          >
+            {o.name}: 残り{o.count}枚{o.left ? "（退出）" : ""}
+          </span>
+        ))}
+        <span
+          style={{
+            border: "1px solid #cbd5e1",
+            borderRadius: 999,
+            padding: "3px 10px",
+            fontSize: 13,
+            background: "#f8fafc",
+          }}
+        >
+          山 {state.boneyardCount}枚
+        </span>
+      </div>
+
+      {webglFailed ? board2d : (
+        <>
+          <DominoScene3D
+            yourHand={state.yourHand}
+            board={state.board}
+            others={state.others.map((o) => ({ seat: o.seat, count: o.count }))}
+            boneyardCount={state.boneyardCount}
+            selectedTile={selectedTile}
+            yourPlayable={state.yourPlayable}
+            myTurn={myTurn}
+            mySeat={mySeat}
+            totalPlayers={state.players.length}
+            onHandTap={handleHandTap}
+            onEndTap={handleEndTap}
+            onFail={() => setWebglFailed(true)}
+            fallback={board2d}
+          />
+          {state.board.length > 0 ? (
+            <p className="muted" style={{ fontSize: 13, marginTop: 6, marginBottom: 12 }}>
+              左端 {state.leftEnd} ・ 右端 {state.rightEnd}
+            </p>
+          ) : null}
+          {selectedTile !== null ? (
+            <p className="muted" role="status" style={{ fontSize: 13, marginTop: -6, marginBottom: 12 }}>
+              置く側を選んでください。場の左端か右端の光るマーカーをタップします。同じ牌をもう一度タップすると選択を解除します。
+            </p>
+          ) : null}
+        </>
+      )}
 
       {myTurn && (state.canDraw || state.canPass) ? (
         <div className="classic-controls" role="group" aria-label="引く・パス">

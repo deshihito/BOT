@@ -2,7 +2,11 @@
 // ブロック崩し。配置・得点は lib/breakout.ts、物理は canvas の rAF ループ。
 // マウス/タッチ/キーでパドルを動かす。残機3、レベル進行あり。
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useCallback, useEffect, useRef, useState } from "react";
+
+// 3D シーンは three を含むため遅延読み込み（このページ専用チャンクに閉じる）。
+const BreakoutScene3D = dynamic(() => import("./BreakoutScene3D"), { ssr: false });
 import {
   BREAKOUT_FIELD_H,
   BREAKOUT_FIELD_W,
@@ -48,6 +52,7 @@ export default function BreakoutClient() {
   const phaseRef = useRef<Phase>("ready");
 
   const [phase, setPhaseState] = useState<Phase>("ready");
+  const [webglFailed, setWebglFailed] = useState(false);
   const [score, setScore] = useState(0);
   const [lives, setLives] = useState(3);
   const [levelIdx, setLevelIdx] = useState(0);
@@ -102,8 +107,9 @@ export default function BreakoutClient() {
       rafRef.current = requestAnimationFrame(loop);
       const dt = Math.min(0.033, (now - last) / 1000);
       last = now;
+      // 物理は canvas の有無に依存しない (3D 表示時は canvas が無いため、
+      // ここで早期 return するとゲーム自体が止まる)。描画だけを下で分岐する。
       const canvas = canvasRef.current;
-      if (!canvas) return;
 
       // --- 物理 ---
       if (phaseRef.current === "playing") {
@@ -190,7 +196,8 @@ export default function BreakoutClient() {
         ballRef.current.y = PADDLE_Y - ballRef.current.r - 2;
       }
 
-      // --- 描画 ---
+      // --- 描画 (2D フォールバック表示時のみ。3D 時はシーンが getState で追従) ---
+      if (!canvas) return;
       const dpr = Math.min(2, window.devicePixelRatio || 1);
       const cssW = canvas.clientWidth || BREAKOUT_FIELD_W;
       const scale = cssW / BREAKOUT_FIELD_W;
@@ -301,6 +308,31 @@ export default function BreakoutClient() {
     },
   });
 
+  // --- 3D シーンとの接続 (語彙は 2D と同一) ---
+  // パドルの目標位置 (フィールド座標 x)。2D の onPointerMove と同じクランプ。
+  const handleTarget3D = useCallback((fieldX: number) => {
+    paddleRef.current.x = Math.max(
+      paddleRef.current.w / 2,
+      Math.min(BREAKOUT_FIELD_W - paddleRef.current.w / 2, fieldX),
+    );
+  }, []);
+  // タップ = 発射・再開、クリア時は次のレベルへ (2D の盤面 onPointerDown と同じ)。
+  const handlePress3D = useCallback(() => {
+    if (phaseRef.current === "ready" || phaseRef.current === "life-lost" || phaseRef.current === "paused") {
+      sfxTap();
+      setPhase("playing");
+    } else if (phaseRef.current === "cleared") {
+      startLevel(levelRef.current + 1, true, true);
+    }
+  }, [setPhase, startLevel]);
+  // 下スワイプ = ポーズ (プレイ中のみ。2D の boardGesture と同じ)。
+  const handleSwipeDown3D = useCallback(() => {
+    if (phaseRef.current === "playing") {
+      sfxTap();
+      setPhase("paused");
+    }
+  }, [setPhase]);
+
   const statusText =
     phase === "gameover"
       ? `ゲームオーバー。スコア ${score} でした。`
@@ -321,22 +353,8 @@ export default function BreakoutClient() {
     background: "rgba(255,255,255,0.06)", color: "inherit", cursor: "pointer", fontWeight: 700, minHeight: 44, touchAction: "manipulation",
   };
 
-  return (
-    <>
-      <nav className="breadcrumbs" aria-label="パンくず">
-        <Link href={`${prefix}/games`}>ゲーム</Link>
-        <span> / </span>
-        <span>ブロック崩し</span>
-      </nav>
-      <div className="page-heading compact-heading">
-        <h1>ブロック崩し</h1>
-        <p className="muted">パドルでボールを跳ね返してブロックを全部壊す定番アクション。ライフは3つ、全3レベルです。</p>
-      </div>
-
-      <p className="classic-status" role="status">
-        スコア <span key={score} className="juice-pulse" style={{ display: "inline-block" }}>{score}</span> ・ ライフ {"♥".repeat(Math.max(0, lives)) || "—"} ・ {BREAKOUT_LEVELS[levelIdx].name} ・ {statusText}
-      </p>
-
+  // 既存 2D 表示 (WebGL が使えない環境へのフォールバックとしてシーンへも渡す)。
+  const board2d = (
       <div style={{ maxWidth: 800, margin: "0 auto" }}>
         <canvas
           ref={canvasRef}
@@ -362,6 +380,36 @@ export default function BreakoutClient() {
           }}
         />
       </div>
+  );
+
+  return (
+    <>
+      <nav className="breadcrumbs" aria-label="パンくず">
+        <Link href={`${prefix}/games`}>ゲーム</Link>
+        <span> / </span>
+        <span>ブロック崩し</span>
+      </nav>
+      <div className="page-heading compact-heading">
+        <h1>ブロック崩し</h1>
+        <p className="muted">パドルでボールを跳ね返してブロックを全部壊す定番アクション。ライフは3つ、全3レベルです。</p>
+      </div>
+
+      <p className="classic-status" role="status">
+        スコア <span key={score} className="juice-pulse" style={{ display: "inline-block" }}>{score}</span> ・ ライフ {"♥".repeat(Math.max(0, lives)) || "—"} ・ {BREAKOUT_LEVELS[levelIdx].name} ・ {statusText}
+      </p>
+
+{webglFailed ? board2d : (
+        <div style={{ maxWidth: 800, margin: "0 auto" }}>
+          <BreakoutScene3D
+            getState={() => ({ ball: ballRef.current, paddle: paddleRef.current, bricks: bricksRef.current })}
+            onTarget={handleTarget3D}
+            onPress={handlePress3D}
+            onSwipeDown={handleSwipeDown3D}
+            onFail={() => setWebglFailed(true)}
+            fallback={board2d}
+          />
+        </div>
+      )}
 
       {(phase === "gameover" || phase === "all-cleared") && (
         <div style={{ maxWidth: 520, margin: "14px auto 0" }}>

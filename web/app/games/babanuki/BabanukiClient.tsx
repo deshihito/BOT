@@ -5,7 +5,11 @@
 // 契約: view.state.yourHand は自分の手札（カード id 配列）、他人の手札は
 // others[].count（枚数）だけが見える。引く操作は { type: "draw", index }
 // で、index は引く相手の手札の位置（中身は見えない）。
-import { useEffect, useRef } from "react";
+import dynamic from "next/dynamic";
+import { useEffect, useRef, useState } from "react";
+
+// 3D シーンは three を含むため遅延読み込み（このページ専用チャンクに閉じる）。
+const BabanukiScene3D = dynamic(() => import("./BabanukiScene3D"), { ssr: false });
 import OnlineShell from "../online/OnlineShell";
 import type { OnlineRoomApi, OnlineRoomView } from "../online/useOnlineRoom";
 import { playSe } from "@/lib/balku-sound";
@@ -70,6 +74,7 @@ export default function BabanukiClient() {
 }
 
 function BabanukiTable({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
+  const [webglFailed, setWebglFailed] = useState(false);
   const state = view.state as BabanukiState | null;
   const mySeat = view.player.seat;
 
@@ -121,6 +126,81 @@ function BabanukiTable({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi
         return "";
     }
   };
+
+  // 3D シーンからの操作（既存の「引く」ボタンと同じ move を送る。意味は変えない）。
+  const doDraw = (index: number) => {
+    if (api.busy) return;
+    playSe("play");
+    void api.move({ type: "draw", index });
+  };
+
+  // 2D テーブル（引く操作＋自分の手札。WebGL が使えない場合のフォールバックとしてそのまま使う）。
+  const table2d = (
+    <>
+      {/* 引く操作: 相手の手札は裏向きで枚数だけ見える */}
+      {!state.finished && isMyTurn && drawTarget && (
+        <section aria-label="カードを引く" style={{ marginTop: 12 }}>
+          <p className="og-status-line">{drawTarget.name} の手札（裏向き）から1枚選んでください。</p>
+          <div
+            role="group"
+            aria-label={`${drawTarget.name}の手札`}
+            style={{ display: "flex", flexWrap: "wrap", gap: 6 }}
+          >
+            {Array.from({ length: drawTarget.count }, (_, index) => (
+              <button
+                key={index}
+                type="button"
+                disabled={api.busy}
+                aria-label={`${drawTarget.name}の手札 ${index + 1}枚目を引く`}
+                onClick={() => {
+                  playSe("play");
+                  void api.move({ type: "draw", index });
+                }}
+                style={{
+                  width: 52,
+                  height: 72,
+                  minHeight: 48,
+                  borderRadius: 8,
+                  border: "2px solid #7a4a21",
+                  background:
+                    "repeating-linear-gradient(45deg, #a33b32 0 8px, #93332b 8px 16px)",
+                  color: "#fff",
+                  fontSize: 20,
+                  cursor: api.busy ? "default" : "pointer",
+                  touchAction: "manipulation",
+                }}
+              >
+                🂠
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
+      {/* 自分の手札 */}
+      {!state.finished && (
+        <section aria-label="あなたの手札" style={{ marginTop: 16 }}>
+          <p className="og-status-line">あなたの手札（{state.yourHand.length}枚）</p>
+          <div className="og-hand" role="group" aria-label="あなたの手札">
+            {state.yourHand.map((id) => (
+              <span
+                key={id}
+                className={`og-card juice-pop${isRedCard(id) ? " og-card-red" : ""}`}
+                role="img"
+                aria-label={cardAriaLabel(id)}
+                style={id === 52 ? { borderColor: "#7a4a21", background: "#fff7e0" } : undefined}
+              >
+                <CardFace id={id} />
+              </span>
+            ))}
+            {state.yourHand.length === 0 && <span className="og-status-line">手札はありません（上がり）。</span>}
+          </div>
+          <p className="og-muted">
+            同じ数字が2枚そろうと自動で捨てられます。最後までジョーカーを持っていた人が負けです。
+          </p>
+        </section>
+      )}
+    </>
+  );
 
   return (
     <div className="og-game og-babanuki">
@@ -195,68 +275,23 @@ function BabanukiTable({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi
         </section>
       )}
 
-      {/* 引く操作: 相手の手札は裏向きで枚数だけ見える */}
-      {!state.finished && isMyTurn && drawTarget && (
-        <section aria-label="カードを引く" style={{ marginTop: 12 }}>
-          <p className="og-status-line">{drawTarget.name} の手札（裏向き）から1枚選んでください。</p>
-          <div
-            role="group"
-            aria-label={`${drawTarget.name}の手札`}
-            style={{ display: "flex", flexWrap: "wrap", gap: 6 }}
-          >
-            {Array.from({ length: drawTarget.count }, (_, index) => (
-              <button
-                key={index}
-                type="button"
-                disabled={api.busy}
-                aria-label={`${drawTarget.name}の手札 ${index + 1}枚目を引く`}
-                onClick={() => {
-                  playSe("play");
-                  void api.move({ type: "draw", index });
-                }}
-                style={{
-                  width: 52,
-                  height: 72,
-                  minHeight: 48,
-                  borderRadius: 8,
-                  border: "2px solid #7a4a21",
-                  background:
-                    "repeating-linear-gradient(45deg, #a33b32 0 8px, #93332b 8px 16px)",
-                  color: "#fff",
-                  fontSize: 20,
-                  cursor: api.busy ? "default" : "pointer",
-                  touchAction: "manipulation",
-                }}
-              >
-                🂠
-              </button>
-            ))}
-          </div>
-        </section>
-      )}
-      {/* 自分の手札 */}
-      {!state.finished && (
-        <section aria-label="あなたの手札" style={{ marginTop: 16 }}>
-          <p className="og-status-line">あなたの手札（{state.yourHand.length}枚）</p>
-          <div className="og-hand" role="group" aria-label="あなたの手札">
-            {state.yourHand.map((id) => (
-              <span
-                key={id}
-                className={`og-card juice-pop${isRedCard(id) ? " og-card-red" : ""}`}
-                role="img"
-                aria-label={cardAriaLabel(id)}
-                style={id === 52 ? { borderColor: "#7a4a21", background: "#fff7e0" } : undefined}
-              >
-                <CardFace id={id} />
-              </span>
-            ))}
-            {state.yourHand.length === 0 && <span className="og-status-line">手札はありません（上がり）。</span>}
-          </div>
-          <p className="og-muted">
-            同じ数字が2枚そろうと自動で捨てられます。最後までジョーカーを持っていた人が負けです。
-          </p>
-        </section>
-      )}
+      {/* 手札まわり: 3D シーン（WebGL が使えない場合は 2D テーブルへ） */}
+      {!state.finished &&
+        (webglFailed ? (
+          table2d
+        ) : (
+          <BabanukiScene3D
+            mySeat={mySeat}
+            yourHand={state.yourHand}
+            others={state.others.map((o) => ({ seat: o.seat, count: o.count }))}
+            drawFromSeat={state.drawFrom}
+            isMyTurn={isMyTurn}
+            lastDraw={state.lastDraw}
+            onDrawTap={doDraw}
+            onFail={() => setWebglFailed(true)}
+            fallback={table2d}
+          />
+        ))}
 
       {/* ログ */}
       {recentLog.length > 0 && (

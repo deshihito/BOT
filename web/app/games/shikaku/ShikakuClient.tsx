@@ -3,6 +3,7 @@
 // マスをタップして始点を決め、もう一度タップしたマスまでを長方形にする。
 // 既にある長方形のマスをタップすると、その長方形を取り除く。端末内で完結する。
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useEffect, useRef, useState } from "react";
 import {
   applyShikakuRect,
@@ -20,6 +21,9 @@ import { sfxCorrect, sfxPlace, sfxTap, sfxWin, sfxWrong } from "@/lib/sfx";
 import { tappableProps, useGesture } from "@/lib/gesture";
 import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
+
+// 3D シーンは three を含むため遅延読み込み（このページ専用チャンクに閉じる）。
+const ShikakuScene3D = dynamic(() => import("./ShikakuScene3D"), { ssr: false });
 
 const SIZES: { key: ShikakuSize; label: string }[] = [
   { key: 5, label: "5×5" },
@@ -51,6 +55,7 @@ function formatTime(sec: number): string {
 
 export default function ShikakuClient() {
   const { prefix } = useGamesNav();
+  const [webglFailed, setWebglFailed] = useState(false);
   const [size, setSize] = useState<ShikakuSize>(5);
   const [state, setState] = useState<ShikakuState>(() => newGame(5));
   const [anchor, setAnchor] = useState<number | null>(null);
@@ -140,6 +145,24 @@ export default function ShikakuClient() {
     setAnchor(null);
   };
 
+  // 3D のドラッグ確定。適用は onCell の2タップ目と同じ applyShikakuRect 経路。
+  // 開始セルと終了セルが同じドラッグはタップとみなして onCell に委ねる。
+  const handleDragRect = (startIndex: number, endIndex: number) => {
+    if (state.status === "won") return;
+    if (startIndex === endIndex) {
+      onCell(startIndex);
+      return;
+    }
+    setCheckResult(null);
+    setAnchor(null);
+    sfxPlace();
+    const r1 = Math.floor(startIndex / state.size);
+    const c1 = startIndex % state.size;
+    const r2 = Math.floor(endIndex / state.size);
+    const c2 = endIndex % state.size;
+    setState((s) => applyShikakuRect(s, { r1, c1, r2, c2 }));
+  };
+
   const onCheck = () => {
     if (isShikakuComplete(state)) {
       sfxCorrect();
@@ -182,41 +205,8 @@ export default function ShikakuClient() {
             : "長方形の反対側の角をタップ。始点をもう一度タップすると取り消します。"
           : "マスをタップして始点を決め、もう一つの角で長方形を描きます。長方形のマスをタップすると消せます。";
 
-  return (
-    <>
-      <nav className="breadcrumbs" aria-label="パンくず">
-        <Link href={`${prefix}/games`}>ゲーム</Link>
-        <span> / </span>
-        <span>しかく</span>
-      </nav>
-      <div className="page-heading compact-heading">
-        <h1>しかく</h1>
-        <p className="muted">
-          角のマスを2回タップして長方形を描き、盤面を埋めます。盤面を下にスワイプするとチェックします。
-        </p>
-      </div>
-
-      <div className="classic-controls" role="group" aria-label="サイズと操作">
-        {SIZES.map((s) => (
-          <div
-            key={s.key}
-            {...tappableProps(() => restart(s.key))}
-            aria-pressed={size === s.key}
-            className={size === s.key ? "classic-btn classic-btn-active" : "classic-btn"}
-          >
-            {s.label}
-          </div>
-        ))}
-        <button type="button" className="classic-btn" onClick={() => restart(size)}>
-          もう一度
-        </button>
-      </div>
-
-      <p className="classic-status" role="status">
-        埋めたマス {covered} / {total} ・ {seconds} 秒
-        {best !== null ? ` ・ ベスト ${formatTime(best)}` : ""} ・ {statusText}
-      </p>
-
+  // 2D 盤（WebGL が使えない場合のフォールバックとしてそのまま使う）。
+  const board2d = (
       <div
         {...boardGesture}
         role="grid"
@@ -301,7 +291,59 @@ export default function ShikakuClient() {
           );
         })}
       </div>
+  );
 
+  return (
+    <>
+      <nav className="breadcrumbs" aria-label="パンくず">
+        <Link href={`${prefix}/games`}>ゲーム</Link>
+        <span> / </span>
+        <span>しかく</span>
+      </nav>
+      <div className="page-heading compact-heading">
+        <h1>しかく</h1>
+        <p className="muted">
+          角のマスを2回タップして長方形を描き、盤面を埋めます。盤面を下にスワイプするとチェックします。
+        </p>
+      </div>
+
+      <div className="classic-controls" role="group" aria-label="サイズと操作">
+        {SIZES.map((s) => (
+          <div
+            key={s.key}
+            {...tappableProps(() => restart(s.key))}
+            aria-pressed={size === s.key}
+            className={size === s.key ? "classic-btn classic-btn-active" : "classic-btn"}
+          >
+            {s.label}
+          </div>
+        ))}
+        <button type="button" className="classic-btn" onClick={() => restart(size)}>
+          もう一度
+        </button>
+      </div>
+
+      <p className="classic-status" role="status">
+        埋めたマス {covered} / {total} ・ {seconds} 秒
+        {best !== null ? ` ・ ベスト ${formatTime(best)}` : ""} ・ {statusText}
+      </p>
+
+      {webglFailed ? board2d : (
+        <div style={{ width: "100%", maxWidth: 460, margin: "0 auto" }}>
+          <ShikakuScene3D
+            clues={state.clues}
+            rects={state.rects}
+            size={state.size}
+            anchor={anchor}
+            violationCells={[...violationCells]}
+            status={state.status}
+            onCell={onCell}
+            onDragRect={handleDragRect}
+            onFail={() => setWebglFailed(true)}
+            fallback={board2d}
+          />
+        </div>
+      )}
       {state.status === "won" ? (
         <EndScreen
           outcome="win"

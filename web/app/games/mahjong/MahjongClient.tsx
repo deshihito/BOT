@@ -3,7 +3,11 @@
 // フリーな牌（上に牌が無く、左右どちらかが空いている）を選んで、
 // 同じ種類のペアを取り除いていく。端末内で完結し、サーバーへ送信しない。
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useEffect, useMemo, useRef, useState } from "react";
+
+// 3D シーンは three を含むため遅延読み込み（このページ専用チャンクに閉じる）。
+const MahjongScene3D = dynamic(() => import("./MahjongScene3D"), { ssr: false });
 import {
   MJ_BOARD_H,
   MJ_BOARD_W,
@@ -26,6 +30,7 @@ function newGame(): MjState {
 
 export default function MahjongClient() {
   const { prefix } = useGamesNav();
+  const [webglFailed, setWebglFailed] = useState(false);
   const [state, setState] = useState<MjState>(() => newGame());
   const [selected, setSelected] = useState<number | null>(null);
   const [hint, setHint] = useState<[number, number] | null>(null);
@@ -94,6 +99,77 @@ export default function MahjongClient() {
           ? "同じ種類のフリーな牌を選んでペアにしよう。"
           : "光っている牌がフリーな牌。同じ種類を2枚選ぶと取り除けます。";
 
+  // 2D 盤（WebGL が使えない場合のフォールバックとしてそのまま使う）。
+  const board2d = (
+    <div
+      role="group"
+      aria-label="麻雀ソリティアの盤"
+      style={{
+        position: "relative",
+        width: "100%",
+        maxWidth: 680,
+        margin: "0 auto",
+        aspectRatio: `${MJ_BOARD_W} / ${MJ_BOARD_H}`,
+        background: "#2e6b46",
+        borderRadius: 12,
+        overflow: "hidden",
+      }}
+    >
+      {state.tiles.map((tile) => {
+        if (tile.removed) return null;
+        const isFree = free.has(tile.id);
+        const isSelected = selected === tile.id;
+        const isHint = hint !== null && (hint[0] === tile.id || hint[1] === tile.id);
+        return (
+          <button
+            key={tile.id}
+            type="button"
+            aria-label={`${MJ_KINDS[tile.kind]}${isFree ? "（フリー）" : ""}`}
+            aria-pressed={isSelected}
+            onClick={() => onTile(tile.id)}
+            style={{
+              position: "absolute",
+              left: `${(tile.x / MJ_BOARD_W) * 100}%`,
+              top: `${(tile.y / MJ_BOARD_H) * 100}%`,
+              width: `${(2 / MJ_BOARD_W) * 100}%`,
+              height: `${(2 / MJ_BOARD_H) * 100}%`,
+              transform: `translate(${tile.layer * 3}px, ${tile.layer * -3}px)`,
+              zIndex: tile.layer * 100 + tile.y,
+              padding: 1,
+              background: "transparent",
+              border: "none",
+              cursor: isFree ? "pointer" : "default",
+            }}
+          >
+            <span
+              className={isSelected || isHint ? "juice-pulse" : undefined}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                width: "100%",
+                height: "100%",
+                borderRadius: 5,
+                background: isFree ? "#fffdf4" : "#d8d2c2",
+                border: isSelected
+                  ? "2px solid #e2534a"
+                  : isHint
+                    ? "2px solid #f2b01e"
+                    : "1px solid #9a927c",
+                boxShadow: "1px 2px 0 rgba(0,0,0,0.35)",
+                fontSize: "clamp(13px, 3.4vw, 26px)",
+                lineHeight: 1,
+                opacity: isFree ? 1 : 0.72,
+              }}
+            >
+              {MJ_KINDS[tile.kind]}
+            </span>
+          </button>
+        );
+      })}
+    </div>
+  );
+
   return (
     <>
       <nav className="breadcrumbs" aria-label="パンくず">
@@ -121,73 +197,19 @@ export default function MahjongClient() {
         残り {remaining} 枚 ・ {state.moves} 手 ・ 取れるペア {pairs.length} 組 ・ {statusText}
       </p>
 
-      <div
-        role="group"
-        aria-label="麻雀ソリティアの盤"
-        style={{
-          position: "relative",
-          width: "100%",
-          maxWidth: 680,
-          margin: "0 auto",
-          aspectRatio: `${MJ_BOARD_W} / ${MJ_BOARD_H}`,
-          background: "#2e6b46",
-          borderRadius: 12,
-          overflow: "hidden",
-        }}
-      >
-        {state.tiles.map((tile) => {
-          if (tile.removed) return null;
-          const isFree = free.has(tile.id);
-          const isSelected = selected === tile.id;
-          const isHint = hint !== null && (hint[0] === tile.id || hint[1] === tile.id);
-          return (
-            <button
-              key={tile.id}
-              type="button"
-              aria-label={`${MJ_KINDS[tile.kind]}${isFree ? "（フリー）" : ""}`}
-              aria-pressed={isSelected}
-              onClick={() => onTile(tile.id)}
-              style={{
-                position: "absolute",
-                left: `${(tile.x / MJ_BOARD_W) * 100}%`,
-                top: `${(tile.y / MJ_BOARD_H) * 100}%`,
-                width: `${(2 / MJ_BOARD_W) * 100}%`,
-                height: `${(2 / MJ_BOARD_H) * 100}%`,
-                transform: `translate(${tile.layer * 3}px, ${tile.layer * -3}px)`,
-                zIndex: tile.layer * 100 + tile.y,
-                padding: 1,
-                background: "transparent",
-                border: "none",
-                cursor: isFree ? "pointer" : "default",
-              }}
-            >
-              <span
-                className={isSelected || isHint ? "juice-pulse" : undefined}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  width: "100%",
-                  height: "100%",
-                  borderRadius: 5,
-                  background: isFree ? "#fffdf4" : "#d8d2c2",
-                  border: isSelected
-                    ? "2px solid #e2534a"
-                    : isHint
-                      ? "2px solid #f2b01e"
-                      : "1px solid #9a927c",
-                  boxShadow: "1px 2px 0 rgba(0,0,0,0.35)",
-                  fontSize: "clamp(13px, 3.4vw, 26px)",
-                  lineHeight: 1,
-                  opacity: isFree ? 1 : 0.72,
-                }}
-              >
-                {MJ_KINDS[tile.kind]}
-              </span>
-            </button>
-          );
-        })}
-      </div>
+      {webglFailed ? board2d : (
+        <div style={{ width: "100%", maxWidth: 700, margin: "0 auto" }}>
+          <MahjongScene3D
+            tiles={state.tiles}
+            free={free}
+            selected={selected}
+            hint={hint}
+            onTile={onTile}
+            onFail={() => setWebglFailed(true)}
+            fallback={board2d}
+          />
+        </div>
+      )}
       {state.status !== "playing" && (
         <EndScreen
           outcome={state.status === "won" ? "win" : "lose"}

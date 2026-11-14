@@ -3,7 +3,11 @@
 // 鏡をタップすると / と \ が切り替わる。光路は毎回 traceLaser で描き直す。
 // 端末内で完結し、サーバーへ送信しない。
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useEffect, useMemo, useRef, useState } from "react";
+
+// 3D シーンは three を含むため遅延読み込み（このページ専用チャンクに閉じる）。
+const LaserScene3D = dynamic(() => import("./LaserScene3D"), { ssr: false });
 import { sfxTap, sfxWin } from "@/lib/sfx";
 import { EndScreen } from "../GameJuice";
 import {
@@ -27,6 +31,7 @@ const DIR_VECTOR: Record<string, { dx: number; dy: number }> = {
 
 export default function LaserClient() {
   const { prefix } = useGamesNav();
+  const [webglFailed, setWebglFailed] = useState(false);
   const [state, setState] = useState<LaserState>(() => createLaserPuzzle(Date.now() % 2147483647));
   const [seconds, setSeconds] = useState(0);
   const [started, setStarted] = useState(false);
@@ -114,28 +119,8 @@ export default function LaserClient() {
         ? "光が輪になってしまいました。どこかの鏡を回してみよう。"
         : "鏡をタップすると向きが切り替わります。光を的まで導こう。";
 
-  return (
-    <>
-      <nav className="breadcrumbs" aria-label="パンくず">
-        <Link href={`${prefix}/games`}>ゲーム</Link>
-        <span> / </span>
-        <span>レーザーミラー</span>
-      </nav>
-      <div className="page-heading compact-heading">
-        <h1>レーザーミラー</h1>
-        <p className="muted">鏡を回して光を反射させ、的まで導くパズル。</p>
-      </div>
-
-      <div className="classic-controls">
-        <button type="button" className="classic-btn" onClick={restart}>
-          もう一度
-        </button>
-      </div>
-
-      <p className="classic-status" role="status">
-        {seconds} 秒 ・ 回転 {state.moves} 回{best !== null ? ` ・ ベスト ${best} 秒` : ""} ・ {statusText}
-      </p>
-
+  // 2D 盤（WebGL が使えない場合のフォールバックとしてそのまま使う）。
+  const board2d = (
       <div style={{ maxWidth: 560, margin: "0 auto" }}>
         <svg
           viewBox={`${-GUTTER} 0 ${size + GUTTER} ${size}`}
@@ -220,6 +205,41 @@ export default function LaserClient() {
             ))}
         </svg>
       </div>
+  );
+
+  return (
+    <>
+      <nav className="breadcrumbs" aria-label="パンくず">
+        <Link href={`${prefix}/games`}>ゲーム</Link>
+        <span> / </span>
+        <span>レーザーミラー</span>
+      </nav>
+      <div className="page-heading compact-heading">
+        <h1>レーザーミラー</h1>
+        <p className="muted">鏡を回して光を反射させ、的まで導くパズル。</p>
+      </div>
+
+      <div className="classic-controls">
+        <button type="button" className="classic-btn" onClick={restart}>
+          もう一度
+        </button>
+      </div>
+
+      <p className="classic-status" role="status">
+        {seconds} 秒 ・ 回転 {state.moves} 回{best !== null ? ` ・ ベスト ${best} 秒` : ""} ・ {statusText}
+      </p>
+
+{webglFailed ? board2d : (
+        <div style={{ width: "min(92vw, 460px)", margin: "0 auto" }}>
+          <LaserScene3D
+            state={state}
+            trace={trace}
+            onMirror={onMirror}
+            onFail={() => setWebglFailed(true)}
+            fallback={board2d}
+          />
+        </div>
+      )}
       {state.status === "solved" && (
         <div style={{ maxWidth: 560, margin: "14px auto 0" }}>
           <EndScreen

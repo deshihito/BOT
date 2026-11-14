@@ -4,7 +4,11 @@
 // 毎フレーム ref 経由で直接更新し、スコア等の変化だけを React state に同期する。
 // ベストの設計: localStorage の ago-airhockey-best に「勝利回数」を保存する。
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useCallback, useEffect, useRef, useState } from "react";
+
+// 3D シーンは three を含むため遅延読み込み（このページ専用チャンクに閉じる）。
+const AirHockeyScene3D = dynamic(() => import("./AirHockeyScene3D"), { ssr: false });
 import {
   AIR_FIELD_H,
   AIR_FIELD_W,
@@ -43,6 +47,7 @@ export default function AirHockeyClient() {
   const playerRef = useRef<SVGCircleElement | null>(null);
   const cpuRef = useRef<SVGCircleElement | null>(null);
 
+  const [webglFailed, setWebglFailed] = useState(false);
   const [phase, setPhaseState] = useState<Phase>("ready");
   const [difficulty, setDifficulty] = useState<AirDifficulty>("normal");
   const [display, setDisplay] = useState({ player: 0, cpu: 0, finished: false, winner: null as "player" | "cpu" | null });
@@ -191,40 +196,7 @@ export default function AirHockeyClient() {
 
   const goalX = (AIR_FIELD_W - AIR_GOAL_W) / 2;
 
-  return (
-    <>
-      <nav className="breadcrumbs" aria-label="パンくず">
-        <Link href={`${prefix}/games`}>ゲーム</Link>
-        <span> / </span>
-        <span>エアホッケー</span>
-      </nav>
-      <div className="page-heading compact-heading">
-        <h1>エアホッケー</h1>
-        <p className="muted">下のパドルをマウスや指で動かして、飛んでくるパックを打ち返します。</p>
-      </div>
-
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }} role="group" aria-label="難易度">
-        {DIFFS.map((d) => (
-          <button
-            key={d.key}
-            type="button"
-            style={difficulty === d.key ? activeBtn : btn}
-            aria-pressed={difficulty === d.key}
-            onClick={() => {
-              setDifficulty(d.key);
-              newGame(d.key);
-            }}
-          >
-            {d.label}
-          </button>
-        ))}
-      </div>
-
-      <p className="classic-status" role="status">
-        あなた {display.player} - {display.cpu} CPU ・ {statusText}
-        {wins > 0 ? ` ・ 通算勝利 ${wins} 回` : ""}
-      </p>
-
+  const board2d = (
       <div
         ref={wrapRef}
         style={{ maxWidth: 400, margin: "0 auto", touchAction: "none" }}
@@ -252,6 +224,53 @@ export default function AirHockeyClient() {
           <circle ref={puckRef} cx={AIR_FIELD_W / 2} cy={AIR_FIELD_H / 2} r={AIR_PUCK_R} fill="#ffd34d" stroke="#92600a" strokeWidth={2} />
         </svg>
       </div>
+  );
+
+  return (
+    <>
+      <nav className="breadcrumbs" aria-label="パンくず">
+        <Link href={`${prefix}/games`}>ゲーム</Link>
+        <span> / </span>
+        <span>エアホッケー</span>
+      </nav>
+      <div className="page-heading compact-heading">
+        <h1>エアホッケー</h1>
+        <p className="muted">3Dフィールド上でマウスや指を動かして下のパドルを動かし、飛んでくるパックを打ち返します。</p>
+      </div>
+
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }} role="group" aria-label="難易度">
+        {DIFFS.map((d) => (
+          <button
+            key={d.key}
+            type="button"
+            style={difficulty === d.key ? activeBtn : btn}
+            aria-pressed={difficulty === d.key}
+            onClick={() => {
+              setDifficulty(d.key);
+              newGame(d.key);
+            }}
+          >
+            {d.label}
+          </button>
+        ))}
+      </div>
+
+      <p className="classic-status" role="status">
+        あなた {display.player} - {display.cpu} CPU ・ {statusText}
+        {wins > 0 ? ` ・ 通算勝利 ${wins} 回` : ""}
+      </p>
+
+{webglFailed ? board2d : (
+        <div style={{ maxWidth: 400, margin: "0 auto" }}>
+          <AirHockeyScene3D
+            getState={() => stateRef.current}
+            onTarget={(x, y) => { targetRef.current = { x, y }; }}
+            onPress={() => { if (phaseRef.current === "ready") setPhase("playing"); }}
+            onFail={() => setWebglFailed(true)}
+            fallback={board2d}
+          />
+        </div>
+      )}
 
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center", marginTop: 14 }}>
         {!finished && phase !== "playing" ? (

@@ -4,7 +4,11 @@
 // ベスト記録: localStorage `ago-puttgolf-best` に9ホールの最少総打数を保存する。
 // 端末内で完結し、サーバーへ送信しない。
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useEffect, useRef, useState } from "react";
+
+// 3D シーンは three を含むため遅延読み込み（このページ専用チャンクに閉じる）。
+const PuttGolfScene3D = dynamic(() => import("./PuttGolfScene3D"), { ssr: false });
 import {
   PG_CUP_RADIUS,
   PG_HEIGHT,
@@ -46,6 +50,17 @@ export default function PuttGolfClient() {
     return angleTo(g.holes[0].tee, g.holes[0].cup);
   });
   const [power, setPower] = useState(40);
+  const [webglFailed, setWebglFailed] = useState(false);
+  // 3D シーンのドラッグ→打つが React state の反映を待たずに最新値で打てるよう、
+  // 角度・強さは ref でも保持する（curling と同じ同期方式）。
+  const angleRef = useRef(angle);
+  const powerRef = useRef(power);
+  const applyAim = (a: number, p: number) => {
+    angleRef.current = a;
+    powerRef.current = p;
+    setAngle(a);
+    setPower(p);
+  };
   const [ballPos, setBallPos] = useState<PgPoint>(() => state.ball);
   const [rolling, setRolling] = useState(false);
   const [best, setBest] = useState<number | null>(null);
@@ -65,8 +80,10 @@ export default function PuttGolfClient() {
     setBallPos(state.ball);
     if (state.phase === "playing") {
       const h = state.holes[state.holeIndex];
-      setAngle(angleTo(state.ball, h.cup));
-      setPower(Math.max(5, Math.round(powerForDistance(Math.hypot(h.cup.x - state.ball.x, h.cup.y - state.ball.y)))));
+      applyAim(
+        angleTo(state.ball, h.cup),
+        Math.max(5, Math.round(powerForDistance(Math.hypot(h.cup.x - state.ball.x, h.cup.y - state.ball.y)))),
+      );
     }
   }, [state]);
 
@@ -121,7 +138,7 @@ export default function PuttGolfClient() {
   const doShoot = () => {
     if (state.phase !== "playing" || rolling) return;
     sfxSlide();
-    const { state: next, result } = shoot(state, angle, power);
+    const { state: next, result } = shoot(state, angleRef.current, powerRef.current);
     setRolling(true);
     const pts = result.points;
     const started = performance.now();
@@ -143,8 +160,8 @@ export default function PuttGolfClient() {
   const aimAtCup = () => {
     if (state.phase !== "playing" || rolling) return;
     sfxTap();
-    setAngle(angleTo(ballPos, hole.cup));
-    setPower(
+    applyAim(
+      angleTo(ballPos, hole.cup),
       Math.max(5, Math.round(powerForDistance(Math.hypot(hole.cup.x - ballPos.x, hole.cup.y - ballPos.y)))),
     );
   };
@@ -181,58 +198,8 @@ export default function PuttGolfClient() {
           ? "ボールが転がっています…"
           : `ホール ${state.holeIndex + 1} / 9（パー ${hole.par}）・ このホール ${state.strokes[state.holeIndex]} 打`;
 
-  return (
-    <>
-      <nav className="breadcrumbs" aria-label="パンくず">
-        <Link href={`${prefix}/games`}>ゲーム</Link>
-        <span> / </span>
-        <span>パットゴルフ</span>
-      </nav>
-      <div className="page-heading compact-heading">
-        <h1>パットゴルフ</h1>
-        <p className="muted">
-          角度と強さは下のスライダーで調整し、コースをタップして打ちます。矢印のマスは傾斜で、ボールが矢印の向きに流されます。
-        </p>
-      </div>
-
-      <div className="classic-controls" role="group" aria-label="操作">
-        <button type="button" className="classic-btn" onClick={restart}>
-          もう一度
-        </button>
-        <div
-          {...tappableProps(aimAtCup)}
-          className="classic-btn"
-          aria-disabled={state.phase !== "playing" || rolling}
-          tabIndex={state.phase !== "playing" || rolling ? -1 : 0}
-        >
-          カップを狙う
-        </div>
-      </div>
-
-      <p className={`classic-status${state.phase === "holed" ? " juice-pulse" : ""}`} role="status">
-        {statusText}
-        {best !== null ? ` ・ ベスト ${best} 打` : ""}
-        {playedHoles > 0 && state.phase !== "finished"
-          ? ` ・ ここまで ${strokesSoFar} 打（パー ${parSoFar}、${scoreDiffLabel(strokesSoFar - parSoFar)}）`
-          : ""}
-      </p>
-
-      {state.phase === "finished" && (
-        <EndScreen
-          outcome={state.totalStrokes <= totalPar(state) ? "win" : "finish"}
-          title="全ホール終了"
-          score={state.totalStrokes}
-          scoreLabel="合計打数"
-          newBest={isNewBest}
-          previousBest={isNewBest ? null : prevBest}
-          onRetry={restart}
-        >
-          <p className="muted" style={{ margin: 0 }}>
-            パー {totalPar(state)} ・ {scoreDiffLabel(state.totalStrokes - totalPar(state))}
-          </p>
-        </EndScreen>
-      )}
-
+  // 既存 2D 表示（WebGL が使えない環境ではこちらへフォールバックする）。
+  const board2d = (
       <div
         {...courseGesture}
         role="button"
@@ -309,6 +276,78 @@ export default function PuttGolfClient() {
         />
       </svg>
       </div>
+  );
+
+  return (
+    <>
+      <nav className="breadcrumbs" aria-label="パンくず">
+        <Link href={`${prefix}/games`}>ゲーム</Link>
+        <span> / </span>
+        <span>パットゴルフ</span>
+      </nav>
+      <div className="page-heading compact-heading">
+        <h1>パットゴルフ</h1>
+        <p className="muted">
+          コース上をドラッグして狙い（角度と強さ）を決め、タップで打ちます。下のスライダーでも調整できます。傾斜のマスでは、ボールが傾きの向きに流されます。
+        </p>
+      </div>
+
+      <div className="classic-controls" role="group" aria-label="操作">
+        <button type="button" className="classic-btn" onClick={restart}>
+          もう一度
+        </button>
+        <div
+          {...tappableProps(aimAtCup)}
+          className="classic-btn"
+          aria-disabled={state.phase !== "playing" || rolling}
+          tabIndex={state.phase !== "playing" || rolling ? -1 : 0}
+        >
+          カップを狙う
+        </div>
+      </div>
+
+      <p className={`classic-status${state.phase === "holed" ? " juice-pulse" : ""}`} role="status">
+        {statusText}
+        {best !== null ? ` ・ ベスト ${best} 打` : ""}
+        {playedHoles > 0 && state.phase !== "finished"
+          ? ` ・ ここまで ${strokesSoFar} 打（パー ${parSoFar}、${scoreDiffLabel(strokesSoFar - parSoFar)}）`
+          : ""}
+      </p>
+
+      {state.phase === "finished" && (
+        <EndScreen
+          outcome={state.totalStrokes <= totalPar(state) ? "win" : "finish"}
+          title="全ホール終了"
+          score={state.totalStrokes}
+          scoreLabel="合計打数"
+          newBest={isNewBest}
+          previousBest={isNewBest ? null : prevBest}
+          onRetry={restart}
+        >
+          <p className="muted" style={{ margin: 0 }}>
+            パー {totalPar(state)} ・ {scoreDiffLabel(state.totalStrokes - totalPar(state))}
+          </p>
+        </EndScreen>
+      )}
+
+{webglFailed ? board2d : (
+        <div style={{ width: "100%", maxWidth: PG_WIDTH }}>
+          <PuttGolfScene3D
+            hole={hole}
+            ball={ballPos}
+            angle={angle}
+            power={power}
+            aiming={state.phase === "playing" && !rolling}
+            canShoot={state.phase === "playing" && !rolling}
+            holed={state.phase === "holed"}
+            onAim={(a, p) => applyAim(a, p)}
+            onShoot={() => doShoot()}
+            onTapCourse={onCourseTap}
+            onFail={() => setWebglFailed(true)}
+            fallback={board2d}
+          />
+        </div>
+      )}
 
       <div
         style={{
@@ -327,7 +366,7 @@ export default function PuttGolfClient() {
             max={180}
             value={angle}
             disabled={state.phase !== "playing" || rolling}
-            onChange={(e) => setAngle(Number(e.target.value))}
+            onChange={(e) => { angleRef.current = Number(e.target.value); setAngle(Number(e.target.value)); }}
             style={{ width: "100%", minHeight: 40 }}
             aria-label="角度"
           />
@@ -340,7 +379,7 @@ export default function PuttGolfClient() {
             max={100}
             value={power}
             disabled={state.phase !== "playing" || rolling}
-            onChange={(e) => setPower(Number(e.target.value))}
+            onChange={(e) => { powerRef.current = Number(e.target.value); setPower(Number(e.target.value)); }}
             style={{ width: "100%", minHeight: 40 }}
             aria-label="強さ"
           />
@@ -348,7 +387,7 @@ export default function PuttGolfClient() {
       </div>
 
       <p className="muted" style={{ textAlign: "center", fontSize: 13, marginTop: 10 }}>
-        コースをタップ（またはフォーカスして Enter / Space）で打つ。カップインしたらコースをタップして次のホールへ。
+        コースをタップで打つ。カップインしたらコースをタップして次のホールへ（2D表示ではフォーカスして Enter / Space でも打てます）。
       </p>
 
       <table

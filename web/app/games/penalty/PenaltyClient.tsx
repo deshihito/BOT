@@ -3,7 +3,10 @@
 // キッカーのときは狙うゾーン、キーパーのときは飛ぶゾーンを選ぶ読み合い。
 // ベストの設計: localStorage の ago-penalty-best に「勝利回数」を保存する。
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useEffect, useRef, useState } from "react";
+
+const PenaltyScene3D = dynamic(() => import("./PenaltyScene3D"), { ssr: false });
 import {
   PEN_ZONES,
   createPenaltyGame,
@@ -61,6 +64,7 @@ function GloveIcon() {
 export default function PenaltyClient() {
   const { prefix } = useGamesNav();
   const [state, setState] = useState<PenaltyState>(() => createPenaltyGame(Date.now() % 2147483647));
+  const [webglFailed, setWebglFailed] = useState(false);
   const [wins, setWins] = useState(0);
   const countedRef = useRef<number | null>(null);
 
@@ -156,6 +160,26 @@ export default function PenaltyClient() {
     };
   };
 
+  const board2d = (
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8, marginTop: 8 }}>
+      {PEN_ZONES.map((zone) => (
+        <button
+          key={zone.id}
+          type="button"
+          style={zoneBtn(zone.id)}
+          disabled={finished}
+          onClick={() => choose(zone.id)}
+          aria-label={`${zone.label}（枠外 ${Math.round(zone.missRate * 100)}%）`}
+        >
+          {zone.label}
+          <span style={{ display: "block", fontSize: 11, fontWeight: 400, opacity: 0.85 }}>
+            枠外 {Math.round(zone.missRate * 100)}%
+          </span>
+        </button>
+      ))}
+    </div>
+  );
+
   return (
     <>
       <nav className="breadcrumbs" aria-label="パンくず">
@@ -187,23 +211,9 @@ export default function PenaltyClient() {
         <div key={`${state.turn}-${state.kicks.length}`} className="juice-flip" style={{ textAlign: "center", fontSize: 30 }} aria-hidden>
           {isPlayerKick ? <GloveIcon /> : <BallIcon />}
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8, marginTop: 8 }}>
-          {PEN_ZONES.map((zone) => (
-            <button
-              key={zone.id}
-              type="button"
-              style={zoneBtn(zone.id)}
-              disabled={finished}
-              onClick={() => choose(zone.id)}
-              aria-label={`${zone.label}（枠外 ${Math.round(zone.missRate * 100)}%）`}
-            >
-              {zone.label}
-              <span style={{ display: "block", fontSize: 11, fontWeight: 400, opacity: 0.85 }}>
-                枠外 {Math.round(zone.missRate * 100)}%
-              </span>
-            </button>
-          ))}
-        </div>
+        {webglFailed ? board2d : (
+          <PenaltyScene3D state={state} onChoose={choose} onFail={() => setWebglFailed(true)} fallback={board2d} />
+        )}
         <p key={state.kicks.length} className="juice-pop" style={{ color: "#e7f6ec", textAlign: "center", margin: "12px 0 0", minHeight: 22 }} role="status">
           {last
             ? `${last.by === "player" ? "あなた" : "CPU"}のキック: ${kickDetail(last)}${last.outcome === "goal" ? "（ゴール）" : last.outcome === "saved" ? "（セーブ）" : "（ミス）"}`

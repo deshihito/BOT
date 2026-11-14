@@ -2,7 +2,10 @@
 // モグラたたき。スケジュール/得点は lib/mole.ts。
 // 3x3 の穴、30秒制限、通常/金モグラ、コンボ表示、ベストスコア保存。
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useCallback, useEffect, useRef, useState } from "react";
+
+const MoleScene3D = dynamic(() => import("./MoleScene3D"), { ssr: false });
 import {
   MOLE_GAME_MS,
   applyMoleHit,
@@ -30,6 +33,7 @@ function loadBest(): number {
 
 /** モグラの顔を SVG で描く（絵文字は使わない）。hit 時は目が×になる。 */
 function MoleFace({ hit }: { hit: boolean }) {
+
   return (
     <svg viewBox="0 0 48 48" width="72%" height="72%" aria-hidden style={{ display: "block" }}>
       <circle cx="10" cy="9" r="5.5" fill="#6d4c41" />
@@ -56,6 +60,7 @@ function MoleFace({ hit }: { hit: boolean }) {
 export default function MoleClient() {
   const { prefix } = useGamesNav();
   const [phase, setPhase] = useState<Phase>("ready");
+  const [webglFailed, setWebglFailed] = useState(false);
   const [score, setScore] = useState(0);
   const [combo, setCombo] = useState(0);
   const [maxCombo, setMaxCombo] = useState(0);
@@ -225,34 +230,7 @@ export default function MoleClient() {
         ? "スタートを押すと30秒のモグラたたきが始まります。"
         : `残り ${remainSec} 秒 ・ 金モグラは30点、コンボでボーナス`;
 
-  return (
-    <>
-      <nav className="breadcrumbs" aria-label="パンくず">
-        <Link href={`${prefix}/games`}>ゲーム</Link>
-        <span> / </span>
-        <span>モグラたたき</span>
-      </nav>
-      <div className="page-heading compact-heading">
-        <h1>モグラたたき</h1>
-        <p className="muted">穴から顔を出すモグラを、タップ（クリック）で叩きます。金モグラは高得点です。</p>
-      </div>
-
-      <p className="classic-status" role="status">
-        スコア {score} ・ ベスト {best} ・ {combo > 0 ? `${combo} コンボ！ ・ ` : ""}{statusText}
-      </p>
-
-      {/* タイムバー */}
-      <div style={{ maxWidth: 420, margin: "0 auto 12px", height: 10, borderRadius: 999, background: "rgba(255,255,255,0.12)", overflow: "hidden" }} aria-hidden="true">
-        <div
-          style={{
-            height: "100%",
-            width: phase === "playing" ? `${(remainSec / 30) * 100}%` : phase === "finished" ? "0%" : "100%",
-            background: remainSec <= 5 && phase === "playing" ? "#e85d4a" : "#e8c832",
-            transition: "width 0.3s linear",
-          }}
-        />
-      </div>
-
+  const board2d = (
       <div
         style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12, maxWidth: 420, margin: "0 auto" }}
         role="grid"
@@ -307,6 +285,51 @@ export default function MoleClient() {
         })}
       </div>
 
+  );
+
+  return (
+    <>
+      <nav className="breadcrumbs" aria-label="パンくず">
+        <Link href={`${prefix}/games`}>ゲーム</Link>
+        <span> / </span>
+        <span>モグラたたき</span>
+      </nav>
+      <div className="page-heading compact-heading">
+        <h1>モグラたたき</h1>
+        <p className="muted">穴から顔を出すモグラを、タップ（クリック）で叩きます。金モグラは高得点です。</p>
+      </div>
+
+      <p className="classic-status" role="status">
+        スコア {score} ・ ベスト {best} ・ {combo > 0 ? `${combo} コンボ！ ・ ` : ""}{statusText}
+      </p>
+
+      {/* タイムバー */}
+      <div style={{ maxWidth: 420, margin: "0 auto 12px", height: 10, borderRadius: 999, background: "rgba(255,255,255,0.12)", overflow: "hidden" }} aria-hidden="true">
+        <div
+          style={{
+            height: "100%",
+            width: phase === "playing" ? `${(remainSec / 30) * 100}%` : phase === "finished" ? "0%" : "100%",
+            background: remainSec <= 5 && phase === "playing" ? "#e85d4a" : "#e8c832",
+            transition: "width 0.3s linear",
+          }}
+        />
+      </div>
+
+      {webglFailed ? board2d : (
+        <div style={{ maxWidth: 420, margin: "0 auto", position: "relative" }}>
+          <MoleScene3D
+            active={active}
+            onWhack={whack}
+            onFail={() => setWebglFailed(true)}
+            fallback={board2d}
+          />
+          {lastGain && active.some((a) => a.id === lastGain.id) ? (
+            <span key={lastGain.id} style={{ position: "absolute", top: 6, left: "50%", transform: "translateX(-50%)", pointerEvents: "none" }}>
+              <ScorePop amount={lastGain.gained} />
+            </span>
+          ) : null}
+        </div>
+      )}
       {phase === "finished" && (
         <div style={{ maxWidth: 420, margin: "16px auto 0" }}>
           <EndScreen

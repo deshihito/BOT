@@ -2,7 +2,11 @@
 // ハイ＆ロー。ロジックは lib/highlow.ts。
 // 次のカードが今より高いか低いかを当て続ける。外すと終了、同数は引き分けで続行。
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useEffect, useRef, useState } from "react";
+
+// 3D シーンは three を含むため遅延読み込み（このページ専用チャンクに閉じる）。
+const HighLowScene3D = dynamic(() => import("./HighLowScene3D"), { ssr: false });
 import { sfxCorrect, sfxLose, sfxTap, sfxWin } from "@/lib/sfx";
 import { EndScreen } from "../GameJuice";
 import {
@@ -56,6 +60,7 @@ function newGame(): HighLowState {
 
 export default function HighLowClient() {
   const { prefix } = useGamesNav();
+  const [webglFailed, setWebglFailed] = useState(false);
   const [state, setState] = useState<HighLowState>(() => newGame());
   const [best, setBest] = useState(0);
 
@@ -115,27 +120,8 @@ export default function HighLowClient() {
         ? `${highLowCardName(last.card)} で同数。引き分けで続行できます。`
         : `${highLowCardName(last.card)} が出て外れ。`;
 
-  return (
-    <>
-      <nav className="breadcrumbs" aria-label="パンくず">
-        <Link href={`${prefix}/games`}>ゲーム</Link>
-        <span> / </span>
-        <span>ハイ＆ロー</span>
-      </nav>
-      <div className="page-heading compact-heading">
-        <h1>ハイ＆ロー</h1>
-        <p className="muted">カードを上へスワイプすると「高い」、下へスワイプすると「低い」で、次のカードを予想します。</p>
-      </div>
-
-      <p className="classic-status" role="status">
-        連続 {state.streak} 回 ・ ベスト {Math.max(best, state.bestStreak)} 回 ・ 残り {highLowRemaining(state)} 枚 ・ {lastText}
-        {state.status === "finished"
-          ? state.finishReason === "cleared"
-            ? " 山札を全部使い切った！クリアです。"
-            : " ゲーム終了。"
-          : ""}
-      </p>
-
+  // 2D カードエリア（WebGL が使えない場合のフォールバック）。
+  const board2d = (
       <div {...cardGesture} style={{ display: "flex", gap: 18, alignItems: "center", justifyContent: "center", margin: "14px 0 20px", flexWrap: "wrap", touchAction: "none", cursor: state.status === "playing" ? "grab" : "default" }} aria-label="カードエリア: 上スワイプで高い、下スワイプで低い">
         <div key={`${current}-${state.streak}`} className="juice-flip" style={{ textAlign: "center" }}>
           {current !== null ? <CardFace card={current} /> : null}
@@ -164,7 +150,40 @@ export default function HighLowClient() {
           <p className="muted" style={{ margin: "8px 0 0" }}>次のカード</p>
         </div>
       </div>
+  );
 
+  return (
+    <>
+      <nav className="breadcrumbs" aria-label="パンくず">
+        <Link href={`${prefix}/games`}>ゲーム</Link>
+        <span> / </span>
+        <span>ハイ＆ロー</span>
+      </nav>
+      <div className="page-heading compact-heading">
+        <h1>ハイ＆ロー</h1>
+        <p className="muted">カードを上へスワイプすると「高い」、下へスワイプすると「低い」で、次のカードを予想します。</p>
+      </div>
+
+      <p className="classic-status" role="status">
+        連続 {state.streak} 回 ・ ベスト {Math.max(best, state.bestStreak)} 回 ・ 残り {highLowRemaining(state)} 枚 ・ {lastText}
+        {state.status === "finished"
+          ? state.finishReason === "cleared"
+            ? " 山札を全部使い切った！クリアです。"
+            : " ゲーム終了。"
+          : ""}
+      </p>
+
+      {webglFailed ? board2d : (
+        <HighLowScene3D
+          current={current}
+          nextCard={state.pile[1] ?? null}
+          deckCount={Math.max(0, highLowRemaining(state) - 1)}
+          playing={state.status === "playing"}
+          onGuess={onGuess}
+          onFail={() => setWebglFailed(true)}
+          fallback={board2d}
+        />
+      )}
       {state.status === "playing" ? (
         <div aria-hidden="true" style={{ display: "flex", gap: 12, justifyContent: "center", flexWrap: "wrap" }}>
           <div style={{ padding: "10px 26px", fontSize: 17, fontWeight: 800, borderRadius: 12, border: "2px solid #b3543f", background: "#fdf0ec", color: "#93392a" }}>

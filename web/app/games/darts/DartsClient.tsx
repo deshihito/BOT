@@ -3,7 +3,10 @@
 // 円形ボードを SVG で描き、クリック位置へ投げる。ブレはクライアント側で
 // クリック点へ小さな乱数を加える方式（ON/OFF 即時切替、lib は jitter 無効で生成）。
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useEffect, useRef, useState } from "react";
+
+const DartsScene3D = dynamic(() => import("./DartsScene3D"), { ssr: false });
 import { sfxCorrect, sfxPlace, sfxWin, sfxWrong } from "@/lib/sfx";
 import { EndScreen } from "../GameJuice";
 import { DART_SECTORS, createDartsGame, roundScores, throwDart, type DartsState } from "@/lib/darts";
@@ -78,6 +81,7 @@ export default function DartsClient() {
   const { prefix } = useGamesNav();
   const [state, setState] = useState<DartsState>(() => createDartsGame(Date.now() % 2147483647, TOTAL_ROUNDS, false));
   const [jitterOn, setJitterOn] = useState(true);
+  const [webglFailed, setWebglFailed] = useState(false);
   const [best, setBest] = useState<number | null>(null);
   const [finishInfo, setFinishInfo] = useState<{ prevBest: number | null; isNewBest: boolean } | null>(null);
   const prevStatusRef = useRef(state.status);
@@ -140,6 +144,7 @@ export default function DartsClient() {
   const thrown = state.rounds.flat().length;
   const currentRoundNum = Math.min(TOTAL_ROUNDS, Math.floor(thrown / 3) + 1);
   const last = state.rounds.flat()[thrown - 1];
+  const board2d = <Board state={state} onThrow={onThrow} />;
 
   return (
     <>
@@ -174,7 +179,11 @@ export default function DartsClient() {
         {state.status === "finished" ? " ・ 終了！" : ""}
       </p>
 
-      <Board state={state} onThrow={onThrow} />
+      {webglFailed ? board2d : (
+        <div style={{ maxWidth: 420, margin: "0 auto" }}>
+          <DartsScene3D state={state} onThrow={onThrow} onFail={() => setWebglFailed(true)} fallback={board2d} />
+        </div>
+      )}
 
       <div style={{ maxWidth: 420, margin: "12px auto 0", display: "flex", flexWrap: "wrap", gap: 6, justifyContent: "center" }} aria-label="ラウンド別スコア">
         {scores.map((s, i) => (

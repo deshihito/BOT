@@ -3,7 +3,11 @@
 // ベスト記録の設計: localStorage `ago-chinchiro-best` に「最終スコアの最高値」を保存する。
 // 端末内で完結し、サーバーへ送信しない。
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useEffect, useRef, useState } from "react";
+
+// 3D シーンは three を含むため遅延読み込み（このページ専用チャンクに閉じる）。
+const ChinchiroScene3D = dynamic(() => import("./ChinchiroScene3D"), { ssr: false });
 import {
   CC_MAX_ROLLS,
   CC_TOTAL_ROUNDS,
@@ -62,6 +66,7 @@ function handText(hand: CcHand | null): string {
 
 export default function ChinchiroClient() {
   const { prefix } = useGamesNav();
+  const [webglFailed, setWebglFailed] = useState(false);
   const [state, setState] = useState<CcState>(() => newGame());
   const [best, setBest] = useState<number | null>(null);
   const countedSeed = useRef<number | null>(null);
@@ -181,8 +186,28 @@ export default function ChinchiroClient() {
             <strong>親（CPU）</strong>
             <span>役: {handText(state.cpuHand)}</span>
           </div>
-          <DiceRow dice={state.cpuDice} size={40} />
+          {webglFailed ? <DiceRow dice={state.cpuDice} size={40} /> : null}
         </section>
+
+        {webglFailed ? (
+          <div {...bowlGesture} style={{ touchAction: "none", cursor: "pointer", display: "inline-block" }} aria-label="サイコロの丼: タップで振る">
+            <DiceRow dice={state.playerDice} size={52} />
+          </div>
+        ) : (
+          <ChinchiroScene3D
+            playerDice={state.playerDice}
+            cpuDice={state.cpuDice}
+            playerRolls={state.playerRolls}
+            canRoll={state.phase === "roll" || state.phase === "decide"}
+            onRoll={() => { sfxDice(); setState((s) => rollCc(s)); }}
+            onFail={() => setWebglFailed(true)}
+            fallback={
+              <div {...bowlGesture} style={{ touchAction: "none", cursor: "pointer", display: "inline-block" }} aria-label="サイコロの丼: タップで振る">
+                <DiceRow dice={state.playerDice} size={52} />
+              </div>
+            }
+          />
+        )}
 
         <section
           aria-label="あなたの結果"
@@ -193,9 +218,6 @@ export default function ChinchiroClient() {
             <span>
               役: {handText(state.playerHand)} ・ 振った回数 {state.playerRolls} / {CC_MAX_ROLLS}
             </span>
-          </div>
-          <div {...bowlGesture} style={{ touchAction: "none", cursor: "pointer", display: "inline-block" }} aria-label="サイコロの丼: タップで振る">
-            <DiceRow dice={state.playerDice} size={52} />
           </div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
             {(state.phase === "roll" || state.phase === "decide") && (

@@ -2,7 +2,11 @@
 // セイムゲーム。ロジックは lib/samegame.ts。
 // 同色でつながった2個以上のグループをタップで消す。端末内で完結する。
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useEffect, useMemo, useRef, useState } from "react";
+
+// 3D シーンは three を含むため遅延読み込み（このページ専用チャンクに閉じる）。
+const SameGameScene3D = dynamic(() => import("./SameGameScene3D"), { ssr: false });
 import {
   createSameGame,
   removeSameGameGroup,
@@ -31,6 +35,7 @@ function newGame(): SameGameState {
 
 export default function SameGameClient() {
   const { prefix } = useGamesNav();
+  const [webglFailed, setWebglFailed] = useState(false);
   const [state, setState] = useState<SameGameState>(() => newGame());
   const [hover, setHover] = useState<number | null>(null);
   const [best, setBest] = useState<number | null>(null);
@@ -94,30 +99,18 @@ export default function SameGameClient() {
         ? `${hoverGroup.length} 個つながっています。タップで ${sameGameGroupScore(hoverGroup.length)} 点。`
         : "同色でつながった2個以上のグループをタップして消そう。";
 
-  return (
-    <>
-      <nav className="breadcrumbs" aria-label="パンくず">
-        <Link href={`${prefix}/games`}>ゲーム</Link>
-        <span> / </span>
-        <span>セイムゲーム</span>
-      </nav>
-      <div className="page-heading compact-heading">
-        <h1>セイムゲーム</h1>
-        <p className="muted">同色でつながったブロックをタップして消します。</p>
-      </div>
+  // ブロックをタップする現行ハンドラ。2D 盤と 3D 盤の両方がここへ接続する。
+  const tapBlockAt = (i: number) => {
+    if (state.status === "playing") {
+      if (sameGameGroupAt(state, i).length >= 2) sfxCorrect();
+      else sfxWrong();
+    }
+    setState((s) => removeSameGameGroup(s, i));
+    setHover(null);
+  };
 
-      <div className="classic-controls" role="group" aria-label="操作">
-        <button type="button" className="classic-btn" onClick={restart}>
-          もう一度
-        </button>
-      </div>
-
-      <p className="classic-status" role="status">
-        スコア {state.score}
-        {state.status === "finished" && state.bonus > 0 ? `（ボーナス +${state.bonus}）` : ""} ・ 残り {remaining} 個
-        {best !== null ? ` ・ ベスト ${best}` : ""} ・ {statusText}
-      </p>
-
+  // 2D 盤（WebGL が使えない場合のフォールバックとしてそのまま使う）。
+  const board2d = (
       <div
         role="grid"
         aria-label="セイムゲームの盤"
@@ -143,14 +136,7 @@ export default function SameGameClient() {
               role="gridcell"
               aria-label={`${style.label}のブロック`}
               className={highlighted ? "juice-pulse" : undefined}
-              onClick={() => {
-                if (state.status === "playing") {
-                  if (sameGameGroupAt(state, i).length >= 2) sfxCorrect();
-                  else sfxWrong();
-                }
-                setState((s) => removeSameGameGroup(s, i));
-                setHover(null);
-              }}
+              onClick={() => tapBlockAt(i)}
               onMouseEnter={() => setHover(i)}
               onMouseLeave={() => setHover(null)}
               onFocus={() => setHover(i)}
@@ -169,6 +155,46 @@ export default function SameGameClient() {
           );
         })}
       </div>
+  );
+
+  return (
+    <>
+      <nav className="breadcrumbs" aria-label="パンくず">
+        <Link href={`${prefix}/games`}>ゲーム</Link>
+        <span> / </span>
+        <span>セイムゲーム</span>
+      </nav>
+      <div className="page-heading compact-heading">
+        <h1>セイムゲーム</h1>
+        <p className="muted">同色でつながったブロックをタップして消します。</p>
+      </div>
+
+      <div className="classic-controls" role="group" aria-label="操作">
+        <button type="button" className="classic-btn" onClick={restart}>
+          もう一度
+        </button>
+      </div>
+
+      <p className="classic-status" role="status">
+        スコア {state.score}
+        {state.status === "finished" && state.bonus > 0 ? `（ボーナス +${state.bonus}）` : ""} ・ 残り {remaining} 個
+        {best !== null ? ` ・ ベスト ${best}` : ""} ・ {statusText}
+      </p>
+
+      {webglFailed ? board2d : (
+        <div style={{ width: "100%", maxWidth: 560, margin: "0 auto" }}>
+          <SameGameScene3D
+            cells={state.cells}
+            cols={state.cols}
+            rows={state.rows}
+            hoverGroup={hoverGroup}
+            onCell={tapBlockAt}
+            onHover={setHover}
+            onFail={() => setWebglFailed(true)}
+            fallback={board2d}
+          />
+        </div>
+      )}
 
       {state.status === "finished" && (
         <div style={{ marginTop: 16 }}>

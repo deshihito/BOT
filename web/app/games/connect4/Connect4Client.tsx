@@ -2,8 +2,12 @@
 // 四目並べ（コネクト4）オンライン対戦クライアント。
 // view.state の契約: board は 42 マス（row0=上、0=空き, 1=seat0, 2=seat1、
 // -1=seat1 も許容）。着手は { type: "drop", col }。
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import { playSe } from "@/lib/balku-sound";
+
+// 3D シーンは three を含むため遅延読み込み（このページ専用チャンクに閉じる）。
+const Connect4Scene3D = dynamic(() => import("./Connect4Scene3D"), { ssr: false });
 import OnlineShell from "../online/OnlineShell";
 import type { OnlineRoomApi, OnlineRoomView } from "../online/useOnlineRoom";
 
@@ -28,6 +32,7 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
   const mySeat = view.player.seat;
   const finishRef = useRef<string | null>(null);
   const turnRef = useRef<number | null>(null);
+  const [webglFailed, setWebglFailed] = useState(false);
 
   useEffect(() => {
     if (!state || state.finished) return;
@@ -58,6 +63,44 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
     void api.move({ type: "drop", col });
   };
 
+  const board2d = (
+    <>
+    <div className="og-c4-drop-row">
+      {Array.from({ length: 7 }, (_, col) => (
+        <button
+          key={col}
+          type="button"
+          className="og-c4-drop-btn"
+          disabled={!myTurn || columnFull(col)}
+          aria-label={`${col + 1}列目に落とす`}
+          onClick={() => drop(col)}
+        >
+          ▼
+        </button>
+      ))}
+    </div>
+    <div className="og-c4-board" role="grid" aria-label="四目並べ盤面">
+      {state.board.map((value, index) => {
+        const seat = cellSeat(value);
+        const col = index % 7;
+        return (
+          <button
+            key={index}
+            type="button"
+            role="gridcell"
+            className={`og-cell og-c4-cell${state.lastMove === index ? " og-cell-last" : ""}${winSet.has(index) ? " og-cell-win" : ""}`}
+            disabled={!myTurn || columnFull(col)}
+            aria-label={`${Math.floor(index / 7) + 1}行${col + 1}列${seat >= 0 ? (seat === 0 ? " 先手の石" : " 後手の石") : ""}`}
+            onClick={() => drop(col)}
+          >
+            {seat >= 0 ? <span className={`og-disc og-disc-${seat}${winSet.has(index) ? " og-disc-win" : ""}${state.lastMove === index ? " juice-pop" : ""}`} aria-hidden="true" /> : null}
+          </button>
+        );
+      })}
+    </div>
+    </>
+  );
+
   return (
     <div className="og-board-wrap">
       <div className={`og-turn-banner${myTurn ? " og-turn-mine" : ""}${state.finished ? " juice-slide" : myTurn ? " juice-pulse" : ""}`} role="status">
@@ -78,39 +121,21 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
           </span>
         ))}
       </div>
-      <div className="og-c4-drop-row">
-        {Array.from({ length: 7 }, (_, col) => (
-          <button
-            key={col}
-            type="button"
-            className="og-c4-drop-btn"
-            disabled={!myTurn || columnFull(col)}
-            aria-label={`${col + 1}列目に落とす`}
-            onClick={() => drop(col)}
-          >
-            ▼
-          </button>
-        ))}
-      </div>
-      <div className="og-c4-board" role="grid" aria-label="四目並べ盤面">
-        {state.board.map((value, index) => {
-          const seat = cellSeat(value);
-          const col = index % 7;
-          return (
-            <button
-              key={index}
-              type="button"
-              role="gridcell"
-              className={`og-cell og-c4-cell${state.lastMove === index ? " og-cell-last" : ""}${winSet.has(index) ? " og-cell-win" : ""}`}
-              disabled={!myTurn || columnFull(col)}
-              aria-label={`${Math.floor(index / 7) + 1}行${col + 1}列${seat >= 0 ? (seat === 0 ? " 先手の石" : " 後手の石") : ""}`}
-              onClick={() => drop(col)}
-            >
-              {seat >= 0 ? <span className={`og-disc og-disc-${seat}${winSet.has(index) ? " og-disc-win" : ""}${state.lastMove === index ? " juice-pop" : ""}`} aria-hidden="true" /> : null}
-            </button>
-          );
-        })}
-      </div>
+      {webglFailed ? (
+        board2d
+      ) : (
+        <div style={{ width: "min(94vw, 520px)", margin: "0 auto" }}>
+          <Connect4Scene3D
+            cells={state.board.map(cellSeat)}
+            winCells={state.winCells ?? []}
+            lastMove={state.lastMove}
+            myTurn={myTurn}
+            onDrop={drop}
+            onFail={() => setWebglFailed(true)}
+            fallback={board2d}
+          />
+        </div>
+      )}
     </div>
   );
 }

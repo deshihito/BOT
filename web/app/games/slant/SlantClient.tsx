@@ -2,6 +2,7 @@
 // スラント（ごきげんななめ）。ロジックは lib/slant.ts（解先行生成・ルール検証で完成判定）。
 // マスをタップすると 未定→/→\→未定 と切り替わる。端末内で完結し、サーバーへ送信しない。
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   createSlantGame,
@@ -13,6 +14,9 @@ import { sfxPlace, sfxTap, sfxWin } from "@/lib/sfx";
 import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
+// 3D シーンは three を含むため遅延読み込み（このページ専用チャンクに閉じる）。
+const SlantScene3D = dynamic(() => import("./SlantScene3D"), { ssr: false });
+
 const MARGIN = 30;
 const CELL = 56;
 
@@ -22,6 +26,7 @@ function newGame(): SlantState {
 
 export default function SlantClient() {
   const { prefix } = useGamesNav();
+  const [webglFailed, setWebglFailed] = useState(false);
   const [state, setState] = useState<SlantState>(() => newGame());
   const [seconds, setSeconds] = useState(0);
   const [best, setBest] = useState<number | null>(null);
@@ -107,31 +112,8 @@ export default function SlantClient() {
   const px = (pc: number) => MARGIN + pc * CELL;
   const py = (pr: number) => MARGIN + pr * CELL;
 
-  return (
-    <>
-      <nav className="breadcrumbs" aria-label="パンくず">
-        <Link href={`${prefix}/games`}>ゲーム</Link>
-        <span> / </span>
-        <span>スラント</span>
-      </nav>
-      <div className="page-heading compact-heading">
-        <h1>スラント</h1>
-        <p className="muted">
-          マスをタップすると 未定→ / → \ →未定 と切り替わります。
-        </p>
-      </div>
-
-      <div className="classic-controls" role="group" aria-label="操作">
-        <button type="button" className="classic-btn" onClick={restart}>
-          もう一度
-        </button>
-      </div>
-
-      <p className="classic-status" role="status">
-        {filled} / {width * height} マス ・ {seconds} 秒
-        {best !== null ? ` ・ ベスト ${best} 秒` : ""} ・ {statusText}
-      </p>
-
+  // 2D 盤（WebGL が使えない場合のフォールバックとしてそのまま使う）。
+  const board2d = (
       <div style={{ maxWidth: 480, margin: "0 auto" }}>
         <svg
           viewBox={`0 0 ${viewSize} ${viewSize}`}
@@ -239,7 +221,49 @@ export default function SlantClient() {
           })}
         </svg>
       </div>
+  );
 
+  return (
+    <>
+      <nav className="breadcrumbs" aria-label="パンくず">
+        <Link href={`${prefix}/games`}>ゲーム</Link>
+        <span> / </span>
+        <span>スラント</span>
+      </nav>
+      <div className="page-heading compact-heading">
+        <h1>スラント</h1>
+        <p className="muted">
+          マスをタップすると 未定→ / → \ →未定 と切り替わります。
+        </p>
+      </div>
+
+      <div className="classic-controls" role="group" aria-label="操作">
+        <button type="button" className="classic-btn" onClick={restart}>
+          もう一度
+        </button>
+      </div>
+
+      <p className="classic-status" role="status">
+        {filled} / {width * height} マス ・ {seconds} 秒
+        {best !== null ? ` ・ ベスト ${best} 秒` : ""} ・ {statusText}
+      </p>
+
+      {webglFailed ? board2d : (
+        <div style={{ width: "100%", maxWidth: 480, margin: "0 auto" }}>
+          <SlantScene3D
+            board={state.board}
+            clues={state.clues}
+            width={width}
+            height={height}
+            badCells={[...badCells]}
+            badPoints={[...badPoints]}
+            status={state.status}
+            onCell={handleCell}
+            onFail={() => setWebglFailed(true)}
+            fallback={board2d}
+          />
+        </div>
+      )}
       {state.status === "won" && (
         <div style={{ marginTop: 16 }}>
           <EndScreen

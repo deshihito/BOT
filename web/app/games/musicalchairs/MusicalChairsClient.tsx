@@ -8,7 +8,10 @@
 // アクションは { type: "sit" }。進行はサーバー側の tick で進む。
 // 反応順はサーバー受信順で決まる（モジュール側のコメント参照）。
 import { useEffect, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import { playSe } from "@/lib/balku-sound";
+
+const MusicalChairsScene3D = dynamic(() => import("./MusicalChairsScene3D"), { ssr: false });
 import OnlineShell from "../online/OnlineShell";
 import type { OnlineRoomApi, OnlineRoomView } from "../online/useOnlineRoom";
 
@@ -38,6 +41,7 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
   const state = view.state as McView | null;
   const mySeat = view.player.seat;
   const [now, setNow] = useState(() => Date.now());
+  const [webglFailed, setWebglFailed] = useState(false);
   const prevPhaseRef = useRef<string>("");
   const finishRef = useRef<string | null>(null);
   const turnRef = useRef<string | null>(null);
@@ -83,6 +87,40 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
 
   const result = state.lastResult;
 
+  const doSit = () => {
+    playSe("play");
+    void api.move({ type: "sit" });
+  };
+
+  const board2d = (
+    <div
+      style={{ display: "flex", justifyContent: "center", alignItems: "flex-end", gap: 10, padding: "16px 10px", flexWrap: "wrap" }}
+      role="img"
+      aria-label={`椅子 ${state.chairs} 個とプレイヤー ${state.players.length} 人（2D表示）`}
+    >
+      {Array.from({ length: state.chairs }, (_, i) => (
+        <span
+          key={i}
+          style={{
+            width: 34, height: 44, display: "inline-block",
+            border: "3px solid #9a6b3f", borderBottomWidth: 10, borderRadius: 4,
+            background: "#c0392b",
+          }}
+        />
+      ))}
+      {state.players.map((pl) => (
+        <span
+          key={pl.seat}
+          style={{
+            width: 22, height: 22, borderRadius: 999, display: "inline-block",
+            background: pl.alive && !pl.left ? "#3f7fe0" : "#8a8f96",
+            border: pl.seat === mySeat ? "3px solid #ffffff" : "3px solid transparent",
+          }}
+        />
+      ))}
+    </div>
+  );
+
   return (
     <div style={{ maxWidth: 640, margin: "0 auto" }}>
       <div className="og-score-row" role="status">
@@ -99,6 +137,22 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
       <p className="og-muted" style={{ marginTop: 8 }}>
         ラウンド {state.round + 1} ・ 残り {state.aliveCount} 人 ・ 椅子は {state.chairs} 個
       </p>
+
+      {webglFailed ? board2d : (
+        <div style={{ margin: "10px 0 2px" }}>
+          <MusicalChairsScene3D
+            players={state.players}
+            chairs={state.chairs}
+            phase={state.phase}
+            round={state.round}
+            mySeat={mySeat}
+            canSit={canSit}
+            onSit={doSit}
+            onFail={() => setWebglFailed(true)}
+            fallback={board2d}
+          />
+        </div>
+      )}
 
       {state.phase === "playing" && (
         <div className="juice-slide" style={{ textAlign: "center", padding: "18px 0 6px" }}>
@@ -149,10 +203,7 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
               type="button"
               className="classic-btn classic-btn-active"
               style={{ minWidth: 220, minHeight: 72, fontSize: 24, fontWeight: 800, marginTop: 14 }}
-              onClick={() => {
-                playSe("play");
-                void api.move({ type: "sit" });
-              }}
+              onClick={doSit}
             >
               座る！
             </button>

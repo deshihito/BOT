@@ -2,7 +2,11 @@
 // バイナリー（Binairo）。ロジックは lib/binairo.ts（解先行生成・ルール検証で完成判定）。
 // マスをタップすると 空き→0→1→空き と切り替わる。端末内で完結し、サーバーへ送信しない。
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useEffect, useMemo, useRef, useState } from "react";
+
+// 3D シーンは three を含むため遅延読み込み（このページ専用チャンクに閉じる）。
+const BinairoScene3D = dynamic(() => import("./BinairoScene3D"), { ssr: false });
 import {
   binairoViolations,
   createBinairoGame,
@@ -19,6 +23,7 @@ function newGame(): BinairoState {
 
 export default function BinairoClient() {
   const { prefix } = useGamesNav();
+  const [webglFailed, setWebglFailed] = useState(false);
   const [state, setState] = useState<BinairoState>(() => newGame());
   const [seconds, setSeconds] = useState(0);
   const [best, setBest] = useState<number | null>(null);
@@ -70,6 +75,12 @@ export default function BinairoClient() {
     setResultPrevBest(null);
   };
 
+  const cycleCell = (i: number) => {
+    if (state.givens[i] || state.status === "won") return;
+    sfxTap();
+    setState((s) => cycleBinairoCell(s, i));
+  };
+
   const violations = useMemo(() => binairoViolations(state), [state]);
   const badCells = useMemo(() => {
     const set = new Set<number>();
@@ -85,31 +96,8 @@ export default function BinairoClient() {
         ? violations[0].message
         : "各行・各列で 0 と 1 を3つずつ。同じ数字が3つ並ばないようにしよう。";
 
-  return (
-    <>
-      <nav className="breadcrumbs" aria-label="パンくず">
-        <Link href={`${prefix}/games`}>ゲーム</Link>
-        <span> / </span>
-        <span>バイナリー</span>
-      </nav>
-      <div className="page-heading compact-heading">
-        <h1>バイナリー</h1>
-        <p className="muted">
-          マスをタップすると 空き→0→1→空き と切り替わります。最初から埋まっている太字のマスは固定です。
-        </p>
-      </div>
-
-      <div className="classic-controls" role="group" aria-label="操作">
-        <button type="button" className="classic-btn" onClick={restart}>
-          もう一度
-        </button>
-      </div>
-
-      <p className="classic-status" role="status">
-        {filled} / {state.board.length} マス ・ {seconds} 秒
-        {best !== null ? ` ・ ベスト ${best} 秒` : ""} ・ {statusText}
-      </p>
-
+  // 2D 盤（WebGL が使えない場合のフォールバックとしてそのまま使う）。
+  const board2d = (
       <div
         role="grid"
         aria-label="バイナリーの盤"
@@ -155,6 +143,48 @@ export default function BinairoClient() {
           );
         })}
       </div>
+  );
+
+  return (
+    <>
+      <nav className="breadcrumbs" aria-label="パンくず">
+        <Link href={`${prefix}/games`}>ゲーム</Link>
+        <span> / </span>
+        <span>バイナリー</span>
+      </nav>
+      <div className="page-heading compact-heading">
+        <h1>バイナリー</h1>
+        <p className="muted">
+          マスをタップすると 空き→0→1→空き と切り替わります。最初から埋まっている太字のマスは固定です。
+        </p>
+      </div>
+
+      <div className="classic-controls" role="group" aria-label="操作">
+        <button type="button" className="classic-btn" onClick={restart}>
+          もう一度
+        </button>
+      </div>
+
+      <p className="classic-status" role="status">
+        {filled} / {state.board.length} マス ・ {seconds} 秒
+        {best !== null ? ` ・ ベスト ${best} 秒` : ""} ・ {statusText}
+      </p>
+
+      {webglFailed ? board2d : (
+        <div style={{ width: "100%", maxWidth: 420, margin: "0 auto" }}>
+          <BinairoScene3D
+            board={state.board}
+            givens={state.givens}
+            size={state.size}
+            badCells={badCells}
+            onCell={cycleCell}
+            onFail={() => setWebglFailed(true)}
+            fallback={board2d}
+          />
+        </div>
+      )}
+
+
 
       {state.status === "won" && (
         <div style={{ marginTop: 16 }}>

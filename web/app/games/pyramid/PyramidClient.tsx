@@ -3,7 +3,11 @@
 // 合計13のペアか K 単体を取り除く。下の2枚が無くなったカードから使える。
 // 端末内で完結し、サーバーへ送信しない。
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useEffect, useRef, useState } from "react";
+
+// 3D シーンは three を含むため遅延読み込み（このページ専用チャンクに閉じる）。
+const PyramidScene3D = dynamic(() => import("./PyramidScene3D"), { ssr: false });
 import {
   canRemove,
   createPyramid,
@@ -54,6 +58,7 @@ function CardFace({ card }: { card: PyramidCard }) {
 
 export default function PyramidClient() {
   const { prefix } = useGamesNav();
+  const [webglFailed, setWebglFailed] = useState(false);
   const [state, setState] = useState<PyramidState>(() =>
     createPyramid(Date.now() % 2147483647),
   );
@@ -81,6 +86,15 @@ export default function PyramidClient() {
     state.status === "won" ||
     state.status === "stuck" ||
     (state.stock.length === 0 && state.waste.length === 0);
+
+  // ストックめくり（2D のタップ対象物と 3D のストックタップで共用する既存処理）。
+  const flipStock = () => {
+    if (stockDisabled) return;
+    // 捨て山の選択は「山そのもの」への参照なので、めくると別カードに移ってしまう。選択を解除する。
+    sfxFlip();
+    setSelected(null);
+    setState((s) => flipPyramidStock(s));
+  };
 
   const onTarget = (target: PyramidTarget, card: PyramidCard) => {
     if (state.status !== "playing") return;
@@ -132,29 +146,19 @@ export default function PyramidClient() {
     (selected.kind === "waste" ||
       (target.kind === "pyramid" && selected.slot === target.slot));
 
-  return (
+  // 3D シーンのタップ（露出・無効判定はこの既存ハンドラ側にあり、シーンは呼ぶだけ）。
+  const handlePyramidTap = (slot: number) => {
+    const card = state.pyramid[slot];
+    if (!card || !exposed.has(slot)) return;
+    onTarget({ kind: "pyramid", slot }, card);
+  };
+  const handleWasteTap = () => {
+    if (wasteTop) onTarget({ kind: "waste" }, wasteTop);
+  };
+
+  // 2D 盤面（ピラミッド＋ストック/ウェイスト。WebGL が使えない場合のフォールバック）。
+  const board2d = (
     <>
-      <nav className="breadcrumbs" aria-label="パンくず">
-        <Link href={`${prefix}/games`}>ゲーム</Link>
-        <span> / </span>
-        <span>ピラミッド</span>
-      </nav>
-      <div className="page-heading compact-heading">
-        <h1>ピラミッド</h1>
-        <p className="muted">カードをタップで選ぶと、合計13の相方を探せます。選択中のカードをもう一度タップすると解除できます。</p>
-      </div>
-
-      <div className="classic-controls">
-        <button type="button" className="classic-btn" onClick={restart}>
-          もう一度
-        </button>
-      </div>
-
-      <p className="classic-status" role="status">
-        {statusText}
-        {selected !== null ? " ・ もう1枚選んでください（合計13で消えます）" : ""}
-      </p>
-
       <div
         style={{
           display: "flex",
@@ -227,13 +231,7 @@ export default function PyramidClient() {
       >
         <div style={{ textAlign: "center" }}>
           <div
-            {...tappableProps(() => {
-              if (stockDisabled) return;
-              // 捨て山の選択は「山そのもの」への参照なので、めくると別カードに移ってしまう。選択を解除する。
-              sfxFlip();
-              setSelected(null);
-              setState((s) => flipPyramidStock(s));
-            })}
+            {...tappableProps(flipStock)}
             className="classic-btn"
             aria-label={state.stock.length > 0 ? "ストックを1枚めくる" : "捨て山を裏返して再利用"}
             aria-disabled={stockDisabled}
@@ -287,7 +285,48 @@ export default function PyramidClient() {
           </p>
         </div>
       </div>
+    </>
+  );
 
+  return (
+    <>
+      <nav className="breadcrumbs" aria-label="パンくず">
+        <Link href={`${prefix}/games`}>ゲーム</Link>
+        <span> / </span>
+        <span>ピラミッド</span>
+      </nav>
+      <div className="page-heading compact-heading">
+        <h1>ピラミッド</h1>
+        <p className="muted">カードをタップで選ぶと、合計13の相方を探せます。選択中のカードをもう一度タップすると解除できます。</p>
+      </div>
+
+      <div className="classic-controls">
+        <button type="button" className="classic-btn" onClick={restart}>
+          もう一度
+        </button>
+      </div>
+
+      <p className="classic-status" role="status">
+        {statusText}
+        {selected !== null ? " ・ もう1枚選んでください（合計13で消えます）" : ""}
+      </p>
+
+      {webglFailed ? board2d : (
+        <PyramidScene3D
+          pyramid={state.pyramid}
+          exposed={exposedSlots(state)}
+          selected={selected}
+          stockCount={state.stock.length}
+          wasteTop={wasteTop}
+          wasteCount={state.waste.length}
+          canFlipStock={!stockDisabled}
+          onPyramidTap={handlePyramidTap}
+          onWasteTap={handleWasteTap}
+          onStockTap={flipStock}
+          onFail={() => setWebglFailed(true)}
+          fallback={board2d}
+        />
+      )}
       <p className="muted" style={{ textAlign: "center", fontSize: 13 }}>
         A=1、J=11、Q=12 として、2枚の合計が13になれば消せます。K は1枚で消えます。
         ストックが尽きたら、捨て山を裏返してもう一度使えます。

@@ -2,7 +2,11 @@
 // ドローポーカー（ビデオポーカー式の配当制）。ロジックは lib/drawpoker.ts。
 // チップは端末内だけの遊び用ポイントで、保存はラウンド確定（settled）時に限る。
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useEffect, useRef, useState } from "react";
+
+// 3D シーンは three を含むため遅延読み込み（このページ専用チャンクに閉じる）。
+const DrawPokerScene3D = dynamic(() => import("./DrawPokerScene3D"), { ssr: false });
 import {
   DP_HAND_TABLE,
   DP_INITIAL_CHIPS,
@@ -47,6 +51,7 @@ function isRed(card: DpCard): boolean {
 
 export default function DrawPokerClient() {
   const { prefix } = useGamesNav();
+  const [webglFailed, setWebglFailed] = useState(false);
   const [state, setState] = useState<DpState>(() => createDrawPokerGame(Date.now() % 2147483647));
   const [bet, setBet] = useState<number>(100);
   /** 交換する札の index 集合。 */
@@ -145,35 +150,8 @@ export default function DrawPokerClient() {
     minHeight: 40,
   });
 
-  return (
-    <div style={{ maxWidth: 560, margin: "0 auto", padding: "16px 12px 40px" }}>
-      <p style={{ margin: "0 0 8px" }}>
-        <Link href={`${prefix}/games`} style={{ color: "#38bdf8", fontSize: 14 }}>
-          ← ゲーム一覧へ
-        </Link>
-      </p>
-      <h1 style={{ fontSize: 22, margin: "0 0 6px" }}>♠ ドローポーカー</h1>
-      <p style={{ margin: "0 0 12px", color: "#64748b", fontSize: 14, lineHeight: 1.6 }}>
-        ベット額を選んでカード置き場をタップで配り、交換したい札をタップで選んで下スワイプで確定します。
-      </p>
-
-      <p style={{ fontSize: 16, fontWeight: 700, margin: "0 0 10px" }}>
-        チップ: {state.chips}
-        {state.phase !== "betting" && <span style={{ marginLeft: 12, fontWeight: 400 }}>ベット: {state.bet}</span>}
-      </p>
-
-      {state.phase === "draw" && (
-        <p role="status" style={{ minHeight: 22, margin: "0 0 8px", fontWeight: 700 }}>
-          現在の役: {currentHand?.name} ／ 交換する札をタップで選んで、下スワイプで確定
-        </p>
-      )}
-      {state.phase === "settled" && state.result && (
-        <p role="status" style={{ minHeight: 22, margin: "0 0 8px", fontWeight: 700, color: state.result.delta >= 0 ? "#16a34a" : "#dc2626" }}>
-          {state.result.message}（収支 {state.result.delta >= 0 ? "+" : ""}{state.result.delta}）
-          {state.result.delta !== 0 ? <ScorePop key={state.round} amount={state.result.delta} /> : null}
-        </p>
-      )}
-
+  // 2D カード置き場（WebGL が使えない場合のフォールバックとしてそのまま使う）。
+  const row2d = (
       <div
         {...rowGesture}
         role="group"
@@ -234,6 +212,50 @@ export default function DrawPokerClient() {
           );
         })}
       </div>
+  );
+
+  return (
+    <div style={{ maxWidth: 560, margin: "0 auto", padding: "16px 12px 40px" }}>
+      <p style={{ margin: "0 0 8px" }}>
+        <Link href={`${prefix}/games`} style={{ color: "#38bdf8", fontSize: 14 }}>
+          ← ゲーム一覧へ
+        </Link>
+      </p>
+      <h1 style={{ fontSize: 22, margin: "0 0 6px" }}>♠ ドローポーカー</h1>
+      <p style={{ margin: "0 0 12px", color: "#64748b", fontSize: 14, lineHeight: 1.6 }}>
+        ベット額を選んでカード置き場をタップで配り、交換したい札をタップで選んで下スワイプで確定します。
+      </p>
+
+      <p style={{ fontSize: 16, fontWeight: 700, margin: "0 0 10px" }}>
+        チップ: {state.chips}
+        {state.phase !== "betting" && <span style={{ marginLeft: 12, fontWeight: 400 }}>ベット: {state.bet}</span>}
+      </p>
+
+      {state.phase === "draw" && (
+        <p role="status" style={{ minHeight: 22, margin: "0 0 8px", fontWeight: 700 }}>
+          現在の役: {currentHand?.name} ／ 交換する札をタップで選んで、下スワイプで確定
+        </p>
+      )}
+      {state.phase === "settled" && state.result && (
+        <p role="status" style={{ minHeight: 22, margin: "0 0 8px", fontWeight: 700, color: state.result.delta >= 0 ? "#16a34a" : "#dc2626" }}>
+          {state.result.message}（収支 {state.result.delta >= 0 ? "+" : ""}{state.result.delta}）
+          {state.result.delta !== 0 ? <ScorePop key={state.round} amount={state.result.delta} /> : null}
+        </p>
+      )}
+
+      {webglFailed ? row2d : (
+        <DrawPokerScene3D
+          hand={state.hand}
+          phase={state.phase}
+          discards={discards}
+          betAmount={state.phase === "betting" ? bet : state.bet}
+          onToggleCard={toggleDiscard}
+          onTapAction={rowAction}
+          onConfirmDraw={confirmDraw}
+          onFail={() => setWebglFailed(true)}
+          fallback={row2d}
+        />
+      )}
 
       {state.phase === "betting" || state.phase === "settled" ? (
         <div>

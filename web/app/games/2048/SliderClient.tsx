@@ -4,7 +4,11 @@
 // タイルは絶対配置し、lib の moveSlideDetailed が返す移動情報で
 // transform を遷移させてスライドアニメーションする（最終状態は lib の盤面と一致）。
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useCallback, useEffect, useRef, useState } from "react";
+
+// 3D シーンは three を含むため遅延読み込み（このページ専用チャンクに閉じる）。
+const SliderScene3D = dynamic(() => import("./SliderScene3D"), { ssr: false });
 import {
   continueSlide,
   createSlideGame,
@@ -32,6 +36,7 @@ type VTile = { id: number; value: number; index: number; pop: boolean };
 
 export default function SliderClient() {
   const { prefix } = useGamesNav();
+  const [webglFailed, setWebglFailed] = useState(false);
   const [initial] = useState<SlideState>(() => createSlideGame(Date.now() % 2147483647));
   const [state, setState] = useState<SlideState>(initial);
   const [best, setBest] = useState(0);
@@ -236,6 +241,8 @@ export default function SliderClient() {
           boxSizing: "border-box",
         }}
       >
+        {webglFailed ? (
+          <>
         <div
           aria-hidden="true"
           style={{
@@ -281,6 +288,15 @@ export default function SliderClient() {
             );
           })}
         </div>
+          </>
+        ) : (
+          <SliderScene3D
+            tiles={visual}
+            size={SLIDE_SIZE}
+            onFail={() => setWebglFailed(true)}
+            fallback={null}
+          />
+        )}
       </div>
 
       {state.status === "won" ? (

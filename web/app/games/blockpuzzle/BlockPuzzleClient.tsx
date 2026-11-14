@@ -2,7 +2,11 @@
 // ブロックスパズル。ロジックは lib/blockpuzzle.ts（シード決定的・回転なし）。
 // 下のブロックを選んで盤をタップすると配置。縦・横・3x3 がそろうと消える。端末内で完結する。
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useEffect, useRef, useState } from "react";
+
+// 3D シーンは three を含むため遅延読み込み（このページ専用チャンクに閉じる）。
+const BlockPuzzleScene3D = dynamic(() => import("./BlockPuzzleScene3D"), { ssr: false });
 import {
   BP_SHAPES,
   BP_SIZE,
@@ -25,6 +29,7 @@ function newGame(): BpState {
 
 export default function BlockPuzzleClient() {
   const { prefix } = useGamesNav();
+  const [webglFailed, setWebglFailed] = useState(false);
   const [state, setState] = useState<BpState>(() => newGame());
   const [selected, setSelected] = useState<number | null>(0);
   const [hover, setHover] = useState<{ r: number; c: number } | null>(null);
@@ -108,6 +113,63 @@ export default function BlockPuzzleClient() {
         ? "下のブロックを選んでください。"
         : "盤をタップして配置。縦・横・3x3 がそろうと消えます。";
 
+  // 2D 盤（WebGL が使えない場合のフォールバックとしてそのまま使う）。
+  const board2d = (
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: `repeat(${BP_SIZE}, minmax(0, 1fr))`,
+        gap: 3,
+        width: "100%",
+        maxWidth: 450,
+        margin: "0 auto",
+      }}
+      role="grid"
+      aria-label="ブロックスパズルの盤"
+      onMouseLeave={() => setHover(null)}
+    >
+      {state.board.map((cell, i) => {
+        const r = Math.floor(i / BP_SIZE);
+        const c = i % BP_SIZE;
+        const isGhost = ghost.has(i);
+        const boxEdge = {
+          borderRight: c % 3 === 2 && c !== BP_SIZE - 1 ? "2px solid #9aa3ad" : undefined,
+          borderBottom: r % 3 === 2 && r !== BP_SIZE - 1 ? "2px solid #9aa3ad" : undefined,
+        };
+        const bg =
+          cell !== null
+            ? CELL_COLORS[cell]
+            : isGhost
+              ? ghostOk
+                ? CELL_COLORS[state.pieces[selected ?? 0]?.color ?? 0] + "88"
+                : "#e2534a55"
+              : "#eef1f4";
+        return (
+          <button
+            key={i}
+            type="button"
+            role="gridcell"
+            aria-label={cell !== null ? "埋まったマス" : "空きマス"}
+            className={cell !== null ? "juice-pop" : undefined}
+            onClick={() => onCellClick(r, c)}
+            onMouseEnter={() => setHover({ r, c })}
+            onFocus={() => setHover({ r, c })}
+            style={{
+              aspectRatio: "1",
+              minWidth: 0,
+              border: "1px solid #d4d9de",
+              borderRadius: 4,
+              background: bg,
+              cursor: selected !== null && state.status === "playing" ? "pointer" : "default",
+              padding: 0,
+              ...boxEdge,
+            }}
+          />
+        );
+      })}
+    </div>
+  );
+
   return (
     <>
       <nav className="breadcrumbs" aria-label="パンくず">
@@ -131,59 +193,20 @@ export default function BlockPuzzleClient() {
         {best !== null ? ` ・ ベスト ${best}` : ""} ・ {statusText}
       </p>
 
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: `repeat(${BP_SIZE}, minmax(0, 1fr))`,
-          gap: 3,
-          width: "100%",
-          maxWidth: 450,
-          margin: "0 auto",
-        }}
-        role="grid"
-        aria-label="ブロックスパズルの盤"
-        onMouseLeave={() => setHover(null)}
-      >
-        {state.board.map((cell, i) => {
-          const r = Math.floor(i / BP_SIZE);
-          const c = i % BP_SIZE;
-          const isGhost = ghost.has(i);
-          const boxEdge = {
-            borderRight: c % 3 === 2 && c !== BP_SIZE - 1 ? "2px solid #9aa3ad" : undefined,
-            borderBottom: r % 3 === 2 && r !== BP_SIZE - 1 ? "2px solid #9aa3ad" : undefined,
-          };
-          const bg =
-            cell !== null
-              ? CELL_COLORS[cell]
-              : isGhost
-                ? ghostOk
-                  ? CELL_COLORS[state.pieces[selected ?? 0]?.color ?? 0] + "88"
-                  : "#e2534a55"
-                : "#eef1f4";
-          return (
-            <button
-              key={i}
-              type="button"
-              role="gridcell"
-              aria-label={cell !== null ? "埋まったマス" : "空きマス"}
-              className={cell !== null ? "juice-pop" : undefined}
-              onClick={() => onCellClick(r, c)}
-              onMouseEnter={() => setHover({ r, c })}
-              onFocus={() => setHover({ r, c })}
-              style={{
-                aspectRatio: "1",
-                minWidth: 0,
-                border: "1px solid #d4d9de",
-                borderRadius: 4,
-                background: bg,
-                cursor: selected !== null && state.status === "playing" ? "pointer" : "default",
-                padding: 0,
-                ...boxEdge,
-              }}
-            />
-          );
-        })}
-      </div>
+      {webglFailed ? board2d : (
+        <div style={{ width: "100%", maxWidth: 500, margin: "0 auto" }}>
+          <BlockPuzzleScene3D
+            board={state.board}
+            ghost={ghost}
+            ghostOk={ghostOk}
+            ghostColor={selected !== null ? (state.pieces[selected]?.color ?? null) : null}
+            onCell={onCellClick}
+            onHover={setHover}
+            onFail={() => setWebglFailed(true)}
+            fallback={board2d}
+          />
+        </div>
+      )}
 
       <div
         style={{ display: "flex", gap: 12, justifyContent: "center", marginTop: 16, flexWrap: "wrap" }}

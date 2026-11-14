@@ -3,7 +3,11 @@
 // ベスト記録: localStorage `ago-curling-best` に通算勝利数を保存する
 // （勝つたびに +1。設計はこのコメントに明示）。端末内で完結し、サーバーへ送信しない。
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useEffect, useRef, useState } from "react";
+
+// 3D シーンは three を含むため遅延読み込み（このページ専用チャンクに閉じる）。
+const CurlingScene3D = dynamic(() => import("./CurlingScene3D"), { ssr: false });
 import {
   CU_BACK_Y,
   CU_BUTTON,
@@ -49,11 +53,15 @@ function thrownBy(state: CurlingState, side: "player" | "cpu"): number {
 
 export default function CurlingClient() {
   const { prefix } = useGamesNav();
+  const [webglFailed, setWebglFailed] = useState(false);
   const [state, setState] = useState<CurlingState>(() =>
     createCurlingGame(Date.now() % 2147483647),
   );
   const [power, setPower] = useState(78);
   const [curl, setCurl] = useState(0);
+  const powerRef = useRef(78);
+  const curlRef = useRef(0);
+  const aim = (pw: number, cu: number) => { powerRef.current = pw; curlRef.current = cu; setPower(pw); setCurl(cu); };
   const [displayStones, setDisplayStones] = useState<CuStone[]>(() => state.stones);
   const [rolling, setRolling] = useState(false);
   const [wins, setWins] = useState(0);
@@ -156,9 +164,13 @@ export default function CurlingClient() {
     setState(createCurlingGame(Date.now() % 2147483647));
   };
 
-  const doThrow = () => {
+  const doThrow = (pw: number = powerRef.current, cu: number = curlRef.current) => {
     if (state.phase !== "aiming" || state.turn !== "player" || rolling) return;
-    const { state: next, result } = playerThrow(state, power, curl);
+    powerRef.current = pw;
+    curlRef.current = cu;
+    setPower(pw);
+    setCurl(cu);
+    const { state: next, result } = playerThrow(state, pw, cu);
     animateThrow(next, result.frames);
   };
 
@@ -182,57 +194,7 @@ export default function CurlingClient() {
 
   const houseColors = ["#2456c8", "#f4f4f4", "#d43a2f"];
 
-  return (
-    <>
-      <nav className="breadcrumbs" aria-label="パンくず">
-        <Link href={`${prefix}/games`}>ゲーム</Link>
-        <span> / </span>
-        <span>カーリング</span>
-      </nav>
-      <div className="page-heading compact-heading">
-        <h1>カーリング</h1>
-        <p className="muted">
-          下のスライダーで強さとカールを決めて、「投げる」ボタンで投げます。
-        </p>
-      </div>
-
-      <div className="classic-controls" role="group" aria-label="操作">
-        <button type="button" className="classic-btn" onClick={restart}>
-          もう一度
-        </button>
-        {state.phase === "endScored" && (
-          <button
-            type="button"
-            className="classic-btn classic-btn-active"
-            onClick={() => {
-              sfxTap();
-              setState((s) => nextEnd(s));
-            }}
-          >
-            {state.end >= 2 ? "結果を見る" : "次のエンドへ"}
-          </button>
-        )}
-      </div>
-
-      <p className={`classic-status${state.phase === "endScored" ? " juice-pulse" : ""}`} role="status">
-        スコア あなた {state.scores.player} - {state.scores.cpu} CPU
-        {wins > 0 ? ` ・ 通算 ${wins} 勝` : ""} ・ {statusText}
-      </p>
-
-      {state.phase === "finished" && (
-        <EndScreen
-          outcome={state.winner === "player" ? "win" : state.winner === "cpu" ? "lose" : "draw"}
-          score={state.scores.player}
-          scoreLabel="あなたのスコア"
-          onRetry={restart}
-        >
-          <p className="muted" style={{ margin: 0 }}>
-            最終スコア あなた {state.scores.player} - {state.scores.cpu} CPU
-            {wins > 0 ? ` ・ 通算 ${wins} 勝` : ""}
-          </p>
-        </EndScreen>
-      )}
-
+  const board2d = (
       <svg
         viewBox={`0 0 ${CU_WIDTH} ${CU_HEIGHT}`}
         role="img"
@@ -282,6 +244,70 @@ export default function CurlingClient() {
           </g>
         )}
       </svg>
+  );
+
+  return (
+    <>
+      <nav className="breadcrumbs" aria-label="パンくず">
+        <Link href={`${prefix}/games`}>ゲーム</Link>
+        <span> / </span>
+        <span>カーリング</span>
+      </nav>
+      <div className="page-heading compact-heading">
+        <h1>カーリング</h1>
+        <p className="muted">
+          3Dシート上をハウス方向へドラッグして強さとカールを決め、フリックで投げます。スライダーと「投げる」ボタンでも操作できます。
+        </p>
+      </div>
+
+      <div className="classic-controls" role="group" aria-label="操作">
+        <button type="button" className="classic-btn" onClick={restart}>
+          もう一度
+        </button>
+        {state.phase === "endScored" && (
+          <button
+            type="button"
+            className="classic-btn classic-btn-active"
+            onClick={() => {
+              sfxTap();
+              setState((s) => nextEnd(s));
+            }}
+          >
+            {state.end >= 2 ? "結果を見る" : "次のエンドへ"}
+          </button>
+        )}
+      </div>
+
+      <p className={`classic-status${state.phase === "endScored" ? " juice-pulse" : ""}`} role="status">
+        スコア あなた {state.scores.player} - {state.scores.cpu} CPU
+        {wins > 0 ? ` ・ 通算 ${wins} 勝` : ""} ・ {statusText}
+      </p>
+
+      {state.phase === "finished" && (
+        <EndScreen
+          outcome={state.winner === "player" ? "win" : state.winner === "cpu" ? "lose" : "draw"}
+          score={state.scores.player}
+          scoreLabel="あなたのスコア"
+          onRetry={restart}
+        >
+          <p className="muted" style={{ margin: 0 }}>
+            最終スコア あなた {state.scores.player} - {state.scores.cpu} CPU
+            {wins > 0 ? ` ・ 通算 ${wins} 勝` : ""}
+          </p>
+        </EndScreen>
+      )}
+
+{webglFailed ? board2d : (
+        <CurlingScene3D
+          stones={displayStones}
+          waiting={state.phase === "aiming" && state.turn === "player" && !rolling}
+          canThrow={state.phase === "aiming" && state.turn === "player" && !rolling}
+          onAim={aim}
+          onThrow={(pw, cu) => doThrow(pw, cu)}
+          onFail={() => setWebglFailed(true)}
+          fallback={board2d}
+        />
+      )}
 
       <div
         style={{
@@ -300,7 +326,7 @@ export default function CurlingClient() {
             max={100}
             value={power}
             disabled={state.phase !== "aiming" || state.turn !== "player" || rolling}
-            onChange={(e) => setPower(Number(e.target.value))}
+            onChange={(e) => { powerRef.current = Number(e.target.value); setPower(Number(e.target.value)); }}
             style={{ width: "100%", minHeight: 40 }}
             aria-label="強さ"
           />
@@ -313,7 +339,7 @@ export default function CurlingClient() {
             max={100}
             value={curl}
             disabled={state.phase !== "aiming" || state.turn !== "player" || rolling}
-            onChange={(e) => setCurl(Number(e.target.value))}
+            onChange={(e) => { curlRef.current = Number(e.target.value); setCurl(Number(e.target.value)); }}
             style={{ width: "100%", minHeight: 40 }}
             aria-label="カール"
           />
@@ -324,7 +350,7 @@ export default function CurlingClient() {
         <button
           type="button"
           className="classic-btn classic-btn-active"
-          onClick={doThrow}
+          onClick={() => doThrow()}
           disabled={state.phase !== "aiming" || state.turn !== "player" || rolling}
           style={{ minWidth: 140, minHeight: 48, fontSize: 17, fontWeight: 700 }}
         >

@@ -3,7 +3,11 @@
 // 白ダイス2個＋色ダイス4個を振り、各行の候補から1マスだけチェックする。
 // 端末内で完結し、サーバーへ送信しない。
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useEffect, useMemo, useRef, useState } from "react";
+
+// 3D シーンは three を含むため遅延読み込み（このページ専用チャンクに閉じる）。
+const DiceQuestScene3D = dynamic(() => import("./DiceQuestScene3D"), { ssr: false });
 import {
   applyDqCheck,
   applyDqPass,
@@ -60,6 +64,7 @@ function DiceFace({ value, bg, label }: { value: number; bg: string; label: stri
 
 export default function DiceQuestClient() {
   const { prefix } = useGamesNav();
+  const [webglFailed, setWebglFailed] = useState(false);
   const [state, setState] = useState<DqState>(() => createDiceQuestGame(Date.now() % 2147483647));
 
   const candidates = useMemo(() => dqCandidates(state), [state]);
@@ -102,41 +107,15 @@ export default function DiceQuestClient() {
           ? "光っているマスから1つ選んでチェックします。"
           : "チェックできるマスがありません。失敗として次へ進みます。";
 
-  return (
+  // 2D のダイス表示（WebGL が使えない場合のフォールバック）。
+  const diceArea2D = (
     <>
-      <nav className="breadcrumbs" aria-label="パンくず">
-        <Link href={`${prefix}/games`}>ゲーム</Link>
-        <span> / </span>
-        <span>ダイスクエスト</span>
-      </nav>
-      <div className="page-heading compact-heading">
-        <h1>ダイスクエスト</h1>
-        <p className="muted">
-          白ダイス2個の合計はどの行でも、色ダイスとの合計はその色の行で使えます。最後の数字は、その行で5つ以上チェック済みのときだけ取れます。チェックしないと失敗（-5点）です。
-        </p>
-      </div>
-
-      <div className="classic-controls">
-        <button type="button" className="classic-btn" onClick={restart}>
-          もう一度
-        </button>
-        <span className="muted" style={{ fontSize: 13 }}>
-          {state.phase === "roll" ? "ダイス置き場をタップで振る" : state.phase === "choice" ? "チェックは光るマスをタップ。しない場合はダイス置き場をタップ" : ""}
-        </span>
-      </div>
-
       {!state.dice && (
         <div {...diceGesture} onKeyDown={diceKeyDown} role="button" tabIndex={0} aria-label="ダイス置き場（タップで振る）"
           style={{ border: "2px dashed var(--line, #ccc)", borderRadius: 12, padding: "18px 14px", textAlign: "center", cursor: "pointer", margin: "6px 0 14px", touchAction: "none" }}>
           ダイス置き場 — タップで振る
         </div>
       )}
-      <p className="classic-status" role="status">
-        スコア {score.total} 点 ・ {state.rolls} 投目 ・ 失敗{" "}
-        {Array.from({ length: DQ_MAX_FAILURES }, (_, i) => (i < state.failures ? "✗" : "・")).join("")} ・{" "}
-        {statusText}
-      </p>
-
       {state.dice && (
         <div
           {...diceGesture}
@@ -163,6 +142,60 @@ export default function DiceQuestClient() {
           ))}
         </div>
       )}
+    </>
+  );
+
+  return (
+    <>
+      <nav className="breadcrumbs" aria-label="パンくず">
+        <Link href={`${prefix}/games`}>ゲーム</Link>
+        <span> / </span>
+        <span>ダイスクエスト</span>
+      </nav>
+      <div className="page-heading compact-heading">
+        <h1>ダイスクエスト</h1>
+        <p className="muted">
+          白ダイス2個の合計はどの行でも、色ダイスとの合計はその色の行で使えます。最後の数字は、その行で5つ以上チェック済みのときだけ取れます。チェックしないと失敗（-5点）です。
+        </p>
+      </div>
+
+      <div className="classic-controls">
+        <button type="button" className="classic-btn" onClick={restart}>
+          もう一度
+        </button>
+        <span className="muted" style={{ fontSize: 13 }}>
+          {state.phase === "roll" ? "ダイス置き場をタップで振る" : state.phase === "choice" ? "チェックは光るマスをタップ。しない場合はダイス置き場をタップ" : ""}
+        </span>
+      </div>
+
+      {webglFailed ? (
+        diceArea2D
+      ) : (
+        <>
+          <div onKeyDown={diceKeyDown} tabIndex={0} role="button" aria-label="ダイス置き場（タップで振る / チェックしない）" style={{ outlineOffset: 2 }}>
+            <DiceQuestScene3D
+              dice={state.dice}
+              rolls={state.rolls}
+              canAct={state.phase === "roll" || state.phase === "choice"}
+              onAction={() => { if (state.phase === "roll") doRoll(); else if (state.phase === "choice") doPass(); }}
+              onFail={() => setWebglFailed(true)}
+              fallback={diceArea2D}
+            />
+          </div>
+          {state.dice && (
+            <p className="muted" style={{ margin: "6px 0 10px", fontSize: 14 }} role="status">
+              白 {state.dice.white[0]}・{state.dice.white[1]}（合計 {state.dice.white[0] + state.dice.white[1]}） ／{" "}
+              {DQ_COLORS.map((color) => `${DQ_COLOR_LABELS[color]} ${state.dice?.colored[color] ?? 0}`).join(" ・ ")}
+            </p>
+          )}
+        </>
+      )}
+
+      <p className="classic-status" role="status">
+        スコア {score.total} 点 ・ {state.rolls} 投目 ・ 失敗{" "}
+        {Array.from({ length: DQ_MAX_FAILURES }, (_, i) => (i < state.failures ? "✗" : "・")).join("")} ・{" "}
+        {statusText}
+      </p>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         {DQ_COLORS.map((color) => {

@@ -2,7 +2,10 @@
 // よけゲー（ドッジ）。canvas で上から落ちる障害物を左右移動で避け続け、生存時間を競う。
 // 描画と物理はこの Client 内で完結する（純粋 lib は持たない）。
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useCallback, useEffect, useRef, useState } from "react";
+
+const DodgeScene3D = dynamic(() => import("./DodgeScene3D"), { ssr: false });
 import { sfxLose, sfxWin } from "@/lib/sfx";
 import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
@@ -38,6 +41,7 @@ function spawnIntervalMs(elapsedSec: number): number {
 export default function DodgeClient() {
   const { prefix } = useGamesNav();
   const [phase, setPhase] = useState<Phase>("ready");
+  const [webglFailed, setWebglFailed] = useState(false);
   const [scoreSec, setScoreSec] = useState(0);
   const [best, setBest] = useState(0);
   const [dodged, setDodged] = useState(0);
@@ -233,6 +237,10 @@ export default function DodgeClient() {
   }, [draw, finish]);
 
   useEffect(() => {
+    if (webglFailed) draw(0);
+  }, [webglFailed, draw]);
+
+  useEffect(() => {
     mountedRef.current = true;
     setBest(loadBest());
     // 初期画面を描く
@@ -278,13 +286,25 @@ export default function DodgeClient() {
     };
   }, []);
 
-  const moveToPointer = (e: React.PointerEvent<HTMLCanvasElement>) => {
+  // 移動先の設定（フィールド座標）。2D のポインタ操作と 3D シーンで共有する
+  // 唯一の経路で、クランプとフェーズ判定はここに集約する（従来どおり）。
+  const applyTargetX = (x: number) => {
     if (phaseRef.current !== "playing") return;
+    targetXRef.current = Math.max(PLAYER_R, Math.min(FIELD_W - PLAYER_R, x));
+  };
+
+  const moveToPointer = (e: React.PointerEvent<HTMLCanvasElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
     if (rect.width <= 0) return;
     const x = ((e.clientX - rect.left) / rect.width) * FIELD_W;
-    targetXRef.current = Math.max(PLAYER_R, Math.min(FIELD_W - PLAYER_R, x));
+    applyTargetX(x);
   };
+
+  // 3D シーンが毎フレーム読む表示用スナップショット（判定は従来ループのまま）。
+  const getSnapshot = () => ({
+    playerX: playerXRef.current,
+    obstacles: obstaclesRef.current,
+  });
 
   const btn: React.CSSProperties = {
     padding: "10px 14px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.18)",
@@ -299,22 +319,8 @@ export default function DodgeClient() {
         ? "スタートを押すと障害物が落ちてきます。"
         : `${scoreSec.toFixed(1)} 秒 ・ よけた数 ${dodged} ・ 時間とともに速くなります`;
 
-  return (
+  const board2d = (
     <>
-      <nav className="breadcrumbs" aria-label="パンくず">
-        <Link href={`${prefix}/games`}>ゲーム</Link>
-        <span> / </span>
-        <span>よけゲー</span>
-      </nav>
-      <div className="page-heading compact-heading">
-        <h1>よけゲー</h1>
-        <p className="muted">上から落ちてくる障害物を左右に動いて避け続けます。当たったら即終了、生き残った時間がスコアです。</p>
-      </div>
-
-      <p className="classic-status" role="status">
-        生存 {scoreSec.toFixed(1)} 秒 ・ ベスト {best > 0 ? `${best.toFixed(1)} 秒` : "—"} ・ {statusText}
-      </p>
-
       <div className={phase === "gameover" ? "juice-shake" : undefined} style={{ maxWidth: 400, margin: "0 auto" }}>
         <canvas
           ref={canvasRef}
@@ -333,6 +339,35 @@ export default function DodgeClient() {
           }}
         />
       </div>
+    </>
+  );
+
+  return (
+    <>
+      <nav className="breadcrumbs" aria-label="パンくず">
+        <Link href={`${prefix}/games`}>ゲーム</Link>
+        <span> / </span>
+        <span>よけゲー</span>
+      </nav>
+      <div className="page-heading compact-heading">
+        <h1>よけゲー</h1>
+        <p className="muted">上から落ちてくる障害物を左右に動いて避け続けます。当たったら即終了、生き残った時間がスコアです。</p>
+      </div>
+
+      <p className="classic-status" role="status">
+        生存 {scoreSec.toFixed(1)} 秒 ・ ベスト {best > 0 ? `${best.toFixed(1)} 秒` : "—"} ・ {statusText}
+      </p>
+
+      {webglFailed ? board2d : (
+        <div className={phase === "gameover" ? "juice-shake" : undefined} style={{ maxWidth: 400, margin: "0 auto" }}>
+          <DodgeScene3D
+            getSnapshot={getSnapshot}
+            onMove={applyTargetX}
+            onFail={() => setWebglFailed(true)}
+            fallback={board2d}
+          />
+        </div>
+      )}
 
       {phase === "gameover" && (
         <div style={{ maxWidth: 400, margin: "16px auto 0" }}>

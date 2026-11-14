@@ -4,7 +4,11 @@
 // が実行する。Worker が使えない環境ではメインスレッド計算にフォールバックする。
 // 対局は端末内で完結し、サーバーへ棋譜は送らない。
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useEffect, useMemo, useRef, useState } from "react";
+
+// 3D シーンは three を含むため遅延読み込み（このページ専用チャンクに閉じる）。
+const ChessScene3D = dynamic(() => import("./ChessScene3D"), { ssr: false });
 import {
   BLACK,
   WHITE,
@@ -60,6 +64,7 @@ export default function ChessClient() {
   const [promoMoves, setPromoMoves] = useState<LegalMove[] | null>(null);
   const [thinking, setThinking] = useState(false);
   const [resignArmed, setResignArmed] = useState(false);
+  const [webglFailed, setWebglFailed] = useState(false);
   const workerRef = useRef<Worker | null>(null);
   const workerFailedRef = useRef(false);
   const requestRef = useRef(0);
@@ -238,20 +243,7 @@ export default function ChessClient() {
     movePairs.push({ no: i / 2 + 1, white: game.sans[i], black: game.sans[i + 1] });
   }
 
-  return (
-    <>
-      <nav className="breadcrumbs" aria-label="パンくず">
-        <Link href={`${prefix}/games`}>ゲーム</Link>
-        <span> / </span>
-        <span>チェス</span>
-      </nav>
-      <div className="page-heading compact-heading">
-        <h1>チェス</h1>
-        <p className="muted">CPU対戦チェス。探索計算はあなたの端末のブラウザの中で実行されます。</p>
-      </div>
-
-      <div className="chess-layout">
-        <div className="chess-board-area">
+  const board2d = (
           <div className="chess-board" role="grid" aria-label="チェス盤">
             {ranks.map((rank) =>
               files.map((file) => {
@@ -292,6 +284,37 @@ export default function ChessClient() {
               }),
             )}
           </div>
+  );
+
+  return (
+    <>
+      <nav className="breadcrumbs" aria-label="パンくず">
+        <Link href={`${prefix}/games`}>ゲーム</Link>
+        <span> / </span>
+        <span>チェス</span>
+      </nav>
+      <div className="page-heading compact-heading">
+        <h1>チェス</h1>
+        <p className="muted">CPU対戦チェス。探索計算はあなたの端末のブラウザの中で実行されます。</p>
+      </div>
+
+      <div className="chess-layout">
+        <div className="chess-board-area">
+          {webglFailed ? (
+            board2d
+          ) : (
+            <ChessScene3D
+              board={board}
+              playerColor={playerColor}
+              selected={selected}
+              targets={[...targetSquares]}
+              lastMove={lastMove}
+              checkSquare={checkSquare}
+              onSquare={onSquareClick}
+              onFail={() => setWebglFailed(true)}
+              fallback={board2d}
+            />
+          )}
           {promoMoves && (
             <div className="chess-promo" role="group" aria-label="昇格する駒の選択">
               <span>昇格先を選んでください</span>

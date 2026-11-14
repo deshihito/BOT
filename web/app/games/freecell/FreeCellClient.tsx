@@ -3,7 +3,12 @@
 // ドラッグではなくタップ選択式：カード（の山）をタップして選び、置き先をタップする。
 // 端末内で完結し、サーバーへ送信しない。
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useEffect, useRef, useState } from "react";
+
+// 3D シーンは three を含むため遅延読み込み（このページ専用チャンクに閉じる）。
+const FreeCellScene3D = dynamic(() => import("./FreeCellScene3D"), { ssr: false });
+import type { FcDragSource } from "./FreeCellScene3D";
 import {
   autoMoveFreecell,
   createFreecell,
@@ -87,6 +92,7 @@ function EmptySlot({ label, onClick, highlight }: { label: string; onClick?: () 
 export default function FreeCellClient() {
   const { prefix } = useGamesNav();
   const [state, setState] = useState<FcState>(() => newGame());
+  const [webglFailed, setWebglFailed] = useState(false);
   const [selected, setSelected] = useState<Selection>(null);
   const [message, setMessage] = useState<string>("");
   const prevStatusRef = useRef(state.status);
@@ -228,13 +234,27 @@ export default function FreeCellClient() {
 
   const remaining = freecellRemaining(state);
 
+  // 3D シーンのドラッグ落下: タップ移動と同じ tryMove で判定し、成否を返す。
+  const onDragDrop = (source: FcDragSource, target: FcTarget): boolean => {
+    if (source.kind === "freecell") {
+      return tryMove({ kind: "freecell", index: source.index }, target, 1);
+    }
+    const count = state.columns[source.column].length - source.startIndex;
+    if (count < 1) return false;
+    return tryMove({ kind: "column", column: source.column }, target, count);
+  };
+
   // 盤面の横スワイプ: 左=1手戻す、右=自動送り（solitaire と同じ）。
+  const handleBoardSwipe = (dir: "left" | "right") => {
+    if (dir === "left") onUndo();
+    else if (dir === "right") onAuto();
+  };
+
   // 子の札の onClick との二重発火は useGesture の suppressClickAfterSwipe が抑止する。
   // 縦スクロールは残すため touchAction は pan-y。
   const boardGesture = useGesture({
     onSwipe: (dir) => {
-      if (dir === "left") onUndo();
-      else if (dir === "right") onAuto();
+      if (dir === "left" || dir === "right") handleBoardSwipe(dir);
     },
   });
 
@@ -250,40 +270,8 @@ export default function FreeCellClient() {
     return () => window.removeEventListener("keydown", onKey);
   }, [onUndo, onAuto]);
 
-  return (
-    <>
-      <nav className="breadcrumbs" aria-label="パンくず">
-        <Link href={`${prefix}/games`}>ゲーム</Link>
-        <span> / </span>
-        <span>フリーセル</span>
-      </nav>
-      <div className="page-heading compact-heading">
-        <h1>フリーセル</h1>
-        <p className="muted">
-          カードをタップして選び、置き先をタップして動かします。色を交互に小さい順に重ね、全カードを組札（A→K）へそろえればクリア。盤面を左にスワイプで1手戻す、右にスワイプで自動送りします。
-        </p>
-      </div>
-
-      <div className="classic-controls" role="group" aria-label="操作">
-        <button type="button" className="classic-btn" onClick={retrySameDeal}>
-          同じ盤面でもう一度
-        </button>
-        <button type="button" className="classic-btn" onClick={restart}>
-          新しい盤面
-        </button>
-      </div>
-
-      <p className="classic-status" role="status">
-        <span>
-          {state.status === "won" ? "クリア！" : `残り ${remaining} 枚`}
-        </span>
-        <span>{state.moves}手</span>
-        <span>
-          まとめて動かせる枚数：最大 {maxMovableCards(state)} 枚
-        </span>
-        {message ? <span>{message}</span> : null}
-      </p>
-
+  // 2D 盤面（WebGL が使えない場合のフォールバックとしてそのまま使う）。
+  const board2d = (
       <div
         {...boardGesture}
         aria-label="フリーセルの盤（左にスワイプで1手戻す、右にスワイプで自動送り）"
@@ -337,6 +325,58 @@ export default function FreeCellClient() {
           ))}
         </div>
       </div>
+  );
+
+  return (
+    <>
+      <nav className="breadcrumbs" aria-label="パンくず">
+        <Link href={`${prefix}/games`}>ゲーム</Link>
+        <span> / </span>
+        <span>フリーセル</span>
+      </nav>
+      <div className="page-heading compact-heading">
+        <h1>フリーセル</h1>
+        <p className="muted">
+          カードをタップして選び、置き先をタップして動かします。色を交互に小さい順に重ね、全カードを組札（A→K）へそろえればクリア。盤面を左にスワイプで1手戻す、右にスワイプで自動送りします。
+        </p>
+      </div>
+
+      <div className="classic-controls" role="group" aria-label="操作">
+        <button type="button" className="classic-btn" onClick={retrySameDeal}>
+          同じ盤面でもう一度
+        </button>
+        <button type="button" className="classic-btn" onClick={restart}>
+          新しい盤面
+        </button>
+      </div>
+
+      <p className="classic-status" role="status">
+        <span>
+          {state.status === "won" ? "クリア！" : `残り ${remaining} 枚`}
+        </span>
+        <span>{state.moves}手</span>
+        <span>
+          まとめて動かせる枚数：最大 {maxMovableCards(state)} 枚
+        </span>
+        {message ? <span>{message}</span> : null}
+      </p>
+
+      {webglFailed ? board2d : (
+        <div style={{ maxWidth: 560, margin: "0 auto" }}>
+          <FreeCellScene3D
+            state={state}
+            selected={selected}
+            onColumnCardTap={onColumnCard}
+            onEmptyColumnTap={onEmptyColumn}
+            onFreeCellTap={onFreeCell}
+            onFoundationTap={onFoundation}
+            onDragDrop={onDragDrop}
+            onBoardSwipe={handleBoardSwipe}
+            onFail={() => setWebglFailed(true)}
+            fallback={board2d}
+          />
+        </div>
+      )}
 
       {state.status === "won" && (
         <div style={{ maxWidth: 560, margin: "16px auto 0" }}>

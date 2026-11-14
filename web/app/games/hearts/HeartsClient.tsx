@@ -3,7 +3,11 @@
 // ベスト記録の設計: localStorage `ago-hearts-best` に「優勝した回数」を保存する。
 // 端末内で完結し、サーバーへ送信しない。
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useEffect, useRef, useState } from "react";
+
+// 3D シーンは three を含むため遅延読み込み（このページ専用チャンクに閉じる）。
+const HeartsScene3D = dynamic(() => import("./HeartsScene3D"), { ssr: false });
 import {
   PASS_DIR_LABELS,
   cardRank,
@@ -77,6 +81,7 @@ function loadWins(): number {
 
 export default function HeartsClient() {
   const { prefix } = useGamesNav();
+  const [webglFailed, setWebglFailed] = useState(false);
   const [state, setState] = useState<HeartsState>(() => createHeartsGame(Date.now() % 2147483647));
   const [selectedPass, setSelectedPass] = useState<number[]>([]);
   const [wins, setWins] = useState(0);
@@ -127,6 +132,93 @@ export default function HeartsClient() {
   const legal = legalPlays(state);
   const isPassPhase = state.phase === "pass";
   const trickPoints = state.trick.reduce((s, p) => s + pointsOfCard(p.card), 0);
+  // 3D シーンの手札タップ（合法判定・パス可否はこの既存ハンドラ側にあり、シーンは呼ぶだけ）。
+  const handleCardTap = (id: number) => {
+    if (isPassPhase) togglePassCard(id);
+    else if (legal.includes(id)) {
+      sfxFlip();
+      setState((s) => playCard(s, id));
+    }
+  };
+
+
+  // 2D テーブル（場のトリック＋手札。WebGL が使えない場合のフォールバック）。
+  const table2d = (
+    <>
+      <section aria-label="場のトリック" style={{ margin: "12px 0" }}>
+        <h2 style={{ fontSize: 16, margin: "0 0 6px" }}>
+          場のカード{state.trick.length > 0 ? `（このトリックの点: ${trickPoints}）` : ""}
+        </h2>
+        {state.trick.length === 0 && !state.lastTrick && <p className="muted">まだカードが出ていません。</p>}
+        {state.trick.length === 0 && state.lastTrick && (
+          <p className="muted">
+            直前のトリックは {state.players[state.lastTrick.winner].name} が取りました。
+          </p>
+        )}
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+          {state.trick.map((play) => (
+            <div
+              key={`${play.seat}-${play.card}-${state.tricksPlayed}`}
+              className="juice-flip"
+              style={{ textAlign: "center" }}
+            >
+              <CardView id={play.card} />
+              <div style={{ fontSize: 12 }}>{state.players[play.seat].name}</div>
+            </div>
+          ))}
+        </div>
+        {state.lastTrick && state.trick.length > 0 && (
+          <p className="muted" style={{ marginTop: 6 }}>
+            直前のトリック: {state.lastTrick.plays.map((p) => cardLabel(p.card)).join(" / ")} →{" "}
+            {state.players[state.lastTrick.winner].name} が取りました。
+          </p>
+        )}
+      </section>
+
+      <section aria-label="あなたの手札">
+        <h2 style={{ fontSize: 16, margin: "0 0 6px" }}>
+          あなたの手札
+          {isPassPhase ? `（${PASS_DIR_LABELS[state.passDir]}パスする3枚を選んでください）` : ""}
+        </h2>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          {state.players[0].hand.map((id) => {
+            const playable = !isPassPhase && legal.includes(id);
+            const selected = selectedPass.includes(id);
+            const disabled = isPassPhase ? false : !playable;
+            return (
+              <button
+                key={id}
+                type="button"
+                aria-label={cardLabel(id)}
+                aria-pressed={isPassPhase ? selected : undefined}
+                disabled={disabled && !isPassPhase}
+                onClick={() => {
+                  if (isPassPhase) togglePassCard(id);
+                  else if (playable) {
+                    sfxFlip();
+                    setState((s) => playCard(s, id));
+                  }
+                }}
+                style={{
+                  padding: 2,
+                  border: selected ? "2px solid var(--accent, #2f6db3)" : "2px solid transparent",
+                  borderRadius: 8,
+                  background: "transparent",
+                  cursor: disabled && !isPassPhase ? "default" : "pointer",
+                  opacity: !isPassPhase && state.phase === "play" && !playable ? 0.45 : 1,
+                  transform: selected ? "translateY(-6px)" : undefined,
+                  minHeight: 44,
+                }}
+              >
+                <CardView id={id} />
+              </button>
+            );
+          })}
+        </div>
+        {state.phase === "play" && state.turn !== 0 && <p className="muted">CPUの手番です。</p>}
+      </section>
+    </>
+  );
 
   return (
     <>
@@ -216,78 +308,21 @@ export default function HeartsClient() {
         ))}
       </div>
 
-      <section aria-label="場のトリック" style={{ margin: "12px 0" }}>
-        <h2 style={{ fontSize: 16, margin: "0 0 6px" }}>
-          場のカード{state.trick.length > 0 ? `（このトリックの点: ${trickPoints}）` : ""}
-        </h2>
-        {state.trick.length === 0 && !state.lastTrick && <p className="muted">まだカードが出ていません。</p>}
-        {state.trick.length === 0 && state.lastTrick && (
-          <p className="muted">
-            直前のトリックは {state.players[state.lastTrick.winner].name} が取りました。
-          </p>
-        )}
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-          {state.trick.map((play) => (
-            <div
-              key={`${play.seat}-${play.card}-${state.tricksPlayed}`}
-              className="juice-flip"
-              style={{ textAlign: "center" }}
-            >
-              <CardView id={play.card} />
-              <div style={{ fontSize: 12 }}>{state.players[play.seat].name}</div>
-            </div>
-          ))}
-        </div>
-        {state.lastTrick && state.trick.length > 0 && (
-          <p className="muted" style={{ marginTop: 6 }}>
-            直前のトリック: {state.lastTrick.plays.map((p) => cardLabel(p.card)).join(" / ")} →{" "}
-            {state.players[state.lastTrick.winner].name} が取りました。
-          </p>
-        )}
-      </section>
-
-      <section aria-label="あなたの手札">
-        <h2 style={{ fontSize: 16, margin: "0 0 6px" }}>
-          あなたの手札
-          {isPassPhase ? `（${PASS_DIR_LABELS[state.passDir]}パスする3枚を選んでください）` : ""}
-        </h2>
-        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-          {state.players[0].hand.map((id) => {
-            const playable = !isPassPhase && legal.includes(id);
-            const selected = selectedPass.includes(id);
-            const disabled = isPassPhase ? false : !playable;
-            return (
-              <button
-                key={id}
-                type="button"
-                aria-label={cardLabel(id)}
-                aria-pressed={isPassPhase ? selected : undefined}
-                disabled={disabled && !isPassPhase}
-                onClick={() => {
-                  if (isPassPhase) togglePassCard(id);
-                  else if (playable) {
-                    sfxFlip();
-                    setState((s) => playCard(s, id));
-                  }
-                }}
-                style={{
-                  padding: 2,
-                  border: selected ? "2px solid var(--accent, #2f6db3)" : "2px solid transparent",
-                  borderRadius: 8,
-                  background: "transparent",
-                  cursor: disabled && !isPassPhase ? "default" : "pointer",
-                  opacity: !isPassPhase && state.phase === "play" && !playable ? 0.45 : 1,
-                  transform: selected ? "translateY(-6px)" : undefined,
-                  minHeight: 44,
-                }}
-              >
-                <CardView id={id} />
-              </button>
-            );
-          })}
-        </div>
-        {state.phase === "play" && state.turn !== 0 && <p className="muted">CPUの手番です。</p>}
-      </section>
+      {webglFailed ? table2d : (
+        <HeartsScene3D
+          myHand={state.players[0].hand}
+          trick={state.trick}
+          players={state.players.map((pl) => ({ seat: pl.seat, handCount: pl.hand.length }))}
+          legal={legal}
+          selectedPass={selectedPass}
+          phase={state.phase}
+          isPassPhase={isPassPhase}
+          isMyTurn={state.phase === "play" && state.turn === 0}
+          onCardTap={handleCardTap}
+          onFail={() => setWebglFailed(true)}
+          fallback={table2d}
+        />
+      )}
 
       {state.phase === "handEnd" && state.handPoints && (
         <section aria-label="ハンド結果" className="juice-slide" style={{ marginTop: 12 }}>

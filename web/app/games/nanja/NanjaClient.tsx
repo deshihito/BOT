@@ -7,7 +7,10 @@
 // めくった人が初めての生き物に名前を付け（30秒制限）、名前のある生き物が
 // 再び出たら全員が名前を叫んで早い者勝ちで山をもらう。
 import { useEffect, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import { playSe } from "@/lib/balku-sound";
+
+const NanjaScene3D = dynamic(() => import("./NanjaScene3D"), { ssr: false });
 import OnlineShell from "../online/OnlineShell";
 import type { OnlineRoomApi, OnlineRoomView } from "../online/useOnlineRoom";
 
@@ -153,6 +156,7 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
   const mySeat = view.player.seat;
   const [nameInput, setNameInput] = useState("");
   const [shoutInput, setShoutInput] = useState("");
+  const [webglFailed, setWebglFailed] = useState(false);
   const [nowMs, setNowMs] = useState(() => Date.now());
 
   // フェーズ締切のカウントダウン表示用（命名・めくる番・叫ぶ）。
@@ -238,23 +242,13 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
     !state.finished &&
     ((state.phase === "flip" && state.current === mySeat) || (state.phase === "naming" && state.namingSeat === mySeat));
 
-  return (
-    <div className="og-board-wrap">
-      <div className={`og-turn-banner${state.finished ? " juice-slide" : " og-turn-mine"}${isMyActionTurn ? " juice-pulse" : ""}`} role="status">
-        {banner}
-      </div>
+  const canFlip = !state.finished && state.phase === "flip" && state.current === mySeat;
+  const doFlip = () => {
+    playSe("play");
+    void api.move({ type: "flip" });
+  };
 
-      <div className="og-score-row">
-        {state.players.map((p) => (
-          <span key={p.seat} className="og-score">
-            {p.name}
-            {p.seat === mySeat ? "（あなた）" : ""}
-            {state.leftSeats.includes(p.seat) ? "（退出）" : ""} ・ {state.captured[p.seat] ?? 0} 枚
-            {!state.finished && state.phase === "flip" && state.current === p.seat ? " ・ 手番" : ""}
-          </span>
-        ))}
-      </div>
-
+  const board2d = (
       <div
         style={{
           display: "flex",
@@ -313,6 +307,39 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
           </p>
         </div>
       </div>
+  );
+
+  return (
+    <div className="og-board-wrap">
+      <div className={`og-turn-banner${state.finished ? " juice-slide" : " og-turn-mine"}${isMyActionTurn ? " juice-pulse" : ""}`} role="status">
+        {banner}
+      </div>
+
+      <div className="og-score-row">
+        {state.players.map((p) => (
+          <span key={p.seat} className="og-score">
+            {p.name}
+            {p.seat === mySeat ? "（あなた）" : ""}
+            {state.leftSeats.includes(p.seat) ? "（退出）" : ""} ・ {state.captured[p.seat] ?? 0} 枚
+            {!state.finished && state.phase === "flip" && state.current === p.seat ? " ・ 手番" : ""}
+          </span>
+        ))}
+      </div>
+
+      {webglFailed ? board2d : (
+        <div style={{ margin: "10px 0" }}>
+          <NanjaScene3D
+            top={top}
+            pile={state.pile}
+            pileCount={state.pileCount}
+            deckCount={state.deckCount}
+            canFlip={canFlip}
+            onFlip={doFlip}
+            onFail={() => setWebglFailed(true)}
+            fallback={board2d}
+          />
+        </div>
+      )}
 
       {state.pileCount > 1 && (
         <div
@@ -349,10 +376,7 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
             type="button"
             className="classic-btn"
             style={{ minWidth: 200, fontWeight: 700 }}
-            onClick={() => {
-              playSe("play");
-              void api.move({ type: "flip" });
-            }}
+            onClick={doFlip}
           >
             カードをめくる
           </button>

@@ -7,7 +7,11 @@
 //   phase finished: winnerSeat と sequence（全体）が開示される
 // 操作は { type: "press", color }。進行はサーバー側の tick で進む。
 import { useEffect, useRef, useState, type CSSProperties } from "react";
+import dynamic from "next/dynamic";
 import { playSe } from "@/lib/balku-sound";
+
+// 3D シーンは three を含むため遅延読み込み（このページ専用チャンクに閉じる）。
+const SimonBattleScene3D = dynamic(() => import("./SimonBattleScene3D"), { ssr: false });
 import OnlineShell from "../online/OnlineShell";
 import type { OnlineRoomApi, OnlineRoomView } from "../online/useOnlineRoom";
 
@@ -73,6 +77,7 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
   const mySeat = view.player.seat;
   const [now, setNow] = useState(() => Date.now());
   const [pressed, setPressed] = useState<number | null>(null);
+  const [webglFailed, setWebglFailed] = useState(false);
   const audioRef = useRef<AudioContext | null>(null);
   const finishRef = useRef<string | null>(null);
   const flashRef = useRef<string>("");
@@ -235,6 +240,38 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
     };
   };
 
+  const board2d = (
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+        gap: 12,
+        width: "min(88vw, 380px)",
+        margin: "14px auto 0",
+        padding: 14,
+        borderRadius: "50%",
+        background: "#20242e",
+        boxShadow: "0 8px 28px rgba(0,0,0,0.25)",
+      }}
+      role="group"
+      aria-label="サイモンのボタン"
+    >
+      {PADS.map((pad, i) => (
+        <button
+          key={pad.name}
+          type="button"
+          className={litPad === i ? "juice-pop" : undefined}
+          style={padStyle(i)}
+          disabled={!canPress}
+          aria-label={pad.name}
+          onClick={() => press(i)}
+        >
+          {pad.name}
+        </button>
+      ))}
+    </div>
+  );
+
   return (
     <div style={{ maxWidth: 640, margin: "0 auto" }}>
       <div className="og-score-row" role="status">
@@ -266,35 +303,17 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
             </p>
           )}
           {remainingRatio !== null && <Bar ratio={remainingRatio} />}
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-              gap: 12,
-              width: "min(88vw, 380px)",
-              margin: "14px auto 0",
-              padding: 14,
-              borderRadius: "50%",
-              background: "#20242e",
-              boxShadow: "0 8px 28px rgba(0,0,0,0.25)",
-            }}
-            role="group"
-            aria-label="サイモンのボタン"
-          >
-            {PADS.map((pad, i) => (
-              <button
-                key={pad.name}
-                type="button"
-                className={litPad === i ? "juice-pop" : undefined}
-                style={padStyle(i)}
-                disabled={!canPress}
-                aria-label={pad.name}
-                onClick={() => press(i)}
-              >
-                {pad.name}
-              </button>
-            ))}
-          </div>
+          {webglFailed ? board2d : (
+            <div style={{ maxWidth: 420, margin: "0 auto" }}>
+              <SimonBattleScene3D
+                lit={state.phase === "showing" ? state.flash : null}
+                pressed={pressed}
+                onPad={press}
+                onFail={() => setWebglFailed(true)}
+                fallback={board2d}
+              />
+            </div>
+          )}
           {state.you.out && (
             <p className="og-muted" style={{ textAlign: "center" }}>
               あなたは脱落しました。対戦の様子は見られます。

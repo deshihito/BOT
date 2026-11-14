@@ -2,7 +2,10 @@
 // ウォーターソート。ロジックは lib/watersort.ts（完成状態からの逆操作生成で必ず解ける）。
 // ボトルをタップして選び、別のボトルをタップして注ぐ。端末内で完結し、サーバーへ送信しない。
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useEffect, useRef, useState } from "react";
+
+const WaterSortScene3D = dynamic(() => import("./WaterSortScene3D"), { ssr: false });
 import {
   canPour,
   createWaterSortGame,
@@ -26,6 +29,7 @@ export default function WaterSortClient() {
   const { prefix } = useGamesNav();
   const [state, setState] = useState<WsState>(() => newGame());
   const [selected, setSelected] = useState<number | null>(null);
+  const [webglFailed, setWebglFailed] = useState(false);
   const [best, setBest] = useState<number | null>(null);
   const [resultNewBest, setResultNewBest] = useState(false);
   const [resultPrevBest, setResultPrevBest] = useState<number | null>(null);
@@ -104,40 +108,8 @@ export default function WaterSortClient() {
         ? "ボトルをタップして選び、注ぎ先のボトルをタップします。"
         : "注ぎ先のボトルをタップ。同じボトルをもう一度タップすると選び直せます。";
 
-  return (
+  const board2d = (
     <>
-      <nav className="breadcrumbs" aria-label="パンくず">
-        <Link href={`${prefix}/games`}>ゲーム</Link>
-        <span> / </span>
-        <span>ウォーターソート</span>
-      </nav>
-      <div className="page-heading compact-heading">
-        <h1>ウォーターソート</h1>
-        <p className="muted">ボトルを選んで注ぎ分けます。間違えたら「1手戻す」で戻せます。</p>
-      </div>
-
-      <div className="classic-controls" role="group" aria-label="操作">
-        <button type="button" className="classic-btn" onClick={restart}>
-          もう一度
-        </button>
-        <button
-          type="button"
-          className="classic-btn"
-          disabled={state.history.length === 0}
-          onClick={() => {
-            sfxSlide();
-            setState((s) => undoWaterSort(s));
-            setSelected(null);
-          }}
-        >
-          1手戻す
-        </button>
-      </div>
-
-      <p className="classic-status" role="status">
-        {state.moves} 手{best !== null ? ` ・ ベスト ${best} 手` : ""} ・ {statusText}
-      </p>
-
       <div
         style={{
           display: "flex",
@@ -203,6 +175,54 @@ export default function WaterSortClient() {
         })}
       </div>
 
+    </>
+  );
+
+  return (
+    <>
+      <nav className="breadcrumbs" aria-label="パンくず">
+        <Link href={`${prefix}/games`}>ゲーム</Link>
+        <span> / </span>
+        <span>ウォーターソート</span>
+      </nav>
+      <div className="page-heading compact-heading">
+        <h1>ウォーターソート</h1>
+        <p className="muted">ボトルを選んで注ぎ分けます。間違えたら「1手戻す」で戻せます。</p>
+      </div>
+
+      <div className="classic-controls" role="group" aria-label="操作">
+        <button type="button" className="classic-btn" onClick={restart}>
+          もう一度
+        </button>
+        <button
+          type="button"
+          className="classic-btn"
+          disabled={state.history.length === 0}
+          onClick={() => {
+            sfxSlide();
+            setState((s) => undoWaterSort(s));
+            setSelected(null);
+          }}
+        >
+          1手戻す
+        </button>
+      </div>
+
+      <p className="classic-status" role="status">
+        {state.moves} 手{best !== null ? ` ・ ベスト ${best} 手` : ""} ・ {statusText}
+      </p>
+
+{webglFailed ? board2d : (
+        <div style={{ maxWidth: 520, margin: "0 auto" }}>
+          <WaterSortScene3D
+            state={state}
+            selected={selected}
+            onBottle={onBottle}
+            onFail={() => setWebglFailed(true)}
+            fallback={board2d}
+          />
+        </div>
+      )}
       {state.status === "won" && (
         <div style={{ marginTop: 16 }}>
           <EndScreen

@@ -2,7 +2,10 @@
 // エイム（的あて）。スケジュール/判定/得点は lib/aim.ts。
 // 30秒間、エリア内に現れては消える的をクリック/タップする。小さい的ほど高得点。
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useCallback, useEffect, useRef, useState } from "react";
+
+const AimScene3D = dynamic(() => import("./AimScene3D"), { ssr: false });
 import {
   AIM_FIELD_HEIGHT,
   AIM_GAME_MS,
@@ -37,6 +40,7 @@ export default function AimClient() {
   const [best, setBest] = useState(0);
   const [remainSec, setRemainSec] = useState(30);
   const [targets, setTargets] = useState<AimTarget[]>([]);
+  const [webglFailed, setWebglFailed] = useState(false);
   const [lastGain, setLastGain] = useState<{ id: number; gained: number; key: number } | null>(null);
   const [resultInfo, setResultInfo] = useState<{ newBest: boolean; prevBest: number } | null>(null);
   const prevPhaseRef = useRef<Phase>("ready");
@@ -129,15 +133,10 @@ export default function AimClient() {
     endTimerRef.current = window.setTimeout(finish, AIM_GAME_MS + 60);
   }, [clearLoops, finish]);
 
-  const shoot = (e: React.PointerEvent<HTMLDivElement>) => {
+  // 射撃の本体。座標は lib と同じ統一単位（横幅=100）で受け、判定は
+  // 従来どおり activeTargetsAt + hitTest に委ねる（3D 側も同じここへ渡す）。
+  const shootAt = (x: number, y: number) => {
     if (phase !== "playing") return;
-    const area = areaRef.current;
-    if (!area) return;
-    const rect = area.getBoundingClientRect();
-    if (rect.width <= 0 || rect.height <= 0) return;
-    // lib と同じ統一単位（横幅=100）へ変換する。縦も幅で割ることで円判定と一致させる。
-    const x = ((e.clientX - rect.left) / rect.width) * 100;
-    const y = ((e.clientY - rect.top) / rect.width) * 100;
     shotsRef.current += 1;
     setShots(shotsRef.current);
     const elapsed = performance.now() - startAtRef.current;
@@ -158,6 +157,18 @@ export default function AimClient() {
     setTargets(activeTargetsAt(scheduleRef.current, elapsed, hitIdsRef.current));
   };
 
+  const shoot = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (phase !== "playing") return;
+    const area = areaRef.current;
+    if (!area) return;
+    const rect = area.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return;
+    // lib と同じ統一単位（横幅=100）へ変換する。縦も幅で割ることで円判定と一致させる。
+    const x = ((e.clientX - rect.left) / rect.width) * 100;
+    const y = ((e.clientY - rect.top) / rect.width) * 100;
+    shootAt(x, y);
+  };
+
   const btn: React.CSSProperties = {
     padding: "10px 14px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.18)",
     background: "rgba(255,255,255,0.06)", color: "inherit", cursor: "pointer", fontWeight: 700, minHeight: 44, touchAction: "manipulation",
@@ -172,34 +183,8 @@ export default function AimClient() {
         ? "スタートを押すと30秒の的あてが始まります。"
         : `残り ${remainSec} 秒 ・ 的は時間が経つと小さく速くなります`;
 
-  return (
+  const board2d = (
     <>
-      <nav className="breadcrumbs" aria-label="パンくず">
-        <Link href={`${prefix}/games`}>ゲーム</Link>
-        <span> / </span>
-        <span>エイム</span>
-      </nav>
-      <div className="page-heading compact-heading">
-        <h1>エイム</h1>
-        <p className="muted">現れた的を、消える前にクリック（タップ）します。30秒で何点稼げるか、命中率とあわせて競います。</p>
-      </div>
-
-      <p className="classic-status" role="status">
-        スコア {score} ・ ベスト {best} ・ 命中 {hits}/{shots}{shots > 0 ? `（${accuracy}%）` : ""} ・ {statusText}
-      </p>
-
-      {/* タイムバー */}
-      <div style={{ maxWidth: 560, margin: "0 auto 12px", height: 10, borderRadius: 999, background: "rgba(255,255,255,0.12)", overflow: "hidden" }} aria-hidden="true">
-        <div
-          style={{
-            height: "100%",
-            width: phase === "playing" ? `${(remainSec / 30) * 100}%` : phase === "finished" ? "0%" : "100%",
-            background: remainSec <= 5 && phase === "playing" ? "#e85d4a" : "#d8542e",
-            transition: "width 0.3s linear",
-          }}
-        />
-      </div>
-
       <div
         ref={areaRef}
         onPointerDown={shoot}
@@ -253,6 +238,52 @@ export default function AimClient() {
           </span>
         )}
       </div>
+    </>
+  );
+
+  return (
+    <>
+      <nav className="breadcrumbs" aria-label="パンくず">
+        <Link href={`${prefix}/games`}>ゲーム</Link>
+        <span> / </span>
+        <span>エイム</span>
+      </nav>
+      <div className="page-heading compact-heading">
+        <h1>エイム</h1>
+        <p className="muted">現れた的を、消える前にクリック（タップ）します。30秒で何点稼げるか、命中率とあわせて競います。</p>
+      </div>
+
+      <p className="classic-status" role="status">
+        スコア {score} ・ ベスト {best} ・ 命中 {hits}/{shots}{shots > 0 ? `（${accuracy}%）` : ""} ・ {statusText}
+      </p>
+
+      {/* タイムバー */}
+      <div style={{ maxWidth: 560, margin: "0 auto 12px", height: 10, borderRadius: 999, background: "rgba(255,255,255,0.12)", overflow: "hidden" }} aria-hidden="true">
+        <div
+          style={{
+            height: "100%",
+            width: phase === "playing" ? `${(remainSec / 30) * 100}%` : phase === "finished" ? "0%" : "100%",
+            background: remainSec <= 5 && phase === "playing" ? "#e85d4a" : "#d8542e",
+            transition: "width 0.3s linear",
+          }}
+        />
+      </div>
+
+      {webglFailed ? board2d : (
+        <div style={{ position: "relative", maxWidth: 560, margin: "0 auto" }}>
+          <AimScene3D
+            targets={targets}
+            onShoot={shootAt}
+            onFail={() => setWebglFailed(true)}
+            fallback={board2d}
+          />
+          {lastGain && phase === "playing" && (
+            <span key={lastGain.key} style={{ position: "absolute", top: 8, right: 12, pointerEvents: "none" }}>
+              <ScorePop amount={lastGain.gained} />
+            </span>
+          )}
+        </div>
+      )}
 
       {phase === "finished" && (
         <div style={{ maxWidth: 560, margin: "16px auto 0" }}>

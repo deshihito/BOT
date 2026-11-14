@@ -2,7 +2,11 @@
 // ブラックジャック。ロジックは lib/blackjack.ts（配当 3:2、ディーラーは17でスタンド）。
 // チップは端末内だけの遊び用ポイントで localStorage に保存する。サーバーへ送信しない。
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useEffect, useRef, useState } from "react";
+
+// 3D シーンは three を含むため遅延読み込み（このページ専用チャンクに閉じる）。
+const BlackjackScene3D = dynamic(() => import("./BlackjackScene3D"), { ssr: false });
 import {
   BJ_INITIAL_CHIPS,
   BJ_MIN_BET,
@@ -88,6 +92,7 @@ function CardView({ card, hidden }: { card?: Card; hidden?: boolean }) {
 
 export default function BlackjackClient() {
   const { prefix } = useGamesNav();
+  const [webglFailed, setWebglFailed] = useState(false);
   const [state, setState] = useState<BjState>(() =>
     createBlackjackGame(Date.now() % 2147483647),
   );
@@ -156,12 +161,13 @@ export default function BlackjackClient() {
   // テーブル（手札エリア）への直接ジェスチャに一本化:
   // 対局中: タップ=ヒット / 下スワイプ=スタンド / ダブルタップ=ダブル
   // ベット中: タップ=配る / 結果表示中: タップ=次のラウンド（チップ切れ時は再支給）
+  const tapAction = () => {
+    if (state.phase === "player") doHit();
+    else if (state.phase === "betting") { if (!broke && bet <= state.chips) dealRound(); }
+    else nextOrRefill();
+  };
   const tableGesture = useGesture({
-    onTap: () => {
-      if (state.phase === "player") doHit();
-      else if (state.phase === "betting") { if (!broke && bet <= state.chips) dealRound(); }
-      else nextOrRefill();
-    },
+    onTap: tapAction,
     onDoubleTap: () => { if (state.phase === "player" && canDouble(state)) doDouble(); },
     onSwipe: (dir) => { if (state.phase === "player" && dir === "down") doStand(); },
   });
@@ -178,6 +184,47 @@ export default function BlackjackClient() {
     minHeight: 40,
     opacity: amount > state.chips ? 0.35 : 1,
   });
+
+  // 2D テーブル（WebGL が使えない場合のフォールバックとしてそのまま使う）。
+  const table2d = (
+    <div {...tableGesture} style={{ display: "grid", gap: 18, maxWidth: 640, touchAction: "none", cursor: "pointer" }} aria-label="テーブル: タップで進行、対局中は下スワイプでスタンド、ダブルタップでダブル">
+      <section aria-label="ディーラーの手札">
+        <p style={{ margin: "0 0 6px", fontWeight: 700 }}>
+          ディーラー
+          {state.dealerHand.length > 0
+            ? state.phase === "player"
+              ? `（見えている合計 ${dealerUp.total}）`
+              : `（合計 ${dealerUp.total}）`
+            : ""}
+        </p>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", minHeight: 78 }}>
+          {state.dealerHand.length === 0 && <span className="muted">まだ配られていません</span>}
+          {state.dealerHand.map((card, i) =>
+            state.phase === "player" && i === 1 ? (
+              <CardView key={`${i}-hole`} hidden />
+            ) : (
+              <CardView key={`${i}-${card.suit}-${card.rank}`} card={card} />
+            ),
+          )}
+        </div>
+      </section>
+
+      <section aria-label="あなたの手札">
+        <p style={{ margin: "0 0 6px", fontWeight: 700 }}>
+          あなた
+          {state.playerHand.length > 0
+            ? `（合計 ${player.total}${player.soft && player.total !== 21 ? "・ソフト" : ""}）`
+            : ""}
+        </p>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", minHeight: 78 }}>
+          {state.playerHand.length === 0 && <span className="muted">ベットして始めましょう</span>}
+          {state.playerHand.map((card, i) => (
+            <CardView key={`${i}-${card.suit}-${card.rank}`} card={card} />
+          ))}
+        </div>
+      </section>
+    </div>
+  );
 
   return (
     <>
@@ -205,43 +252,38 @@ export default function BlackjackClient() {
         ) : null}
       </p>
 
-      <div {...tableGesture} style={{ display: "grid", gap: 18, maxWidth: 640, touchAction: "none", cursor: "pointer" }} aria-label="テーブル: タップで進行、対局中は下スワイプでスタンド、ダブルタップでダブル">
-        <section aria-label="ディーラーの手札">
-          <p style={{ margin: "0 0 6px", fontWeight: 700 }}>
-            ディーラー
-            {state.dealerHand.length > 0
-              ? state.phase === "player"
-                ? `（見えている合計 ${dealerUp.total}）`
-                : `（合計 ${dealerUp.total}）`
-              : ""}
-          </p>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", minHeight: 78 }}>
-            {state.dealerHand.length === 0 && <span className="muted">まだ配られていません</span>}
-            {state.dealerHand.map((card, i) =>
-              state.phase === "player" && i === 1 ? (
-                <CardView key={`${i}-hole`} hidden />
-              ) : (
-                <CardView key={`${i}-${card.suit}-${card.rank}`} card={card} />
-              ),
-            )}
+      {webglFailed ? table2d : (
+        <div style={{ maxWidth: 640 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap", marginBottom: 6 }}>
+            <span style={{ fontWeight: 700 }}>
+              ディーラー（奥）
+              {state.dealerHand.length > 0
+                ? state.phase === "player"
+                  ? `・見えている合計 ${dealerUp.total}`
+                  : `・合計 ${dealerUp.total}`
+                : ""}
+            </span>
+            <span style={{ fontWeight: 700 }}>
+              あなた（手前）
+              {state.playerHand.length > 0
+                ? `・合計 ${player.total}${player.soft && player.total !== 21 ? "・ソフト" : ""}`
+                : ""}
+            </span>
           </div>
-        </section>
-
-        <section aria-label="あなたの手札">
-          <p style={{ margin: "0 0 6px", fontWeight: 700 }}>
-            あなた
-            {state.playerHand.length > 0
-              ? `（合計 ${player.total}${player.soft && player.total !== 21 ? "・ソフト" : ""}）`
-              : ""}
-          </p>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", minHeight: 78 }}>
-            {state.playerHand.length === 0 && <span className="muted">ベットして始めましょう</span>}
-            {state.playerHand.map((card, i) => (
-              <CardView key={`${i}-${card.suit}-${card.rank}`} card={card} />
-            ))}
-          </div>
-        </section>
-      </div>
+          <BlackjackScene3D
+            playerHand={state.playerHand}
+            dealerHand={state.dealerHand}
+            phase={state.phase}
+            betAmount={state.phase === "betting" ? bet : state.bet}
+            canDoubleNow={canDouble(state)}
+            onTapAction={tapAction}
+            onDouble={doDouble}
+            onStand={doStand}
+            onFail={() => setWebglFailed(true)}
+            fallback={table2d}
+          />
+        </div>
+      )}
 
       <div className="classic-controls" style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 16 }}>
         {state.phase === "betting" && !broke && (

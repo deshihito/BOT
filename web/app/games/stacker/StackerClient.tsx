@@ -3,7 +3,11 @@
 // 左右に往復するブロックをタイミングよく止めて積み上げ、はみ出しは切り落とされる。
 // ベスト段数は localStorage に保存する。サーバーへ送信しない。
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useCallback, useEffect, useRef, useState } from "react";
+
+// 3D シーンは three を含むため遅延読み込み（このページ専用チャンクに閉じる）。
+const StackerScene3D = dynamic(() => import("./StackerScene3D"), { ssr: false });
 import {
   advanceStacker,
   createStackerGame,
@@ -30,6 +34,7 @@ function loadBest(): number {
 export default function StackerClient() {
   const { prefix } = useGamesNav();
   const [state, setState] = useState<StackerState>(() => createStackerGame());
+  const [webglFailed, setWebglFailed] = useState(false);
   const [best, setBest] = useState(0);
   const [prevBest, setPrevBest] = useState<number | null>(null);
   const stateRef = useRef(state);
@@ -118,6 +123,37 @@ export default function StackerClient() {
     </div>
   );
 
+  // 2D 盤面（WebGL が使えない場合のフォールバックとしてそのまま使う）。
+  const board2d = (
+    <div
+      role="button"
+      aria-label="ブロックを止める"
+      tabIndex={0}
+      onClick={drop}
+      style={{
+        width: boardWidthPx,
+        maxWidth: "92vw",
+        margin: "0 auto",
+        border: "2px solid #3a4560",
+        borderRadius: 10,
+        background: "linear-gradient(#141b2e, #1d2740)",
+        padding: "8px 0",
+        cursor: state.status === "playing" ? "pointer" : "default",
+        touchAction: "manipulation",
+        userSelect: "none",
+      }}
+    >
+      {levels.map((level) => {
+        if (level === state.rows.length && state.status === "playing") {
+          return renderRow(state.currentStart, state.currentWidth, level, true);
+        }
+        const row = state.rows[level];
+        return row ? renderRow(row.start, row.width, level, false) : null;
+      })}
+      {levels.length === 0 && <div style={{ height: cell }} />}
+    </div>
+  );
+
   return (
     <>
       <nav className="breadcrumbs" aria-label="パンくず">
@@ -139,33 +175,21 @@ export default function StackerClient() {
         {state.status === "gameover" ? ` ・ 重ならず落下… ${state.score} 段で終了です。` : ""}
       </p>
 
-      <div
-        role="button"
-        aria-label="ブロックを止める"
-        tabIndex={0}
-        onClick={drop}
-        style={{
-          width: boardWidthPx,
-          maxWidth: "92vw",
-          margin: "0 auto",
-          border: "2px solid #3a4560",
-          borderRadius: 10,
-          background: "linear-gradient(#141b2e, #1d2740)",
-          padding: "8px 0",
-          cursor: state.status === "playing" ? "pointer" : "default",
-          touchAction: "manipulation",
-          userSelect: "none",
-        }}
-      >
-        {levels.map((level) => {
-          if (level === state.rows.length && state.status === "playing") {
-            return renderRow(state.currentStart, state.currentWidth, level, true);
-          }
-          const row = state.rows[level];
-          return row ? renderRow(row.start, row.width, level, false) : null;
-        })}
-        {levels.length === 0 && <div style={{ height: cell }} />}
-      </div>
+      {webglFailed ? board2d : (
+        <div style={{ maxWidth: 520, margin: "0 auto" }}>
+          <StackerScene3D
+            rows={state.rows}
+            currentStart={state.currentStart}
+            currentWidth={state.currentWidth}
+            boardWidth={state.boardWidth}
+            status={state.status}
+            lastPerfect={state.lastPerfect}
+            onDrop={drop}
+            onFail={() => setWebglFailed(true)}
+            fallback={board2d}
+          />
+        </div>
+      )}
 
       {state.status === "gameover" && (
         <div style={{ maxWidth: 520, margin: "14px auto 0" }}>

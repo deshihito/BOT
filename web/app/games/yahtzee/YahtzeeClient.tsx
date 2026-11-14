@@ -3,7 +3,11 @@
 // ダイス5個を振り（振り直し最大2回）、13カテゴリへ順に記録していく。
 // 端末内で完結し、サーバーへ送信しない。
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useEffect, useRef, useState } from "react";
+
+// 3D シーンは three を含むため遅延読み込み（このページ専用チャンクに閉じる）。
+const YahtzeeScene3D = dynamic(() => import("./YahtzeeScene3D"), { ssr: false });
 import {
   applyYahtzeeScore,
   createYahtzee,
@@ -27,6 +31,7 @@ const DICE_FACES = ["", "⚀", "⚁", "⚂", "⚃", "⚄", "⚅"];
 
 export default function YahtzeeClient() {
   const { prefix } = useGamesNav();
+  const [webglFailed, setWebglFailed] = useState(false);
   const [state, setState] = useState<YahtzeeState>(() =>
     createYahtzee(Date.now() % 2147483647),
   );
@@ -96,6 +101,63 @@ export default function YahtzeeClient() {
       ? `ターン ${state.turnsDone + 1}/13 ・ まずダイスを振ってください。`
       : `ターン ${state.turnsDone + 1}/13 ・ 振り直しはあと ${rollsLeft} 回。記録する役を選んでください。`;
 
+  const diceArea2d = (
+    <>
+    <div
+      style={{ display: "flex", gap: 8, justifyContent: "center", flexWrap: "wrap", margin: "6px 0" }}
+      role="group"
+      aria-label="ダイス（タップで保持）"
+    >
+      {state.dice.map((d, i) => {
+        const held = state.held[i];
+        return (
+          <div
+            key={`${state.turnsDone}-${state.rollsUsed}-${i}-${d}`}
+            className="juice-flip"
+            {...tappableProps(() => { if (!finished && state.rollsUsed > 0) toggleHold(i); })}
+            aria-disabled={finished || state.rollsUsed === 0}
+            aria-pressed={held}
+            aria-label={`ダイス ${d}${held ? "（保持中）" : ""}`}
+            style={{
+              width: 58,
+              height: 58,
+              fontSize: 44,
+              lineHeight: 1,
+              display: "grid",
+              placeItems: "center",
+              borderRadius: 12,
+              border: held ? "3px solid #d9a41c" : "2px solid var(--line)",
+              background: held ? "#fdf3d8" : "#fff",
+              color: "#243447",
+              cursor: state.rollsUsed > 0 ? "pointer" : "default",
+              touchAction: "manipulation",
+            }}
+          >
+            {DICE_FACES[d]}
+          </div>
+        );
+      })}
+    </div>
+
+    <div
+      {...trayGesture}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => { if ((e.key === "Enter" || e.key === " ") && !finished && rollsLeft > 0) { e.preventDefault(); roll(); } }}
+      aria-disabled={finished || rollsLeft <= 0}
+      aria-label="ダイストレイ（タップで振る）"
+      style={{
+        maxWidth: 420, margin: "8px auto 14px", padding: "12px 16px", textAlign: "center",
+        borderRadius: 12, border: "2px dashed #b9a86a", background: "#fdf6da",
+        fontWeight: 700, cursor: finished || rollsLeft <= 0 ? "default" : "pointer",
+        opacity: finished || rollsLeft <= 0 ? 0.5 : 1, touchAction: "none", userSelect: "none",
+      }}
+    >
+      ダイストレイ — タップで振る{state.rollsUsed > 0 ? `（あと ${rollsLeft} 回）` : ""}
+    </div>
+    </>
+  );
+
   return (
     <>
       <nav className="breadcrumbs" aria-label="パンくず">
@@ -119,58 +181,21 @@ export default function YahtzeeClient() {
         {best !== null ? ` ・ ベスト ${best} 点` : ""}
       </p>
 
-      <div
-        style={{ display: "flex", gap: 8, justifyContent: "center", flexWrap: "wrap", margin: "6px 0" }}
-        role="group"
-        aria-label="ダイス（タップで保持）"
-      >
-        {state.dice.map((d, i) => {
-          const held = state.held[i];
-          return (
-            <div
-              key={`${state.turnsDone}-${state.rollsUsed}-${i}-${d}`}
-              className="juice-flip"
-              {...tappableProps(() => { if (!finished && state.rollsUsed > 0) toggleHold(i); })}
-              aria-disabled={finished || state.rollsUsed === 0}
-              aria-pressed={held}
-              aria-label={`ダイス ${d}${held ? "（保持中）" : ""}`}
-              style={{
-                width: 58,
-                height: 58,
-                fontSize: 44,
-                lineHeight: 1,
-                display: "grid",
-                placeItems: "center",
-                borderRadius: 12,
-                border: held ? "3px solid #d9a41c" : "2px solid var(--line)",
-                background: held ? "#fdf3d8" : "#fff",
-                color: "#243447",
-                cursor: state.rollsUsed > 0 ? "pointer" : "default",
-                touchAction: "manipulation",
-              }}
-            >
-              {DICE_FACES[d]}
-            </div>
-          );
-        })}
-      </div>
-
-      <div
-        {...trayGesture}
-        role="button"
-        tabIndex={0}
-        onKeyDown={(e) => { if ((e.key === "Enter" || e.key === " ") && !finished && rollsLeft > 0) { e.preventDefault(); roll(); } }}
-        aria-disabled={finished || rollsLeft <= 0}
-        aria-label="ダイストレイ（タップで振る）"
-        style={{
-          maxWidth: 420, margin: "8px auto 14px", padding: "12px 16px", textAlign: "center",
-          borderRadius: 12, border: "2px dashed #b9a86a", background: "#fdf6da",
-          fontWeight: 700, cursor: finished || rollsLeft <= 0 ? "default" : "pointer",
-          opacity: finished || rollsLeft <= 0 ? 0.5 : 1, touchAction: "none", userSelect: "none",
-        }}
-      >
-        ダイストレイ — タップで振る{state.rollsUsed > 0 ? `（あと ${rollsLeft} 回）` : ""}
-      </div>
+      {webglFailed ? (
+        diceArea2d
+      ) : (
+        <YahtzeeScene3D
+          dice={state.dice}
+          held={state.held}
+          rollsUsed={state.rollsUsed}
+          canRoll={!finished && rollsLeft > 0}
+          canHold={!finished && state.rollsUsed > 0}
+          onToggleHold={toggleHold}
+          onRoll={roll}
+          onFail={() => setWebglFailed(true)}
+          fallback={diceArea2d}
+        />
+      )}
 
       <div style={{ maxWidth: 520, margin: "0 auto" }} role="group" aria-label="スコアシート">
         {YAHTZEE_CATEGORIES.map((category, idx) => {

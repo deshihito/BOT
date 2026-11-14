@@ -3,7 +3,11 @@
 // 参加者名と景品ラベルはその場で編集でき、経路はアニメーションでたどる。
 // 端末内で完結し、サーバーへ送信しない。
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useEffect, useMemo, useRef, useState } from "react";
+
+// 3D シーンは three を含むため遅延読み込み（このページ専用チャンクに閉じる）。
+const AmidaScene3D = dynamic(() => import("./AmidaScene3D"), { ssr: false });
 import { sfxPop, sfxTap } from "@/lib/sfx";
 import {
   AMIDA_MAX_PLAYERS,
@@ -49,6 +53,7 @@ export default function AmidaClient() {
   const [names, setNames] = useState<string[]>(DEFAULT_NAMES.slice(0, 4));
   const [prizes, setPrizes] = useState<string[]>(DEFAULT_PRIZES.slice(0, 4));
   const [amida, setAmida] = useState<AmidaState>(() => createAmida(4, Date.now() % 2147483647));
+  const [webglFailed, setWebglFailed] = useState(false);
   const [selected, setSelected] = useState<number | null>(null);
   const [step, setStep] = useState(0); // 経路の描画済みステップ数（0 = 未開始）
   const [showResults, setShowResults] = useState(false);
@@ -125,6 +130,55 @@ export default function AmidaClient() {
     return pts.join(" ");
   })();
 
+  // 2D 図（WebGL が使えない場合のフォールバックとしてそのまま使う）。
+  const board2d = (
+      <div style={{ overflowX: "auto", maxWidth: "100%" }}>
+        <svg
+          width={width}
+          height={height}
+          viewBox={`0 0 ${width} ${height}`}
+          role="img"
+          aria-label="あみだくじの図"
+          style={{ background: "#fbfcfe", border: "1px solid #d5d8e0", borderRadius: 12, maxWidth: "none" }}
+        >
+          {Array.from({ length: amida.count }, (_, x) => (
+            <line key={`v${x}`} x1={px(x)} y1={py(0)} x2={px(x)} y2={py(amida.levels)} stroke="#8a90a3" strokeWidth={2} />
+          ))}
+          {amida.bars.map((row, level) =>
+            row.map((bar, i) =>
+              bar ? (
+                <line
+                  key={`h${level}-${i}`}
+                  x1={px(i)}
+                  y1={py(level) + Y_STEP / 2}
+                  x2={px(i + 1)}
+                  y2={py(level) + Y_STEP / 2}
+                  stroke="#8a90a3"
+                  strokeWidth={2}
+                />
+              ) : null,
+            ),
+          )}
+          {Array.from({ length: amida.count }, (_, x) => (
+            <text key={`n${x}`} x={px(x)} y={py(0) - 24} textAnchor="middle" fontSize={13} fontWeight={700} fill="#1c2333">
+              {names[x] || `${x + 1}`}
+            </text>
+          ))}
+          {Array.from({ length: amida.count }, (_, x) => (
+            <text key={`p${x}`} x={px(x)} y={py(amida.levels) + 26} textAnchor="middle" fontSize={12} fill="#1c2333">
+              {prizes[x] || `景品 ${x + 1}`}
+            </text>
+          ))}
+          {tracedPoints && (
+            <polyline points={tracedPoints} fill="none" stroke="#d8542e" strokeWidth={4} strokeLinejoin="round" strokeLinecap="round" />
+          )}
+          {trace && step >= trace.path.length && (
+            <circle className="juice-pop" cx={px(trace.end)} cy={py(amida.levels)} r={7} fill="#d8542e" />
+          )}
+        </svg>
+      </div>
+  );
+
   return (
     <>
       <nav className="breadcrumbs" aria-label="パンくず">
@@ -200,51 +254,20 @@ export default function AmidaClient() {
         </section>
       </div>
 
-      <div style={{ overflowX: "auto", maxWidth: "100%" }}>
-        <svg
-          width={width}
-          height={height}
-          viewBox={`0 0 ${width} ${height}`}
-          role="img"
-          aria-label="あみだくじの図"
-          style={{ background: "#fbfcfe", border: "1px solid #d5d8e0", borderRadius: 12, maxWidth: "none" }}
-        >
-          {Array.from({ length: amida.count }, (_, x) => (
-            <line key={`v${x}`} x1={px(x)} y1={py(0)} x2={px(x)} y2={py(amida.levels)} stroke="#8a90a3" strokeWidth={2} />
-          ))}
-          {amida.bars.map((row, level) =>
-            row.map((bar, i) =>
-              bar ? (
-                <line
-                  key={`h${level}-${i}`}
-                  x1={px(i)}
-                  y1={py(level) + Y_STEP / 2}
-                  x2={px(i + 1)}
-                  y2={py(level) + Y_STEP / 2}
-                  stroke="#8a90a3"
-                  strokeWidth={2}
-                />
-              ) : null,
-            ),
-          )}
-          {Array.from({ length: amida.count }, (_, x) => (
-            <text key={`n${x}`} x={px(x)} y={py(0) - 24} textAnchor="middle" fontSize={13} fontWeight={700} fill="#1c2333">
-              {names[x] || `${x + 1}`}
-            </text>
-          ))}
-          {Array.from({ length: amida.count }, (_, x) => (
-            <text key={`p${x}`} x={px(x)} y={py(amida.levels) + 26} textAnchor="middle" fontSize={12} fill="#1c2333">
-              {prizes[x] || `景品 ${x + 1}`}
-            </text>
-          ))}
-          {tracedPoints && (
-            <polyline points={tracedPoints} fill="none" stroke="#d8542e" strokeWidth={4} strokeLinejoin="round" strokeLinecap="round" />
-          )}
-          {trace && step >= trace.path.length && (
-            <circle className="juice-pop" cx={px(trace.end)} cy={py(amida.levels)} r={7} fill="#d8542e" />
-          )}
-        </svg>
-      </div>
+{webglFailed ? board2d : (
+        <div style={{ width: "min(94vw, 620px)", margin: "0 auto" }}>
+          <AmidaScene3D
+            amida={amida}
+            names={names}
+            prizes={prizes}
+            trace={trace}
+            step={step}
+            onStart={startTrace}
+            onFail={() => setWebglFailed(true)}
+            fallback={board2d}
+          />
+        </div>
+      )}
 
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", margin: "10px 0" }} role="group" aria-label="経路をたどる参加者">
         {names.map((name, i) => (

@@ -4,7 +4,11 @@
 // チップが動くのは「配る」＝結果確定の遷移だけなので、読み込み完了後に
 // チップ残高が変わったタイミングで保存すれば確定時のみ保存になる。
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useEffect, useRef, useState } from "react";
+
+// 3D シーンは three を含むため遅延読み込み（このページ専用チャンクに閉じる）。
+const BaccaratScene3D = dynamic(() => import("./BaccaratScene3D"), { ssr: false });
 import {
   BACCARAT_MIN_BET,
   BACCARAT_START_CHIPS,
@@ -73,6 +77,7 @@ function HandRow({ title, cards, color }: { title: string; cards: BaccaratCard[]
 
 export default function BaccaratClient() {
   const { prefix } = useGamesNav();
+  const [webglFailed, setWebglFailed] = useState(false);
   const [state, setState] = useState<BaccaratState>(() => createBaccarat(Date.now() % 2147483647));
   const [betKind, setBetKind] = useState<BaccaratBetKind>("player");
   const [amount, setAmount] = useState<number>(50);
@@ -158,6 +163,27 @@ export default function BaccaratClient() {
     tableAction();
   };
 
+  // 2D テーブル（WebGL が使えない場合のフォールバックとしてそのまま使う）。
+  const table2d = (
+    <div
+      {...tableGesture}
+      role="button"
+      tabIndex={0}
+      onKeyDown={tableKeyDown}
+      aria-label={
+        state.phase === "result"
+          ? "テーブル（タップで次のラウンドへ）"
+          : broke
+            ? "テーブル（タップでチップを再支給）"
+            : "テーブル（タップで配る）"
+      }
+      style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 14, touchAction: "none", cursor: "pointer" }}
+    >
+      <HandRow title="プレイヤー" cards={state.playerCards} color="#2563eb" />
+      <HandRow title="バンカー" cards={state.bankerCards} color="#dc2626" />
+    </div>
+  );
+
   return (
     <>
       <nav className="breadcrumbs" aria-label="パンくず">
@@ -182,23 +208,30 @@ export default function BaccaratClient() {
         ) : null}
       </p>
 
-      <div
-        {...tableGesture}
-        role="button"
-        tabIndex={0}
-        onKeyDown={tableKeyDown}
-        aria-label={
-          state.phase === "result"
-            ? "テーブル（タップで次のラウンドへ）"
-            : broke
-              ? "テーブル（タップでチップを再支給）"
-              : "テーブル（タップで配る）"
-        }
-        style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 14, touchAction: "none", cursor: "pointer" }}
-      >
-        <HandRow title="プレイヤー" cards={state.playerCards} color="#2563eb" />
-        <HandRow title="バンカー" cards={state.bankerCards} color="#dc2626" />
-      </div>
+      {webglFailed ? table2d : (
+        <div style={{ marginBottom: 14 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap", marginBottom: 6 }}>
+            <span style={{ fontWeight: 800, color: "#2563eb" }}>
+              プレイヤー（手前）
+              {state.playerCards.length > 0 ? `・合計 ${baccaratHandValue(state.playerCards)}` : ""}
+            </span>
+            <span style={{ fontWeight: 800, color: "#dc2626" }}>
+              バンカー（奥）
+              {state.bankerCards.length > 0 ? `・合計 ${baccaratHandValue(state.bankerCards)}` : ""}
+            </span>
+          </div>
+          <BaccaratScene3D
+            playerCards={state.playerCards}
+            bankerCards={state.bankerCards}
+            phase={state.phase}
+            chipAmount={state.phase === "betting" ? amount : state.lastBet?.amount ?? 0}
+            chipKind={state.phase === "betting" ? betKind : state.lastBet?.kind ?? betKind}
+            onTapAction={tableAction}
+            onFail={() => setWebglFailed(true)}
+            fallback={table2d}
+          />
+        </div>
+      )}
 
       {state.phase === "betting" ? (
         <div style={{ display: "grid", gap: 12, maxWidth: 640 }}>

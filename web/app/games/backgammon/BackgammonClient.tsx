@@ -3,7 +3,11 @@
 // 自分のコマ（白）をタップして選び、光った移動先をタップする。
 // 端末内で完結し、サーバーへ送信しない。
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useEffect, useMemo, useRef, useState } from "react";
+
+// 3D シーンは three を含むため遅延読み込み（このページ専用チャンクに閉じる）。
+const BackgammonScene3D = dynamic(() => import("./BackgammonScene3D"), { ssr: false });
 import { sfxDice, sfxLose, sfxPlace, sfxTap, sfxWin } from "@/lib/sfx";
 import { EndScreen } from "../GameJuice";
 import {
@@ -95,6 +99,7 @@ export default function BackgammonClient() {
   const { prefix } = useGamesNav();
   const [state, setState] = useState<BgState>(() => newGame());
   const [selected, setSelected] = useState<BgFrom | null>(null);
+  const [webglFailed, setWebglFailed] = useState(false);
   const endSfxRef = useRef<number | null>(null);
 
   const myTurn = state.turn === 0 && state.phase !== "finished";
@@ -171,6 +176,9 @@ export default function BackgammonClient() {
   };
 
   const bearOffMove: BgMove | undefined = targets.find((m) => m.to === "off");
+  const targetIndices = targets
+    .filter((m) => typeof m.to === "number")
+    .map((m) => m.to as number);
 
   const rollDice = () => {
     if (!myTurn || state.phase !== "roll") return;
@@ -279,6 +287,40 @@ export default function BackgammonClient() {
     );
   };
 
+  const board2d = (
+    <>
+        <div
+          role="group"
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(12, minmax(0, 1fr))",
+            gap: 3,
+          }}
+          aria-label="バックギャモンの盤（上段）"
+        >
+          {topRow.map(renderPoint)}
+        </div>
+        <div
+          aria-hidden="true"
+          style={{ height: 6, background: "#b45309", borderRadius: 3, margin: "6px 0" }}
+        />
+        <div
+          role="group"
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(12, minmax(0, 1fr))",
+            gap: 3,
+          }}
+          aria-label="バックギャモンの盤（下段）"
+        >
+          {bottomRow.map(renderPoint)}
+        </div>
+        <p className="muted" style={{ fontSize: 12, marginTop: 8 }}>
+          上段は13〜24、下段は12〜1のマス。あなたのホームは下段右側の1〜6です。
+        </p>
+    </>
+  );
+
   return (
     <>
       <nav className="breadcrumbs" aria-label="パンくず">
@@ -349,35 +391,24 @@ export default function BackgammonClient() {
         aria-label="バックギャモンの盤（タップでダイスを振る・コマを選ぶ、左にスワイプでパス、上にスワイプで上がる）"
         style={{ maxWidth: 640, margin: "0 auto", touchAction: "none" }}
       >
-        <div
-          role="group"
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(12, minmax(0, 1fr))",
-            gap: 3,
-          }}
-          aria-label="バックギャモンの盤（上段）"
-        >
-          {topRow.map(renderPoint)}
-        </div>
-        <div
-          aria-hidden="true"
-          style={{ height: 6, background: "#b45309", borderRadius: 3, margin: "6px 0" }}
-        />
-        <div
-          role="group"
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(12, minmax(0, 1fr))",
-            gap: 3,
-          }}
-          aria-label="バックギャモンの盤（下段）"
-        >
-          {bottomRow.map(renderPoint)}
-        </div>
-        <p className="muted" style={{ fontSize: 12, marginTop: 8 }}>
-          上段は13〜24、下段は12〜1のマス。あなたのホームは下段右側の1〜6です。
-        </p>
+        {webglFailed ? (
+          board2d
+        ) : (
+          <BackgammonScene3D
+            points={state.points}
+            bar={state.bar}
+            off={state.off}
+            selected={selected}
+            targets={targetIndices}
+            canBearOff={!!bearOffMove}
+            lastRoll={state.lastRoll}
+            rollKey={state.lastRoll ? state.rng : null}
+            onPoint={onPointClick}
+            onBearOff={bearOff}
+            onFail={() => setWebglFailed(true)}
+            fallback={board2d}
+          />
+        )}
       </div>
     </>
   );

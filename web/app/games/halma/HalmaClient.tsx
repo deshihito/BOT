@@ -4,7 +4,11 @@
 // コマをタップして選び、光ったマスをタップすると移動する。
 // ジャンプは隣のコマを飛び越える動きで、1手の中で連鎖できる。
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useEffect, useMemo, useRef, useState } from "react";
+
+// 3D シーンは three を含むため遅延読み込み（このページ専用チャンクに閉じる）。
+const HalmaScene3D = dynamic(() => import("./HalmaScene3D"), { ssr: false });
 import {
   HALMA_CELLS,
   HALMA_CAMPS,
@@ -50,6 +54,7 @@ export default function HalmaClient() {
     createHalmaGame(Date.now() % 2147483647),
   );
   const [selected, setSelected] = useState<number | null>(null);
+  const [webglFailed, setWebglFailed] = useState(false);
   const prevStatusRef = useRef(state.status);
 
   // 終局遷移の瞬間だけジングルを鳴らす。
@@ -112,30 +117,7 @@ export default function HalmaClient() {
     }
   };
 
-  const statusText =
-    state.status === "draw"
-      ? "引き分けです（同一局面の繰り返し、または手数上限に達しました）。"
-      : state.status === "won"
-        ? state.winner === 0
-          ? "あなたの勝ちです！相手の陣地をすべて占めました。"
-          : "CPUの勝ちです。相手陣地を先に占められました。"
-        : myTurn
-        ? selected !== null
-          ? "光ったマスをタップすると移動します（ジャンプ連鎖も1手）。"
-          : "あなたの手番です。青いコマを選んでください。"
-        : "CPUが考え中です…";
-
-  const inTarget = state.board.filter((v, i) => v === 1 && TARGET0.has(i)).length;
-
-  return (
-    <div>
-      <p className="classic-status" role="status">
-        {statusText}
-      </p>
-      <p style={{ fontSize: 13, color: "#475569", margin: "4px 0 10px" }}>
-        進み具合: あなた {inTarget}/10 ・ 手数 {state.moves}
-      </p>
-
+  const board2d = (
       <div style={{ maxWidth: 540, margin: "0 auto" }}>
         <svg
           viewBox="0 0 100 100"
@@ -198,6 +180,47 @@ export default function HalmaClient() {
           })}
         </svg>
       </div>
+  );
+
+  const statusText =
+    state.status === "draw"
+      ? "引き分けです（同一局面の繰り返し、または手数上限に達しました）。"
+      : state.status === "won"
+        ? state.winner === 0
+          ? "あなたの勝ちです！相手の陣地をすべて占めました。"
+          : "CPUの勝ちです。相手陣地を先に占められました。"
+        : myTurn
+        ? selected !== null
+          ? "光ったマスをタップすると移動します（ジャンプ連鎖も1手）。"
+          : "あなたの手番です。青いコマを選んでください。"
+        : "CPUが考え中です…";
+
+  const inTarget = state.board.filter((v, i) => v === 1 && TARGET0.has(i)).length;
+
+  return (
+    <div>
+      <p className="classic-status" role="status">
+        {statusText}
+      </p>
+      <p style={{ fontSize: 13, color: "#475569", margin: "4px 0 10px" }}>
+        進み具合: あなた {inTarget}/10 ・ 手数 {state.moves}
+      </p>
+
+      {webglFailed ? (
+        board2d
+      ) : (
+        <div style={{ maxWidth: 540, margin: "0 auto" }}>
+          <HalmaScene3D
+            board={state.board}
+            selected={selected}
+            targets={[...targets.keys()]}
+            lastMove={state.lastMove}
+            onCell={onCell}
+            onFail={() => setWebglFailed(true)}
+            fallback={board2d}
+          />
+        </div>
+      )}
 
       {state.status === "won" && (
         <div style={{ maxWidth: 540, margin: "16px auto 0" }}>

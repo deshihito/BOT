@@ -6,8 +6,12 @@
 //   チャレンジの開示結果は lastReveal（前のラウンドの全ダイスと実際の個数）。
 // ルール: 1の目はワイルド。宣言は「個数を上げる」か「同じ個数で数字を上げる」。
 import { useEffect, useMemo, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import { playSe } from "@/lib/balku-sound";
 import OnlineShell from "../online/OnlineShell";
+
+// 3D シーンは three を含むため遅延読み込み（このページ専用チャンクに閉じる）。
+const LiarsDiceScene3D = dynamic(() => import("./LiarsDiceScene3D"), { ssr: false });
 import type { OnlineRoomApi, OnlineRoomView } from "../online/useOnlineRoom";
 
 const DICE_FACES = ["⚀", "⚁", "⚂", "⚃", "⚄", "⚅"];
@@ -63,6 +67,7 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
   const mySeat = view.player.seat;
   const [count, setCount] = useState(1);
   const [face, setFace] = useState(2);
+  const [webglFailed, setWebglFailed] = useState(false);
 
   // 宣言フォームの初期値を、現在の宣言より一段強い値に寄せる。
   const suggestion = useMemo(() => {
@@ -135,6 +140,23 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
       <p className="og-muted" style={{ marginTop: 8 }}>
         ルール：1の目はワイルドで、どの数字としても数えます。宣言は前の人より「個数を上げる」か「同じ個数で数字を上げる」こと。嘘だと思ったらチャレンジ。
       </p>
+
+      {!webglFailed ? (
+        <div style={{ marginBottom: 12 }}>
+          <LiarsDiceScene3D
+            myDice={state.you.dice}
+            round={state.round}
+            opponents={state.players
+              .filter((p) => p.seat !== mySeat)
+              .map((p) => ({ seat: p.seat, diceCount: p.diceCount, isCurrent: p.isCurrent, eliminated: p.eliminated }))}
+            onFail={() => setWebglFailed(true)}
+            fallback={null}
+          />
+          <p className="og-muted" style={{ margin: "6px 0 0", fontSize: 13 }}>
+            手前があなたのダイス（{state.you.dice.length > 0 ? state.you.dice.join("・") : "なし"}）。相手のダイスはカップで伏せてあります（個数は上のスコア表示どおり）。
+          </p>
+        </div>
+      ) : null}
 
       {state.phase === "bidding" ? (
         <>

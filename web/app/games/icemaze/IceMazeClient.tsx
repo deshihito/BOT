@@ -2,7 +2,11 @@
 // 氷の迷路。ロジックは lib/icemaze.ts（滑って壁の手前で止まる）。
 // ベストは localStorage の ago-icemaze-best に「クリア時の最少滑り回数」を保存する設計。
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useCallback, useEffect, useRef, useState } from "react";
+
+// 3D シーンは three を含むため遅延読み込み（このページ専用チャンクに閉じる）。
+const IceMazeScene3D = dynamic(() => import("./IceMazeScene3D"), { ssr: false });
 import {
   createIceMaze,
   slideIce,
@@ -18,6 +22,7 @@ const BEST_KEY = "ago-icemaze-best";
 
 export default function IceMazeClient() {
   const { prefix } = useGamesNav();
+  const [webglFailed, setWebglFailed] = useState(false);
   const [state, setState] = useState<IceState>(() => createIceMaze(Date.now() % 2147483647));
   const [best, setBest] = useState<number | null>(null);
   const touchRef = useRef<{ x: number; y: number } | null>(null);
@@ -125,6 +130,56 @@ export default function IceMazeClient() {
     </button>
   );
 
+  // 2D 盤（WebGL が使えない場合のフォールバックとしてそのまま使う）。
+  const board2d = (
+    <div
+      role="grid"
+      aria-label="氷の迷路の盤面"
+      onTouchStart={onTouchStart}
+      onTouchEnd={onTouchEnd}
+      style={{
+        display: "grid",
+        gridTemplateColumns: `repeat(${state.cols}, 1fr)`,
+        gap: 2,
+        maxWidth: 420,
+        margin: "0 auto",
+        touchAction: "pan-y",
+      }}
+    >
+      {state.walls.map((wall, i) => {
+        const isPlayer = i === state.player;
+        const isGoal = i === state.goal;
+        const isStart = i === state.start && !isPlayer;
+        return (
+          <div
+            key={i}
+            role="gridcell"
+            className={isPlayer ? "juice-pop" : isGoal ? "juice-pulse" : undefined}
+            aria-label={wall ? "壁" : isPlayer ? "現在位置" : isGoal ? "ゴール" : "床"}
+            style={{
+              aspectRatio: "1",
+              borderRadius: 4,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              fontSize: 18,
+              background: wall
+                ? "#5b7ea6"
+                : isGoal
+                  ? "#ffd54d"
+                  : isPlayer
+                    ? "#bfe3ff"
+                    : "#eaf6ff",
+              border: isPlayer ? "2px solid #1565c0" : "1px solid #cfe4f5",
+            }}
+          >
+            {wall ? "" : isPlayer ? <span style={{ color: "#0d47a1" }}>●</span> : isGoal ? <span style={{ color: "#8d6e00" }}>◎</span> : isStart ? "・" : ""}
+          </div>
+        );
+      })}
+    </div>
+  );
+
   return (
     <>
       <nav className="breadcrumbs" aria-label="パンくず">
@@ -163,52 +218,22 @@ export default function IceMazeClient() {
         {best !== null ? ` ・ ベスト ${best} 手` : ""}
       </p>
 
-      <div
-        role="grid"
-        aria-label="氷の迷路の盤面"
-        onTouchStart={onTouchStart}
-        onTouchEnd={onTouchEnd}
-        style={{
-          display: "grid",
-          gridTemplateColumns: `repeat(${state.cols}, 1fr)`,
-          gap: 2,
-          maxWidth: 420,
-          margin: "0 auto",
-          touchAction: "pan-y",
-        }}
-      >
-        {state.walls.map((wall, i) => {
-          const isPlayer = i === state.player;
-          const isGoal = i === state.goal;
-          const isStart = i === state.start && !isPlayer;
-          return (
-            <div
-              key={i}
-              role="gridcell"
-              className={isPlayer ? "juice-pop" : isGoal ? "juice-pulse" : undefined}
-              aria-label={wall ? "壁" : isPlayer ? "現在位置" : isGoal ? "ゴール" : "床"}
-              style={{
-                aspectRatio: "1",
-                borderRadius: 4,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                fontSize: 18,
-                background: wall
-                  ? "#5b7ea6"
-                  : isGoal
-                    ? "#ffd54d"
-                    : isPlayer
-                      ? "#bfe3ff"
-                      : "#eaf6ff",
-                border: isPlayer ? "2px solid #1565c0" : "1px solid #cfe4f5",
-              }}
-            >
-              {wall ? "" : isPlayer ? <span style={{ color: "#0d47a1" }}>●</span> : isGoal ? <span style={{ color: "#8d6e00" }}>◎</span> : isStart ? "・" : ""}
-            </div>
-          );
-        })}
-      </div>
+      {webglFailed ? board2d : (
+        <div style={{ width: "100%", maxWidth: 420, margin: "0 auto" }}>
+          <IceMazeScene3D
+            walls={state.walls}
+            cols={state.cols}
+            rows={state.rows}
+            player={state.player}
+            goal={state.goal}
+            start={state.start}
+            status={state.status}
+            onSlide={slide}
+            onFail={() => setWebglFailed(true)}
+            fallback={board2d}
+          />
+        </div>
+      )}
 
       <div
         style={{

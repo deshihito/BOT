@@ -3,7 +3,11 @@
 // 2枚開いたら、一致はすぐ・不一致は少し見せてから settlePair で照合する。
 // 端末内で完結し、サーバーへ送信しない。
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useEffect, useRef, useState } from "react";
+
+// 3D シーンは three を含むため遅延読み込み（このページ専用チャンクに閉じる）。
+const MemoryScene3D = dynamic(() => import("./MemoryScene3D"), { ssr: false });
 import {
   createMemoryGame,
   flipCard,
@@ -69,6 +73,7 @@ function MemorySymbolIcon({ icon }: { icon: string }) {
 
 export default function MemoryClient() {
   const { prefix } = useGamesNav();
+  const [webglFailed, setWebglFailed] = useState(false);
   const [levelKey, setLevelKey] = useState<LevelKey>("normal");
   const pairs = LEVELS.find((l) => l.key === levelKey)?.pairs ?? 8;
   const [state, setState] = useState<MemState>(() => createMemoryGame(Date.now() % 2147483647, 8));
@@ -151,6 +156,37 @@ export default function MemoryClient() {
     setWinResult(null);
   };
 
+  // 2D 盤（WebGL が使えない場合のフォールバックとしてそのまま使う）。
+  const board2d = (
+      <div className="mem-board" role="grid" aria-label="メモリーマッチの盤">
+        {state.cards.map((card, i) => {
+          const faceUp = card.matched || state.faceUp.includes(i);
+          return (
+            <button
+              key={i}
+              type="button"
+              role="gridcell"
+              className={faceUp ? "mem-card mem-card-up juice-flip" : "mem-card"}
+              aria-label={faceUp ? memorySymbol(card.icon).label : "裏向きのカード"}
+              aria-pressed={faceUp}
+              onClick={() => onFlip(i)}
+            >
+              <span className="mem-card-inner">
+                <span className="mem-face mem-face-back" aria-hidden="true">
+                  <svg width="1em" height="1em" viewBox="0 0 100 100" style={{ display: "block" }}>
+                    <polygon points={polygonPoints(5, 42, 0.42)} fill="#ffffff" />
+                  </svg>
+                </span>
+                <span className="mem-face mem-face-front" aria-hidden="true">
+                  <MemorySymbolIcon icon={card.icon} />
+                </span>
+              </span>
+            </button>
+          );
+        })}
+      </div>
+  );
+
   return (
     <>
       <nav className="breadcrumbs" aria-label="パンくず">
@@ -183,33 +219,20 @@ export default function MemoryClient() {
         {state.status === "won" ? ` ・ 全ペア制覇！ ${state.moves} 手・${seconds} 秒でクリアです。` : ""}
       </p>
 
-      <div className="mem-board" role="grid" aria-label="メモリーマッチの盤">
-        {state.cards.map((card, i) => {
-          const faceUp = card.matched || state.faceUp.includes(i);
-          return (
-            <button
-              key={i}
-              type="button"
-              role="gridcell"
-              className={faceUp ? "mem-card mem-card-up juice-flip" : "mem-card"}
-              aria-label={faceUp ? memorySymbol(card.icon).label : "裏向きのカード"}
-              aria-pressed={faceUp}
-              onClick={() => onFlip(i)}
-            >
-              <span className="mem-card-inner">
-                <span className="mem-face mem-face-back" aria-hidden="true">
-                  <svg width="1em" height="1em" viewBox="0 0 100 100" style={{ display: "block" }}>
-                    <polygon points={polygonPoints(5, 42, 0.42)} fill="#ffffff" />
-                  </svg>
-                </span>
-                <span className="mem-face mem-face-front" aria-hidden="true">
-                  <MemorySymbolIcon icon={card.icon} />
-                </span>
-              </span>
-            </button>
-          );
-        })}
-      </div>
+      {webglFailed ? board2d : (
+        <div style={{ width: "min(92vw, 440px)", margin: "0 auto" }}>
+          <MemoryScene3D
+            cards={state.cards.map((card, i) => {
+              const faceUp = card.matched || state.faceUp.includes(i);
+              // 裏向きカードの絵柄はシーンへ渡さない（表向きの間だけ渡す）。
+              return { faceUp, matched: card.matched, icon: faceUp ? card.icon : null };
+            })}
+            onFlip={onFlip}
+            onFail={() => setWebglFailed(true)}
+            fallback={board2d}
+          />
+        </div>
+      )}
 
       {state.status === "won" ? (
         <EndScreen

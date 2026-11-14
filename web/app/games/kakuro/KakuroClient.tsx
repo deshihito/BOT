@@ -2,7 +2,11 @@
 // カックロ。ロジックは lib/kakuro.ts（完成盤先行生成・ルール検証で完成判定）。
 // マスを選んで下の数字パッドから入力する。端末内で完結し、サーバーへ送信しない。
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useEffect, useMemo, useRef, useState } from "react";
+
+// 3D シーンは three を含むため遅延読み込み（このページ専用チャンクに閉じる）。
+const KakuroScene3D = dynamic(() => import("./KakuroScene3D"), { ssr: false });
 import {
   checkKakuro,
   createKakuroGame,
@@ -23,6 +27,7 @@ function newGame(): KakuroState {
 
 export default function KakuroClient() {
   const { prefix } = useGamesNav();
+  const [webglFailed, setWebglFailed] = useState(false);
   const [state, setState] = useState<KakuroState>(() => newGame());
   const [selected, setSelected] = useState(0);
   const [seconds, setSeconds] = useState(0);
@@ -132,6 +137,13 @@ export default function KakuroClient() {
     return set;
   }, [checked]);
 
+  const selectCell = (i: number) => {
+    const cell = state.cells[i];
+    if (!cell || cell.kind !== "white" || cell.given) return;
+    sfxTap();
+    setSelected(i);
+  };
+
   const size = state.size;
   const statusText =
     state.status === "won"
@@ -142,30 +154,8 @@ export default function KakuroClient() {
           : checked[0].message
         : "白マスを選んで、下の数字パッドで入力します。盤面を下にスワイプするとチェックできます。";
 
-  return (
-    <>
-      <nav className="breadcrumbs" aria-label="パンくず">
-        <Link href={`${prefix}/games`}>ゲーム</Link>
-        <span> / </span>
-        <span>カックロ</span>
-      </nav>
-      <div className="page-heading compact-heading">
-        <h1>カックロ</h1>
-        <p className="muted">
-          黒マスの右上の数字は右方向の合計、左下の数字は下方向の合計です。
-        </p>
-      </div>
-
-      <div className="classic-controls" role="group" aria-label="操作">
-        <button type="button" className="classic-btn" onClick={restart}>
-          もう一度
-        </button>
-      </div>
-
-      <p className="classic-status" role="status">
-        {seconds} 秒{best !== null ? ` ・ ベスト ${best} 秒` : ""} ・ {statusText}
-      </p>
-
+  // 2D 盤（WebGL が使えない場合のフォールバックとしてそのまま使う）。
+  const board2d = (
       <div
         {...boardGesture}
         role="grid"
@@ -297,6 +287,48 @@ export default function KakuroClient() {
           );
         })}
       </div>
+  );
+
+  return (
+    <>
+      <nav className="breadcrumbs" aria-label="パンくず">
+        <Link href={`${prefix}/games`}>ゲーム</Link>
+        <span> / </span>
+        <span>カックロ</span>
+      </nav>
+      <div className="page-heading compact-heading">
+        <h1>カックロ</h1>
+        <p className="muted">
+          黒マスの右上の数字は右方向の合計、左下の数字は下方向の合計です。
+        </p>
+      </div>
+
+      <div className="classic-controls" role="group" aria-label="操作">
+        <button type="button" className="classic-btn" onClick={restart}>
+          もう一度
+        </button>
+      </div>
+
+      <p className="classic-status" role="status">
+        {seconds} 秒{best !== null ? ` ・ ベスト ${best} 秒` : ""} ・ {statusText}
+      </p>
+
+      {webglFailed ? board2d : (
+        <div style={{ width: "100%", maxWidth: 460, margin: "0 auto" }}>
+          <KakuroScene3D
+            cells={state.cells}
+            values={state.values}
+            size={size}
+            selected={selected}
+            badCells={badCells}
+            onCell={selectCell}
+            onCheck={handleCheck}
+            onFail={() => setWebglFailed(true)}
+            fallback={board2d}
+          />
+        </div>
+      )}
+
 
       <div
         className="classic-controls"

@@ -2,7 +2,11 @@
 // タッチザナンバー。ロジックは lib/touchnumber.ts。
 // 1から順にタップし、ミス1回につき+3秒のペナルティでタイムを競う。
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useEffect, useRef, useState } from "react";
+
+// 3D シーンは three を含むため遅延読み込み（このページ専用チャンクに閉じる）。
+const TouchNumberScene3D = dynamic(() => import("./TouchNumberScene3D"), { ssr: false });
 import { createTouchGame, isCleared, tapCell, touchColumns, type TouchState } from "@/lib/touchnumber";
 import { sfxPop, sfxTap, sfxWin, sfxWrong } from "@/lib/sfx";
 import { EndScreen } from "../GameJuice";
@@ -13,6 +17,7 @@ const SIZES = [25, 50] as const;
 
 export default function TouchNumberClient() {
   const { prefix } = useGamesNav();
+  const [webglFailed, setWebglFailed] = useState(false);
   const [size, setSize] = useState<number>(25);
   const [state, setState] = useState<TouchState>(() => createTouchGame(25, Date.now() % 2147483647));
   const [elapsed, setElapsed] = useState(0);
@@ -89,41 +94,8 @@ export default function TouchNumberClient() {
 
   const cols = touchColumns(size);
 
-  return (
-    <>
-      <nav className="breadcrumbs" aria-label="パンくず">
-        <Link href={`${prefix}/games`}>ゲーム</Link>
-        <span> / </span>
-        <span>タッチザナンバー</span>
-      </nav>
-      <div className="page-heading compact-heading">
-        <h1>タッチザナンバー</h1>
-        <p className="muted">最初のタップで計測が始まります。次に押す数字は金色の枠で示されます。</p>
-      </div>
-
-      <div className="classic-controls" role="group" aria-label="サイズ">
-        {SIZES.map((s) => (
-          <button
-            key={s}
-            type="button"
-            className={size === s ? "classic-btn classic-btn-active" : "classic-btn"}
-            aria-pressed={size === s}
-            onClick={() => restart(s)}
-          >
-            1〜{s}
-          </button>
-        ))}
-        <button type="button" className="classic-btn" onClick={() => restart(size)}>
-          もう一度
-        </button>
-      </div>
-
-      <p className="classic-status" role="status">
-        次は {state.status === "won" ? "—" : state.next} ・ {totalSec.toFixed(1)} 秒（ミス {state.misses} 回）
-        {best !== null ? ` ・ ベスト ${best.toFixed(1)} 秒` : ""}
-        {state.status === "won" ? ` ・ クリア！記録は ${totalSec.toFixed(1)} 秒です。` : ""}
-      </p>
-
+  // 2D 盤（WebGL が使えない場合のフォールバックとしてそのまま使う）。
+  const board2d = (
       <div
         role="grid"
         aria-label="数字の盤"
@@ -165,6 +137,58 @@ export default function TouchNumberClient() {
           );
         })}
       </div>
+  );
+
+  return (
+    <>
+      <nav className="breadcrumbs" aria-label="パンくず">
+        <Link href={`${prefix}/games`}>ゲーム</Link>
+        <span> / </span>
+        <span>タッチザナンバー</span>
+      </nav>
+      <div className="page-heading compact-heading">
+        <h1>タッチザナンバー</h1>
+        <p className="muted">最初のタップで計測が始まります。次に押す数字は金色の枠で示されます。</p>
+      </div>
+
+      <div className="classic-controls" role="group" aria-label="サイズ">
+        {SIZES.map((s) => (
+          <button
+            key={s}
+            type="button"
+            className={size === s ? "classic-btn classic-btn-active" : "classic-btn"}
+            aria-pressed={size === s}
+            onClick={() => restart(s)}
+          >
+            1〜{s}
+          </button>
+        ))}
+        <button type="button" className="classic-btn" onClick={() => restart(size)}>
+          もう一度
+        </button>
+      </div>
+
+      <p className="classic-status" role="status">
+        次は {state.status === "won" ? "—" : state.next} ・ {totalSec.toFixed(1)} 秒（ミス {state.misses} 回）
+        {best !== null ? ` ・ ベスト ${best.toFixed(1)} 秒` : ""}
+        {state.status === "won" ? ` ・ クリア！記録は ${totalSec.toFixed(1)} 秒です。` : ""}
+      </p>
+
+      {webglFailed ? board2d : (
+        <div style={{ width: "100%", maxWidth: 420, margin: "0 auto" }}>
+          <TouchNumberScene3D
+            board={state.board}
+            cols={cols}
+            size={size}
+            next={state.next}
+            wrongIndex={wrongIndex}
+            status={state.status}
+            onTap={onTap}
+            onFail={() => setWebglFailed(true)}
+            fallback={board2d}
+          />
+        </div>
+      )}
 
       {state.status === "won" && (
         <div style={{ maxWidth: 520, margin: "14px auto 0" }}>

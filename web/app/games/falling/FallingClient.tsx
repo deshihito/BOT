@@ -3,7 +3,11 @@
 // キーボードと盤面のスワイプ／タップの両方で操作でき、端末内で完結する（サーバー送信なし）。
 // ベストスコアは localStorage の ago-falling-best に保存する。
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useCallback, useEffect, useRef, useState } from "react";
+
+// 3D シーンは three を含むため遅延読み込み（このページ専用チャンクに閉じる）。
+const FallingScene3D = dynamic(() => import("./FallingScene3D"), { ssr: false });
 import {
   FALLING_COLS,
   FALLING_PIECE_COLORS,
@@ -25,7 +29,7 @@ import {
   type FallingState,
 } from "@/lib/falling";
 import { sfxCorrect, sfxLose, sfxPlace, sfxTap, sfxWin } from "@/lib/sfx";
-import { tappableProps, useGesture } from "@/lib/gesture";
+import { tappableProps, useGesture, type GestureDirection } from "@/lib/gesture";
 import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
@@ -87,6 +91,7 @@ function Preview({ type, label }: { type: FallingPieceType | null; label: string
 
 export default function FallingClient() {
   const { prefix } = useGamesNav();
+  const [webglFailed, setWebglFailed] = useState(false);
   const [state, setState] = useState<FallingState>(() => createFallingGame(Date.now() % 2147483647));
   const [paused, setPaused] = useState(false);
   const [best, setBest] = useState(0);
@@ -97,6 +102,9 @@ export default function FallingClient() {
   const sessionBestRef = useRef(0);
   const statusRef = useRef(state.status);
   statusRef.current = state.status;
+  // 3D シーンが毎フレーム読む最新の状態（React 再描画を介さない）。
+  const stateRef = useRef(state);
+  stateRef.current = state;
 
   useEffect(() => {
     const loaded = loadBest();
@@ -167,22 +175,49 @@ export default function FallingClient() {
     act(holdPiece);
   }, [act]);
 
-  // 盤面ジェスチャ: 左右スワイプ=移動、下スワイプ=ソフトドロップ、
-  // タップ=回転、上スワイプ=ハードドロップ（操作パッド廃止）。
-  // キーボードは下の window リスナーが受けるため盤面にキー対応は付けない。
-  const boardGesture = useGesture({
-    onSwipe: (dir) => {
+  // 盤面ジェスチャと 3D シーンで共有する操作ハンドラ:
+  // 左右スワイプ=移動、下スワイプ=ソフトドロップ、タップ=回転、
+  // 上スワイプ=ハードドロップ（操作パッド廃止）。
+  const handleSwipe = useCallback(
+    (dir: GestureDirection) => {
       if (paused) return;
       if (dir === "left") act(moveLeft);
       else if (dir === "right") act(moveRight);
       else if (dir === "down") act(softDrop);
       else if (dir === "up") actHardDrop();
     },
-    onTap: () => {
-      if (paused) return;
-      act((s) => rotatePiece(s, 1));
-    },
+    [act, actHardDrop, paused],
+  );
+  const handleTap = useCallback(() => {
+    if (paused) return;
+    act((s) => rotatePiece(s, 1));
+  }, [act, paused]);
+
+  const boardGesture = useGesture({
+    onSwipe: handleSwipe,
+    onTap: handleTap,
   });
+
+  // 3D シーンへ渡す表示状態（ゴーストと落下中セルはここで lib の関数で計算する）。
+  const getViewState = useCallback(() => {
+    const s = stateRef.current;
+    const g = s.status === "playing" ? ghostY(s) : s.active.y;
+    const ghostCells: Array<{ x: number; y: number; type: FallingPieceType }> = [];
+    if (s.status === "playing" && g !== s.active.y) {
+      for (const c of getPieceCells(s.active.type, s.active.rotation)) {
+        const x = s.active.x + c.x;
+        const y = g + c.y;
+        if (x >= 0 && x < FALLING_COLS && y >= 0 && y < FALLING_ROWS) ghostCells.push({ x, y, type: s.active.type });
+      }
+    }
+    const activeCells: Array<{ x: number; y: number; type: FallingPieceType }> = [];
+    for (const c of getActiveCells(s)) {
+      if (c.x >= 0 && c.x < FALLING_COLS && c.y >= 0 && c.y < FALLING_ROWS) {
+        activeCells.push({ x: c.x, y: c.y, type: s.active.type });
+      }
+    }
+    return { board: s.board, activeCells, ghostCells, status: s.status, placed: s.placed };
+  }, []);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -260,35 +295,8 @@ export default function FallingClient() {
       ? "一時停止中です。Pキーか一時停止表示のタップで再開できます。"
       : "";
 
-  return (
-    <>
-      <nav className="breadcrumbs" aria-label="パンくず">
-        <Link href={`${prefix}/games`}>ゲーム</Link>
-        <span> / </span>
-        <span>フォーリングブロック</span>
-      </nav>
-      <div className="page-heading compact-heading">
-        <h1>フォーリングブロック</h1>
-        <p className="muted">落ちてくるブロックをそろえてラインを消す落下パズル。盤面のスワイプ・タップとキー操作に対応しています。</p>
-      </div>
-
-      <p className="classic-status" role="status">
-        スコア {state.score} ・ ベスト {Math.max(best, state.score)} ・ ライン {state.lines} ・ レベル {state.level}
-        {statusText ? ` ・ ${statusText}` : ""}
-      </p>
-
-      <div
-        style={{
-          display: "flex",
-          gap: 16,
-          justifyContent: "center",
-          alignItems: "flex-start",
-          flexWrap: "wrap",
-          width: "100%",
-          maxWidth: 560,
-          margin: "0 auto",
-        }}
-      >
+  // 2D 盤（WebGL が使えない場合のフォールバックとしてそのまま使う）。
+  const board2d = (
         <div
           {...boardGesture}
           role="grid"
@@ -335,6 +343,48 @@ export default function FallingClient() {
             );
           })}
         </div>
+  );
+
+  return (
+    <>
+      <nav className="breadcrumbs" aria-label="パンくず">
+        <Link href={`${prefix}/games`}>ゲーム</Link>
+        <span> / </span>
+        <span>フォーリングブロック</span>
+      </nav>
+      <div className="page-heading compact-heading">
+        <h1>フォーリングブロック</h1>
+        <p className="muted">落ちてくるブロックをそろえてラインを消す落下パズル。盤面のスワイプ・タップとキー操作に対応しています。</p>
+      </div>
+
+      <p className="classic-status" role="status">
+        スコア {state.score} ・ ベスト {Math.max(best, state.score)} ・ ライン {state.lines} ・ レベル {state.level}
+        {statusText ? ` ・ ${statusText}` : ""}
+      </p>
+
+      <div
+        style={{
+          display: "flex",
+          gap: 16,
+          justifyContent: "center",
+          alignItems: "flex-start",
+          flexWrap: "wrap",
+          width: "100%",
+          maxWidth: 560,
+          margin: "0 auto",
+        }}
+      >
+        {webglFailed ? board2d : (
+          <div style={{ width: "min(78vw, 320px)" }}>
+            <FallingScene3D
+              getState={getViewState}
+              onSwipe={handleSwipe}
+              onTap={handleTap}
+              onFail={() => setWebglFailed(true)}
+              fallback={board2d}
+            />
+          </div>
+        )}
 
         <div style={{ display: "grid", gap: 14, minWidth: 92, justifyItems: "center" }}>
           <Preview type={state.next} label="NEXT" />

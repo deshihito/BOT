@@ -3,7 +3,11 @@
 // 安定判定は lib/balancestack.ts の決定的モデル（各段の重心と接触区間の検証）。
 // 端末内で完結し、サーバーへ送信しない。
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useEffect, useRef, useState } from "react";
+
+// 3D シーンは three を含むため遅延読み込み（このページ専用チャンクに閉じる）。
+const BalanceStackScene3D = dynamic(() => import("./BalanceStackScene3D"), { ssr: false });
 import {
   BALANCE_BASE,
   BALANCE_FIELD_WIDTH,
@@ -30,6 +34,7 @@ function newGame(): BalanceState {
 export default function BalanceStackClient() {
   const { prefix } = useGamesNav();
   const [state, setState] = useState<BalanceState>(() => newGame());
+  const [webglFailed, setWebglFailed] = useState(false);
   const [center, setCenter] = useState(50);
   const [best, setBest] = useState<number | null>(null);
   const fieldRef = useRef<HTMLDivElement | null>(null);
@@ -142,6 +147,69 @@ export default function BalanceStackClient() {
     );
   };
 
+  // 2D 盤面（WebGL が使えない場合のフォールバックとしてそのまま使う）。
+  const field2d = (
+    <div
+      ref={fieldRef}
+      role="img"
+      aria-label={`タワー。現在 ${state.score} 個積まれています`}
+      onPointerDown={onFieldTap}
+      style={{
+        position: "relative",
+        height: Math.max(FIELD_HEIGHT, towerHeight + 60),
+        background: "linear-gradient(#eaf3fb, #f7fbff)",
+        border: "1px solid #c9d8e6",
+        borderRadius: 8,
+        overflow: "hidden",
+        touchAction: "manipulation",
+        cursor: state.status === "playing" ? "crosshair" : "default",
+      }}
+    >
+      <div
+        aria-hidden
+        style={{
+          position: "absolute",
+          left: `calc(${(comX / BALANCE_FIELD_WIDTH) * 100}% - 7px)`,
+          bottom: 30 + previewBlocks.length * blockHeight,
+          fontSize: 14,
+          color: "#c0392b",
+          transition: "left 0.08s linear",
+        }}
+      >
+        ▼
+      </div>
+      <div
+        aria-hidden
+        style={{
+          position: "absolute",
+          left: `${BALANCE_BASE.left}%`,
+          width: `${BALANCE_BASE.right - BALANCE_BASE.left}%`,
+          bottom: 14,
+          height: 14,
+          background: "#5b4632",
+          borderRadius: 3,
+        }}
+      />
+      <div aria-hidden style={{ position: "absolute", left: 0, right: 0, bottom: 0, height: 14, background: "#8a6d4f" }} />
+      {state.blocks.map((b, i) =>
+        renderBlock(b, i, {
+          collapsed: state.status === "collapsed" && state.collapsedLevel === i,
+          juiceClass:
+            state.status === "collapsed"
+              ? "juice-shake"
+              : i === state.blocks.length - 1
+                ? "juice-pop"
+                : undefined,
+        }),
+      )}
+      {state.status === "playing" &&
+        renderBlock({ ...state.current, center: previewCenter }, state.blocks.length, {
+          ghost: true,
+          juiceClass: preview && !preview.stable ? "juice-shake" : undefined,
+        })}
+    </div>
+  );
+
   return (
     <div style={{ maxWidth: 560, margin: "0 auto", padding: 16 }}>
       <p style={{ fontSize: 13, margin: "0 0 8px" }}>
@@ -180,67 +248,19 @@ export default function BalanceStackClient() {
         </EndScreen>
       )}
 
-      <div
-        ref={fieldRef}
-        role="img"
-        aria-label={`タワー。現在 ${state.score} 個積まれています`}
-        onPointerDown={onFieldTap}
-        style={{
-          position: "relative",
-          height: Math.max(FIELD_HEIGHT, towerHeight + 60),
-          background: "linear-gradient(#eaf3fb, #f7fbff)",
-          border: "1px solid #c9d8e6",
-          borderRadius: 8,
-          overflow: "hidden",
-          touchAction: "manipulation",
-          cursor: state.status === "playing" ? "crosshair" : "default",
-        }}
-      >
-        {/* 重心マーカー */}
-        <div
-          aria-hidden
-          style={{
-            position: "absolute",
-            left: `calc(${(comX / BALANCE_FIELD_WIDTH) * 100}% - 7px)`,
-            bottom: 30 + previewBlocks.length * blockHeight,
-            fontSize: 14,
-            color: "#c0392b",
-            transition: "left 0.08s linear",
-          }}
-        >
-          ▼
-        </div>
-        {/* 土台 */}
-        <div
-          aria-hidden
-          style={{
-            position: "absolute",
-            left: `${BALANCE_BASE.left}%`,
-            width: `${BALANCE_BASE.right - BALANCE_BASE.left}%`,
-            bottom: 14,
-            height: 14,
-            background: "#5b4632",
-            borderRadius: 3,
-          }}
+      {webglFailed ? field2d : (
+        <BalanceStackScene3D
+          blocks={state.blocks}
+          current={state.current}
+          center={previewCenter}
+          stable={preview ? preview.stable : true}
+          status={state.status}
+          collapsedLevel={state.collapsedLevel}
+          onCenter={setCenter}
+          onFail={() => setWebglFailed(true)}
+          fallback={field2d}
         />
-        <div aria-hidden style={{ position: "absolute", left: 0, right: 0, bottom: 0, height: 14, background: "#8a6d4f" }} />
-        {state.blocks.map((b, i) =>
-          renderBlock(b, i, {
-            collapsed: state.status === "collapsed" && state.collapsedLevel === i,
-            juiceClass:
-              state.status === "collapsed"
-                ? "juice-shake"
-                : i === state.blocks.length - 1
-                  ? "juice-pop"
-                  : undefined,
-          }),
-        )}
-        {state.status === "playing" &&
-          renderBlock({ ...state.current, center: previewCenter }, state.blocks.length, {
-            ghost: true,
-            juiceClass: preview && !preview.stable ? "juice-shake" : undefined,
-          })}
-      </div>
+      )}
 
       {state.status === "playing" && preview && (
         <div style={{ marginTop: 10 }}>

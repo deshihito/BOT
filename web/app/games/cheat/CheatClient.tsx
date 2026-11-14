@@ -6,8 +6,12 @@
 // 操作は { type: "play", cards } / { type: "challenge" }。
 // 手番のランクは expectedRank で固定され、出すカード自体は自由（ブラフ可）。
 // 直前の宣言にチャレンジしたい場合は、カードを出す前に押す。
+import dynamic from "next/dynamic";
 import { useEffect, useRef, useState } from "react";
 import { playSe } from "@/lib/balku-sound";
+
+// 3D シーンは three を含むため遅延読み込み（このページ専用チャンクに閉じる）。
+const CheatScene3D = dynamic(() => import("./CheatScene3D"), { ssr: false });
 import OnlineShell from "../online/OnlineShell";
 import type { OnlineRoomApi, OnlineRoomView } from "../online/useOnlineRoom";
 
@@ -96,6 +100,7 @@ export default function CheatClient() {
 function CheatTable({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
   const state = view.state as CheatViewState | null;
   const mySeat = view.player.seat;
+  const [webglFailed, setWebglFailed] = useState(false);
   const [selected, setSelected] = useState<number[]>([]);
 
   // 手札が変わったら、もう持っていないカードの選択を外す。
@@ -168,6 +173,49 @@ function CheatTable({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi })
           ? `${nameOf(state.lastPlay!.seat)}の宣言「${rankLabel(state.lastPlay!.rank)}を${state.lastPlay!.count}枚」にチャレンジできます。出さずにチャレンジするか、そのままカードを出してください。`
           : `あなたの手番です。「${rankLabel(state.expectedRank)}」の宣言で1〜3枚出してください（中身は自由です）。`
         : `${nameOf(state.turn)}の手番です。`;
+
+  // 3D シーンの手札タップ（既存の選択トグルへ接続。手番でないときは 2D と同じく無効）。
+  const handleCardTap = (id: number) => {
+    if (!myTurn) return;
+    toggleCard(id);
+  };
+  const revealKey = state.lastReveal
+    ? `${state.lastReveal.challenger}:${state.lastReveal.seat}:${state.lastReveal.cards.join(",")}:${state.lastReveal.taker ?? ""}`
+    : null;
+
+  // 2D 手札（WebGL が使えない場合のフォールバックとしてそのまま使う）。
+  const handButtons = (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 12 }}>
+      {state.yourHand.map((id) => {
+        const isSel = selected.includes(id);
+        return (
+          <button
+            key={id}
+            type="button"
+            disabled={!myTurn}
+            aria-pressed={isSel}
+            aria-label={`${SUITS[cardSuit(id)]}の${rankLabel(cardRank(id))}`}
+            onClick={() => toggleCard(id)}
+            style={{
+              border: isSel ? "2px solid #d97706" : "1px solid #cbd5e1",
+              borderRadius: 8,
+              background: isSel ? "#fffbeb" : "#ffffff",
+              padding: "5px 7px",
+              cursor: myTurn ? "pointer" : "default",
+              boxShadow: "0 1px 2px rgba(0,0,0,0.08)",
+            }}
+          >
+            <CardFace id={id} />
+          </button>
+        );
+      })}
+      {state.yourHand.length === 0 ? (
+        <span className="muted" style={{ fontSize: 13 }}>
+          手札はありません。
+        </span>
+      ) : null}
+    </div>
+  );
 
   return (
     <div>
@@ -282,36 +330,21 @@ function CheatTable({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi })
         あなたの手札（{state.yourHand.length}枚）
         {state.yourRank !== null ? ` ・ ${state.yourRank}位確定` : ""}
       </h2>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 12 }}>
-        {state.yourHand.map((id) => {
-          const isSel = selected.includes(id);
-          return (
-            <button
-              key={id}
-              type="button"
-              disabled={!myTurn}
-              aria-pressed={isSel}
-              aria-label={`${SUITS[cardSuit(id)]}の${rankLabel(cardRank(id))}`}
-              onClick={() => toggleCard(id)}
-              style={{
-                border: isSel ? "2px solid #d97706" : "1px solid #cbd5e1",
-                borderRadius: 8,
-                background: isSel ? "#fffbeb" : "#ffffff",
-                padding: "5px 7px",
-                cursor: myTurn ? "pointer" : "default",
-                boxShadow: "0 1px 2px rgba(0,0,0,0.08)",
-              }}
-            >
-              <CardFace id={id} />
-            </button>
-          );
-        })}
-        {state.yourHand.length === 0 ? (
-          <span className="muted" style={{ fontSize: 13 }}>
-            手札はありません。
-          </span>
-        ) : null}
-      </div>
+      {webglFailed ? handButtons : (
+        <CheatScene3D
+          myHand={state.yourHand}
+          selected={selected}
+          others={state.others.map((o) => ({ seat: o.seat, count: o.count }))}
+          pileCount={state.pileCount}
+          revealCards={state.lastReveal?.cards ?? null}
+          revealKey={revealKey}
+          myTurn={myTurn}
+          finished={state.finished}
+          onCardTap={handleCardTap}
+          onFail={() => setWebglFailed(true)}
+          fallback={handButtons}
+        />
+      )}
 
       {myTurn ? (
         <div className="classic-controls" role="group" aria-label="アクション">
