@@ -42,6 +42,7 @@ export const CTA_BAND_EXCLUDED_PATHS: readonly string[] = [
   "/terms",
   "/privacy",
   "/credits",
+  "/about",
   // Discord 審査用の証跡ページ（販促導線を置かない）
   "/intents",
 ];

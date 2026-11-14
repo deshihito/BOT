@@ -360,7 +360,10 @@ export const FOOTER_GROUPS: { label: string; links: SiteLink[] }[] = [
   },
   {
     label: "サイト情報",
-    links: [{ href: "/credits", label: "クレジット" }],
+    links: [
+      { href: "/about", label: "運営者情報" },
+      { href: "/credits", label: "クレジット" },
+    ],
   },
   {
     label: "ポリシー",

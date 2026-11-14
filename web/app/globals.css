@@ -151,6 +151,13 @@ th,td { padding:6px 8px; border-bottom:1px solid var(--line); text-align:left; }
 .home-entry p { color:var(--muted); font-size:14px; }
 .home-entries { margin-top:34px; }
 .home-entries h2 { margin-bottom:12px; font-size:20px; }
+/* トップ: サービス説明と導入手順（読み物ゾーン） */
+.home-about { margin-top:40px; }
+.home-about h2 { margin:22px 0 10px; font-size:20px; }
+.home-about h2:first-child { margin-top:0; }
+.home-about p { line-height:1.9; }
+.home-about p + p { margin-top:10px; }
+.home-about ol { line-height:1.9; padding-left:1.5em; display:grid; gap:6px; margin-bottom:12px; }
 /* トップ: リピーター向けゾーン（主導線と競合させない控えめな面） */
 .home-repeater { display:grid; gap:22px; margin-top:44px; padding-top:22px; border-top:1px solid var(--line); }
 .home-repeater h2 { margin-bottom:8px; color:var(--muted); font-size:14px; letter-spacing:.06em; }
@@ -174,6 +181,8 @@ th,td { padding:6px 8px; border-bottom:1px solid var(--line); text-align:left; }
 .faq-list { display:grid; gap:10px; }
 .faq-item { border:1px solid var(--line); border-radius:9px; }
 .faq-q { width:100%; padding:14px 16px; border:0; background:transparent; color:var(--text); cursor:pointer; font:inherit; font-weight:700; text-align:left; }
+summary.faq-q { display:block; list-style:none; }
+summary.faq-q::-webkit-details-marker { display:none; }
 .faq-a { padding:0 16px 14px; color:var(--muted); line-height:1.7; }
 .faq-a p + p { margin-top:8px; }
 .ranking-tabs { display:flex; gap:8px; margin:18px 0; }
