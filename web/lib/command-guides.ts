@@ -227,7 +227,7 @@ const FUNCTION_OVERRIDES: Record<string, { description?: string; note?: string }
   // /general 画像作成
   "general:story54": { description: "入力した文章を54字の物語として、1080×1080の画像にします。" },
   "general:fast_html": { description: "HTMLファイルを送ると、60分間だけ公開されるプレビューURLを発行します。" },
-  "general:bg_cutout": { description: "画像やGIFの背景を透過し、カスタム絵文字（256KB以下）やスタンプ（512KB以下・320×320）としてアップロードできるサイズに変換します。" },
+  "general:bg_cutout": { description: "画像やGIFの背景を透過し、カスタム絵文字（256KB以下）やスタンプ（512KB以下・320×320）として使えるサイズに変換します。処理は、発行される一時リンク先のページで、あなたのブラウザの中で行われます。" },
   "general:meme_create": { description: "画像と文字からミーム画像を作成します。" },
   "general:meme_help": { description: "画像作成機能の使い方を表示します。" },
   "general:miq_settings": { description: "MIQの見た目と引用拒否を設定します。" },

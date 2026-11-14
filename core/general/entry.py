@@ -176,24 +176,22 @@ class GeneralCog(
         # ユーザーごとの最終発行時刻（クールダウン用, monotonic 秒）
         self._fast_html_waits: dict[tuple[int, int], asyncio.Event] = {}
         self._fast_html_last_issue: dict[int, float] = {}
-        # 背景透過の待ちセッション {(channel_id, user_id): Event} と用途、
-        # サブプロセス同時実行セマフォ（1つまで）、最終処理時刻、実行中数
-        self._bgcut_waits: dict[tuple[int, int], asyncio.Event] = {}
-        self._bgcut_purposes: dict[tuple[int, int], str] = {}
-        self._bgcut_sem = asyncio.Semaphore(1)
-        self._bgcut_last: dict[int, float] = {}
-        self._bgcut_jobs = 0
+        # 背景透過（Webリンク発行）のユーザーごとの最終発行時刻
+        # （クールダウン用, monotonic 秒）。処理自体はブラウザ側で行う。
+        self._bgcut_last_issue: dict[int, float] = {}
 
 
     async def cog_load(self):
         await translation.ensure_loaded()
         self.exp_vc_tick.start()
+        self._bgcut_result_poll.start()
         self.bot.tree.add_command(self.miq_menu, override=True)
         self.bot.tree.add_command(self.meme_menu, override=True)
 
 
     def cog_unload(self):
         self.exp_vc_tick.cancel()
+        self._bgcut_result_poll.cancel()
         self.bot.tree.remove_command(self.miq_menu.name, type=self.miq_menu.type)
         self.bot.tree.remove_command(self.meme_menu.name, type=self.meme_menu.type)
         for task in list(self._bg_tasks):
@@ -298,7 +296,7 @@ class GeneralCog(
             return await self._fast_html_start(interaction)
 
         if value == "bg_cutout":
-            # 用途選択＋画像投稿待ちの対話フロー（fastHTML と同じ作り）。
+            # 用途選択→Web一時リンク発行の対話フロー（処理はブラウザ側）。
             return await self._bgcut_start(interaction)
 
         if value == "story54":
