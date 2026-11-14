@@ -12,7 +12,7 @@ import type { Metadata } from "next";
 // 参考コラージュに寄せ、地球のガラス球・雲・スカイライン・蝶・
 // 草花の要素を足した。さらに同日の追加指示で、光沢の境界を
 // ハッキリさせ（上部で濃く下端で薄く、境界はシャープ）、
-// グラデーションは下に行くほど明るくなるガラス光沢に統一した。さらに同日の追加指示で、その光沢を全UI要素（ヘッダー/ヒーロー/フッター/経歴ドット等）へ展開し、イルカ画像を About 欄の右上へ移し、配色全体をかなり鮮やかにした。さらに泡は「ぼかした白い丸」ではなく縁とハイライトの境目がハッキリしたガラス球の質感に作り替え、パネルのスペキュラは上端から少し下げた位置から薄く効かせるようにした。地球儀は大陸を消して青一色（#0080ff）にした（光沢は維持）。アイコン画像は本人が
+// グラデーションは下に行くほど明るくなるガラス光沢に統一した。さらに同日の追加指示で、その光沢を全UI要素（ヘッダー/ヒーロー/フッター/経歴ドット等）へ展開し、イルカ画像を About 欄の右上へ移し、配色全体をかなり鮮やかにした。さらに泡は「ぼかした白い丸」ではなく縁とハイライトの境目がハッキリしたガラス球の質感に作り替え、パネルのスペキュラは上端から少し下げた位置から薄く効かせるようにした。地球儀は大陸を消して青一色（#0080ff）にした（光沢は維持）。さらに Frutiger Aero のスペキュラ仕様（50%付近のハードストップ段差、内側リムライト＋外側の暗い輪郭線、下端のバウンスライト、ドーム型ハイライト、斜めのガラス反射）に沿ってガラス表現を全面改修し、オーロラの帯とボケ味も加えた。アイコン画像は本人が
 // 用意したらヒーローのプレースホルダと差し替える。
 // 専用ヘッダー/フッターはこのファイルの中で完結させる（サイト共通の
 // ヘッダー/フッターは lib/site-chrome.ts の /folio 判定で出ない）。
@@ -62,22 +62,27 @@ main:has(.folio-fa){max-width:none;min-height:0;margin:0;padding:0}
 .folio-fa{position:relative;min-height:100svh;overflow:hidden;color:#0d3a56;font-family:"Segoe UI","Hiragino Kaku Gothic ProN","Hiragino Sans","Noto Sans JP",system-ui,sans-serif;background:radial-gradient(1050px 520px at 86% -8%,rgba(255,246,190,.6),transparent 60%),linear-gradient(180deg,#007cf0 0%,#00a2ff 22%,#3ec6ff 42%,#8df5c0 60%,#54e86a 78%,#c6ff9a 100%)}
 .folio-fa *{box-sizing:border-box}
 .folio-fa-bubbles{position:absolute;inset:0;pointer-events:none}
-.folio-fa-bubble{position:absolute;border-radius:50%;background:radial-gradient(ellipse 62% 34% at 50% 13%,rgba(255,255,255,.95) 0 66%,rgba(255,255,255,.30) 72%,rgba(255,255,255,0) 76%),radial-gradient(ellipse 66% 30% at 50% 112%,rgba(255,255,255,.55) 0 55%,rgba(255,255,255,0) 66%),linear-gradient(180deg,rgba(255,255,255,.10),rgba(255,255,255,.02) 48%,rgba(255,255,255,.20));border:1.5px solid rgba(255,255,255,.95);box-shadow:inset 0 0 0 1px rgba(180,230,255,.30),0 2px 5px rgba(0,90,160,.20);animation:folio-fa-float 7s ease-in-out infinite alternate}
+.folio-fa-aurora{position:absolute;top:-46px;left:0;width:100%;height:330px;pointer-events:none;animation:folio-fa-drift 18s ease-in-out infinite alternate}
+@keyframes folio-fa-drift{from{transform:translateX(-24px)}to{transform:translateX(24px)}}
+.folio-fa-bokeh{position:absolute;border-radius:50%;background:radial-gradient(circle,rgba(255,255,255,.22),rgba(255,255,255,0) 62%);filter:blur(5px);pointer-events:none}
+.folio-fa-bubble{position:absolute;border-radius:50%;background:radial-gradient(ellipse 62% 34% at 50% 13%,rgba(255,255,255,.95) 0 66%,rgba(255,255,255,.30) 72%,rgba(255,255,255,0) 76%),radial-gradient(ellipse 66% 30% at 50% 112%,rgba(170,255,205,.55) 0 55%,rgba(170,255,205,0) 66%),linear-gradient(180deg,rgba(255,255,255,.10),rgba(255,255,255,.02) 48%,rgba(190,255,215,.30));border:1.5px solid rgba(255,255,255,.95);box-shadow:inset 0 0 0 1px rgba(180,230,255,.30),0 2px 5px rgba(0,90,160,.20);animation:folio-fa-float 7s ease-in-out infinite alternate}
 @keyframes folio-fa-float{from{transform:translateY(8px)}to{transform:translateY(-14px)}}
 .folio-fa-hills{position:absolute;left:0;right:0;bottom:0;width:100%;height:250px;pointer-events:none}
 .folio-fa-sun{position:absolute;top:4.6rem;right:4vw;width:230px;height:230px;border-radius:50%;background:radial-gradient(circle,rgba(255,252,210,.55) 0%,rgba(255,244,170,.22) 42%,transparent 70%);pointer-events:none}
 .folio-fa-icon{position:absolute;top:6.5rem;right:6vw;width:172px;height:172px;border-radius:50%;object-fit:cover;box-shadow:0 0 0 6px rgba(255,255,255,.9),0 0 0 9px rgba(130,205,255,.55),0 20px 44px rgba(0,80,140,.38)}
-.folio-fa-icon-ph{display:grid;place-items:center;background:radial-gradient(circle at 35% 20%,rgba(255,255,255,.95) 0 20%,rgba(255,255,255,0) 24%),linear-gradient(180deg,#00a2ff,#0072e0 58%,#4dc9ff)}
+.folio-fa-icon-ph{display:grid;place-items:center;background:radial-gradient(ellipse 135% 100% at 50% -30%,rgba(255,255,255,.95) 0 46%,rgba(255,255,255,.30) 58%,rgba(255,255,255,0) 63%),linear-gradient(180deg,#00a2ff,#0072e0 58%,#4dc9ff)}
 .folio-fa-fish{position:absolute;pointer-events:none;opacity:.85;animation:folio-fa-swim 9s ease-in-out infinite alternate}
 @keyframes folio-fa-swim{from{transform:translateX(-16px)}to{transform:translateX(22px)}}
 .folio-fa-inner{position:relative;z-index:1;max-width:880px;margin:0 auto;padding:0 20px 120px}
 .folio-fa-header{display:flex;align-items:center;gap:10px;padding:12px 18px;margin-top:16px;border-radius:16px}
+.folio-fa-header::after{content:"";position:absolute;inset:0;border-radius:inherit;background:linear-gradient(105deg,rgba(255,255,255,0) 22%,rgba(255,255,255,.38) 40%,rgba(255,255,255,.10) 52%,rgba(255,255,255,0) 68%);pointer-events:none}
 .folio-fa-header .name{font-size:17px;letter-spacing:.16em;font-weight:600;color:#0063b3;text-shadow:0 1px 0 rgba(255,255,255,.7)}
 .folio-fa-hero{margin-top:64px;padding:30px 30px 34px;max-width:600px}
+.folio-fa-hero::after{content:"";position:absolute;left:-10%;right:-10%;top:-46%;height:84%;border-radius:50%;background:linear-gradient(180deg,rgba(255,255,255,.34),rgba(255,255,255,.04) 80%);pointer-events:none}
 .folio-fa-hero h1{font-size:52px;margin:0 0 10px;letter-spacing:.05em;font-weight:700;color:#0057a8;text-shadow:0 2px 0 rgba(255,255,255,.65),0 12px 28px rgba(0,90,160,.28)}
 .folio-fa-alias{color:#1a6ea8;letter-spacing:.12em;margin:0 0 18px;font-size:15px;font-weight:600;text-shadow:0 1px 0 rgba(255,255,255,.6)}
-.folio-fa-glass{position:relative;border:1px solid rgba(255,255,255,.98);border-radius:20px;background:linear-gradient(180deg,rgba(255,255,255,.48),rgba(255,255,255,.20) 52%,rgba(235,255,242,.42));box-shadow:inset 0 1px 0 #ffffff,inset 0 -1px 0 rgba(255,255,255,.65),0 14px 30px rgba(15,90,150,.18);overflow:hidden}
-.folio-fa-glass::before{content:"";position:absolute;top:6%;left:6px;right:6px;height:34%;border-radius:12px;border-top:1px solid rgba(255,255,255,.9);background:linear-gradient(180deg,rgba(255,255,255,.80) 0%,rgba(255,255,255,.30) 55%,rgba(255,255,255,0) 92%);pointer-events:none}
+.folio-fa-glass{position:relative;border:1px solid rgba(7,64,110,.42);border-radius:20px;background:linear-gradient(180deg,rgba(255,255,255,.48),rgba(255,255,255,.20) 52%,rgba(198,255,214,.46));box-shadow:inset 0 1px 0 rgba(255,255,255,.92),inset 1px 0 0 rgba(255,255,255,.38),inset -1px 0 0 rgba(255,255,255,.38),inset 0 -1px 0 rgba(255,255,255,.30),0 14px 30px rgba(15,90,150,.18);overflow:hidden}
+.folio-fa-glass::before{content:"";position:absolute;inset:0;border-radius:inherit;background:linear-gradient(180deg,rgba(255,255,255,.80) 0%,rgba(255,255,255,.26) 48%,rgba(255,255,255,.03) 50.5%,rgba(255,255,255,.08) 78%,rgba(150,255,185,.30) 100%);pointer-events:none}
 .folio-fa-slot{padding:14px 16px;color:#33586e}
 .folio-fa-badge{display:inline-block;position:relative;z-index:1;font-size:10.5px;letter-spacing:.08em;color:#5b3a00;background:linear-gradient(180deg,#fff3cf 0%,#ffd873 47%,#ff8a00 52%,#ffb84d 100%);border:1px solid rgba(255,255,255,.95);border-radius:999px;padding:2px 9px;margin-bottom:8px;font-weight:700;box-shadow:inset 0 1px 0 #ffffff,0 3px 8px rgba(200,120,0,.30)}
 .folio-fa-slotbody{position:relative;z-index:1}
@@ -86,7 +91,7 @@ main:has(.folio-fa){max-width:none;min-height:0;margin:0;padding:0}
 .folio-fa-divider{display:flex;gap:12px;align-items:center;justify-content:center;margin:46px 0 8px}
 .folio-fa section{margin-top:44px}
 .folio-fa h2{font-size:21px;letter-spacing:.12em;margin:0 0 16px;display:flex;align-items:center;gap:11px;font-weight:700;color:#0063b3;text-shadow:0 1px 0 rgba(255,255,255,.65)}
-.folio-fa-h2icon{flex:none;width:30px;height:30px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;background:radial-gradient(circle at 35% 20%,rgba(255,255,255,.98) 0 26%,rgba(255,255,255,0) 30%),linear-gradient(180deg,#2fb9ff,#0072e0 55%,#4dc9ff);border:1px solid rgba(255,255,255,.98);box-shadow:inset 0 -3px 5px rgba(255,255,255,.45),0 4px 10px rgba(10,90,160,.35)}
+.folio-fa-h2icon{flex:none;width:30px;height:30px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;background:radial-gradient(ellipse 135% 100% at 50% -30%,rgba(255,255,255,.95) 0 46%,rgba(255,255,255,.30) 58%,rgba(255,255,255,0) 63%),linear-gradient(180deg,#2fb9ff,#0072e0 55%,#4dc9ff);border:1px solid rgba(255,255,255,.98);box-shadow:inset 0 -3px 5px rgba(255,255,255,.45),0 4px 10px rgba(10,90,160,.35)}
 .folio-fa-works{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
 .folio-fa-works .folio-fa-glass{min-height:132px}
 .folio-fa-career{list-style:none;margin:0;padding:0 0 0 14px;border-left:3px solid transparent;border-image:linear-gradient(180deg,#00a2ff,#00c853) 1}
@@ -106,7 +111,7 @@ main:has(.folio-fa){max-width:none;min-height:0;margin:0;padding:0}
 .folio-fa-stats .folio-fa-glass{background:linear-gradient(180deg,rgba(255,255,255,.5),rgba(240,255,235,.24) 52%,rgba(140,255,150,.55))}
 .folio-fa-aboutwrap{position:relative}
 .folio-fa-aboutwrap .folio-fa-slot{padding-right:196px;min-height:122px}
-.folio-fa-dolphin{position:absolute;top:-16px;right:12px;width:172px;margin:0;padding:6px;border-radius:16px;background:linear-gradient(180deg,rgba(255,255,255,.75),rgba(255,255,255,.35) 55%,rgba(240,255,246,.6));border:1px solid rgba(255,255,255,.98);box-shadow:inset 0 1px 0 #fff,0 18px 36px rgba(10,90,60,.28);transform:rotate(2.5deg);z-index:3}
+.folio-fa-dolphin{position:absolute;top:-16px;right:12px;width:172px;margin:0;padding:6px;border-radius:16px;background:linear-gradient(180deg,rgba(255,255,255,.75),rgba(255,255,255,.35) 55%,rgba(240,255,246,.6));border:1px solid rgba(7,64,110,.35);box-shadow:inset 0 1px 0 #fff,0 18px 36px rgba(10,90,60,.28);transform:rotate(2.5deg);z-index:3}
 .folio-fa-dolphin::after{content:"";position:absolute;left:6px;right:6px;top:6px;height:36%;border-radius:11px;background:linear-gradient(180deg,rgba(255,255,255,.55) 0%,rgba(255,255,255,.14) 84%,rgba(255,255,255,0) 88%);pointer-events:none}
 .folio-fa-dolphin img{display:block;width:100%;height:auto;border-radius:11px;image-rendering:pixelated}
 .folio-fa-cloud{position:absolute;width:280px;height:120px;pointer-events:none;opacity:.98;background:radial-gradient(ellipse 62px 36px at 28% 62%,#ffffff 62%,transparent 64%),radial-gradient(ellipse 86px 50px at 54% 44%,#ffffff 62%,transparent 64%),radial-gradient(ellipse 56px 32px at 76% 64%,#ffffff 62%,transparent 64%);animation:folio-fa-drift 26s ease-in-out infinite alternate}
@@ -120,7 +125,7 @@ main:has(.folio-fa){max-width:none;min-height:0;margin:0;padding:0}
 .folio-fa-sparkle{position:absolute;pointer-events:none;animation:folio-fa-twinkle 3.4s ease-in-out infinite alternate}
 @keyframes folio-fa-twinkle{from{opacity:.25;transform:scale(.7) rotate(0deg)}to{opacity:.95;transform:scale(1.15) rotate(20deg)}}
 @media (max-width:640px){.folio-fa-hero{margin-top:40px;padding:22px}.folio-fa-hero h1{font-size:32px}.folio-fa-sun{width:140px;height:140px;top:3.8rem}.folio-fa-icon{width:104px;height:104px;top:5.2rem;right:5vw}.folio-fa-stats{grid-template-columns:repeat(2,1fr)}.folio-fa-works,.folio-fa-links,.folio-fa-cards{grid-template-columns:1fr}.folio-fa-aboutwrap{display:flex;flex-direction:column}.folio-fa-aboutwrap .folio-fa-slot{padding-right:16px;min-height:0}.folio-fa-dolphin{position:relative;order:-1;top:0;right:0;margin:0 0 10px auto;width:150px}}
-@media (prefers-reduced-motion:reduce){.folio-fa-bubble,.folio-fa-fish,.folio-fa-cloud,.folio-fa-globe,.folio-fa-butterfly,.folio-fa-sparkle{animation:none}}
+@media (prefers-reduced-motion:reduce){.folio-fa-aurora,.folio-fa-bubble,.folio-fa-fish,.folio-fa-cloud,.folio-fa-globe,.folio-fa-butterfly,.folio-fa-sparkle{animation:none}}
 `;
 
 function Slot({ label, children }: { label: string; children?: React.ReactNode }) {
@@ -171,7 +176,7 @@ function BubbleDivider() {
             height: s,
             borderRadius: "50%",
             background:
-              "radial-gradient(ellipse 62% 34% at 50% 13%,rgba(255,255,255,.95) 0 66%,rgba(255,255,255,.30) 72%,rgba(255,255,255,0) 76%),radial-gradient(ellipse 66% 30% at 50% 112%,rgba(255,255,255,.55) 0 55%,rgba(255,255,255,0) 66%),linear-gradient(180deg,rgba(255,255,255,.10),rgba(255,255,255,.02) 48%,rgba(255,255,255,.20))",
+              "radial-gradient(ellipse 62% 34% at 50% 13%,rgba(255,255,255,.95) 0 66%,rgba(255,255,255,.30) 72%,rgba(255,255,255,0) 76%),radial-gradient(ellipse 66% 30% at 50% 112%,rgba(170,255,205,.55) 0 55%,rgba(170,255,205,0) 66%),linear-gradient(180deg,rgba(255,255,255,.10),rgba(255,255,255,.02) 48%,rgba(190,255,215,.30))",
             border: "1.5px solid rgba(255,255,255,.95)",
             boxShadow: "inset 0 0 0 1px rgba(180,230,255,.30),0 1px 2px rgba(0,90,160,.18)",
           }}
@@ -210,17 +215,38 @@ function Globe({ top, right, size, delay }: { top: string; right: string; size: 
         <clipPath id="folio-fa-globe-clip"><circle cx="50" cy="50" r="48" /></clipPath>
         <linearGradient id="folio-fa-gloss" x1="0" y1="0" x2="0" y2="1">
           <stop offset="0%" stopColor="#ffffff" stopOpacity=".92" />
-          <stop offset="82%" stopColor="#ffffff" stopOpacity=".34" />
-          <stop offset="88%" stopColor="#ffffff" stopOpacity="0" />
+          <stop offset="46%" stopColor="#ffffff" stopOpacity=".30" />
+          <stop offset="52%" stopColor="#ffffff" stopOpacity=".03" />
           <stop offset="100%" stopColor="#ffffff" stopOpacity="0" />
         </linearGradient>
       </defs>
       <g clipPath="url(#folio-fa-globe-clip)">
         <rect width="100" height="100" fill="#0080ff" />
         <ellipse cx="50" cy="30" rx="47" ry="29" fill="url(#folio-fa-gloss)" />
-        <ellipse cx="50" cy="97" rx="46" ry="16" fill="#ffffff" opacity=".22" />
+        <ellipse cx="50" cy="97" rx="46" ry="16" fill="#a8ffc8" opacity=".32" />
       </g>
       <circle cx="50" cy="50" r="48" fill="none" stroke="rgba(255,255,255,.9)" strokeWidth="1.6" />
+    </svg>
+  );
+}
+
+function Aurora() {
+  return (
+    <svg className="folio-fa-aurora" viewBox="0 0 1440 320" preserveAspectRatio="none" aria-hidden="true">
+      <defs>
+        <linearGradient id="folio-fa-aurora-a" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0%" stopColor="#37f2c8" />
+          <stop offset="52%" stopColor="#7dff8a" />
+          <stop offset="100%" stopColor="#8a7dff" />
+        </linearGradient>
+        <linearGradient id="folio-fa-aurora-b" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0%" stopColor="#4dc9ff" />
+          <stop offset="55%" stopColor="#37f2c8" />
+          <stop offset="100%" stopColor="#c07dff" />
+        </linearGradient>
+      </defs>
+      <path d="M-40 218 C220 96 460 262 740 158 C1020 54 1260 96 1500 176 L1500 66 C1240 150 980 44 700 128 C430 209 210 118 -40 96 Z" fill="url(#folio-fa-aurora-a)" opacity=".34" />
+      <path d="M-40 268 C260 170 520 300 820 208 C1090 126 1300 168 1500 226 L1500 148 C1270 208 1040 118 780 190 C520 262 260 190 -40 168 Z" fill="url(#folio-fa-aurora-b)" opacity=".22" />
     </svg>
   );
 }
@@ -292,6 +318,10 @@ export default function TadanoenFolioPage() {
         </g>
       </svg>
       <div className="folio-fa-sun" aria-hidden="true" />
+      <Aurora />
+      <span className="folio-fa-bokeh" style={{ width: 170, height: 170, top: "9%", right: "14%" }} aria-hidden="true" />
+      <span className="folio-fa-bokeh" style={{ width: 210, height: 210, top: "34%", left: -60 }} aria-hidden="true" />
+      <span className="folio-fa-bokeh" style={{ width: 130, height: 130, bottom: "16%", right: "5%", background: "radial-gradient(circle,rgba(190,255,200,.28),rgba(190,255,200,0) 62%)" }} aria-hidden="true" />
       <Cloud top="4rem" left="4%" scale={1} delay="0s" />
       <Cloud top="9.5rem" left="52%" scale={0.7} delay="2.2s" />
       <Cloud top="2.2rem" left="68%" scale={0.55} delay="4s" />
