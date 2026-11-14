@@ -9,15 +9,19 @@
     "start": "next start",
     "test": "node --test tests/*.mjs",
     "build:workers": "node scripts/build-workers.mjs",
-    "prebuild": "node scripts/build-workers.mjs"
+    "prebuild": "node scripts/build-workers.mjs && node scripts/fetch-bgcut-models.mjs"
   },
   "dependencies": {
     "@discord/embedded-app-sdk": "^2.5.0",
+    "gifenc": "^1.0.3",
+    "gifuct-js": "^2.1.2",
     "marked": "^14.1.0",
     "next": "^15.5.0",
+    "onnxruntime-web": "1.20.1",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
-    "three": "^0.187.0"
+    "three": "^0.187.0",
+    "upng-js": "^2.1.0"
   },
   "overrides": {
     "@discord/embedded-app-sdk": {
