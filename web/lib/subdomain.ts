@@ -4,6 +4,7 @@
 // 現在の割り当て:
 // - oneprompter.agobot.app → /one-prompter（One Prompter）
 // - deshihito.agobot.app  → /folio/deshihito（ポートフォリオ枠・1人1ファイル）
+// - tadanoen.agobot.app   → /folio/tadanoen（ポートフォリオ枠・1人1ファイル）
 //
 // rewrite ではなく redirect にしている理由（2026-11-10 の 500 障害）:
 // Cloudflare Tunnel 配下では Next の nextUrl は X-Forwarded-Proto を拾って
@@ -25,6 +26,7 @@ export const ONE_PROMPTER_PATH = "/one-prompter";
 export const SUBDOMAIN_ROUTES: Readonly<Record<string, string>> = {
   [ONE_PROMPTER_HOST]: ONE_PROMPTER_PATH,
   "deshihito.agobot.app": "/folio/deshihito",
+  "tadanoen.agobot.app": "/folio/tadanoen",
 };
 
 /**
