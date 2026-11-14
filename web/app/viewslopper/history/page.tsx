@@ -76,7 +76,7 @@ export default function ViewslopperHistoryPage() {
                 </button>
                 {openAt === e.savedAt && (
                   <div style={{ marginTop: 6, borderTop: "1px solid #23252a" }}>
-                    <ResultView result={e.result as ViewResult} />
+                    <ResultView result={e.result as ViewResult} savedAt={e.savedAt} />
                     <button
                       type="button"
                       onClick={() => remove(e.savedAt)}

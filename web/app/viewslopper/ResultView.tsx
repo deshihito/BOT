@@ -1,3 +1,7 @@
+"use client";
+
+import { useState } from "react";
+
 // 診断結果の表示専用コンポーネント。診断画面と保存画面（履歴）で共有する。
 
 type Dimension = { key: string; label: string; score: number; weight: number; hits: number };
@@ -34,7 +38,31 @@ export function scoreColor(score: number): string {
   return "#e5484d";
 }
 
-export default function ResultView({ result }: { result: ViewResult }) {
+export default function ResultView({ result, savedAt }: { result: ViewResult; savedAt?: number }) {
+  const [cardUrl, setCardUrl] = useState("");
+  const [cardName, setCardName] = useState("");
+
+  async function makeCard() {
+    const { drawScoreCard, buildCardFileName } = await import("@/lib/viewslopper-card");
+    const canvas = document.createElement("canvas");
+    drawScoreCard(canvas, {
+      url: result.url,
+      title: result.title,
+      score: result.score,
+      grade: result.grade,
+      dimensions: result.dimensions.map((d) => ({ label: d.label, score: d.score })),
+      uxFriction: result.ux?.friction ?? null,
+      uxGrade: result.ux?.grade ?? "",
+      appearanceScore: result.appearance?.score ?? null,
+      appearanceGrade: result.appearance?.grade ?? "",
+      scoreSource: result.scoreSource,
+      rendered: result.rendered,
+      date: savedAt ? new Date(savedAt) : new Date(),
+    });
+    setCardName(buildCardFileName(result.url, result.score));
+    setCardUrl(canvas.toDataURL("image/png"));
+  }
+
   return (
     <section aria-label="診断結果" style={{ marginTop: 28 }}>
               <div style={{ display: "flex", alignItems: "baseline", gap: 14, flexWrap: "wrap" }}>
@@ -158,6 +186,29 @@ export default function ResultView({ result }: { result: ViewResult }) {
               ) : (
                 <p style={{ color: "#b6bac2" }}>今回はスクリーンショットを取得できず、外観は採点できませんでした。</p>
               )}
+
+          <div style={{ marginTop: 32, borderTop: "1px solid #23252a", paddingTop: 20 }}>
+            <button
+              type="button"
+              onClick={() => void makeCard()}
+              style={{ padding: "12px 20px", borderRadius: 10, border: "none", fontWeight: 700, fontSize: 15, background: "#f2f3f5", color: "#17191c", cursor: "pointer" }}
+            >
+              16:9カード画像を作る
+            </button>
+            {cardUrl && (
+              <div style={{ marginTop: 16 }}>
+                {/* 生成したカードのプレビュー。iPhone では長押しでも保存できる */}
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={cardUrl} alt="診断結果の16:9カード画像" style={{ width: "100%", borderRadius: 12, border: "1px solid #23252a" }} />
+                <p style={{ marginTop: 10, fontSize: 13 }}>
+                  <a href={cardUrl} download={cardName} style={{ color: "#d6d9de" }}>
+                    画像を保存する
+                  </a>
+                  <span style={{ color: "#6d7278" }}>（iPhoneでは画像を長押しして「写真に追加」でも保存できます）</span>
+                </p>
+              </div>
+            )}
+          </div>
             </section>
   );
 }

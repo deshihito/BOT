@@ -202,6 +202,19 @@ test("診断履歴: 端末保存の追加・重複URLの最新化・上限・削
   assert.deepEqual(h.loadHistory(storage), []);
 });
 
+test("16:9カード: 寸法・ファイル名・省略が仕様通り", async () => {
+  const csrc = fs.readFileSync(path.join(import.meta.dirname, "..", "lib", "viewslopper-card.ts"), "utf8");
+  const cjs = ts.transpileModule(csrc, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText;
+  const c = await import("data:text/javascript;base64," + Buffer.from(cjs).toString("base64"));
+  assert.equal(c.CARD_WIDTH / c.CARD_HEIGHT, 16 / 9);
+  assert.equal(c.buildCardFileName("https://example.com/a?b=1", 42), "viewslopper-example.com-42.png");
+  assert.equal(c.buildCardFileName("not a url", 7), "viewslopper-result-7.png");
+  assert.equal(c.ellipsize("abcdef", 4), "abc…");
+  assert.equal(c.ellipsize("abc", 4), "abc");
+  assert.equal(c.cardScoreColor(10), "#46a758");
+  assert.equal(c.cardScoreColor(90), "#e5484d");
+});
+
 test("LLM診断メッセージはスコア固定を指示し、応答検証は不正要素を捨てる", () => {
   const page = { url: "https://e.com", title: "t", description: "", headings: [], text: SLOP_TEXT };
   const msgs = m.buildDiagnosisMessages(page, m.scoreText(SLOP_TEXT));
