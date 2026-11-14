@@ -693,6 +693,7 @@ class GeneralCog(
                     self._spawn(self._notify_levelup(
                         message.guild, message.author, level_before, level_after,
                         fallback_channel=message.channel,
+                        chat_exp=_as_int(user.get("chat_exp")), vc_exp=_as_int(user.get("vc_exp")),
                     ))
                     await self._notify_level_rewards(
                         message.guild, message.author, level_before, level_after,
@@ -747,6 +748,7 @@ class GeneralCog(
             if levelup:
                 self._spawn(self._notify_levelup(
                     member.guild, member, levelup[0], levelup[1], fallback_channel=before.channel,
+                    chat_exp=_as_int(user.get("chat_exp")), vc_exp=_as_int(user.get("vc_exp")),
                 ))
                 await self._notify_level_rewards(
                     member.guild, member, levelup[0], levelup[1],
@@ -762,7 +764,7 @@ class GeneralCog(
             now = time.time()
             touched = False
             active: set[tuple[str, str]] = set()
-            levelups: list[tuple[discord.Guild, int, int, int, object]] = []
+            levelups: list[tuple[discord.Guild, int, int, int, object, int, int]] = []
             for guild in list(self.bot.guilds):
                 for uid, voice_channel in _iter_voice_user_channels(guild):
                     active.add((str(guild.id), str(uid)))
@@ -775,7 +777,7 @@ class GeneralCog(
                         touched = True
                     level_after = _user_general_level(user)
                     if level_after > level_before:
-                        levelups.append((guild, uid, level_before, level_after, voice_channel))
+                        levelups.append((guild, uid, level_before, level_after, voice_channel, _as_int(user.get("chat_exp")), _as_int(user.get("vc_exp"))))
             # VCにいないのに計測中のままの人(退室イベント取りこぼし等)は計測を止める
             for gid, users in data.items():
                 if not isinstance(users, dict):
@@ -788,7 +790,7 @@ class GeneralCog(
                         touched = True
             if touched:
                 await _exp_save()
-            for guild, uid, level_before, level_after, voice_channel in levelups:
+            for guild, uid, level_before, level_after, voice_channel, chat_exp, vc_exp in levelups:
                 member = guild.get_member(uid)
                 if member is not None:
                     await self._notify_level_rewards(
@@ -796,6 +798,7 @@ class GeneralCog(
                     )
                 self._spawn(self._notify_levelup(
                     guild, uid, level_before, level_after, fallback_channel=voice_channel,
+                    chat_exp=chat_exp, vc_exp=vc_exp,
                 ))
         except Exception:
             logger.exception("EXP: VC tick に失敗しました (次の周期で再試行します)")
