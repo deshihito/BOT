@@ -12,6 +12,7 @@ import {
   type BotStatusSnapshot,
 } from "@/lib/site";
 import { InviteCtaBlock } from "../InviteCta";
+import { InteractiveHoursChart, InteractiveSeriesChart, InteractiveUptime } from "./StatusCharts";
 
 export const metadata = {
   title: "サービスステータス",
@@ -59,63 +60,6 @@ function lastJstHourKeys(now: Date, count: number): string[] {
     keys.push(hour.toISOString().slice(0, 13));
   }
   return keys;
-}
-
-function SeriesChart({ points, color, label }: {
-  points: { label: string; value: number }[];
-  color: string;
-  label: string;
-}) {
-  const width = 560;
-  const height = 140;
-  const pad = 8;
-  const values = points.map((point) => point.value);
-  const max = Math.max(...values);
-  const min = Math.min(...values);
-  const range = max - min || 1;
-  const stepX = points.length > 1 ? (width - pad * 2) / (points.length - 1) : 0;
-  const coords = points.map((point, index) => [
-    pad + index * stepX,
-    height - pad - ((point.value - min) / range) * (height - pad * 2),
-  ] as const);
-  const line = coords.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(" ");
-  const area = `${pad},${height - pad} ${line} ${(pad + (points.length - 1) * stepX).toFixed(1)},${height - pad}`;
-  const [lastX, lastY] = coords[coords.length - 1];
-  return (
-    <svg viewBox={`0 0 ${width} ${height}`} className="status-chart" role="img" aria-label={label}>
-      <polygon points={area} fill={color} opacity={0.14} />
-      <polyline points={line} fill="none" stroke={color} strokeWidth={2} />
-      <circle cx={lastX} cy={lastY} r={3.5} fill={color} />
-    </svg>
-  );
-}
-
-function HoursChart({ points }: { points: { label: string; value: number }[] }) {
-  const width = 560;
-  const height = 140;
-  const gap = 2;
-  const max = Math.max(1, ...points.map((point) => point.value));
-  const barWidth = (width - gap * (points.length - 1)) / points.length;
-  return (
-    <svg viewBox={`0 0 ${width} ${height}`} className="status-chart" role="img" aria-label="直近24時間の1時間ごとの実行数">
-      {points.map((point, index) => {
-        const barHeight = Math.max(1, (point.value / max) * (height - 16));
-        return (
-          <rect
-            key={point.label}
-            x={index * (barWidth + gap)}
-            y={height - barHeight}
-            width={barWidth}
-            height={barHeight}
-            rx={2}
-            fill="#2f9e44"
-          >
-            <title>{`${point.label}: ${point.value}回`}</title>
-          </rect>
-        );
-      })}
-    </svg>
-  );
 }
 
 function formatDateTime(iso: string): string {
@@ -234,23 +178,16 @@ export default async function StatusPage() {
                     {fresh ? "正常稼働中" : "情報が古い"}
                   </span>
                 </div>
-                <div className="uptime-bars">
-                  {uptimeDates.map((date, index) => {
-                    const ratio = uptimeRatios[index];
-                    const cls = ratio === null ? "uptime-bar none"
-                      : ratio >= 0.99 ? "uptime-bar ok"
-                      : ratio >= 0.5 ? "uptime-bar warn" : "uptime-bar low";
-                    const title = ratio === null
-                      ? `${date}: 記録なし`
-                      : `${date}: 稼働率 ${(ratio * 100).toFixed(1)}%`;
-                    return <div key={date} className={cls} title={title} />;
-                  })}
-                </div>
-                <div className="uptime-caption">
-                  <span>30日前</span>
-                  <span>{uptimePct === null ? "—" : `${uptimePct.toFixed(1)} % uptime`}</span>
-                  <span>今日</span>
-                </div>
+                <InteractiveUptime
+                  items={uptimeDates.map((date, index) => ({
+                    date,
+                    ratio: uptimeRatios[index],
+                    samples: dayByDate.get(date)?.samples ?? null,
+                  }))}
+                  pct={uptimePct}
+                  recordedDays={recordedRatios.length}
+                  samplesPerDay={SAMPLES_PER_DAY}
+                />
               </section>
               <div className="chart-grid">
                 <section className="chart-card" aria-label="ユーザー数の推移">
@@ -262,7 +199,7 @@ export default async function StatusPage() {
                   </p>
                   {seriesDays.length >= 2 ? (
                     <>
-                      <SeriesChart
+                      <InteractiveSeriesChart
                         color="#2f9e44"
                         label="ユーザー数の推移グラフ"
                         points={seriesDays.map((day) => ({ label: day.date, value: day.users }))}
@@ -285,7 +222,7 @@ export default async function StatusPage() {
                   </p>
                   {seriesDays.length >= 2 ? (
                     <>
-                      <SeriesChart
+                      <InteractiveSeriesChart
                         color="#1971c2"
                         label="サーバー数の推移グラフ"
                         points={seriesDays.map((day) => ({ label: day.date, value: day.guilds }))}
@@ -305,7 +242,7 @@ export default async function StatusPage() {
                   <h2>1時間ごとの実行数（直近24時間）</h2>
                   <span className="muted">合計 {hourTotal.toLocaleString("ja-JP")} 回</span>
                 </div>
-                <HoursChart points={hourPoints} />
+                <InteractiveHoursChart points={hourPoints} />
                 <div className="chart-range">
                   <span>{hourPoints[0].label}</span>
                   <span>コマンドとアクションの合計</span>
