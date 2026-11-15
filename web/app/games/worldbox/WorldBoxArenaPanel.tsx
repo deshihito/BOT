@@ -48,6 +48,24 @@ interface PvpState {
   duel: PvpDuelView | null;
 }
 
+interface TournamentView {
+  status: "none" | "entry" | "running" | "done";
+  fee: number;
+  maxEntrants: number;
+  entrantCount: number;
+  entryEndsAt: number | null;
+  prizePool: number;
+  entered: boolean;
+  champion: "you" | "decided" | null;
+  myMatch: { round: number; state: "pending" | "dueling" | "done"; won: boolean | null } | null;
+  decidedMatches: number;
+  totalMatches: number;
+}
+
+interface TournamentState {
+  tournament: TournamentView;
+}
+
 const ERROR_LABEL: Record<string, string> = {
   not_at_arena: "闘技場にいません",
   session_active: "進行中の試合があります",
@@ -56,6 +74,8 @@ const ERROR_LABEL: Record<string, string> = {
   not_your_turn: "相手の番です",
   payment_pending: "参加費を処理中です。少し待ってください",
   payment_failed: "参加費の支払いに失敗しました",
+  tournament_closed: "大会は締め切られました",
+  tournament_full: "大会は満員です",
   bad_tier: "相手が不正です",
   bad_move: "手が不正です",
   unauthorized: "ログインが必要です",
@@ -85,6 +105,13 @@ function HpBar({ value, max, color }: { value: number; max: number; color: strin
   );
 }
 
+function tournamentRoundLabel(round: number, totalMatches: number): string {
+  const lastRound = totalMatches <= 1 ? 0 : totalMatches <= 3 ? 1 : 2;
+  if (round >= lastRound) return "決勝";
+  if (round === 1) return "準決勝";
+  return `${round + 1}回戦`;
+}
+
 export default function WorldBoxArenaPanel({ onClose }: { onClose: () => void }) {
   const [load, setLoad] = useState<LoadState>("loading");
   const [state, setState] = useState<ArenaState | null>(null);
@@ -94,6 +121,8 @@ export default function WorldBoxArenaPanel({ onClose }: { onClose: () => void })
   const [pvp, setPvp] = useState<PvpState | null>(null);
   const [pvpMsg, setPvpMsg] = useState("");
   const [pvpOutcome, setPvpOutcome] = useState<"win" | "lose" | null>(null);
+  const [tournament, setTournament] = useState<TournamentView | null>(null);
+  const [tournamentMsg, setTournamentMsg] = useState("");
   const aliveRef = useRef(true);
 
   const refresh = useCallback(async () => {
@@ -122,13 +151,26 @@ export default function WorldBoxArenaPanel({ onClose }: { onClose: () => void })
     }
   }, []);
 
+  const refreshTournament = useCallback(async () => {
+    try {
+      const res = await fetch("/api/worldbox/tournament", { headers: { Accept: "application/json" } });
+      if (!res.ok) return;
+      const data = (await res.json()) as TournamentState;
+      if (!aliveRef.current) return;
+      setTournament(data.tournament);
+    } catch {
+      // 大会の取得失敗は闘技場の表示を壊さない（次の更新で取り直す）
+    }
+  }, []);
+
   useEffect(() => {
     aliveRef.current = true;
     void refresh();
     void refreshPvp();
-    const timer = window.setInterval(() => { void refresh(); void refreshPvp(); }, 3000);
+    void refreshTournament();
+    const timer = window.setInterval(() => { void refresh(); void refreshPvp(); void refreshTournament(); }, 3000);
     return () => { aliveRef.current = false; window.clearInterval(timer); };
-  }, [refresh, refreshPvp]);
+  }, [refresh, refreshPvp, refreshTournament]);
 
   const post = async (payload: Record<string, unknown>) => {
     setBusy(true);
@@ -173,6 +215,28 @@ export default function WorldBoxArenaPanel({ onClose }: { onClose: () => void })
       if (data.outcome) setPvpOutcome(data.outcome);
     } catch {
       setPvpMsg("受け付けられませんでした");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const postTournament = async (payload: Record<string, unknown>) => {
+    setBusy(true);
+    try {
+      const res = await fetch("/api/worldbox/tournament", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = (await res.json().catch(() => ({}))) as TournamentState & { error?: string };
+      if (!res.ok) {
+        setTournamentMsg(ERROR_LABEL[data.error ?? ""] ?? "受け付けられませんでした");
+        return;
+      }
+      setTournamentMsg("");
+      setTournament(data.tournament);
+    } catch {
+      setTournamentMsg("受け付けられませんでした");
     } finally {
       setBusy(false);
     }
@@ -321,6 +385,66 @@ export default function WorldBoxArenaPanel({ onClose }: { onClose: () => void })
                 </div>
               )}
               {pvpMsg && <p role="status" style={{ margin: "10px 0 0", fontSize: 13 }}>{pvpMsg}</p>}
+            </div>
+          )}
+
+          {!outcome && !session && tournament && (
+            <div style={{ marginTop: 16, borderTop: "1px solid rgba(255,255,255,0.15)", paddingTop: 12 }}>
+              <p style={{ margin: "0 0 8px", fontSize: 14, fontWeight: 700 }}>大会</p>
+              {tournament.status === "none" && (
+                <button
+                  type="button" disabled={busy}
+                  style={{ ...btn, display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%", textAlign: "left" }}
+                  onClick={() => void postTournament({ action: "enter" })}
+                >
+                  <span>大会に参加する</span>
+                  <span>参加費 {tournament.fee} → 優勝賞金は参加費の総額</span>
+                </button>
+              )}
+              {tournament.status === "entry" && (
+                <div>
+                  <p style={{ margin: "0 0 8px", fontSize: 13 }}>
+                    募集中（{tournament.entrantCount}/{tournament.maxEntrants}人）・賞金総額 {tournament.prizePool}
+                  </p>
+                  {tournament.entered ? (
+                    <p style={{ margin: 0, fontSize: 13 }}>参加済みです</p>
+                  ) : (
+                    <button
+                      type="button" disabled={busy}
+                      style={{ ...btn, display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%", textAlign: "left" }}
+                      onClick={() => void postTournament({ action: "enter" })}
+                    >
+                      <span>参加する</span>
+                      <span>参加費 {tournament.fee}</span>
+                    </button>
+                  )}
+                </div>
+              )}
+              {tournament.status === "running" && (
+                <div>
+                  <p style={{ margin: "0 0 8px", fontSize: 13 }}>
+                    開催中（{tournament.decidedMatches}/{tournament.totalMatches}試合決着）・賞金総額 {tournament.prizePool}
+                  </p>
+                  {tournament.entered && tournament.myMatch && (
+                    <p style={{ margin: 0, fontSize: 13 }}>
+                      {tournamentRoundLabel(tournament.myMatch.round, tournament.totalMatches)}
+                      {tournament.myMatch.state === "pending" && " — 対戦相手を待っています"}
+                      {tournament.myMatch.state === "dueling" && " — 決闘中です。対人戦で戦ってください"}
+                      {tournament.myMatch.state === "done" && (tournament.myMatch.won ? " — 勝利" : " — 敗退")}
+                    </p>
+                  )}
+                </div>
+              )}
+              {tournament.status === "done" && (
+                <p style={{ margin: 0, fontSize: 13 }}>
+                  {tournament.champion === "you"
+                    ? `優勝 — 賞金 ${tournament.prizePool}`
+                    : tournament.champion === "decided"
+                      ? "優勝者が決まりました"
+                      : "不成立 — 参加費を返金します"}
+                </p>
+              )}
+              {tournamentMsg && <p role="status" style={{ margin: "10px 0 0", fontSize: 13 }}>{tournamentMsg}</p>}
             </div>
           )}
 

@@ -61,6 +61,24 @@ type PlayResult =
   | { game: "roulette"; number: number; color: RouletteColor; payout: number }
   | { game: "dice"; rolled: number; hit: boolean; payout: number };
 
+interface CasinoTournamentView {
+  status: "none" | "entry" | "running" | "done";
+  fee: number;
+  maxEntrants: number;
+  entrantCount: number;
+  entryEndsAt: number | null;
+  playEndsAt: number | null;
+  prizePool: number;
+  entered: boolean;
+  myNet: number;
+  myRank: number | null;
+  standings: { rank: number; net: number; you: boolean }[];
+}
+
+interface CasinoTournamentState {
+  tournament: CasinoTournamentView;
+}
+
 
 interface Celebration {
   key: number;
@@ -93,6 +111,8 @@ const ERROR_LABEL: Record<string, string> = {
   discord_required: "Discord ログインが必要です",
   economy_unavailable: "いまカジノを使えません",
   economy_failed: "受け付けられませんでした",
+  tournament_closed: "大会は締め切られました",
+  tournament_full: "大会は満員です",
 };
 
 const OP_STATUS_LABEL: Record<EconomyOp["status"], string> = {
@@ -282,6 +302,8 @@ export default function WorldBoxCasinoPanel({ onClose }: { onClose: () => void }
   const [diceRange, setDiceRange] = useState<number>(DICE_RANGES[0]);
   const [diceNumber, setDiceNumber] = useState<number>(1);
   const [bjFinal, setBjFinal] = useState<SessionView | null>(null);
+  const [tournament, setTournament] = useState<CasinoTournamentView | null>(null);
+  const [tournamentMsg, setTournamentMsg] = useState("");
   const [lastSpin, setLastSpin] = useState<{ reward: number; penalty: number; events: string[] } | null>(null);
   const [lastGo, setLastGo] = useState<{ win: boolean; currentValue: number } | null>(null);
   // 演出用
@@ -344,17 +366,29 @@ export default function WorldBoxCasinoPanel({ onClose }: { onClose: () => void }
     }
   }, []);
 
+  const refreshTournament = useCallback(async () => {
+    try {
+      const res = await fetch("/api/worldbox/casino-tournament", { headers: { Accept: "application/json" } });
+      if (!res.ok) return;
+      const data = (await res.json()) as CasinoTournamentState;
+      if (aliveRef.current) setTournament(data.tournament);
+    } catch {
+      // 大会の取得失敗はカジノの表示を壊さない（次の更新で取り直す）
+    }
+  }, []);
+
   useEffect(() => {
     aliveRef.current = true;
     void refresh();
-    const timer = window.setInterval(() => void refresh(), 3000);
+    void refreshTournament();
+    const timer = window.setInterval(() => { void refresh(); void refreshTournament(); }, 3000);
     const timers = timersRef.current;
     return () => {
       aliveRef.current = false;
       window.clearInterval(timer);
       for (const id of timers) window.clearTimeout(id);
     };
-  }, [refresh]);
+  }, [refresh, refreshTournament]);
 
   // 回転中の目まぐるしい切り替え（スロット/ルーレット/ダイス共通）
   useEffect(() => {
@@ -389,6 +423,28 @@ export default function WorldBoxCasinoPanel({ onClose }: { onClose: () => void }
     const data = (await res.json().catch(() => ({}))) as Record<string, unknown> & { error?: string };
     return { res, data };
   }, []);
+
+  const postTournament = async (payload: Record<string, unknown>) => {
+    setBusy(true);
+    try {
+      const res = await fetch("/api/worldbox/casino-tournament", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = (await res.json().catch(() => ({}))) as CasinoTournamentState & { error?: string };
+      if (!res.ok) {
+        setTournamentMsg(ERROR_LABEL[data.error ?? ""] ?? "受け付けられませんでした");
+        return;
+      }
+      setTournamentMsg("");
+      setTournament(data.tournament);
+    } catch {
+      setTournamentMsg("受け付けられませんでした");
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const finishPlay = useCallback((r: PlayResult, betAmount: number) => {
     setResult(r);
@@ -961,6 +1017,78 @@ export default function WorldBoxCasinoPanel({ onClose }: { onClose: () => void }
               <span style={{ opacity: 0.75 }}>{OP_STATUS_LABEL[op.status]}</span>
             </div>
           ))}
+        </div>
+      )}
+
+      {tournament && (
+        <div style={{ marginTop: 12, borderTop: "1px solid rgba(255,255,255,0.12)", paddingTop: 8 }}>
+          <p style={{ margin: "0 0 8px", fontSize: 14, fontWeight: 700 }}>大会</p>
+          {tournament.status === "none" && (
+            <button
+              type="button" disabled={busy || machine === null}
+              style={{ ...btn, display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%", textAlign: "left" }}
+              onClick={() => void postTournament({ action: "enter" })}
+            >
+              <span>大会に参加する</span>
+              <span>参加費 {tournament.fee} → 純益の上位3人が賞金を分け合う</span>
+            </button>
+          )}
+          {tournament.status === "entry" && (
+            <div>
+              <p style={{ margin: "0 0 8px", fontSize: 13 }}>
+                募集中（{tournament.entrantCount}/{tournament.maxEntrants}人）・賞金総額 {tournament.prizePool}
+              </p>
+              {tournament.entered ? (
+                <p style={{ margin: 0, fontSize: 13 }}>参加済みです</p>
+              ) : (
+                <button
+                  type="button" disabled={busy || machine === null}
+                  style={{ ...btn, display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%", textAlign: "left" }}
+                  onClick={() => void postTournament({ action: "enter" })}
+                >
+                  <span>参加する</span>
+                  <span>参加費 {tournament.fee}</span>
+                </button>
+              )}
+            </div>
+          )}
+          {tournament.status === "running" && (
+            <div>
+              <p style={{ margin: "0 0 8px", fontSize: 13 }}>
+                対局中・賞金総額 {tournament.prizePool}
+                {tournament.entered && ` — あなたの純益 ${tournament.myNet}${tournament.myRank ? `（${tournament.myRank}位）` : ""}`}
+              </p>
+              {tournament.standings.map((row) => (
+                <div key={row.rank} style={{ display: "flex", gap: 8, fontSize: 12, padding: "3px 0" }}>
+                  <span>{row.rank}位</span>
+                  <span style={{ flex: 1 }} />
+                  <span>{row.you ? "あなた" : "参加者"}</span>
+                  <span>純益 {row.net}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          {tournament.status === "done" && (
+            <div>
+              <p style={{ margin: "0 0 8px", fontSize: 13 }}>
+                {tournament.entrantCount < 2
+                  ? "不成立 — 参加費を返金します"
+                  : tournament.standings.length > 0 && tournament.standings[0].net > 0
+                    ? "終了 — 賞金を配分しました"
+                    : "終了 — 純益プラスの参加者がいませんでした"}
+                {tournament.entered && ` — あなたの純益 ${tournament.myNet}${tournament.myRank ? `（${tournament.myRank}位）` : ""}`}
+              </p>
+              {tournament.standings.map((row) => (
+                <div key={row.rank} style={{ display: "flex", gap: 8, fontSize: 12, padding: "3px 0" }}>
+                  <span>{row.rank}位</span>
+                  <span style={{ flex: 1 }} />
+                  <span>{row.you ? "あなた" : "参加者"}</span>
+                  <span>純益 {row.net}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          {tournamentMsg && <p role="status" style={{ margin: "10px 0 0" }}>{tournamentMsg}</p>}
         </div>
       )}
 
