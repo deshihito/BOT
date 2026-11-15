@@ -222,7 +222,7 @@ test("war: 保存→復元の往復で戦争と履歴が残り、壊れた値は
 // ---------- タイル採掘への配線 ----------
 
 const tilesUrl = bundleModule(
-  ["worldbox/rng.ts", "worldbox/mapgen.ts", "worldbox/items.ts", "worldbox/profile.ts", "worldbox/presence.ts", "worldbox/tiles.ts"],
+  ["worldbox/rng.ts", "worldbox/mapgen.ts", "worldbox/items.ts", "worldbox/profile.ts", "worldbox/presence.ts", "worldbox/seasons.ts", "worldbox/tiles.ts"],
   [
     "worldTileSource", "mapTileAt", "T_GRASS",
     "parseProfile", "addItem", "countItem",
