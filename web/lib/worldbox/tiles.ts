@@ -376,10 +376,17 @@ export function applyPlaceBlock(
 }
 
 /**
- * ブロック採掘: 設置者だけが掘れる（ユニオン/レイドで他人のブロックを
- * 壊せるようにするのは防衛フェーズで開く）。硬いブロックは道具が要る。
+ * ブロック採掘: 設置者だけが掘れる。ただしユニオン戦争中は、攻撃側の国民が
+ * 防衛側の首都の WAR_TERRITORY_RADIUS 以内にある他者ブロックを掘れる
+ * （ルート側が戦争状態を検証して warBreakAllowed を渡す。掘ったブロックは
+ * 掘った者の所持品に入る＝略奪ルール）。硬いブロックは道具が要る。
  * 掘ったブロックはそのままアイテムに戻る。
  */
+export type MineBlockContext = {
+  /** 戦争中の他者ブロック破壊がこの1回で許可されているか。 */
+  warBreakAllowed?: boolean;
+};
+
 export function applyMineBlock(
   current: TileOverride | null,
   profile: PlayerProfile,
@@ -388,6 +395,7 @@ export function applyMineBlock(
   xRaw: unknown,
   yRaw: unknown,
   now: number,
+  ctx: MineBlockContext = {},
 ): TileActionResult {
   const tile = checkedTile(xRaw, yRaw);
   if (!tile) return { ok: false, error: "invalid_tile" };
@@ -397,7 +405,7 @@ export function applyMineBlock(
   const block = active?.block;
   if (!active || !block) return { ok: false, error: "no_block" };
   const selfId = presenceIdFor(ownerKey);
-  if (block.ownerId !== selfId) return { ok: false, error: "not_owner" };
+  if (block.ownerId !== selfId && !ctx.warBreakAllowed) return { ok: false, error: "not_owner" };
   const def = itemById(block.itemId);
   if (!def) return { ok: false, error: "no_block" };
   const tool = blockMineTool(def);
