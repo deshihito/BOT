@@ -15,6 +15,14 @@ const MAX_VELOCITY = 16;
 /** 表示名の上限文字数。 */
 export const PRESENCE_NAME_MAX = 24;
 
+/** プレイヤーがいる空間。ワールドとロビーでプレゼンスは混ざらない。 */
+export type PresenceSpace = "world" | "lobby";
+
+/** 空間の指定として解釈する。不正な値はワールドに寄せる。 */
+export function sanitizePresenceSpace(raw: unknown): PresenceSpace {
+  return raw === "lobby" ? "lobby" : "world";
+}
+
 export type Heartbeat = {
   name: string;
   x: number;
@@ -23,6 +31,8 @@ export type Heartbeat = {
   vy: number;
   /** 向き: 左 -1 / 右 1（アバターの反転用）。 */
   face: 1 | -1;
+  /** いる空間（ワールド / ロビー）。 */
+  space: PresenceSpace;
 };
 
 export type PresenceEntry = Heartbeat & {
@@ -69,6 +79,7 @@ export function sanitizeHeartbeat(raw: unknown, bounds: { width: number; height:
     vx: vel(v.vx),
     vy: vel(v.vy),
     face: v.face === -1 ? -1 : 1,
+    space: sanitizePresenceSpace(v.space),
   };
 }
 
@@ -95,15 +106,16 @@ export function isFreshPresence(entry: PresenceEntry, now: number): boolean {
   return entry.ts <= now + 5_000 && now - entry.ts <= PRESENCE_FRESH_MS;
 }
 
-/** 表示対象の選別: 新鮮な他者だけを新しい順に並べ、上限で切る。 */
+/** 表示対象の選別: 新鮮な他者だけを新しい順に並べ、上限で切る。space を渡すと同じ空間の者だけに絞る。 */
 export function selectVisiblePlayers(
   entries: PresenceEntry[],
   selfId: string | null,
   now: number,
   limit: number = PRESENCE_MAX_PLAYERS,
+  space?: PresenceSpace,
 ): PresenceEntry[] {
   return entries
-    .filter((e) => e.id !== selfId && isFreshPresence(e, now))
+    .filter((e) => e.id !== selfId && isFreshPresence(e, now) && (space === undefined || e.space === space))
     .sort((a, b) => b.ts - a.ts)
     .slice(0, limit);
 }

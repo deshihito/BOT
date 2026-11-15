@@ -3,7 +3,7 @@
 // - 移動と当たり判定（固体で止まる・壁ずり・マップ端）
 // - プレゼンス純粋ロジック（検証・鮮度・自己除外・上限・デッドレコニング）
 // - プレゼンス API（認証・往復・鮮度・自己除外・退室）
-// - セーブ v5（往復・旧バージョン破棄）
+// - セーブ v6（往復・旧バージョン破棄）
 // - クライアント配線（横スクロール層が残っていないこと）
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -58,7 +58,7 @@ async function loadBundle(files, exportNames) {
 const wb = await loadBundle(
   [
     "worldbox/rng.ts", "worldbox/mapgen.ts", "worldbox/move.ts", "worldbox/presence.ts",
-    "worldbox/save.ts", "worldbox/save-source.ts", "worldbox/daynight.ts",
+    "worldbox/lobby.ts", "worldbox/save.ts", "worldbox/save-source.ts", "worldbox/daynight.ts",
   ],
   [
     "MAP_W", "MAP_H", "MAP_SEED", "T_GRASS", "T_WATER", "T_SAND", "T_TREE", "T_ROCK", "T_DIRT",
@@ -324,19 +324,20 @@ test("presence: ID は不透明で安定している", () => {
   assert.ok(!a.includes("123456789"));
 });
 
-// ---------- セーブ v5 ----------
+// ---------- セーブ v6 ----------
 
-test("save v5: 往復とクランプ、旧バージョンは破棄される", () => {
-  assert.equal(wb.SAVE_VERSION, 5);
-  const json = wb.serializeSave({ x: 10.5, y: 20.25 });
-  assert.deepEqual(wb.parseSave(json), { x: 10.5, y: 20.25 });
-  const clamped = wb.parseSave(wb.serializeSave({ x: -3, y: 99999 }));
+test("save v6: 往復とクランプ、旧バージョンは破棄される", () => {
+  assert.equal(wb.SAVE_VERSION, 6);
+  const json = wb.serializeSave({ space: "world", x: 10.5, y: 20.25, worldReturn: null });
+  assert.deepEqual(wb.parseSave(json), { space: "world", x: 10.5, y: 20.25, worldReturn: null });
+  const clamped = wb.parseSave(wb.serializeSave({ space: "world", x: -3, y: 99999, worldReturn: null }));
   assert.ok(clamped.x >= 0.5 && clamped.y <= wb.MAP_H - 0.5);
-  // 128×128 時代（v4）と横スクロール時代のセーブは読み込まない
+  // v5（空間を持たない）以前のセーブは読み込まない
+  assert.equal(wb.parseSave(JSON.stringify({ version: 5, x: 64.5, y: 64.5 })), null);
   assert.equal(wb.parseSave(JSON.stringify({ version: 4, x: 64.5, y: 64.5 })), null);
   assert.equal(wb.parseSave(JSON.stringify({ version: 3, slots: [], player: { x: 1, y: 2 }, hp: 10 })), null);
   assert.equal(wb.parseSave(JSON.stringify({ version: 2, player: { x: 1, y: 2 } })), null);
-  assert.equal(wb.parseSave(JSON.stringify({ version: 5, x: "10", y: 5 })), null);
+  assert.equal(wb.parseSave(JSON.stringify({ version: 6, space: "world", x: "10", y: 5 })), null);
   assert.equal(wb.parseSave("{壊れた"), null);
   assert.equal(wb.parseSave(null), null);
 });
@@ -379,6 +380,7 @@ const authUrl = dataUrl(
 const auth = await import(authUrl);
 const rngUrl = dataUrl(transpile("worldbox/rng.ts"));
 const mapgenUrl = dataUrl(transpile("worldbox/mapgen.ts").replaceAll('"./rng"', JSON.stringify(rngUrl)));
+const lobbyUrl = dataUrl(transpile("worldbox/lobby.ts").replaceAll('"./mapgen"', JSON.stringify(mapgenUrl)));
 const presenceUrl = dataUrl(transpile("worldbox/presence.ts"));
 const presenceOnlineUrl = dataUrl(
   transpile("worldbox/presence-online.ts")
@@ -400,6 +402,7 @@ const presenceRoute = await import(
       .replaceAll('"next/server"', JSON.stringify(nextServerStubUrl))
       .replaceAll('"@/lib/auth"', JSON.stringify(authUrl))
       .replaceAll('"@/lib/worldbox/mapgen"', JSON.stringify(mapgenUrl))
+      .replaceAll('"@/lib/worldbox/lobby"', JSON.stringify(lobbyUrl))
       .replaceAll('"@/lib/worldbox/presence-online"', JSON.stringify(presenceOnlineUrl))
       .replaceAll('"@/lib/worldbox/presence"', JSON.stringify(presenceUrl)),
   ),
@@ -485,7 +488,9 @@ test("クライアント: 見下ろし＋プレゼンス配線があり、横ス
   assert.ok(client.includes("/api/worldbox/presence"), "プレゼンス API を使っていない");
   assert.ok(client.includes("minimap") || client.includes("ミニマップ"), "ミニマップが無い");
   assert.ok(client.includes("/img/nomal.png"), "公式アバターを使っていない");
-  for (const dead of ["worldgen", "physics", "enemies", "craft", "/api/worldbox/world", "jinrou"]) {
+  // "craft" は旧横スクロール時代の名残チェックだったが、ハンバーガーの
+  // クラフトアクション（器のみ）として正規に追加されたため対象から外す。
+  for (const dead of ["worldgen", "physics", "enemies", "/api/worldbox/world", "jinrou"]) {
     assert.ok(!client.includes(dead), `旧層が残っている: ${dead}`);
   }
   const catalog = fs.readFileSync(path.join(libDir, "games-catalog.ts"), "utf8");

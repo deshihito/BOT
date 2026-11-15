@@ -35,3 +35,54 @@ export function loadTextures(): Record<string, HTMLImageElement> {
   for (const [k, v] of Object.entries(TEXTURE_DATA)) { const img = new Image(); img.src = v; out[k] = img; }
   return out;
 }
+
+// ロビーのドット絵スプライト（64×64、噴水だけ 192×192 = 3タイル分）。
+// 実体は web/public/img/worldbox/lobby/ に置く。床の新種（チェック・ダーク
+// 大理石）もここに並べ、ファイルが無い間は読み込みが完了せず平色に落ちる。
+export const LOBBY_SPRITE_SRC: Record<string, string> = {
+  floor_marble: "/img/worldbox/lobby/floor_marble.png",
+  floor_marble_dark: "/img/worldbox/lobby/floor_marble_dark.png",
+  floor_check: "/img/worldbox/lobby/floor_check.png",
+  floor_wood: "/img/worldbox/lobby/floor_wood.png",
+  carpet_plain: "/img/worldbox/lobby/carpet_plain.png",
+  carpet_red: "/img/worldbox/lobby/carpet_red.png",
+  wall_stone: "/img/worldbox/lobby/wall_stone.png",
+  fountain: "/img/worldbox/lobby/fountain.png",
+  bulletin_board: "/img/worldbox/lobby/bulletin_board.png",
+  warp_pad: "/img/worldbox/lobby/warp_pad.png",
+  shop_counter: "/img/worldbox/lobby/shop_counter.png",
+  display_case: "/img/worldbox/lobby/display_case.png",
+  item_shelf: "/img/worldbox/lobby/item_shelf.png",
+  sign_board: "/img/worldbox/lobby/sign_board.png",
+  bank_counter: "/img/worldbox/lobby/bank_counter.png",
+  vault: "/img/worldbox/lobby/vault.png",
+  atm: "/img/worldbox/lobby/atm.png",
+  slot_machine: "/img/worldbox/lobby/slot_machine.png",
+  casino_table: "/img/worldbox/lobby/casino_table.png",
+  table_round: "/img/worldbox/lobby/table_round.png",
+  chair: "/img/worldbox/lobby/chair.png",
+  sofa: "/img/worldbox/lobby/sofa.png",
+  piano: "/img/worldbox/lobby/piano.png",
+  arena_gate: "/img/worldbox/lobby/arena_gate.png",
+  bench: "/img/worldbox/lobby/bench.png",
+  furnace: "/img/worldbox/lobby/furnace.png",
+  anvil: "/img/worldbox/lobby/anvil.png",
+  workbench: "/img/worldbox/lobby/workbench.png",
+  fence_wood: "/img/worldbox/lobby/fence_wood.png",
+  crate: "/img/worldbox/lobby/crate.png",
+  barrel: "/img/worldbox/lobby/barrel.png",
+  bookshelf: "/img/worldbox/lobby/bookshelf.png",
+  stairs: "/img/worldbox/lobby/stairs.png",
+  pillar: "/img/worldbox/lobby/pillar.png",
+  lamp: "/img/worldbox/lobby/lamp.png",
+  planter: "/img/worldbox/lobby/planter.png",
+  hedge: "/img/worldbox/lobby/hedge.png",
+  tapestry: "/img/worldbox/lobby/tapestry.png",
+  vending: "/img/worldbox/lobby/vending.png",
+};
+
+export function loadLobbySprites(): Record<string, HTMLImageElement> {
+  const out: Record<string, HTMLImageElement> = {};
+  for (const [k, v] of Object.entries(LOBBY_SPRITE_SRC)) { const img = new Image(); img.src = v; out[k] = img; }
+  return out;
+}

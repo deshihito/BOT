@@ -1,14 +1,15 @@
 import { NextResponse } from "next/server";
 import { getRequestSession, publicOrigin, sessionOwnerKey } from "@/lib/auth";
 import { MAP_H, MAP_W } from "@/lib/worldbox/mapgen";
+import { LOBBY_H, LOBBY_W } from "@/lib/worldbox/lobby";
 import { isPresenceEnabled, listPresence, putPresence, removePresence } from "@/lib/worldbox/presence-online";
-import { presenceIdFor, sanitizeHeartbeat, selectVisiblePlayers } from "@/lib/worldbox/presence";
+import { presenceIdFor, sanitizeHeartbeat, sanitizePresenceSpace, selectVisiblePlayers } from "@/lib/worldbox/presence";
 
 export const runtime = "nodejs";
 
 // AGO WORLD BOX の同時接続プレゼンス。
-// GET: { players }（誰でも読める。ゲストも他プレイヤーが見える）
-// PUT { name, x, y, vx, vy, face }: ハートビート（ログイン中のみ、約1秒間隔）
+// GET ?space=world|lobby: { players }（誰でも読める。同じ空間の者だけ返す）
+// PUT { name, x, y, vx, vy, face, space }: ハートビート（ログイン中のみ、約1秒間隔）
 // DELETE: 退室（自分のキーを消す）
 // 保存先は bot_kv（名前空間 worldbox_presence、キー = 所有者キー）。
 // 表示名はセッションの username を正とし、body の name は予備。
@@ -27,8 +28,9 @@ export async function GET(request: Request) {
   }
   const session = getRequestSession(request);
   const selfId = session ? presenceIdFor(sessionOwnerKey(session)) : null;
+  const space = sanitizePresenceSpace(new URL(request.url).searchParams.get("space"));
   const entries = await listPresence();
-  const players = selectVisiblePlayers(entries, selfId, Date.now()).map((e) => ({
+  const players = selectVisiblePlayers(entries, selfId, Date.now(), undefined, space).map((e) => ({
     id: e.id,
     name: e.name,
     x: e.x,
@@ -36,6 +38,7 @@ export async function GET(request: Request) {
     vx: e.vx,
     vy: e.vy,
     face: e.face,
+    space: e.space,
     ts: e.ts,
   }));
   return NextResponse.json({ players }, { headers: NO_STORE });
@@ -58,7 +61,9 @@ export async function PUT(request: Request) {
   } catch {
     return NextResponse.json({ error: "invalid_request" }, { status: 400, headers: NO_STORE });
   }
-  const heartbeat = sanitizeHeartbeat(body, { width: MAP_W, height: MAP_H });
+  const space = sanitizePresenceSpace((body as { space?: unknown } | null)?.space);
+  const bounds = space === "lobby" ? { width: LOBBY_W, height: LOBBY_H } : { width: MAP_W, height: MAP_H };
+  const heartbeat = sanitizeHeartbeat(body, bounds);
   if (!heartbeat) {
     return NextResponse.json({ error: "invalid_heartbeat" }, { status: 400, headers: NO_STORE });
   }
