@@ -467,6 +467,72 @@ class TestGamble(WorkerCase):
         self.assertEqual(self.store.pool, 1000)
 
 
+class TestGamblePrepaid(WorkerCase):
+    """セッション型カジノの精算（prepaid）: ベットは spend で先払い済み。"""
+
+    def gamble_op(self, **overrides):
+        base = {"kind": "gamble", "amount": 100, "reason": "casino_double",
+                "payout": 0, "prepaid": True}
+        base.update(overrides)
+        return self.add_op(**base)
+
+    async def test_prepaid_loss_recycles_without_debit(self):
+        self.wallet.balances[ME] = 900  # 先払いで 100 引かれた後
+        op = self.gamble_op(payout=0)
+        self.assertEqual(await self.worker.poll_once(), 1)
+        record = self.record(op["id"])
+        self.assertEqual(record["status"], "done")
+        self.assertEqual(record["appliedAmount"], 0)
+        # 二重に引かず、ベットは還流する
+        self.assertEqual(self.wallet.balances[ME], 900)
+        self.assertEqual(self.store.pool, 70)
+        self.assertEqual(self.store.treasury, 30)
+        self.assertEqual(self.history, [])
+
+    async def test_prepaid_win_pays_stake_and_profit(self):
+        self.wallet.balances[ME] = 900
+        self.store.pool = 1000
+        op = self.gamble_op(payout=250)  # 利益 150 はバンクロールから
+        self.assertEqual(await self.worker.poll_once(), 1)
+        record = self.record(op["id"])
+        self.assertEqual(record["status"], "done")
+        self.assertEqual(record["appliedAmount"], 250)
+        self.assertEqual(self.wallet.balances[ME], 900 + 250)
+        self.assertEqual(self.store.pool, 1000 - 150)
+
+    async def test_prepaid_partial_return_recycles_difference(self):
+        self.wallet.balances[ME] = 900
+        op = self.gamble_op(amount=100, payout=30, reason="casino_slot7")
+        self.assertEqual(await self.worker.poll_once(), 1)
+        record = self.record(op["id"])
+        self.assertEqual(record["status"], "done")
+        self.assertEqual(record["appliedAmount"], 30)
+        self.assertEqual(self.wallet.balances[ME], 930)
+        # 戻らなかった 70 は負けとして還流（70% プール / 30% 国庫）
+        self.assertEqual(self.store.pool, 49)
+        self.assertEqual(self.store.treasury, 21)
+
+    async def test_prepaid_new_reasons_accepted(self):
+        self.wallet.balances[ME] = 1000
+        for reason in ("casino_dice", "casino_slot7", "casino_blackjack", "casino_double"):
+            op = self.gamble_op(reason=reason, payout=0)
+            self.assertEqual(await self.worker.poll_once(), 1)
+            self.assertEqual(self.record(op["id"])["status"], "done", reason)
+
+    async def test_prepaid_credit_failure_does_not_refund_bet(self):
+        self.wallet.balances[ME] = 900
+        self.store.pool = 1000
+        self.wallet.none_on_positive_once = True
+        op = self.gamble_op(payout=250)
+        self.assertEqual(await self.worker.poll_once(), 1)
+        record = self.record(op["id"])
+        self.assertEqual(record["status"], "failed")
+        self.assertEqual(record["error"], "credit_failed")
+        # 先払い済みのベットはこのオプでは返金しない（原資だけ戻る）
+        self.assertEqual(self.wallet.balances[ME], 900)
+        self.assertEqual(self.store.pool, 1000)
+
+
 class TestQueueBehavior(WorkerCase):
     async def test_invalid_ops_are_tombstoned_and_queue_drains(self):
         self.kv.store["garbage"] = "読めない値"

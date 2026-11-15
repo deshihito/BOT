@@ -47,6 +47,7 @@ import { countItem, type ItemSlot, type PlayerProfile, type SlotRef } from "@/li
 import { loadDungeonTiles, loadFarmSprites, loadLobbySprites, loadTextures } from "@/lib/worldbox/textures";
 import { useGamesNav } from "../GamesShell";
 import WorldBoxEconomyPanel from "./WorldBoxEconomyPanel";
+import WorldBoxCasinoPanel from "./WorldBoxCasinoPanel";
 
 const SAVE_KEY = "ago-worldbox-save-v6";
 /** 1タイルの表示サイズ（CSS px）。 */
@@ -353,6 +354,7 @@ export default function WorldBoxClient() {
   const [stationUi, setStationUi] = useState<LobbyStation | null>(null);
   const warpActionRef = useRef<(target: SaveSpace) => void>(() => {});
   const [boardOpen, setBoardOpen] = useState(false);
+  const [casinoOpen, setCasinoOpen] = useState(false);
   const [boardPosts, setBoardPosts] = useState<BoardPost[]>([]);
   const [boardLoggedIn, setBoardLoggedIn] = useState(false);
   const [boardText, setBoardText] = useState("");
@@ -2098,6 +2100,15 @@ export default function WorldBoxClient() {
                 {boardOpen ? "閉じる" : "開く"}
               </button>
             )}
+            {stationUi === "casino" && (
+              <button
+                type="button"
+                style={{ ...btn, minHeight: 32, padding: "2px 10px" }}
+                onClick={() => setCasinoOpen((v) => !v)}
+              >
+                {casinoOpen ? "閉じる" : "遊ぶ"}
+              </button>
+            )}
           </div>
         )}
         {showMap && spaceUi === "world" && (
@@ -2496,6 +2507,9 @@ export default function WorldBoxClient() {
       )}
 
       {showEconomy && <WorldBoxEconomyPanel space={spaceUi} onClose={() => setShowEconomy(false)} />}
+      {casinoOpen && spaceUi === "lobby" && (
+        <WorldBoxCasinoPanel onClose={() => setCasinoOpen(false)} />
+      )}
       </div>
     </div>
   );
