@@ -194,7 +194,7 @@ def _ticket_embed(settings: dict[str, Any], notice: str | None = None) -> discor
         + f"自動削除: **{TICKET_DELETE_LABELS[settings['delete_after']]}**\n"
         + f"作成者のルーム操作: **{'許可' if settings['user_manage'] else '禁止'}**\n"
         + f"種別: {', '.join(item['name'] for item in settings.get('types') or []) or 'なし'}\n"
-        + f"記録の保存先: {f'<#{settings['transcript_channel_id']}>' if settings.get('transcript_channel_id') else 'なし'}\n\n"
+        + f"記録の保存先: {f'<#{settings["transcript_channel_id"]}>' if settings.get('transcript_channel_id') else 'なし'}\n\n"
         + "チケット作成者には必ず閲覧・発言権限が付与されます。"
     )
     return discord.Embed(title="チケットツールの設定", description=description, color=0xFFFFFF)
