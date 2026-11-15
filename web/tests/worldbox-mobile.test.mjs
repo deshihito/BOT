@@ -23,6 +23,11 @@ test("フルスクリーン中はキャンバスがステージいっぱいに�
   assert.match(client, /isFullscreen \? \{ width: "100%", height: "100%"/);
 });
 
+test("≡ メニューはステージ下端からはみ出さない（収まらない分はスクロール）", () => {
+  assert.match(client, /maxHeight: "calc\(100% - 68px\)"/);
+  assert.match(client, /overflowY: "auto", overscrollBehavior: "contain", touchAction: "pan-y"/);
+});
+
 test("ホットバーのスロットは画面幅でスケーリングする（縦画面ではみ出さない）", () => {
   // スロット枠は --slot 変数に従う
   assert.match(client, /width: "var\(--slot, 42px\)"/);
