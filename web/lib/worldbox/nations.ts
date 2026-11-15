@@ -1,10 +1,13 @@
 // AGO WORLD BOX の国家レイヤー（純粋ロジック、DOM 非依存）。
+// 国 = Discord サーバーそのもの: 建国できるのはサーバーのオーナーだけ、
+// 国名はサーバー名、国民はサーバーのメンバー、役職は Discord 権限から決まる
+// （オーナー=王、ADMINISTRATOR=大臣、メンバー=国民。判定は guilds.ts）。
 // 国はあくまで所属区分: 1ユーザー = 最大1国まで所属する。建国するとマップ
-// 中央から渦巻き状（チェビシェフリング）に空き地を探して首都を置き、建国者
-// が王になる。首都同士は一定の間隔を空けるが、所属や「領地」が建築などの
-// 行動を制限することはない（建物は lib/worldbox/buildings の個人所有）。
-// 状態遷移（建国・参加・離脱・解散）はここに集約し、API ルートは保存と認証だけ
-// を担う。地形は lib/worldbox/mapgen の決定的マップを参照する。
+// 中央から渦巻き状（チェビシェフリング）に空き地を探して首都を置く。首都
+// 同士は一定の間隔を空けるが、所属が建築などの行動を制限することはない
+// （建物は lib/worldbox/buildings の個人所有）。
+// 状態遷移（建国・参加・離脱・解散）はここに集約し、API ルートは保存・認証・
+// Discord 検証だけを担う。地形は lib/worldbox/mapgen の決定的マップを参照する。
 import {
   MAP_H, MAP_W, isSolidMapTile, mapTileAt, type TopDownMap,
 } from "./mapgen";
@@ -13,17 +16,20 @@ import { BUILDING_PROSPERITY, emptyBuildings, type BuildingsMap } from "./buildi
 
 /** 首都同士の最小間隔の基準（チェビシェフ距離）。首都はこの2倍より離して置く。 */
 export const TERRITORY_RADIUS = 6;
-/** 国名の最大文字数（コードポイント単位）。 */
-export const NATION_NAME_MAX = 16;
+
+/** 保存形式の版。旧（プレイヤー建国）形式は読み込み時に破棄する。 */
+export const NATIONS_STATE_VERSION = 2;
 
 export type NationRole = "king" | "minister" | "citizen";
 
 export type Nation = {
-  id: string;
+  /** 国 = Discord サーバー。ギルド ID がそのまま国の ID。 */
+  guildId: string;
+  /** サーバー名（建国時点の Discord 側の名前。そのまま使う）。 */
   name: string;
   /** NATION_PALETTE のいずれか。 */
   color: string;
-  /** 建国者の所有者キー（API では表に出さず kingId に変換する）。 */
+  /** 建国者（サーバーオーナー）の所有者キー（API では表に出さず kingId に変換する）。 */
   kingKey: string;
   /** 首都タイル（整数座標）。 */
   capital: { x: number; y: number };
@@ -31,11 +37,13 @@ export type Nation = {
 };
 
 export type Membership = {
+  /** 所属先のギルド ID（= 国 ID）。 */
   nationId: string;
   role: NationRole;
 };
 
 export type NationsState = {
+  /** ギルド ID → 国。 */
   nations: Record<string, Nation>;
   /** 所有者キー → 所属。未所属はキー自体が無い。 */
   members: Record<string, Membership>;
@@ -49,36 +57,6 @@ export const NATION_PALETTE = [
 
 export function emptyNationsState(): NationsState {
   return { nations: {}, members: {} };
-}
-
-function fnvHex(text: string): string {
-  let h = 0x811c9dc5;
-  for (let i = 0; i < text.length; i++) {
-    h ^= text.charCodeAt(i);
-    h = Math.imul(h, 0x01000193);
-  }
-  return (h >>> 0).toString(16).padStart(8, "0");
-}
-
-/** 国 ID（建国者と時刻から決まる不透明な短い ID）。 */
-export function nationIdFor(kingKey: string, createdAt: number): string {
-  return fnvHex(`${kingKey}:${createdAt}`);
-}
-
-/** 国名の検証。整形済みの名前か、エラーコード "invalid_name" を返す。 */
-export function validateNationName(raw: unknown): { ok: true; name: string } | { ok: false; error: "invalid_name" } {
-  if (typeof raw !== "string") return { ok: false, error: "invalid_name" };
-  if (/[\u0000-\u001f\u007f]/.test(raw)) return { ok: false, error: "invalid_name" };
-  const name = raw.trim();
-  const len = Array.from(name).length;
-  if (len < 1 || len > NATION_NAME_MAX) return { ok: false, error: "invalid_name" };
-  return { ok: true, name };
-}
-
-/** 同名の国があるか（前後空白と大小文字の差は同一視する）。 */
-export function isNameTaken(state: NationsState, name: string): boolean {
-  const key = name.trim().toLowerCase();
-  return Object.values(state.nations).some((n) => n.name.trim().toLowerCase() === key);
 }
 
 /** 使用数が最も少ないパレット色（同数ならパレット順）。 */
@@ -152,49 +130,61 @@ export type NationActionResult =
   | { ok: true; state: NationsState; nation?: Nation; disbanded?: boolean }
   | { ok: false; error: string };
 
-/** 建国: 空き地を渦巻き探索で決め、建国者が王になる。 */
+/** 建国に使うギルドの最小情報（Discord 検証済みのものだけが渡ってくる）。 */
+export type FoundGuild = { id: string; name: string };
+
+/**
+ * 建国: サーバーオーナーが自分のサーバーを国にする。国名はサーバー名を
+ * そのまま使い、首都は渦巻き探索で決める。建国者は王として所属する。
+ * オーナー検証そのものは呼び出し側（API ルート）が guilds で行う。
+ */
 export function applyFound(
   state: NationsState,
   ownerKey: string,
-  rawName: unknown,
+  guild: FoundGuild,
   map: TopDownMap,
   now: number,
 ): NationActionResult {
+  if (typeof guild?.id !== "string" || !/^\d+$/.test(guild.id)) return { ok: false, error: "invalid_request" };
+  if (state.nations[guild.id]) return { ok: false, error: "nation_exists" };
   if (state.members[ownerKey]) return { ok: false, error: "already_in_nation" };
-  const checked = validateNationName(rawName);
-  if (!checked.ok) return { ok: false, error: checked.error };
-  if (isNameTaken(state, checked.name)) return { ok: false, error: "name_taken" };
   const capital = findCapitalTile(map, Object.values(state.nations));
   if (!capital) return { ok: false, error: "no_free_tile" };
+  const name = (typeof guild.name === "string" ? guild.name.trim() : "") || "サーバー";
   const nation: Nation = {
-    id: nationIdFor(ownerKey, now),
-    name: checked.name,
+    guildId: guild.id,
+    name: Array.from(name).slice(0, 100).join(""),
     color: pickNationColor(state),
     kingKey: ownerKey,
     capital,
     createdAt: now,
   };
   const next: NationsState = {
-    nations: { ...state.nations, [nation.id]: nation },
-    members: { ...state.members, [ownerKey]: { nationId: nation.id, role: "king" } },
+    nations: { ...state.nations, [nation.guildId]: nation },
+    members: { ...state.members, [ownerKey]: { nationId: nation.guildId, role: "king" } },
   };
   return { ok: true, state: next, nation };
 }
 
-/** 参加: 市民として所属する。 */
-export function applyJoin(state: NationsState, ownerKey: string, nationId: unknown): NationActionResult {
+/** 参加: 役職は Discord 権限から導いたものを呼び出し側が渡す。 */
+export function applyJoin(
+  state: NationsState,
+  ownerKey: string,
+  guildId: unknown,
+  role: NationRole,
+): NationActionResult {
   if (state.members[ownerKey]) return { ok: false, error: "already_in_nation" };
-  if (typeof nationId !== "string" || !state.nations[nationId]) return { ok: false, error: "nation_not_found" };
+  if (typeof guildId !== "string" || !state.nations[guildId]) return { ok: false, error: "nation_not_found" };
   const next: NationsState = {
     nations: state.nations,
-    members: { ...state.members, [ownerKey]: { nationId, role: "citizen" } },
+    members: { ...state.members, [ownerKey]: { nationId: guildId, role } },
   };
-  return { ok: true, state: next, nation: state.nations[nationId] };
+  return { ok: true, state: next, nation: state.nations[guildId] };
 }
 
 /**
- * 離脱: 市民・大臣はそのまま抜ける。王は国民が残っている間は抜けられず、
- * 一人だけなら解散（国と所属を消し、首都を空ける）。
+ * 離脱: 市民・大臣はそのまま抜ける。王（サーバーオーナー）は国民が残っている
+ * 間は抜けられず、一人だけなら解散（国と所属を消し、首都を空ける）。
  */
 export function applyLeave(state: NationsState, ownerKey: string): NationActionResult {
   const mine = state.members[ownerKey];
@@ -258,7 +248,7 @@ function parseNation(raw: unknown): Nation | null {
   if (!raw || typeof raw !== "object") return null;
   const v = raw as Record<string, unknown>;
   const cap = v.capital as Record<string, unknown> | null;
-  if (typeof v.id !== "string" || v.id.length === 0) return null;
+  if (typeof v.guildId !== "string" || !/^\d+$/.test(v.guildId)) return null;
   if (typeof v.name !== "string" || v.name.length === 0) return null;
   if (typeof v.color !== "string" || !(NATION_PALETTE as readonly string[]).includes(v.color)) return null;
   if (typeof v.kingKey !== "string" || v.kingKey.length === 0) return null;
@@ -268,17 +258,24 @@ function parseNation(raw: unknown): Nation | null {
   const y = Math.floor(cap.y);
   if (x < 0 || y < 0 || x >= MAP_W || y >= MAP_H) return null;
   if (typeof v.createdAt !== "number" || !Number.isFinite(v.createdAt)) return null;
-  return { id: v.id, name: v.name, color: v.color, kingKey: v.kingKey, capital: { x, y }, createdAt: v.createdAt };
+  return { guildId: v.guildId, name: v.name, color: v.color, kingKey: v.kingKey, capital: { x, y }, createdAt: v.createdAt };
 }
 
-/** bot_kv の2値（nations マップと members マップ）から状態を復元する。壊れた要素は落とす。 */
+/**
+ * bot_kv の2値（nations マップと members マップ）から状態を復元する。
+ * nations 側は { v: NATIONS_STATE_VERSION, nations } の包みが必須で、版が
+ * 合わない保存（旧プレイヤー建国形式を含む）は丸ごと破棄する（首都は空く）。
+ * 壊れた要素は落とす。
+ */
 export function parseNationsState(rawNations: unknown, rawMembers: unknown): NationsState {
   const state = emptyNationsState();
-  const nationsRaw = asRecord(rawNations);
+  const wrapped = asRecord(rawNations);
+  if (!wrapped || wrapped.v !== NATIONS_STATE_VERSION) return state;
+  const nationsRaw = asRecord(wrapped.nations);
   if (nationsRaw) {
     for (const raw of Object.values(nationsRaw)) {
       const nation = parseNation(raw);
-      if (nation) state.nations[nation.id] = nation;
+      if (nation) state.nations[nation.guildId] = nation;
     }
   }
   const membersRaw = asRecord(rawMembers);
@@ -297,7 +294,9 @@ export function parseNationsState(rawNations: unknown, rawMembers: unknown): Nat
 // ---------- API 表示用 ----------
 
 export type NationView = {
+  /** 国 ID = ギルド ID。 */
   id: string;
+  guildId: string;
   name: string;
   color: string;
   capital: { x: number; y: number };
@@ -309,25 +308,42 @@ export type NationView = {
   createdAt: number;
 };
 
+/** 自分が参加しているサーバー1件分の表示（建国・参加の入口）。 */
+export type MyGuildView = {
+  guildId: string;
+  name: string;
+  /** サーバーのオーナーか（= 建国できるか）。 */
+  owner: boolean;
+  /** そのサーバーの国が既にあるか。 */
+  hasNation: boolean;
+  /** Discord 権限から導いた、そのサーバーでの自分の役職。 */
+  myRole: NationRole;
+};
+
 export type NationsResponse = {
   nations: NationView[];
   me: { nationId: string; role: NationRole } | null;
   /** プレゼンス ID → 所属国の色（他プレイヤーの名前表示に色ドットを付ける用）。 */
   playerNations: Record<string, { nationId: string; color: string }>;
   loggedIn: boolean;
+  /** ログイン中ユーザーの参加サーバー（建国・参加の候補）。ゲストは空。 */
+  myGuilds: MyGuildView[];
+  /** セッションに Discord トークンが無く、サーバー一覧を引けない（再ログインが必要）。 */
+  guildsScopeRequired: boolean;
 };
 
 export function nationViews(state: NationsState, buildings: BuildingsMap = emptyBuildings()): NationView[] {
   const counts = memberCounts(state);
   return Object.values(state.nations)
-    .sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id))
+    .sort((a, b) => a.createdAt - b.createdAt || a.guildId.localeCompare(b.guildId))
     .map((n) => ({
-      id: n.id,
+      id: n.guildId,
+      guildId: n.guildId,
       name: n.name,
       color: n.color,
       capital: { ...n.capital },
-      members: counts[n.id] ?? 0,
-      prosperity: prosperityOf(state, buildings, n.id),
+      members: counts[n.guildId] ?? 0,
+      prosperity: prosperityOf(state, buildings, n.guildId),
       kingId: presenceIdFor(n.kingKey),
       createdAt: n.createdAt,
     }));
@@ -337,7 +353,7 @@ export function playerNationMap(state: NationsState): Record<string, { nationId:
   const out: Record<string, { nationId: string; color: string }> = {};
   for (const [ownerKey, m] of Object.entries(state.members)) {
     const nation = state.nations[m.nationId];
-    if (nation) out[presenceIdFor(ownerKey)] = { nationId: nation.id, color: nation.color };
+    if (nation) out[presenceIdFor(ownerKey)] = { nationId: nation.guildId, color: nation.color };
   }
   return out;
 }
@@ -346,6 +362,7 @@ export function buildNationsResponse(
   state: NationsState,
   selfKey: string | null,
   buildings: BuildingsMap = emptyBuildings(),
+  extra: { myGuilds?: MyGuildView[]; guildsScopeRequired?: boolean } = {},
 ): NationsResponse {
   const mine = selfKey ? state.members[selfKey] : undefined;
   return {
@@ -353,5 +370,7 @@ export function buildNationsResponse(
     me: mine ? { nationId: mine.nationId, role: mine.role } : null,
     playerNations: playerNationMap(state),
     loggedIn: selfKey !== null,
+    myGuilds: extra.myGuilds ?? [],
+    guildsScopeRequired: extra.guildsScopeRequired ?? false,
   };
 }

@@ -94,9 +94,12 @@ const BUILD_TOOL_LABEL: Record<BuildTool, string> = { house: "家", farm: "畑",
 
 const NATION_ERROR_LABEL: Record<string, string> = {
   already_in_nation: "既に国に所属しています",
-  name_taken: "その国名は使われています",
+  nation_exists: "そのサーバーの国は既にあります",
   no_free_tile: "首都を置ける空き地がありません",
-  invalid_name: "国名は1〜16文字です",
+  not_owner: "建国はサーバーのオーナーのみです",
+  not_member: "そのサーバーのメンバーではありません",
+  guilds_scope_required: "サーバー情報の取得に再ログインが必要です",
+  guilds_unavailable: "サーバー情報を取得できませんでした",
   nation_not_found: "国が見つかりません",
   not_in_nation: "国に所属していません",
   king_must_transfer_or_disband: "国民がいる間、王は離脱できません",
@@ -105,12 +108,19 @@ const NATION_ERROR_LABEL: Record<string, string> = {
   cap_reached: "建築上限に達しています",
   forbidden: "その権限がありません",
   invalid_type: "建物の種類が不正です",
-  not_owner: "自分の建物だけ取り壊せます",
   on_capital: "首都には建てられません",
   on_spawn: "スポーン広場には建てられません",
 };
 
-const EMPTY_NATIONS: NationsResponse = { nations: [], me: null, playerNations: {}, loggedIn: false };
+/** 建物側の文言（not_owner は国家側と意味が違うため上書きする）。 */
+const BUILDING_ERROR_LABEL: Record<string, string> = {
+  ...NATION_ERROR_LABEL,
+  not_owner: "自分の建物だけ取り壊せます",
+};
+
+const EMPTY_NATIONS: NationsResponse = {
+  nations: [], me: null, playerNations: {}, loggedIn: false, myGuilds: [], guildsScopeRequired: false,
+};
 
 /** 建物データ（建物は個人所有で、国家データとは別 API から取る）。 */
 type BuildingsData = { buildings: BuildingView[]; loggedIn: boolean };
@@ -130,7 +140,6 @@ export default function WorldBoxClient() {
   const playerPosRef = useRef({ x: MAP_W / 2 + 0.5, y: MAP_H / 2 + 0.5 });
   const [nationsUi, setNationsUi] = useState<NationsResponse>(EMPTY_NATIONS);
   const [showNations, setShowNations] = useState(false);
-  const [nationName, setNationName] = useState("");
   const [nationMsg, setNationMsg] = useState("");
   // 建築モード（描画・入力ループは ref、パネルは state で見る）
   const [buildMode, setBuildMode] = useState(false);
@@ -191,7 +200,6 @@ export default function WorldBoxClient() {
         setNationMsg(NATION_ERROR_LABEL[data.error ?? ""] ?? "失敗しました");
         return;
       }
-      setNationName("");
       await refreshNations();
     } catch {
       setNationMsg("失敗しました");
@@ -207,7 +215,7 @@ export default function WorldBoxClient() {
       });
       const data = (await res.json().catch(() => ({}))) as { error?: string };
       if (!res.ok) {
-        setNationMsg(NATION_ERROR_LABEL[data.error ?? ""] ?? "失敗しました");
+        setNationMsg(BUILDING_ERROR_LABEL[data.error ?? ""] ?? "失敗しました");
         return;
       }
       await refreshBuildings();
@@ -941,6 +949,12 @@ export default function WorldBoxClient() {
           {(() => {
             const me = nationsUi.me;
             const myNation = me ? nationsUi.nations.find((n) => n.id === me.nationId) ?? null : null;
+            const foundable = nationsUi.myGuilds.filter((g) => g.owner && !g.hasNation);
+            const joinable = nationsUi.myGuilds.filter((g) => g.hasNation);
+            const myGuildIds = new Set(nationsUi.myGuilds.map((g) => g.guildId));
+            const others = [...nationsUi.nations]
+              .filter((n) => !myGuildIds.has(n.guildId))
+              .sort((a, b) => b.prosperity - a.prosperity);
             if (me && myNation) {
               return (
                 <div>
@@ -964,46 +978,73 @@ export default function WorldBoxClient() {
             }
             return (
               <div>
-                {nationsUi.loggedIn && (
-                  <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
-                    <input
-                      value={nationName}
-                      onChange={(e) => setNationName(e.target.value)}
-                      maxLength={24}
-                      placeholder="国名"
-                      aria-label="国名"
-                      style={{
-                        flex: 1, minHeight: 40, padding: "6px 10px", borderRadius: 10,
-                        border: "1px solid rgba(255,255,255,0.25)", background: "rgba(255,255,255,0.06)", color: "inherit",
-                      }}
-                    />
-                    <button
-                      type="button"
-                      style={btn}
-                      disabled={!nationName.trim()}
-                      onClick={() => void nationAction({ action: "found", name: nationName })}
+                {nationsUi.loggedIn && nationsUi.guildsScopeRequired && (
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 12 }}>
+                    <span className="muted" style={{ fontSize: 13 }}>サーバー一覧の取得に再ログインが必要</span>
+                    <a
+                      href="/api/auth/discord/authorize?next=/games/worldbox"
+                      style={{ ...btn, textDecoration: "none", display: "inline-flex", alignItems: "center" }}
                     >
-                      建国
-                    </button>
+                      Discordで再ログイン
+                    </a>
                   </div>
                 )}
-                {nationsUi.nations.length === 0 ? (
+                {nationsUi.loggedIn && !nationsUi.guildsScopeRequired && foundable.length > 0 && (
+                  <div style={{ marginBottom: 12 }}>
+                    <p style={{ margin: "0 0 6px", fontSize: 13 }}>建国できるサーバー</p>
+                    <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: 8 }}>
+                      {foundable.map((g) => (
+                        <li key={g.guildId} style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                          <strong>{g.name}</strong>
+                          <span style={{ flex: 1 }} />
+                          <button type="button" style={btn} onClick={() => void nationAction({ action: "found", guildId: g.guildId })}>
+                            建国
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {nationsUi.loggedIn && !nationsUi.guildsScopeRequired && joinable.length > 0 && (
+                  <div style={{ marginBottom: 12 }}>
+                    <p style={{ margin: "0 0 6px", fontSize: 13 }}>国があるサーバー</p>
+                    <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: 8 }}>
+                      {joinable.map((g) => {
+                        const n = nationsUi.nations.find((x) => x.guildId === g.guildId);
+                        return (
+                          <li key={g.guildId} style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                            {n && (
+                              <span aria-hidden style={{ width: 12, height: 12, borderRadius: 3, background: n.color, display: "inline-block" }} />
+                            )}
+                            <strong>{g.name}</strong>
+                            <span className="muted">{ROLE_LABEL[g.myRole]}{n ? ` ・ ${n.members}人` : ""}</span>
+                            <span style={{ flex: 1 }} />
+                            <button type="button" style={btn} onClick={() => void nationAction({ action: "join", guildId: g.guildId })}>
+                              参加
+                            </button>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </div>
+                )}
+                {others.length === 0 && joinable.length === 0 ? (
                   <p className="muted" style={{ margin: 0 }}>まだ国はありません</p>
-                ) : (
+                ) : others.length > 0 ? (
                   <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: 8 }}>
-                    {[...nationsUi.nations].sort((a, b) => b.prosperity - a.prosperity).map((n) => {
+                    {others.map((n) => {
                       const dist = Math.round(Math.hypot(
                         n.capital.x + 0.5 - playerPosRef.current.x,
                         n.capital.y + 0.5 - playerPosRef.current.y,
                       ));
                       return (
-                        <li key={n.id} style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                        <li key={n.id} style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", opacity: 0.55 }}>
                           <span aria-hidden style={{ width: 12, height: 12, borderRadius: 3, background: n.color, display: "inline-block" }} />
                           <strong>{n.name}</strong>
                           <span className="muted">{n.members}人 ・ 繁栄度 {n.prosperity} ・ {dist}タイル</span>
                           <span style={{ flex: 1 }} />
                           {nationsUi.loggedIn && (
-                            <button type="button" style={btn} onClick={() => void nationAction({ action: "join", nationId: n.id })}>
+                            <button type="button" style={btn} disabled>
                               参加
                             </button>
                           )}
@@ -1011,7 +1052,7 @@ export default function WorldBoxClient() {
                       );
                     })}
                   </ul>
-                )}
+                ) : null}
                 {!nationsUi.loggedIn && (
                   <p className="muted" style={{ margin: "10px 0 0", fontSize: 13 }}>建国・参加はログイン後</p>
                 )}
