@@ -7,7 +7,7 @@ export const runtime = "nodejs";
 
 // AGO WORLD BOX のオンラインセーブ（ログイン中ユーザーのみ）。
 // GET: { save: string | null }（自分のセーブ JSON。無ければ null）
-// PUT { save }: 保存（v2 として解釈できる JSON のみ受け付ける）
+// PUT { save }: 保存（v5 として解釈できる JSON のみ受け付ける）
 // 保存先は bot_kv（名前空間 worldbox_save、キー = 所有者キー）。
 // セッションが無ければ 401。Bot API 未設定なら 503（クライアントは
 // ローカル保存にフォールバックして遊び続ける）。
