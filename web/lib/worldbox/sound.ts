@@ -280,7 +280,7 @@ export function footstepMaterialFor(input: { biome?: string; space?: string; swi
   if (input.swimming) return "water";
   const space = input.space ?? "world";
   if (space === "tent") return "wood";
-  if (space === "lobby") return "stone";
+  if (space === "lobby" || space === "lobby2" || space === "lobby3") return "stone";
   if (space.startsWith("cave:") || space.startsWith("dungeon:") || space.startsWith("ruins:")) return "stone";
   switch (input.biome) {
     case "snowfield":

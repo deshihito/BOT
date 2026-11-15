@@ -49,6 +49,10 @@ import {
   LOBBY_DOWN_LANDING, LOBBY_UP_LANDING, LOBBY_W, LOBBY_WARP_PAD,
   buildLobby, lobbyTileAt, stationGenreNear, stationNear, type LobbyData, type LobbyObject, type LobbyStation,
 } from "@/lib/worldbox/lobby";
+import {
+  LOBBY2_H, LOBBY2_W, LOBBY3_H, LOBBY3_W,
+  buildLobby2, buildLobby3, floorWarpAt, lobby2TileAt, lobby3TileAt, type LobbyFloorSpace,
+} from "@/lib/worldbox/lobby-floors";
 import { genreById, type ShopGenreId } from "@/lib/worldbox/shops";
 import { TENT_MAX_TIER, TENT_TIERS, buildTent, tentEntryFor, tentExitFor, tentTileAt } from "@/lib/worldbox/tent";
 import {
@@ -1680,7 +1684,7 @@ export default function WorldBoxClient() {
       parseInstanceSpace(space)?.kind === "dungeon"
         ? { ...def, hp: Math.max(1, Math.round(def.hp * dungeonHpScale(dungeonStateRef.current.size))) }
         : def;
-    const indoorData = (): LobbyData => caveLayerNow()?.data ?? ruinsNow()?.data ?? dungeonNow()?.data ?? (space === "tent" ? tentNow() : lobby);
+    const indoorData = (): LobbyData => caveLayerNow()?.data ?? ruinsNow()?.data ?? dungeonNow()?.data ?? (space === "tent" ? tentNow() : space === "lobby2" ? buildLobby2() : space === "lobby3" ? buildLobby3() : lobby);
     const textures = loadTextures();
     const dungeon = loadDungeonTiles();
     const lobbySprites = loadLobbySprites();
@@ -1765,7 +1769,10 @@ export default function WorldBoxClient() {
       if (inst?.kind === "cave") return rectBounds(64, 64);
       if (inst?.kind === "ruins") return rectBounds(48, 48);
       if (inst?.kind === "dungeon") return rectBounds(52, 52);
-      return space === "lobby" ? rectBounds(LOBBY_W, LOBBY_H) : space === "tent" ? rectBounds(tentNow().width, tentNow().height) : worldBounds();
+      return space === "lobby" ? rectBounds(LOBBY_W, LOBBY_H)
+        : space === "lobby2" ? rectBounds(LOBBY2_W, LOBBY2_H)
+        : space === "lobby3" ? rectBounds(LOBBY3_W, LOBBY3_H)
+        : space === "tent" ? rectBounds(tentNow().width, tentNow().height) : worldBounds();
     };
     // モブ占有を差し引いた今フレームの固体集合（モブの真上に立つ間の救済用）
     let mobFrameBlocked: ReadonlySet<string> | undefined;
@@ -1921,7 +1928,7 @@ export default function WorldBoxClient() {
       }
       if (choice.pushLocalToOnline) saveNow();
       else lastSaved = { x: player.x, y: player.y, at: performance.now() };
-      setStatusText(space === "lobby" ? "ロビー" : space === "tent" ? "テント" : "共有ワールド");
+      setStatusText(space === "lobby" ? "ロビー" : space === "lobby2" ? "ロビー 2F" : space === "lobby3" ? "ロビー 3F" : space === "tent" ? "テント" : "共有ワールド");
     })();
 
     // ---- プレゼンス（空間ごとに分ける。他空間の者は受け取らない） ----
@@ -2780,6 +2787,27 @@ export default function WorldBoxClient() {
       });
     };
     warpActionRef.current = doWarp;
+    /** ロビー内の階移動（1F⇄2F⇄3F、L2b）。階段を踏んだときだけ発火し、
+     * ワープと同じフェード（B1）でつなぐ。建物内の移動なので worldReturn は触らない。 */
+    const FLOOR_LABEL: Record<LobbyFloorSpace, string> = { lobby: "ロビー", lobby2: "ロビー 2F", lobby3: "ロビー 3F" };
+    const doFloorWarp = (target: LobbyFloorSpace, entry: { x: number; y: number }) => {
+      if (target === space) return;
+      beginTransition(() => {
+        space = target;
+        setSpaceUi(target);
+        setStatusText(FLOOR_LABEL[target]);
+        lastStation = null;
+        setStationUi(null);
+        lastStationGenre = null;
+        setStationGenre(null);
+        setBoardOpen(false);
+        setGuildBoardOpen(false);
+        placePlayer(entry.x, entry.y);
+        spawnBurst(fxSys, "warp", player.x, player.y - 0.3);
+        playWbSe("warp");
+        void pollOthers();
+      });
+    };
     /** インスタンス空間（洞窟など）への遷移。入口の踏破で発火する。 */
     const warpToInstance = (target: string, entry: { x: number; y: number }) => {
       if (target === space) return;
@@ -2976,6 +3004,15 @@ export default function WorldBoxClient() {
         if (tx === exit.x && ty === exit.y) doWarp("world");
         return;
       }
+      // ロビーの階移動（1F⇄2F⇄3F、L2b）: 階段タイルを踏んだら対応する階へ。
+      // 判定は floorWarpAt（lobby-floors.ts）が正。着地点は行き先の階段の前で、
+      // 着地タイルでは再発火しない（placePlayer が lastTileKey を着地先へ進める）。
+      const floorWarp = floorWarpAt(space, tx, ty);
+      if (floorWarp) {
+        doFloorWarp(floorWarp.to, floorWarp.entry);
+        return;
+      }
+      if (space !== "lobby") return;
       if (tx === LOBBY_WARP_PAD.x && ty === LOBBY_WARP_PAD.y) {
         doWarp("world");
         return;
@@ -3486,7 +3523,10 @@ export default function WorldBoxClient() {
           for (let tx = lx0; tx <= lx1; tx++) {
             const id = parseInstanceSpace(space)
               ? indoor.tiles[ty * indoor.width + tx] ?? 0
-              : space === "tent" ? tentTileAt(indoor.tiles, indoor.width, indoor.height, tx, ty) : lobbyTileAt(indoor.tiles, tx, ty);
+              : space === "tent" ? tentTileAt(indoor.tiles, indoor.width, indoor.height, tx, ty)
+              : space === "lobby2" ? lobby2TileAt(indoor.tiles, tx, ty)
+              : space === "lobby3" ? lobby3TileAt(indoor.tiles, tx, ty)
+              : lobbyTileAt(indoor.tiles, tx, ty);
             if (id === L_VOID) continue; // 図形の外は背景のまま
             const sx = lobbyOx + tx * TILE;
             const sy = lobbyOy + ty * TILE;
