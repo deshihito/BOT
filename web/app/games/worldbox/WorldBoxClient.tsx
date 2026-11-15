@@ -72,6 +72,10 @@ import { DUNGEON_TILE_SRC, FARM_SPRITE_SRC, LOBBY_SPRITE_SRC, loadDungeonTiles, 
 import { preloadImages, transitionAlpha, transitionDone, transitionSwapDue, SPRITE_PRELOAD_TIMEOUT_MS, TRANSITION_OVERLAY_RGB, type TransitionKind } from "@/lib/worldbox/transition";
 import { isStickTouch, stickBase, stickVector } from "@/lib/worldbox/stick";
 import {
+  AFFORDANCE_RING_RGB, DENIED_RING_RGB, deniedFeedback, isWithinAffordanceRange,
+  nudgeBobPx, nudgeRingAlpha, stickKnobRadius,
+} from "@/lib/worldbox/affordance";
+import {
   bgmSceneFor, loadWbSoundSettings, playWbSe, saveWbSoundSettings, seForFxBurst, setWbBgmScene,
   stopWbBgm, unlockWbAudio, type WbSoundSettings,
 } from "@/lib/worldbox/sound";
@@ -666,10 +670,23 @@ export default function WorldBoxClient() {
   /** 演出イベントの受け渡し（行為の成功/失敗→描画ループでパーティクル/揺れ/ポップに変換）。
    * whiff は空振り（風切りのみ、粒なし）。hit/death/spawn はモブ演出用（sizeTiles/color 任意）。 */
   const fxEventsRef = useRef<{ kind: FxBurstKind | "whiff"; x: number; y: number; sizeTiles?: number; color?: string }[]>([]);
+  /** 無効操作のフィードバック（赤い輪＋揺れ。タップしたタイルと開始時刻）。 */
+  const denyFxRef = useRef<{ x: number; y: number; at: number } | null>(null);
+  /** 初回誘導を出した施設（セッション内だけ覚える。キー=施設種別/スプライト）。 */
+  const seenAffordanceRef = useRef(new Map<string, number>());
+  /** 無効フィードバックの回数（tileMsg ピルの揺れアニメーション再発火用）。 */
+  const [denyStamp, setDenyStamp] = useState(0);
   // 冒険役職の技（ダブルタップ発動）: 進行中の演出・前回タップ・死亡地点。
   const skillFxRef = useRef<{ effect: SkillFxEffect; stage: number }[]>([]);
   const lastTapRef = useRef<{ x: number; y: number; at: number } | null>(null);
   const deathsRef = useRef<{ name: string; x: number; y: number; at: number }[]>([]);
+
+  /** 無効操作の構造的フィードバック: 赤い輪＋揺れ＋ error SE（文言だけに頼らない）。 */
+  const denyAtTile = (x: number, y: number) => {
+    denyFxRef.current = { x, y, at: performance.now() };
+    playWbSe("error");
+    setDenyStamp((n) => n + 1);
+  };
 
   /** ダブルタップで技を打つ。発動したら true（通常タップは消費される）。 */
   const castSkillAt = async (t: { x: number; y: number }): Promise<boolean> => {
@@ -1974,6 +1991,7 @@ export default function WorldBoxClient() {
         if (!mobOccupiesTile(placed.size, cx, cy, t.x, t.y)) continue;
         if (mobDistance(px, py, { x: cx, y: cy, size: placed.size }) > MOB_ATTACK_RANGE) {
           setTileMsg(TILE_ERROR_LABEL.too_far);
+          denyAtTile(t.x, t.y);
           return true;
         }
         // 向きをモブへ向けて即時に振る（HP と粒はサーバー応答で返す）
@@ -2001,10 +2019,12 @@ export default function WorldBoxClient() {
       if (chest) {
         if (dungeonStateRef.current.opened[`${inst.layer}:${chest.idx}`]) {
           setTileMsg(TILE_ERROR_LABEL.depleted);
+          denyAtTile(t.x, t.y);
           return true;
         }
         if (Math.hypot(px - t.x, py - t.y) > 2) {
           setTileMsg(TILE_ERROR_LABEL.too_far);
+          denyAtTile(t.x, t.y);
           return true;
         }
         void postInstanceRef.current("open_chest", { chestIdx: chest.idx });
@@ -2015,6 +2035,7 @@ export default function WorldBoxClient() {
         if (dungeonStateRef.current.doors[`${inst.layer}:${door.idx}`]) return false;
         if (Math.hypot(px - t.x, py - t.y) > 2) {
           setTileMsg(TILE_ERROR_LABEL.too_far);
+          denyAtTile(t.x, t.y);
           return true;
         }
         void postInstanceRef.current("open_door", { doorIdx: door.idx });
@@ -2032,10 +2053,12 @@ export default function WorldBoxClient() {
       if (chest) {
         if (ruinsStateRef.current.chests[String(chest.idx)]) {
           setTileMsg(TILE_ERROR_LABEL.depleted);
+          denyAtTile(t.x, t.y);
           return true;
         }
         if (Math.hypot(px - t.x, py - t.y) > 2) {
           setTileMsg(TILE_ERROR_LABEL.too_far);
+          denyAtTile(t.x, t.y);
           return true;
         }
         void postInstanceRef.current("open_chest", { chestIdx: chest.idx });
@@ -2046,6 +2069,7 @@ export default function WorldBoxClient() {
         if (ruinsStateRef.current.doors[String(door.idx)]) return false;
         if (Math.hypot(px - t.x, py - t.y) > 2) {
           setTileMsg(TILE_ERROR_LABEL.too_far);
+          denyAtTile(t.x, t.y);
           return true;
         }
         void postInstanceRef.current("open_door", { doorIdx: door.idx });
@@ -2065,10 +2089,12 @@ export default function WorldBoxClient() {
         const takenAt = caveStateRef.current.veins[vein.key] ?? 0;
         if (def && takenAt > 0 && Date.now() - takenAt < def.respawnMs) {
           setTileMsg(TILE_ERROR_LABEL.depleted);
+          denyAtTile(t.x, t.y);
           return true;
         }
         if (Math.hypot(px - t.x, py - t.y) > 2) {
           setTileMsg(TILE_ERROR_LABEL.too_far);
+          denyAtTile(t.x, t.y);
           return true;
         }
         void postInstanceRef.current("mine", { veinKey: vein.key });
@@ -2077,6 +2103,7 @@ export default function WorldBoxClient() {
       if (cave.chest && cave.chest.x === t.x && cave.chest.y === t.y) {
         if (Math.hypot(px - t.x, py - t.y) > 2) {
           setTileMsg(TILE_ERROR_LABEL.too_far);
+          denyAtTile(t.x, t.y);
           return true;
         }
         void postInstanceRef.current("open_chest");
@@ -2094,7 +2121,10 @@ export default function WorldBoxClient() {
       const py = Math.floor(player.y);
       if (Math.max(Math.abs(t.x - px), Math.abs(t.y - py)) > 1) {
         // ブロック選択中の遠いタップは設置のつもりなので、無反応で終わらせない
-        if (wantsPlace) setTileMsg(TILE_ERROR_LABEL.too_far);
+        if (wantsPlace) {
+          setTileMsg(TILE_ERROR_LABEL.too_far);
+          denyAtTile(t.x, t.y);
+        }
         return false;
       }
       const view = tileView(terrainMap, tilesRef.current, t.x, t.y, Date.now(), null);
@@ -2112,6 +2142,7 @@ export default function WorldBoxClient() {
           void openContainerRef.current(t.x, t.y, view.block.itemId);
         } else {
           setTileMsg(TILE_ERROR_LABEL.not_owner);
+          denyAtTile(t.x, t.y);
         }
         return true;
       }
@@ -2123,7 +2154,10 @@ export default function WorldBoxClient() {
       if (!act) {
         // 隣接タップで何も起きない場合は理由を出す（素材は置けない・その地形には置けない等）。
         // 剣の空振りは通常の応答なので理由は出さない
-        if (selItem && selItem.tool !== "sword") setTileMsg(TILE_ERROR_LABEL.tile_blocked);
+        if (selItem && selItem.tool !== "sword") {
+          setTileMsg(TILE_ERROR_LABEL.tile_blocked);
+          denyAtTile(t.x, t.y);
+        }
         return false;
       }
       if (act.action === "plant-picker") {
@@ -3608,6 +3642,68 @@ export default function WorldBoxClient() {
       drawList.sort((a, b) => a.y - b.y);
       for (const d of drawList) d.draw();
 
+      // ---- アフォーダンス（B2）: 近くの「使えるもの」に脈動する輪を出す ----
+      // 対象は施設・出入口・宝箱/扉。鉱脈は斥候/採掘者の既存の脈動があるので対象外。
+      // 初回だけ誘導バウンス（強めの脈動＋上下の揺れ）。reducedMotion では静止した輪だけ。
+      if (space !== "world") {
+        const indoor = indoorData();
+        const ruinsDraw = ruinsNow();
+        const caveDraw = caveLayerNow();
+        for (const o of indoor.objects) {
+          const key = o.station ?? o.sprite;
+          const isTarget =
+            !!o.station ||
+            FLAT_LOBBY_SPRITES.has(o.sprite) ||
+            o.sprite === "ruins_chest" ||
+            o.sprite === "gold_door" ||
+            o.sprite === "cave_chest";
+          if (!isTarget) continue;
+          if (ruinsDraw && o.sprite === "ruins_chest") {
+            const chest = ruinsDraw.chests.find((c) => c.x === o.x && c.y === o.y);
+            if (chest && ruinsStateRef.current.chests[String(chest.idx)]) continue;
+          }
+          if (ruinsDraw && o.sprite === "gold_door") {
+            const door = ruinsDraw.doors.find((d) => d.x === o.x && d.y === o.y);
+            if (door && ruinsStateRef.current.doors[String(door.idx)]) continue;
+          }
+          if (caveDraw && o.sprite === "cave_chest") {
+            const takenAt = caveStateRef.current.chest;
+            if (takenAt > 0 && Date.now() - takenAt < 6 * 60 * 60 * 1000) continue;
+          }
+          if (!isWithinAffordanceRange(player.x, player.y, o.x, o.y, o.w, o.h)) continue;
+          const sx = Math.round(lobbyOx + o.x * TILE);
+          const sy = Math.round(lobbyOy + o.y * TILE);
+          if (sx < -TILE * 2 || sy < -TILE * 2 || sx > cw + TILE * 2 || sy > ch + TILE * 2) continue;
+          let seenAt = seenAffordanceRef.current.get(key);
+          if (seenAt === undefined) {
+            seenAt = now;
+            seenAffordanceRef.current.set(key, now);
+          }
+          const age = now - seenAt;
+          const alpha = reducedMotion ? 0.35 : nudgeRingAlpha(now, age);
+          const bob = reducedMotion ? 0 : nudgeBobPx(age);
+          ctx.strokeStyle = `rgba(${AFFORDANCE_RING_RGB},${alpha.toFixed(3)})`;
+          ctx.lineWidth = 2;
+          ctx.strokeRect(sx + 2.5, sy + 2.5 + bob, o.w * TILE - 5, o.h * TILE - 5);
+        }
+      }
+
+      // ---- 無効操作のフィードバック（B2）: タップしたタイルに赤い輪＋揺れ ----
+      {
+        const deny = denyFxRef.current;
+        if (deny) {
+          const fb = deniedFeedback(now - deny.at);
+          if (!fb) denyFxRef.current = null;
+          else {
+            const dx0 = space !== "world" ? Math.round(lobbyOx + deny.x * TILE) : Math.round(toScreenX(deny.x));
+            const dy0 = space !== "world" ? Math.round(lobbyOy + deny.y * TILE) : Math.round(toScreenY(deny.y));
+            ctx.strokeStyle = `rgba(${DENIED_RING_RGB},${fb.alpha.toFixed(3)})`;
+            ctx.lineWidth = 2;
+            ctx.strokeRect(dx0 + 2.5 + (reducedMotion ? 0 : fb.dx), dy0 + 2.5, TILE - 5, TILE - 5);
+          }
+        }
+      }
+
       // 洞窟の闇: 明かりの半径の外を暗くする（松明 6 / ランプ 9 タイル）。
       if (parseInstanceSpace(space)?.kind === "cave" || parseInstanceSpace(space)?.kind === "dungeon") {
         const radius = lightRadiusTiles(invRef.current?.items) * TILE;
@@ -3915,7 +4011,7 @@ export default function WorldBoxClient() {
       ctx.fill();
       ctx.fillStyle = joy.active ? "rgba(255,255,255,0.45)" : "rgba(255,255,255,0.22)";
       ctx.beginPath();
-      ctx.arc(base.x + joy.dx * 34, base.y + joy.dy * 34, 22, 0, Math.PI * 2);
+      ctx.arc(base.x + joy.dx * 34, base.y + joy.dy * 34, stickKnobRadius(joy.active), 0, Math.PI * 2);
       ctx.fill();
 
       // スタミナ（ゼルダ式の円形ゲージをキャラの左上に。満タンで放置すると消える）
@@ -4374,10 +4470,12 @@ export default function WorldBoxClient() {
         )}
         {spaceUi !== "world" && stationUi && (
           <div
+            key={stationUi}
             style={{
               position: "absolute", left: "50%", bottom: 10, transform: "translateX(-50%)",
               display: "flex", gap: 8, alignItems: "center", padding: "6px 8px 6px 14px",
               borderRadius: 10, background: "rgba(0,0,0,0.6)", color: "#fff", fontSize: 13, whiteSpace: "nowrap",
+              animation: "wb-chip-pop 240ms ease-out",
             }}
           >
             <span>{stationUi === "shop" && stationGenre ? (genreById(stationGenre)?.name ?? STATION_LABEL[stationUi]) : STATION_LABEL[stationUi]}</span>
@@ -4739,12 +4837,14 @@ export default function WorldBoxClient() {
         </div>
         {tileMsg && (
           <div
+            key={denyStamp}
             role="status"
             style={{
               position: "absolute", left: "50%", bottom: 58, transform: "translateX(-50%)",
               padding: "4px 12px", borderRadius: 10, background: "rgba(0,0,0,0.6)",
               color: "#fff", fontSize: 13, whiteSpace: "nowrap", zIndex: 4,
               maxWidth: "calc(100% - 16px)", boxSizing: "border-box", overflow: "hidden", textOverflow: "ellipsis",
+              animation: denyStamp > 0 ? "wb-deny-shake 260ms ease-out" : undefined,
             }}
           >
             {tileMsg}
