@@ -206,3 +206,12 @@ test("クライアント配線: 経済パネルと API がつながっている"
   assert.ok(!panel.includes("profile.coins"), "残高表示にプロフィールの coins を使わない");
   assert.ok(panel.includes("/api/worldbox/economy"), "パネルがブリッジ API を使っていない");
 });
+
+test("ショップはロビー空間でのみ開く（クライアントが空間を渡し、パネルが制限する）", () => {
+  const client = fs.readFileSync(path.join(rootDir, "app/games/worldbox/WorldBoxClient.tsx"), "utf8");
+  assert.match(client, /<WorldBoxEconomyPanel space=\{spaceUi\} \/>/);
+  const panel = fs.readFileSync(path.join(rootDir, "app/games/worldbox/WorldBoxEconomyPanel.tsx"), "utf8");
+  assert.match(panel, /space === "lobby"/);
+  assert.match(panel, /inLobby && tabBtn\("shop"/);
+  assert.match(panel, /ショップ（売買）はロビーでのみ利用できます/);
+});
