@@ -49,9 +49,9 @@ const DELETED_ONLINE = [
   "simonbattle", "gomoku", "checkers", "domino", "minority",
 ];
 
-test("カタログ: 141本から46本を削除し95本になっている", () => {
+test("カタログ: 141本から46本を削除し95本、AGO WORLD BOX追加で96本になっている", () => {
   assert.equal(DELETED.length, 46);
-  assert.equal(catalog.WEB_GAMES.length, 95);
+  assert.equal(catalog.WEB_GAMES.length, 96);
   for (const slug of DELETED) {
     assert.equal(catalog.getWebGame(slug), undefined, `${slug}: カタログに残っている`);
     assert.ok(!fs.existsSync(path.join(webDir, "app/games", slug)), `${slug}: ディレクトリが残っている`);
