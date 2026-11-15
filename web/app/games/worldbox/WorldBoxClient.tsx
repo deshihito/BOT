@@ -868,9 +868,16 @@ export default function WorldBoxClient() {
     const handleTileTap = (t: { x: number; y: number }): boolean => {
       const prof = invRef.current;
       if (!prof) return false;
+      const slot = prof.hotbar[selSlotRef.current] ?? null;
+      const selItem = slot ? itemById(slot.id) : null;
+      const wantsPlace = !!selItem && (selItem.category === "block" || selItem.facility === true);
       const px = Math.floor(player.x);
       const py = Math.floor(player.y);
-      if (Math.max(Math.abs(t.x - px), Math.abs(t.y - py)) > 1) return false;
+      if (Math.max(Math.abs(t.x - px), Math.abs(t.y - py)) > 1) {
+        // ブロック選択中の遠いタップは設置のつもりなので、無反応で終わらせない
+        if (wantsPlace) setTileMsg(TILE_ERROR_LABEL.too_far);
+        return false;
+      }
       const view = tileView(map, tilesRef.current, t.x, t.y, Date.now(), null);
       // 自分のブロックかどうかは、サーバーが返した自分の ID で判定する
       if (view.block) {
@@ -880,14 +887,16 @@ export default function WorldBoxClient() {
           mine: selfIdRef.current !== null && ov?.block?.ownerId === selfIdRef.current,
         };
       }
-      const slot = prof.hotbar[selSlotRef.current] ?? null;
-      const selItem = slot ? itemById(slot.id) : null;
       const act = actionForTile(view, {
         tool: selItem?.tool,
         seedId: selItem && selItem.category === "seed" ? selItem.id : undefined,
         blockId: selItem && (selItem.category === "block" || selItem.facility) ? selItem.id : undefined,
       });
-      if (!act) return false;
+      if (!act) {
+        // 隣接タップで何も起きない場合は理由を出す（素材は置けない・その地形には置けない等）
+        if (selItem) setTileMsg(TILE_ERROR_LABEL.tile_blocked);
+        return false;
+      }
       if (act.action === "plant-picker") {
         setSeedPicker({ x: t.x, y: t.y });
         return true;
@@ -1487,6 +1496,31 @@ export default function WorldBoxClient() {
               ctx.fillRect(bx + 5, by + 5, TILE - 10, TILE - 10);
             }
             ctx.restore();
+          }
+        }
+      }
+
+      // ブロック/施設を選択中は、置ける隣接タイルを薄く光らせる（置ける場所を構造で示す）
+      if (!buildRef.current.active) {
+        const prof = invRef.current;
+        const slot = prof?.hotbar[selSlotRef.current] ?? null;
+        const selDef = slot ? itemById(slot.id) : null;
+        if (prof && selDef && (selDef.category === "block" || selDef.facility === true)) {
+          const px = Math.floor(player.x);
+          const py = Math.floor(player.y);
+          for (let dy = -1; dy <= 1; dy++) {
+            for (let dx = -1; dx <= 1; dx++) {
+              const vx = px + dx;
+              const vy = py + dy;
+              if (vx < 0 || vy < 0 || vx >= MAP_W || vy >= MAP_H) continue;
+              const v = tileView(map, tilesRef.current, vx, vy, nowMs, null);
+              if (actionForTile(v, { blockId: selDef.id })?.action !== "place_block") continue;
+              ctx.fillStyle = "rgba(140,255,150,0.20)";
+              ctx.fillRect(toScreenX(vx), toScreenY(vy), TILE, TILE);
+              ctx.strokeStyle = "rgba(225,255,225,0.55)";
+              ctx.lineWidth = 1.5;
+              ctx.strokeRect(toScreenX(vx) + 1, toScreenY(vy) + 1, TILE - 2, TILE - 2);
+            }
           }
         }
       }
