@@ -12,6 +12,8 @@ import {
 } from "@/lib/worldbox/tiles";
 import { loadBuildings } from "@/lib/worldbox/buildings-online";
 import { loadNationsState } from "@/lib/worldbox/nations-online";
+import { containerIsEmpty, isContainerItem } from "@/lib/worldbox/containers";
+import { loadContainer, storeContainer } from "@/lib/worldbox/containers-online";
 import {
   isTilesEnabled, loadTileOverride, loadTileOverrides, storeTileOverride,
 } from "@/lib/worldbox/tiles-online";
@@ -23,6 +25,7 @@ export const runtime = "nodejs";
 // 建物タイルを避け、採掘は設置者だけが行える。
 // 地形の真値は生成マップ＋bot_kv の上書き（名前空間 worldbox_tiles、
 // キー "x,y"）で、行為の可否はすべてサーバー側で検証する。
+// 収納コンテナ（樽・宝箱）は中身が入っている間は掘れない（not_empty）。
 // 隣接検証: サーバーが知る本人の位置（プレゼンス優先、無ければ
 // オンラインセーブ）がある場合だけタイルとの距離を確かめる。
 // GET ?x0&y0&x1&y1: その範囲（各辺128まで）の上書きだけを返す
@@ -143,6 +146,8 @@ export async function POST(request: Request) {
   const profile = await loadProfile(ownerKey);
   const map = worldTileSource();
   let result: TileActionResult;
+  /** 掘り出す対象が収納コンテナなら、そのアイテム ID（回収後に状態を消す）。 */
+  let minedContainerItem: string | null = null;
   if (fields.action === "place_block") {
     // ユニオンマーク（首都）・建物レイヤーの保護はルート側の真値で判定する
     const [nationsState, buildings] = await Promise.all([loadNationsState(), loadBuildings()]);
@@ -155,6 +160,16 @@ export async function POST(request: Request) {
       },
     );
   } else if (fields.action === "mine_block") {
+    // 収納コンテナ（樽・宝箱）は中身が入っている間は回収できない
+    const blockItemId =
+      current && isOverrideActive(current, Date.now()) ? current.block?.itemId : undefined;
+    if (blockItemId && isContainerItem(blockItemId)) {
+      const state = await loadContainer(tx, ty, blockItemId);
+      if (state && !containerIsEmpty(state)) {
+        return NextResponse.json({ error: "not_empty" }, { status: 409, headers: NO_STORE });
+      }
+      minedContainerItem = blockItemId;
+    }
     result = applyMineBlock(current, profile, map, ownerKey, fields.x, fields.y, Date.now());
   } else {
     result = applyTileAction(
@@ -171,6 +186,8 @@ export async function POST(request: Request) {
   if (!(await storeProfile(ownerKey, result.profile))) {
     return NextResponse.json({ error: "tiles_failed" }, { status: 500, headers: NO_STORE });
   }
+  // コンテナを回収したら中身（空）の状態も消す
+  if (minedContainerItem) await storeContainer(tx, ty, null);
   return NextResponse.json(
     {
       ok: true,
