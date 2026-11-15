@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { COMMAND_GUIDES, TOTAL_FUNCTIONS } from "@/lib/command-guides";
+import Breadcrumbs from "../Breadcrumbs";
 import FactsStrip from "../FactsStrip";
 import FeaturesExplorer from "./FeaturesExplorer";
 
@@ -13,6 +14,7 @@ export const metadata: Metadata = {
 export default function FeaturesPage() {
   return (
     <section className="home-features">
+      <Breadcrumbs items={[{ label: "機能紹介" }]} />
       <div className="page-heading"><h1>機能紹介</h1></div>
       <FactsStrip
         facts={[

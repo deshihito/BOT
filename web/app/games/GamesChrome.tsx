@@ -42,6 +42,11 @@ export function GameDetailHeader({ game }: { game: WebGame }) {
         ]}
         label={`${game.title} の判断材料`}
       />
+      {game.guide ? (
+        <p className="quiet-note">
+          <Link href={game.guide.href}>{game.guide.label} →</Link>
+        </p>
+      ) : null}
     </>
   );
 }

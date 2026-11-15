@@ -87,3 +87,80 @@ test("isNavActive は配下ページで親を現在地とし、紛らわしい�
   assert.equal(m.isNavActive("/", "/commands"), false);
   assert.equal(m.isNavActive("/ranking", "/games"), false);
 });
+
+// ---- U4（Web IA 再構築）: パンくずの網羅と名称一致 ----
+// 公開ページはパンくずで親へ1クリックで戻れる。独立シェル（/games/worldbox・
+// /one-prompter・/viewslopper・/folio）とアプリ画面（/dashboard・/login）、
+// 死蔵ページ（/nation・/map＝U5 棚卸し対象）はこの網羅の対象外。
+const appRoot = path.join(import.meta.dirname, "..", "app");
+const readPage = (rel) => fs.readFileSync(path.join(appRoot, rel), "utf8");
+
+test("公開ページはパンくずを持ち、末尾ラベルが見出しと一致する", () => {
+  const pages = [
+    // [page.tsx の相対パス, パンくずの末尾ラベル]
+    ["features/page.tsx", "機能紹介"],
+    ["commands/page.tsx", "コマンド"],
+    ["games/page.tsx", "ゲーム"],
+    ["ranking/page.tsx", "ランキング"],
+    ["compute/page.tsx", "計算に参加"],
+    ["faq/page.tsx", "よくある質問"],
+    ["status/page.tsx", "ステータス"],
+    ["about/page.tsx", "運営者情報"],
+    ["credits/page.tsx", "クレジット"],
+    ["terms/page.tsx", "利用規約"],
+    ["privacy/page.tsx", "プライバシーポリシー"],
+    ["jinrou/roles/page.tsx", "人狼 役職図鑑"],
+  ];
+  for (const [rel, label] of pages) {
+    const src = readPage(rel);
+    // /games のパンくずは GamesChrome 側で描くため、ラベルはそちらで確認する
+    const labelOk =
+      rel === "games/page.tsx"
+        ? readPage("games/GamesChrome.tsx").includes("<span>ゲーム</span>")
+        : src.includes(`label: "${label}"`);
+    const hasCrumb =
+      labelOk && (src.includes("Breadcrumbs") || src.includes("GamesBreadcrumb"));
+    assert.ok(hasCrumb, `${rel} に「${label}」のパンくずがない`);
+    const h1 = src.match(/<h1>([^<]+)<\/h1>/);
+    assert.ok(h1, `${rel} に h1 がない`);
+    assert.equal(h1[1], label, `${rel} の h1「${h1[1]}」がパンくず「${label}」と違う`);
+  }
+});
+
+test("役職詳細はパンくずで親へ戻り、手書きの戻るリンクを持たない", () => {
+  const src = readPage("jinrou/roles/[id]/page.tsx");
+  assert.ok(src.includes('href: "/jinrou/roles"'), "役職詳細のパンくずに親へのリンクがない");
+  assert.ok(!src.includes("にもどる"), "役職詳細に手書きの戻るリンクが残っている");
+  assert.ok(src.includes("{ label: role.name }"), "役職詳細のパンくず末尾が役職名でない");
+});
+
+test("同一行き先の名称はページ内でも揺れない（ランキング／ステータス）", () => {
+  for (const [rel, label] of [
+    ["ranking/page.tsx", "ランキング"],
+    ["status/page.tsx", "ステータス"],
+  ]) {
+    const src = readPage(rel);
+    assert.ok(src.includes(`title: "${label}"`), `${rel} の metadata title が「${label}」でない`);
+    assert.ok(!src.includes("リーダーボード"), `${rel} に旧称「リーダーボード」が残っている`);
+    assert.ok(!src.includes("サービスステータス"), `${rel} に旧称「サービスステータス」が残っている`);
+  }
+});
+
+test("人狼 役職図鑑は人狼の詳細ヘッダーから1クリックで届く", async () => {
+  const catalogSrc = fs.readFileSync(
+    path.join(import.meta.dirname, "..", "lib", "games-catalog.ts"),
+    "utf8",
+  );
+  const catalogJs = ts.transpileModule(catalogSrc, {
+    compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
+  }).outputText;
+  const catalog = await import(
+    "data:text/javascript;base64," + Buffer.from(catalogJs).toString("base64")
+  );
+  const werewolf = catalog.WEB_GAMES.find((g) => g.slug === "werewolf");
+  assert.ok(werewolf, "人狼のカタログエントリがない");
+  assert.deepEqual(werewolf.guide, { href: "/jinrou/roles", label: "人狼 役職図鑑を見る" });
+  const chromeSrc = readPage("games/GamesChrome.tsx");
+  assert.ok(chromeSrc.includes("game.guide"), "詳細ヘッダーが guide 導線を描画していない");
+  assert.ok(chromeSrc.includes("game.guide.href"), "詳細ヘッダーが guide の行き先を使っていない");
+});

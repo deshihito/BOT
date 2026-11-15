@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { JINROU_ROLES, type JinrouTeam } from "@/lib/jinrou-roles";
+import Breadcrumbs from "../../Breadcrumbs";
 
 export const metadata = {
   title: "人狼 役職図鑑",
@@ -16,6 +17,7 @@ const TEAMS: { team: JinrouTeam; label: string; note: string }[] = [
 export default function JinrouRoles() {
   return (
     <>
+      <Breadcrumbs items={[{ label: "人狼 役職図鑑" }]} />
       <section className="hero">
         <img src="/img/jinrou/jinrou.png" alt="人狼" />
         <div>
