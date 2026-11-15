@@ -11,6 +11,17 @@ import { ITEMS, RECIPES, itemById, sellPrice } from "@/lib/worldbox/items";
 import type { LobbyStation } from "@/lib/worldbox/lobby";
 import type { PlayerProfile } from "@/lib/worldbox/profile";
 import type { SaveSpace } from "@/lib/worldbox/save";
+import { playWbSe, type WbSeName } from "@/lib/worldbox/sound";
+
+/** 経済アクションの成功音（行為の意味で選ぶ）。 */
+const ACTION_SE: Record<string, WbSeName> = {
+  buy: "buy",
+  sell: "sell",
+  craft: "craft",
+  eat: "harvest",
+  work: "coin",
+  steal: "coin",
+};
 
 type Tab = "bag" | "shop" | "craft" | "steal" | "bank";
 type LoadState = "loading" | "ready" | "guest" | "unavailable";
@@ -177,6 +188,8 @@ export default function WorldBoxEconomyPanel({ space, station, onClose }: { spac
       }
       setProfile(data.profile);
       setMsg(describe(data));
+      const se = ACTION_SE[String(payload.action ?? "")];
+      if (se) playWbSe(se);
       void refreshBridge();
     } catch {
       setMsg("できませんでした");
@@ -202,6 +215,7 @@ export default function WorldBoxEconomyPanel({ space, station, onClose }: { spac
       setTransferTo("");
       setTransferAmount("");
       setMsg("送金を受け付けました");
+      playWbSe("coin");
       void refreshBridge();
     } catch {
       setMsg("送金を受け付けられませんでした");

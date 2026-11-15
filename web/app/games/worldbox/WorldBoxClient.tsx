@@ -54,6 +54,10 @@ import { CROPS, ITEMS, itemById } from "@/lib/worldbox/items";
 import { countItem, type ItemSlot, type PlayerProfile, type SlotRef } from "@/lib/worldbox/profile";
 import { loadDungeonTiles, loadFarmSprites, loadLobbySprites, loadTextures } from "@/lib/worldbox/textures";
 import { isStickTouch, stickBase, stickVector } from "@/lib/worldbox/stick";
+import {
+  bgmSceneFor, loadWbSoundSettings, playWbSe, saveWbSoundSettings, seForFxBurst, setWbBgmScene,
+  stopWbBgm, unlockWbAudio, type WbSoundSettings,
+} from "@/lib/worldbox/sound";
 import { useGamesNav } from "../GamesShell";
 import WorldBoxCasinoPanel from "./WorldBoxCasinoPanel";
 import WorldBoxArenaPanel from "./WorldBoxArenaPanel";
@@ -430,6 +434,36 @@ export default function WorldBoxClient() {
   const [boardLoggedIn, setBoardLoggedIn] = useState(false);
   const [boardText, setBoardText] = useState("");
   const [boardMsg, setBoardMsg] = useState("");
+  // 音響（BGM/SE）: 設定は lib/worldbox/sound が localStorage に持つ。
+  // AudioContext は最初のユーザー操作でだけ作れるため、解錠は pointerdown/keydown で行う。
+  const [soundSettings, setSoundSettings] = useState<WbSoundSettings>({ bgm: true, se: true });
+  useEffect(() => {
+    setSoundSettings(loadWbSoundSettings());
+    const unlock = () => unlockWbAudio();
+    window.addEventListener("pointerdown", unlock);
+    window.addEventListener("keydown", unlock);
+    return () => {
+      window.removeEventListener("pointerdown", unlock);
+      window.removeEventListener("keydown", unlock);
+      stopWbBgm();
+    };
+  }, []);
+  // BGM の場面は 1 秒ごとに判定し直す（昼夜は共有時計で勝手に進むため）。
+  useEffect(() => {
+    const applyScene = () =>
+      setWbBgmScene(bgmSceneFor({
+        space: spaceUi, night: nightAmount(phaseAtTime(Date.now() / 1000)), casinoOpen,
+      }));
+    applyScene();
+    const timer = setInterval(applyScene, 1000);
+    return () => clearInterval(timer);
+  }, [spaceUi, casinoOpen]);
+  const toggleSound = (key: "bgm" | "se") => {
+    const next = { ...soundSettings, [key]: !soundSettings[key] };
+    setSoundSettings(next);
+    saveWbSoundSettings(next);
+    if (key === "se" && next.se) playWbSe("click");
+  };
   const refreshBoard = async () => {
     try {
       const res = await fetch("/api/worldbox/board", { headers: { Accept: "application/json" } });
@@ -498,6 +532,7 @@ export default function WorldBoxClient() {
         return;
       }
       staminaBoostRef.current = true;
+      playWbSe(action === "fountain" ? "coin" : "success");
       if (action === "fountain") {
         const itemName = data.item ? itemById(data.item)?.name ?? data.item : null;
         setPlazaMsg(itemName ? `スタミナが回復した。${itemName} を手に入れた` : "スタミナが回復した");
@@ -1223,6 +1258,7 @@ export default function WorldBoxClient() {
       if (selDef?.tool === "sword") {
         if (t.x !== px || t.y !== py) player.face = t.x + 0.5 >= player.x ? 1 : -1;
         swing = { startedAt: performance.now(), itemId: selDef.id, face: player.face, whiff: false };
+        playWbSe("swing");
         const candidates: { mobId: string; x: number; y: number; size: number; placed: PlacedMob }[] = [];
         for (const placed of mobCache) {
           const def = mobById(placed.mobId);
@@ -1265,6 +1301,7 @@ export default function WorldBoxClient() {
         player.face = cx + 0.5 >= player.x ? 1 : -1;
         const slot = invRef.current.hotbar[selSlotRef.current] ?? null;
         swing = { startedAt: performance.now(), itemId: slot?.id ?? null, face: player.face, whiff: false };
+        playWbSe("swing");
         if (nowMs - lastAttackAt >= 350) {
           lastAttackAt = nowMs;
           void attackMobRef.current(placed);
@@ -1312,6 +1349,7 @@ export default function WorldBoxClient() {
       }
       // 入力への即時応答として道具を振る（結果の粒は成功時に別で出す）
       swing = { startedAt: performance.now(), itemId: selItem?.id ?? null, face: player.face, whiff: false };
+      playWbSe("swing");
       void postTileActionRef.current(act.action, t.x, t.y, act.seedId, act.itemId);
       return true;
     };
@@ -1656,6 +1694,7 @@ export default function WorldBoxClient() {
         placePlayer(dest.x, dest.y);
       }
       spawnBurst(fxSys, "warp", player.x, player.y - 0.3);
+      playWbSe("warp");
       void pollOthers();
     };
     warpActionRef.current = doWarp;
@@ -1795,6 +1834,7 @@ export default function WorldBoxClient() {
       if (inWaterNow !== wasSwimming) {
         splashes.push({ x: player.x, y: player.y, at: now });
         spawnBurst(fxSys, "splash", player.x, player.y);
+        playWbSe("splash");
         wasSwimming = inWaterNow;
       }
       stamina = stepStamina(stamina, staminaUse, dt).state;
@@ -1816,6 +1856,7 @@ export default function WorldBoxClient() {
         playerSwimming = false;
         splashes.push({ x: player.x, y: player.y, at: now });
         spawnBurst(fxSys, "warp", player.x, player.y - 0.3);
+        playWbSe("warp");
         saveNow();
       }
       // モブ接触: 占有範囲までチェビシェフ距離1以内を接触とする。
@@ -1876,10 +1917,12 @@ export default function WorldBoxClient() {
         if (ev.kind === "whiff") {
           // 空振り: 風切りだけのスイングを再生する（粒も道具アイコンも出さない）
           swing = { startedAt: now, itemId: null, face: player.face, whiff: true };
+          playWbSe("swing");
           continue;
         }
         if (ev.kind === "hit" || ev.kind === "death" || ev.kind === "spawn") {
           // モブ演出: 大きさに応じて粒をスケール。死亡は小さな揺れ、出現はポップも併用
+          playWbSe(seForFxBurst(ev.kind));
           spawnMobFx(fxSys, ev.kind, ev.x + 0.5, ev.y + 0.5, { sizeTiles: ev.sizeTiles, color: ev.color });
           if (ev.kind === "death") shake = startShake(shake, 3, now);
           if (ev.kind === "spawn") pops.set(`${ev.x},${ev.y}`, now);
@@ -1900,6 +1943,7 @@ export default function WorldBoxClient() {
           continue;
         }
         spawnBurst(fxSys, ev.kind, ev.x + 0.5, ev.y + 0.5);
+        playWbSe(seForFxBurst(ev.kind));
         if (ev.kind === "chop" || ev.kind === "mine") shake = startShake(shake, 2, now);
         else if (ev.kind === "debris" || ev.kind === "build") shake = startShake(shake, 3, now);
         if (ev.kind === "place" || ev.kind === "build") pops.set(`${ev.x},${ev.y}`, now);
@@ -1909,13 +1953,19 @@ export default function WorldBoxClient() {
       if (beat !== lastBeat) {
         lastBeat = beat;
         if (speed > 0.6 && !reducedMotion) {
-          if (playerSwimming) spawnBurst(fxSys, "step", player.x, player.y, { color: "#bfe6ff" });
-          else spawnBurst(fxSys, "step", player.x, player.y + 0.05);
+          if (playerSwimming) {
+            spawnBurst(fxSys, "step", player.x, player.y, { color: "#bfe6ff" });
+            playWbSe("splash");
+          } else {
+            spawnBurst(fxSys, "step", player.x, player.y + 0.05);
+            playWbSe("step");
+          }
         }
       }
       if (dashing && speed > 0.6 && now - lastDashFxAt > 45 && !reducedMotion) {
         lastDashFxAt = now;
         spawnBurst(fxSys, "dash", player.x - player.vx * 0.06, player.y - 0.35);
+        playWbSe("dash");
       }
       if (playerSwimming && speed > 0.6 && now - lastSwimFxAt > 200) {
         lastSwimFxAt = now;
@@ -2918,6 +2968,20 @@ export default function WorldBoxClient() {
                   {a.label}
                 </button>
               ))}
+            <button
+              type="button"
+              style={{ ...btn, background: "rgba(255,255,255,0.10)", color: "#fff" }}
+              onClick={() => toggleSound("bgm")}
+            >
+              {soundSettings.bgm ? "BGMを切る" : "BGMを入れる"}
+            </button>
+            <button
+              type="button"
+              style={{ ...btn, background: "rgba(255,255,255,0.10)", color: "#fff" }}
+              onClick={() => toggleSound("se")}
+            >
+              {soundSettings.se ? "効果音を切る" : "効果音を入れる"}
+            </button>
             <Link
               href={`${prefix}/games`}
               style={{
