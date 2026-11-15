@@ -36,6 +36,7 @@ import {
   buildLobby, lobbyTileAt, stationNear, type LobbyObject, type LobbyStation,
 } from "@/lib/worldbox/lobby";
 import type { BoardPost } from "@/lib/worldbox/board";
+import { CHAT_TEXT_MAX } from "@/lib/worldbox/chat";
 import { parseSave, serializeSave, type SaveSpace } from "@/lib/worldbox/save";
 import { chooseInitialSave } from "@/lib/worldbox/save-source";
 import {
@@ -244,6 +245,16 @@ const STATION_LABEL: Record<LobbyStation, string> = {
   smith: "鍛冶屋",
 };
 
+/** 近距離チャットの1行（API が距離つきで返す）。 */
+type ChatLine = {
+  id: string;
+  name: string;
+  text: string;
+  at: number;
+  distanceTiles: number;
+  mine: boolean;
+};
+
 export default function WorldBoxClient() {
   const { prefix } = useGamesNav();
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -398,6 +409,52 @@ export default function WorldBoxClient() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [boardOpen]);
 
+  // 近距離チャット（届く範囲はサーバー側がプレゼンス位置で判定し、距離つきで返す）
+  const [chatOpen, setChatOpen] = useState(false);
+  const [chatLines, setChatLines] = useState<ChatLine[]>([]);
+  const [chatText, setChatText] = useState("");
+  const [chatMsg, setChatMsg] = useState("");
+  const refreshChat = async () => {
+    try {
+      const res = await fetch(`/api/worldbox/chat?space=${spaceUi}`, { headers: { Accept: "application/json" } });
+      if (!res.ok) return;
+      const data = (await res.json()) as { messages?: ChatLine[] };
+      setChatLines(data.messages ?? []);
+    } catch { /* チャットが読めなくても歩き続けられる */ }
+  };
+  const postChat = async () => {
+    const text = chatText.trim();
+    if (!text) return;
+    setChatMsg("");
+    try {
+      const res = await fetch("/api/worldbox/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ space: spaceUi, text }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) {
+        setChatMsg(
+          data.error === "unauthorized" ? "ログインが必要"
+            : data.error === "too_fast" ? "少し待ってから送って"
+            : "送れなかった",
+        );
+        return;
+      }
+      setChatText("");
+      void refreshChat();
+    } catch {
+      setChatMsg("送れなかった");
+    }
+  };
+  useEffect(() => {
+    if (!chatOpen) return;
+    void refreshChat();
+    const timer = window.setInterval(() => void refreshChat(), 2000);
+    return () => window.clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chatOpen, spaceUi]);
+
   // 施設から離れたら、その施設のパネルは閉じる（場所制約の表示側）
   useEffect(() => {
     if (stationUi !== "board") setBoardOpen(false);
@@ -496,6 +553,7 @@ export default function WorldBoxClient() {
       setMapView(false);
       setCasinoOpen(false);
       setBoardOpen(false);
+      setChatOpen(false);
       setGuildBoardOpen(false);
       setStorageOpen(false);
       setHeldSlot(null);
@@ -1956,6 +2014,12 @@ export default function WorldBoxClient() {
       show: spaceUi === "world",
       run: () => setMapView((v) => !v),
     },
+    {
+      id: "chat",
+      label: chatOpen ? "チャットを閉じる" : "チャット",
+      show: true,
+      run: () => setChatOpen((v) => !v),
+    },
     { id: "close", label: "閉じる", show: true, run: () => {} },
   ];
 
@@ -2286,6 +2350,55 @@ export default function WorldBoxClient() {
               <p className="muted" style={{ margin: 0, fontSize: 13 }}>種がない</p>
             )}
           </div>
+        </div>
+      )}
+
+      {chatOpen && (
+        <div style={panelOverlay}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <strong>チャット</strong>
+            <span style={{ flex: 1 }} />
+            <button type="button" style={btn} onClick={() => setChatOpen(false)}>
+              閉じる
+            </button>
+          </div>
+          {chatLines.length === 0 ? (
+            <p className="muted" style={{ margin: "10px 0 0", fontSize: 13 }}>まだ発言はありません</p>
+          ) : (
+            <ul style={{ listStyle: "none", margin: "10px 0 0", padding: 0, display: "grid", gap: 8, maxHeight: 260, overflowY: "auto" }}>
+              {chatLines.map((m) => (
+                <li key={m.id} style={{ fontSize: 13 }}>
+                  <strong>{m.name}</strong>{" "}
+                  <span className="muted">{m.mine ? "自分" : `${m.distanceTiles}タイル先`}</span>
+                  <div>{m.text}</div>
+                </li>
+              ))}
+            </ul>
+          )}
+          <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+            <input
+              value={chatText}
+              onChange={(e) => setChatText(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  void postChat();
+                }
+              }}
+              maxLength={CHAT_TEXT_MAX}
+              placeholder="メッセージ"
+              style={{
+                flex: 1, minHeight: 40, padding: "6px 10px", borderRadius: 10,
+                border: "1px solid rgba(255,255,255,0.25)", background: "rgba(255,255,255,0.06)", color: "inherit",
+              }}
+            />
+            <button type="button" style={btn} onClick={() => void postChat()}>
+              送る
+            </button>
+          </div>
+          {chatMsg && (
+            <p role="status" style={{ margin: "10px 0 0" }}>{chatMsg}</p>
+          )}
         </div>
       )}
 
