@@ -11,7 +11,7 @@ import { playerAttack } from "@/lib/worldbox/arena";
 import { mobById } from "@/lib/worldbox/mobs";
 import { isNightPhase, phaseAtTime } from "@/lib/worldbox/daynight";
 import {
-  applyMobAttack, mobDistance, mobExistsAt, mobKeyOf, visibleMobs,
+  applyMobAttack, mobDistance, mobExistsAt, mobKeyOf, resolveMobPosition, visibleMobs,
   MOB_ATTACK_MAX_DISTANCE, type MobState,
 } from "@/lib/worldbox/combat";
 import { isMobsEnabled, loadMobState, loadMobStates, storeMobState } from "@/lib/worldbox/mobs-online";
@@ -183,7 +183,7 @@ export async function POST(request: Request) {
   } catch {
     return NextResponse.json({ error: "invalid_request" }, { status: 400, headers: NO_STORE });
   }
-  const fields = (body ?? {}) as { action?: unknown; mobId?: unknown; x?: unknown; y?: unknown; px?: unknown; py?: unknown; space?: unknown };
+  const fields = (body ?? {}) as { action?: unknown; mobId?: unknown; x?: unknown; y?: unknown; px?: unknown; py?: unknown; mx?: unknown; my?: unknown; space?: unknown };
   if (fields.action !== "attack" || typeof fields.x !== "number" || typeof fields.y !== "number") {
     return NextResponse.json({ error: "invalid_request" }, { status: 400, headers: NO_STORE });
   }
@@ -278,7 +278,19 @@ export async function POST(request: Request) {
       })()
     : await actorWorldPosition(ownerKey, reported);
   if (pos) {
-    const dist = mobDistance(Math.floor(pos.x), Math.floor(pos.y), placed);
+    // 距離はアンカーでなく「画面で見えている現在タイル」で測る。モブの
+    // 見た目はアンカーから最大で LEASH_DISTANCE ほど離れて追跡してくる
+    // ため、アンカー基準だと足元のモブにも too_far になってしまう。
+    // 申告タイルはリーシュ内でのみ採用する（resolveMobPosition）。
+    const reportedMob =
+      typeof fields.mx === "number" && typeof fields.my === "number" &&
+      Number.isFinite(fields.mx) && Number.isFinite(fields.my) &&
+      fields.mx >= -WORLD_COORD_LIMIT && fields.my >= -WORLD_COORD_LIMIT &&
+      fields.mx <= WORLD_COORD_LIMIT && fields.my <= WORLD_COORD_LIMIT
+        ? { x: fields.mx, y: fields.my }
+        : null;
+    const effPlaced = resolveMobPosition(placed, reportedMob);
+    const dist = mobDistance(Math.floor(pos.x), Math.floor(pos.y), effPlaced);
     if (dist > MOB_ATTACK_MAX_DISTANCE) {
       return NextResponse.json({ error: "too_far" }, { status: 409, headers: NO_STORE });
     }

@@ -701,6 +701,15 @@ export default function WorldBoxClient() {
   };
   // インベントリ（ホットバー/ストレージ）とタイル上書き（伐採・畑・作物）
   const [invProfile, setInvProfile] = useState<PlayerProfile | null>(null);
+  /** 技チャージゲージの表示時計（クールタイム中だけ 200ms で進める）。 */
+  const [gaugeNow, setGaugeNow] = useState(() => Date.now());
+  const gaugeSkill = invProfile && invProfile.role !== "free" ? activeSkillFor(invProfile) : null;
+  useEffect(() => {
+    if (!gaugeSkill) return;
+    const timer = window.setInterval(() => setGaugeNow(Date.now()), 200);
+    return () => window.clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gaugeSkill?.id, invProfile?.role]);
   const [, setCtTick] = useState(0);
   useEffect(() => {
     const timer = window.setInterval(() => setCtTick((v) => v + 1), 500);
@@ -754,6 +763,8 @@ export default function WorldBoxClient() {
   const [denyStamp, setDenyStamp] = useState(0);
   // 冒険役職の技（ダブルタップ発動）: 進行中の演出・前回タップ・死亡地点。
   const skillFxRef = useRef<{ effect: SkillFxEffect; stage: number }[]>([]);
+  /** モブの現在タイルのスナップショット（描画ループが毎フレーム差し替える）。 */
+  const mobTilesRef = useRef(new Map<string, { mobId: string; x: number; y: number; mx: number; my: number }>());
   const lastTapRef = useRef<{ x: number; y: number; at: number } | null>(null);
   const deathsRef = useRef<{ name: string; x: number; y: number; at: number }[]>([]);
 
@@ -764,8 +775,12 @@ export default function WorldBoxClient() {
     setDenyStamp((n) => n + 1);
   };
 
-  /** ダブルタップで技を打つ。発動したら true（通常タップは消費される）。 */
-  const castSkillAt = async (t: { x: number; y: number }): Promise<boolean> => {
+  /**
+   * ダブルタップで技を打つ。発動したら true（通常タップは消費される）。
+   * サーバーに弾かれたら "denied"（ジェスチャ自体は技の試みとして消費し、
+   * 無言で通常タップに化けさせない）。役職なし等で技にならない場合は false。
+   */
+  const castSkillAt = async (t: { x: number; y: number }): Promise<boolean | "denied"> => {
     const profile = invRef.current;
     if (!profile || profile.role === "free") return false;
     const pos = playerPosRef.current;
@@ -798,13 +813,17 @@ export default function WorldBoxClient() {
     const skill = ownTile && profile.role === "guard" ? SKILLS.taunt : activeSkillFor(profile);
     if (!skill) return false;
     if (skillCooldownLeft(profile, skill.id, Date.now()) > 0) return false;
+    // 近くのモブの現在タイルを申告する（サーバーの対象解決を画面に合わせる）
+    const mobsReport = [...mobTilesRef.current.values()]
+      .filter((m) => Math.abs(m.mx - pos.x) <= 18 && Math.abs(m.my - pos.y) <= 18)
+      .slice(0, 32);
     try {
       const res = await fetch("/api/worldbox/roles", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action: "skill", skill: skill.id, tx: t.x + 0.5, ty: t.y + 0.5,
-          space, px: pos.x, py: pos.y,
+          space, px: pos.x, py: pos.y, mobs: mobsReport,
         }),
       });
       const data = (await res.json().catch(() => ({}))) as {
@@ -827,7 +846,7 @@ export default function WorldBoxClient() {
         void refreshInv();
         return true;
       }
-      return false;
+      return "denied";
     } catch {
       return false;
     }
@@ -1441,7 +1460,7 @@ export default function WorldBoxClient() {
     }
   };
   /** モブへの攻撃（サーバーが配置・距離・HP の正）。結果は演出で返す。 */
-  const attackMob = async (placed: PlacedMob) => {
+  const attackMob = async (placed: PlacedMob, curTile?: { x: number; y: number }) => {
     let key = mobKeyOf(placed);
     const def = mobById(placed.mobId);
     try {
@@ -1454,6 +1473,9 @@ export default function WorldBoxClient() {
           // サーバー側の位置の正（プレゼンス）が WS 中継中は bot_kv に届かないため、
           // 距離検証のフォールバックとして現在位置を添える（プレゼンスが新鮮ならそちらが優先される）
           px: playerPosRef.current.x, py: playerPosRef.current.y,
+          // モブの見た目の現在タイルも申告する。サーバーはアンカーしか
+          // 知らないため、これがないと追跡してきたモブに攻撃が通らない。
+          ...(curTile ? { mx: curTile.x, my: curTile.y } : {}),
         }),
       });
       const data = (await res.json().catch(() => ({}))) as {
@@ -2234,7 +2256,7 @@ export default function WorldBoxClient() {
         if (target) {
           if (nowMs - lastAttackAt >= 350) {
             lastAttackAt = nowMs;
-            void attackMobRef.current(target.placed);
+            void attackMobRef.current(target.placed, { x: target.x, y: target.y });
           }
           return true;
         }
@@ -2261,7 +2283,7 @@ export default function WorldBoxClient() {
         playWbSe("swing");
         if (nowMs - lastAttackAt >= 350) {
           lastAttackAt = nowMs;
-          void attackMobRef.current(placed);
+          void attackMobRef.current(placed, { x: cx, y: cy });
         }
         return true;
       }
@@ -2490,16 +2512,20 @@ export default function WorldBoxClient() {
             }
           }
         }
-        // ダブルタップ（320ms 以内・同タイル近傍）は冒険役職の技が消費する。
+        // ダブルタップ（450ms 以内・同タイル近傍）は冒険役職の技が消費する。
         // クールタイム中・役職なしでは発動せず通常タップとして処理する。
         const lastTap = lastTapRef.current;
         const nowTap = performance.now();
         if (
-          lastTap && nowTap - lastTap.at <= 320 &&
+          lastTap && nowTap - lastTap.at <= 450 &&
           Math.abs(lastTap.x - t.x) <= 1 && Math.abs(lastTap.y - t.y) <= 1
         ) {
           lastTapRef.current = null;
           void castSkillRef.current(t).then((cast) => {
+            if (cast === "denied") {
+              denyAtTile(t.x, t.y);
+              return;
+            }
             if (!cast) {
               if (!handleMobTap(t)) {
                 if (space === "world") handleTileTap(t);
@@ -3810,6 +3836,15 @@ export default function WorldBoxClient() {
           r.ky *= Math.exp(-9 * dt);
           mobDrawQueue.push({ placed, r, hpFrac: hpNow.hp / defFor(def).hp });
         }
+        // React 側（攻撃・技の申告）へモブの現在タイルを渡すスナップショット。
+        // サーバーはアンカーしか知らないため、見た目の現在位置を申告して
+        // 距離検証を画面に合わせる（リーシュ内でのみ採用される）。
+        mobTilesRef.current = new Map(
+          mobDrawQueue.map(({ placed, r }) => [
+            mobKeyFor(placed),
+            { mobId: placed.mobId, x: placed.x, y: placed.y, mx: Math.floor(r.wx), my: Math.floor(r.wy) },
+          ]),
+        );
       }
 
       // ---- モブの予兆マーカー・投射物・糸跡（地面レイヤー、見た目のみ） ----
@@ -5069,10 +5104,6 @@ export default function WorldBoxClient() {
             )}
             {invProfile.role !== "free" && (() => {
               const role = roleById(invProfile.role);
-              const skill = activeSkillFor(invProfile);
-              const total = skill ? SKILLS[skill.id].cooldownMs : 0;
-              const left = skill ? skillCooldownLeft(invProfile, skill.id, Date.now()) : 0;
-              const frac = total > 0 ? left / total : 0;
               return (
                 <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                   <span
@@ -5083,15 +5114,6 @@ export default function WorldBoxClient() {
                       border: "1px solid rgba(255,255,255,0.4)", background: "rgba(255,255,255,0.1)",
                     }}
                   >
-                    {frac > 0 && (
-                      <span
-                        aria-hidden
-                        style={{
-                          position: "absolute", inset: 0,
-                          background: `conic-gradient(rgba(0,0,0,0.72) ${frac * 360}deg, transparent ${frac * 360}deg)`,
-                        }}
-                      />
-                    )}
                     <span style={{ position: "relative" }}>{role.symbol}</span>
                   </span>
                   <span style={{ color: "#fff", fontSize: 11, letterSpacing: 2 }}>
@@ -5103,6 +5125,39 @@ export default function WorldBoxClient() {
             })()}
           </div>
         )}
+        {invProfile && gaugeSkill && (() => {
+          // 左隅の技チャージゲージ: 円の金リングが回復した分だけ満ち、
+          // 満タン（発動可能）で光る。クールタイム表示はここに一本化する。
+          const role = roleById(invProfile.role);
+          const total = SKILLS[gaugeSkill.id].cooldownMs;
+          const left = skillCooldownLeft(invProfile, gaugeSkill.id, gaugeNow);
+          const charged = total > 0 ? Math.max(0, Math.min(1, 1 - left / total)) : 1;
+          const ready = left <= 0;
+          return (
+            <div
+              aria-label={ready ? "技が使える" : "技チャージ中"}
+              style={{ position: "absolute", left: 10, top: 168, width: 54, height: 54, zIndex: 4, pointerEvents: "none" }}
+            >
+              <div
+                aria-hidden
+                style={{
+                  position: "absolute", inset: 0, borderRadius: "50%",
+                  background: `conic-gradient(#ffd23e ${charged * 360}deg, rgba(255,255,255,0.16) ${charged * 360}deg)`,
+                  boxShadow: ready ? "0 0 14px rgba(255,210,62,0.85)" : "0 0 4px rgba(0,0,0,0.5)",
+                }}
+              />
+              <div
+                style={{
+                  position: "absolute", inset: 5, borderRadius: "50%", background: "rgba(0,0,0,0.74)",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  color: ready ? "#ffd23e" : "#ffffff", fontSize: 17, fontWeight: 700,
+                }}
+              >
+                {role.symbol}
+              </div>
+            </div>
+          );
+        })()}
         {spaceUi === "world" && invProfile && (
           <div
             style={{

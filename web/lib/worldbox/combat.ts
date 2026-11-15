@@ -95,9 +95,35 @@ export function mobHasVisual(id: string): boolean {
   return Boolean(MOB_SPRITE[id]) || MOB_SPRITE_FALLBACK.has(id);
 }
 /** 攻撃が届く距離（プレイヤーのタイルからモブ占有範囲までのチェビシェフ距離）。 */
-export const MOB_ATTACK_RANGE = 1;
+export const MOB_ATTACK_RANGE = 2;
 /** サーバー側の距離検証の上限（タイル行為と同じ 2。占有範囲までの距離で測る）。 */
 export const MOB_ATTACK_MAX_DISTANCE = 2;
+/**
+ * クライアントが申告するモブの現在タイルを、アンカーからこの距離までなら
+ * 距離検証の実位置として採用する上限。モブの見た目はクライアント側で
+ * アンカーからうろつき/追跡する（行動側の LEASH_DISTANCE=11＋サイズ・
+ * 丸めのマージン）。申告がこの範囲を外れたらアンカー位置で検証する。
+ * 申告なしの検証（アンカーのみ）だと、追跡してきたモブが画面では足元に
+ * いてもサーバーには遠くに見えて攻撃が通らなかった（2026-11-16 実害）。
+ */
+export const MOB_REPORT_LEASH = 13;
+
+/**
+ * 距離検証に使うモブの実位置を決める。申告タイル（現在タイル）が
+ * アンカーの占有範囲から MOB_REPORT_LEASH 以内なら申告を採用し、
+ * それ以外（未申告・不正・リーシュ外）はアンカーを返す。
+ */
+export function resolveMobPosition<T extends Pick<PlacedMob, "mobId" | "x" | "y" | "size">>(
+  placed: T,
+  reported: { x: number; y: number } | null | undefined,
+): T {
+  if (!reported) return placed;
+  if (!Number.isFinite(reported.x) || !Number.isFinite(reported.y)) return placed;
+  const rx = Math.floor(reported.x);
+  const ry = Math.floor(reported.y);
+  if (mobDistance(rx, ry, placed) > MOB_REPORT_LEASH) return placed;
+  return { ...placed, x: rx, y: ry };
+}
 
 /** 個体キー: "mobId@x,y"（アンカー＝中心タイル）。 */
 export function mobKeyOf(placed: Pick<PlacedMob, "mobId" | "x" | "y">): string {
