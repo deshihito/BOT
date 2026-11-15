@@ -8,8 +8,9 @@
 // 洞窟=希少鉱物、遺跡=宝箱（アイテム+罠）、ダンジョン=強敵。
 import { itemById } from "./items";
 import {
-  CHUNK_SIZE, biomeAt, chunkHash, type BiomeId,
+  biomeAt, chunkHash, type BiomeId,
 } from "./maplogic";
+import { CHUNK_SIZE } from "./mapgen";
 import { makeRng } from "./rng";
 
 export type ObjectInteraction =

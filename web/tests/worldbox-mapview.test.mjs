@@ -1,5 +1,5 @@
 // AGO WORLD BOX マップ表示モードの配線検証:
-// - 全体マップを大きく描くキャンバスと、地形の事前描画がある
+// - プレイヤー中心の周辺図を大きく描くキャンバスと、地形の事前描画がある
 // - ミニマップと同じマーカー（首都・建物・他プレイヤー・自分）を描く
 // - ボタンと ≡ メニューの両方から開ける
 import { test } from "node:test";
@@ -17,7 +17,16 @@ test("マップ表示モードの状態とキャンバスがある", () => {
   assert.match(client, /mapView/);
   assert.match(client, /bigMapRef/);
   assert.match(client, /BIGMAP_SIZE = 512/);
-  assert.match(client, /sampleMinimapTiles\(map, BIGMAP_SIZE\)/);
+  // 周辺図: プレイヤー中心の範囲（BIGMAP_TILES）を地形キャンバスへ描く
+  assert.match(client, /BIGMAP_TILES = 256/);
+  assert.match(client, /paintLocalTerrain\(bigTerrainCanvas/);
+});
+
+test("ミニマップもプレイヤー中心の周辺図（全体図ではない）", () => {
+  assert.match(client, /MINIMAP_TILES = 128/);
+  assert.match(client, /paintLocalTerrain\(miniTerrainCanvas/);
+  assert.ok(!client.includes("sampleMinimapTiles"), "全体マップの間引きが残っている");
+  assert.ok(!client.includes("全体マップ"), "全体マップ表記が残っている");
 });
 
 test("大きなマップにもマーカーを描く（首都・建物・他プレイヤー・自分）", () => {

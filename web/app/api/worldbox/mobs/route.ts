@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getRequestSession, publicOrigin, sessionOwnerKey } from "@/lib/auth";
-import { MAP_H, MAP_W, MAP_SEED } from "@/lib/worldbox/mapgen";
+import { MAP_SEED, WORLD_COORD_LIMIT } from "@/lib/worldbox/mapgen";
 import { loadProfile, storeProfile } from "@/lib/worldbox/profile-online";
 import { listPresence } from "@/lib/worldbox/presence-online";
 import { presenceIdFor } from "@/lib/worldbox/presence";
@@ -73,10 +73,10 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "mobs_unavailable" }, { status: 503, headers: NO_STORE });
   }
   const url = new URL(request.url);
-  const x0 = clampIntParam(url.searchParams.get("x0"), 0, MAP_W - 1, 0);
-  const y0 = clampIntParam(url.searchParams.get("y0"), 0, MAP_H - 1, 0);
-  const x1 = clampIntParam(url.searchParams.get("x1"), x0, Math.min(MAP_W - 1, x0 + MAX_RECT_SPAN - 1), x0);
-  const y1 = clampIntParam(url.searchParams.get("y1"), y0, Math.min(MAP_H - 1, y0 + MAX_RECT_SPAN - 1), y0);
+  const x0 = clampIntParam(url.searchParams.get("x0"), -WORLD_COORD_LIMIT, WORLD_COORD_LIMIT, 0);
+  const y0 = clampIntParam(url.searchParams.get("y0"), -WORLD_COORD_LIMIT, WORLD_COORD_LIMIT, 0);
+  const x1 = clampIntParam(url.searchParams.get("x1"), x0, Math.min(WORLD_COORD_LIMIT, x0 + MAX_RECT_SPAN - 1), x0);
+  const y1 = clampIntParam(url.searchParams.get("y1"), y0, Math.min(WORLD_COORD_LIMIT, y0 + MAX_RECT_SPAN - 1), y0);
   const now = Date.now();
   const isNight = isNightPhase(phaseAtTime(now / 1000));
   const all = await loadMobStates();
@@ -118,13 +118,13 @@ export async function POST(request: Request) {
   const reported =
     typeof fields.px === "number" && typeof fields.py === "number" &&
     Number.isFinite(fields.px) && Number.isFinite(fields.py) &&
-    fields.px >= 0 && fields.py >= 0 && fields.px < MAP_W && fields.py < MAP_H
+    fields.px >= -WORLD_COORD_LIMIT && fields.py >= -WORLD_COORD_LIMIT && fields.px <= WORLD_COORD_LIMIT && fields.py <= WORLD_COORD_LIMIT
       ? { x: fields.px, y: fields.py }
       : null;
   const def = mobById(fields.mobId);
   const x = Math.floor(fields.x);
   const y = Math.floor(fields.y);
-  if (!def || def.instanceOnly || x < 0 || y < 0 || x >= MAP_W || y >= MAP_H) {
+  if (!def || def.instanceOnly || x < -WORLD_COORD_LIMIT || y < -WORLD_COORD_LIMIT || x > WORLD_COORD_LIMIT || y > WORLD_COORD_LIMIT) {
     return NextResponse.json({ error: "unknown_mob" }, { status: 400, headers: NO_STORE });
   }
   const now = Date.now();

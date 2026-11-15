@@ -1,12 +1,16 @@
 import { NextResponse } from "next/server";
 import { getRequestSession, publicOrigin, sessionOwnerKey } from "@/lib/auth";
-import { parseSave } from "@/lib/worldbox/save";
+import { parseSave, serializeSave } from "@/lib/worldbox/save";
 import { MAX_SAVE_JSON_LENGTH, isOnlineSaveEnabled, loadWorldBoxSave, storeWorldBoxSave } from "@/lib/worldbox/save-online";
+import { pickRandomSpawn } from "@/lib/worldbox/spawn";
 
 export const runtime = "nodejs";
 
 // AGO WORLD BOX のオンラインセーブ（ログイン中ユーザーのみ）。
-// GET: { save: string | null }（自分のセーブ JSON。無ければ null）
+// GET: { save: string | null }（自分のセーブ JSON）
+//   セーブが無い（または旧版などで解釈できない）場合は初回作成として、
+//   原点周辺からランダムに選んだスポーン地点で新規セーブを作って返す。
+//   初期スポーンの決定はサーバー側のここが正。以後は通常のセーブ位置。
 // PUT { save }: 保存（v6 として解釈できる JSON のみ受け付ける）
 // 保存先は bot_kv（名前空間 worldbox_save、キー = 所有者キー）。
 // セッションが無ければ 401。Bot API 未設定なら 503（クライアントは
@@ -27,8 +31,17 @@ export async function GET(request: Request) {
   if (!isOnlineSaveEnabled()) {
     return NextResponse.json({ error: "save_unavailable" }, { status: 503, headers: NO_STORE });
   }
-  const save = await loadWorldBoxSave(sessionOwnerKey(session));
-  return NextResponse.json({ save }, { headers: NO_STORE });
+  const ownerKey = sessionOwnerKey(session);
+  const save = await loadWorldBoxSave(ownerKey);
+  if (save && parseSave(save)) {
+    return NextResponse.json({ save }, { headers: NO_STORE });
+  }
+  // 初回作成: 初期スポーンはランダム（陸の歩行可能タイル）。作った
+  // セーブを保存して返し、以後はその位置が続きになる。
+  const spawn = pickRandomSpawn(Math.random);
+  const fresh = serializeSave({ space: "world", x: spawn.x, y: spawn.y, worldReturn: null });
+  await storeWorldBoxSave(ownerKey, fresh);
+  return NextResponse.json({ save: fresh }, { headers: NO_STORE });
 }
 
 export async function PUT(request: Request) {

@@ -2,7 +2,7 @@
 // 置いたテントを踏むと入れる小さな室内空間。形は LobbyData と同じにして、
 // ロビーの描画・移動・ステーション判定をそのまま使う。最低限の設備として
 // 作業台とかまど（どちらも station: "smith" = 合成の場所）を持つ。
-import { T_GRASS, T_ROCK, type TopDownMap } from "./mapgen";
+import { T_GRASS, T_ROCK, tilesSource, type TopDownMap } from "./mapgen";
 import { L_WALL, L_WOOD, isSolidLobbyTile, type LobbyData, type LobbyObject } from "./lobby";
 
 export const TENT_W = 13;
@@ -60,7 +60,7 @@ export function buildTent(): LobbyData {
   for (let i = 0; i < tiles.length; i++) {
     moveTiles[i] = isSolidLobbyTile(tiles[i]) ? T_ROCK : T_GRASS;
   }
-  const moveMap: TopDownMap = { seed: 0, width: TENT_W, height: TENT_H, tiles: moveTiles };
+  const moveMap: TopDownMap = tilesSource(0, TENT_W, TENT_H, moveTiles);
   cachedTent = {
     width: TENT_W,
     height: TENT_H,
