@@ -58,7 +58,8 @@ import {
 import { EVENT_DUNGEON_ENTRANCE } from "@/lib/worldbox/events";
 import { SEASON_NAMES, seasonDaysLeft, seasonOf } from "@/lib/worldbox/seasons";
 import { biomeAt, structureById, structuresForChunk, type PlacedStructure } from "@/lib/worldbox/maplogic";
-import { specialObjectById } from "@/lib/worldbox/objects";
+import { objectsForChunk, specialObjectById } from "@/lib/worldbox/objects";
+import { fishingSpotAt } from "@/lib/worldbox/fishing";
 import type { BoardPost } from "@/lib/worldbox/board";
 import { parseSave, serializeSave, type SaveSpace } from "@/lib/worldbox/save";
 import { chooseInitialSave } from "@/lib/worldbox/save-source";
@@ -1036,6 +1037,35 @@ export default function WorldBoxClient() {
     const timer = window.setInterval(() => { void load(); }, 3000);
     return () => { disposed = true; window.clearInterval(timer); };
   }, [spaceUi, chatChannel]);
+  /** 釣り: 魚影タップでキャスト、食いつきの窓でもう一度タップすると釣れる。 */
+  const fishingRef = useRef<{ x: number; y: number; biteAt: number } | null>(null);
+  /** 闇マスク用のオフスクリーン（設置した明かりの穴あけに使う）。 */
+  const darkCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const fishCaughtRef = useRef(new Map<string, number>());
+  const postCatch = async (x: number, y: number) => {
+    try {
+      const res = await fetch("/api/worldbox/fishing", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ x, y }),
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        gained?: Record<string, number>; profile?: PlayerProfile; error?: string;
+      };
+      if (res.ok) {
+        fishCaughtRef.current.set(`${x},${y}`, Date.now());
+        if (data.profile) setInvProfile(data.profile);
+        const names = Object.entries(data.gained ?? {})
+          .map(([id, n]) => `${itemById(id)?.name ?? id}×${n}`)
+          .join(" ");
+        setTileMsg(names ? `釣れた: ${names}` : "何も釣れなかった");
+      } else {
+        setTileMsg(data.error === "tool_required" ? "釣り竿が要る" : data.error === "not_respawned" ? "魚がいない" : "釣れない");
+      }
+    } catch { /* noop */ }
+  };
+  const postCatchRef = useRef(postCatch);
+  postCatchRef.current = postCatch;
   const sendChat = async () => {
     const text = chatText.trim();
     if (!text) return;
@@ -2341,6 +2371,29 @@ export default function WorldBoxClient() {
           denyAtTile(t.x, t.y);
         }
         return false;
+      }
+      // 魚影タップ: 釣り（キャスト → 食いつきの窓でもう一度タップで引き上げ）
+      if (space === "world" && fishingSpotAt(MAP_SEED, t.x, t.y)) {
+        const active = fishingRef.current;
+        const nowMs = Date.now();
+        if (active && active.x === t.x && active.y === t.y) {
+          fishingRef.current = null;
+          if (nowMs >= active.biteAt && nowMs <= active.biteAt + 1100) {
+            void postCatchRef.current(t.x, t.y);
+          } else {
+            setTileMsg("逃げられた");
+            playWbSe("splash");
+          }
+          return true;
+        }
+        if ((prof.items["fishing_rod"] ?? 0) <= 0) {
+          setTileMsg(TILE_ERROR_LABEL.tool_required);
+          denyAtTile(t.x, t.y);
+          return true;
+        }
+        fishingRef.current = { x: t.x, y: t.y, biteAt: nowMs + 1200 + Math.random() * 2500 };
+        playWbSe("splash");
+        return true;
       }
       const view = tileView(terrainMap, tilesRef.current, t.x, t.y, Date.now(), null);
       // 自分のブロックかどうかは、サーバーが返した自分の ID で判定する
@@ -3960,16 +4013,105 @@ export default function WorldBoxClient() {
         }
       }
 
+      // 魚影（釣りスポット）と釣りの演出
+      if (space === "world") {
+        const activeFish = fishingRef.current;
+        if (activeFish && now > activeFish.biteAt + 1100) fishingRef.current = null;
+        const fcx0 = Math.floor((cam.x - cw / TILE / 2) / CHUNK_SIZE);
+        const fcx1 = Math.ceil((cam.x + cw / TILE / 2) / CHUNK_SIZE);
+        const fcy0 = Math.floor((cam.y - ch / TILE / 2) / CHUNK_SIZE);
+        const fcy1 = Math.ceil((cam.y + ch / TILE / 2) / CHUNK_SIZE);
+        for (let fcy = fcy0; fcy <= fcy1; fcy++) {
+          for (let fcx = fcx0; fcx <= fcx1; fcx++) {
+            for (const o of objectsForChunk(MAP_SEED, fcx, fcy)) {
+              if (o.objectId !== "fishing_spot") continue;
+              const caughtAt = fishCaughtRef.current.get(`${o.x},${o.y}`) ?? 0;
+              if (caughtAt && now - caughtAt < 10 * 60 * 1000) continue;
+              const sx = toScreenX(o.x + 0.5);
+              const sy = toScreenY(o.y + 0.55);
+              const bob = Math.sin(now / 600 + o.x * 1.7 + o.y) * 2;
+              ctx.fillStyle = "rgba(10,30,50,0.55)";
+              ctx.beginPath();
+              ctx.ellipse(sx, sy + bob, TILE * 0.30, TILE * 0.13, 0, 0, Math.PI * 2);
+              ctx.fill();
+              ctx.beginPath();
+              ctx.moveTo(sx + TILE * 0.28, sy + bob);
+              ctx.lineTo(sx + TILE * 0.44, sy - TILE * 0.08 + bob);
+              ctx.lineTo(sx + TILE * 0.44, sy + TILE * 0.08 + bob);
+              ctx.closePath();
+              ctx.fill();
+            }
+          }
+        }
+        const f = fishingRef.current;
+        if (f) {
+          const sx = toScreenX(f.x + 0.5);
+          const sy = toScreenY(f.y + 0.5);
+          // 糸とウキ
+          ctx.strokeStyle = "rgba(255,255,255,0.5)";
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.moveTo(toScreenX(player.x + 0.4), toScreenY(player.y - 0.4));
+          ctx.lineTo(sx, sy);
+          ctx.stroke();
+          const biting = now >= f.biteAt;
+          ctx.fillStyle = biting ? "#e84a3c" : "#f2f2f2";
+          ctx.beginPath();
+          ctx.arc(sx, sy + (biting ? 2 : 0), 3, 0, Math.PI * 2);
+          ctx.fill();
+          if (biting) {
+            const age = Math.min(1, (now - f.biteAt) / 1100);
+            ctx.strokeStyle = `rgba(255,255,255,${(0.8 * (1 - age)).toFixed(3)})`;
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.ellipse(sx, sy, TILE * (0.15 + 0.35 * age), TILE * (0.06 + 0.14 * age), 0, 0, Math.PI * 2);
+            ctx.stroke();
+          }
+        }
+      }
+
       // 洞窟の闇: 明かりの半径の外を暗くする（松明 6 / ランプ 9 タイル）。
+      // 設置した明かり（松明/ランプ/焚き火）も実際に周りを照らす:
+      // 闇はオフスクリーンに描き、明かりの位置に穴を開けてから重ねる。
       if (parseInstanceSpace(space)?.kind === "cave" || parseInstanceSpace(space)?.kind === "dungeon") {
-        const radius = lightRadiusTiles(invRef.current?.items) * TILE;
-        const cxp = Math.round(lobbyOx + player.x * TILE);
-        const cyp = Math.round(lobbyOy + player.y * TILE);
-        const grad = ctx.createRadialGradient(cxp, cyp, radius * 0.55, cxp, cyp, radius);
-        grad.addColorStop(0, "rgba(5,6,14,0)");
-        grad.addColorStop(1, "rgba(5,6,14,0.93)");
-        ctx.fillStyle = grad;
-        ctx.fillRect(0, 0, cw, ch);
+        if (!darkCanvasRef.current) darkCanvasRef.current = document.createElement("canvas");
+        const dark = darkCanvasRef.current;
+        if (dark.width !== cw || dark.height !== ch) { dark.width = cw; dark.height = ch; }
+        const dctx = dark.getContext("2d");
+        if (dctx) {
+          dctx.setTransform(1, 0, 0, 1, 0, 0);
+          dctx.clearRect(0, 0, cw, ch);
+          const radius = lightRadiusTiles(invRef.current?.items) * TILE;
+          const cxp = Math.round(lobbyOx + player.x * TILE);
+          const cyp = Math.round(lobbyOy + player.y * TILE);
+          const grad = dctx.createRadialGradient(cxp, cyp, radius * 0.55, cxp, cyp, radius);
+          grad.addColorStop(0, "rgba(5,6,14,0)");
+          grad.addColorStop(1, "rgba(5,6,14,0.93)");
+          dctx.fillStyle = grad;
+          dctx.fillRect(0, 0, cw, ch);
+          dctx.globalCompositeOperation = "destination-out";
+          for (const [key, ov] of Object.entries(tilesRef.current)) {
+            const itemId = ov.block?.itemId;
+            const rTiles = itemId === "lamp" ? 9 : itemId === "torch" ? 6 : itemId === "campfire" ? 5 : 0;
+            if (!rTiles) continue;
+            const comma = key.indexOf(",");
+            const lx = Number(key.slice(0, comma));
+            const ly = Number(key.slice(comma + 1));
+            const sx = Math.round(lobbyOx + (lx + 0.5) * TILE);
+            const sy = Math.round(lobbyOy + (ly + 0.5) * TILE);
+            const r = rTiles * TILE;
+            if (sx < -r || sy < -r || sx > cw + r || sy > ch + r) continue;
+            const g = dctx.createRadialGradient(sx, sy, r * 0.4, sx, sy, r);
+            g.addColorStop(0, "rgba(0,0,0,0.95)");
+            g.addColorStop(1, "rgba(0,0,0,0)");
+            dctx.fillStyle = g;
+            dctx.beginPath();
+            dctx.arc(sx, sy, r, 0, Math.PI * 2);
+            dctx.fill();
+          }
+          dctx.globalCompositeOperation = "source-over";
+          ctx.drawImage(dark, 0, 0, cw, ch);
+        }
       }
 
       // 入水/出水の波紋（広がって消える輪）
