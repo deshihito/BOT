@@ -156,44 +156,6 @@ def set_store(store: Optional[GuildSettings]) -> None:
     _store = store
 
 
-# ---------------------------------------------------------------- 国づくり設定
-NATION_SECTION = "nation"
-NOTIFY_MAJOR = "major"   # 大きな出来事だけ
-NOTIFY_ALL = "all"       # 全部
-NOTIFY_LEVELS = {NOTIFY_MAJOR: "大きな出来事だけ", NOTIFY_ALL: "全部"}
-NATION_DEFAULTS = {"enabled": True, "channel_id": None, "notify": NOTIFY_MAJOR}
-
-
-def nation_settings(guild_id: int) -> dict[str, Any]:
-    """このサーバーの国づくりの設定を、既定値で補って返す。
-
-    戻り値: {"enabled": 参加するか, "channel_id": お知らせチャンネル ID か None,
-             "notify": "major"（大きな出来事だけ）か "all"（全部）}
-    """
-    raw = get_store().get(guild_id, NATION_SECTION)
-    result = dict(NATION_DEFAULTS)
-    if isinstance(raw.get("enabled"), bool):
-        result["enabled"] = raw["enabled"]
-    if isinstance(raw.get("channel_id"), int):
-        result["channel_id"] = raw["channel_id"]
-    if raw.get("notify") in NOTIFY_LEVELS:
-        result["notify"] = raw["notify"]
-    return result
-
-
-def nation_should_notify(guild_id: int, *, major: bool) -> Optional[int]:
-    """お知らせを送るべきならチャンネル ID を、送らないなら None を返す。
-
-    major=True は建国・戦争などの大きな出来事。notify が "major" のサーバーには、major=False の出来事は送らない。
-    """
-    s = nation_settings(guild_id)
-    if not s["enabled"] or s["channel_id"] is None:
-        return None
-    if not major and s["notify"] != NOTIFY_ALL:
-        return None
-    return s["channel_id"]
-
-
 # ---------------------------------------------------------------- 放置したプレイヤーの代打ち（core/game/game/autoplay.py）
 AUTOPLAY_SECTION = "autoplay"
 AUTOPLAY_DEFAULTS = {"enabled": True}

@@ -47,10 +47,14 @@ class FakeWallet:
         self.balances: dict[str, int] = {}
         self.change_calls: list[tuple[str, int]] = []
         self.none_on_positive = False
+        self.none_on_positive_once = False
         self.transfer_mode = "ok"  # ok / rpc_down / rpc_42883 / boom
 
     async def _change_balance(self, user_id, delta, *, require_funds=False, create_with=None):
         self.change_calls.append((user_id, delta))
+        if self.none_on_positive_once and delta > 0:
+            self.none_on_positive_once = False
+            return None
         if self.none_on_positive and delta > 0:
             return None
         if user_id not in self.balances:
@@ -96,6 +100,12 @@ class FakeEconomyStore:
     def refund_house(self, breakdown) -> None:
         self.pool += int(breakdown.get("pool") or 0)
         self.treasury += int(breakdown.get("treasury") or 0)
+
+    def add_loss(self, amount: int):
+        pool_part = int(amount * 0.7)
+        self.pool += pool_part
+        self.treasury += amount - pool_part
+        return {"pool": pool_part, "treasury": amount - pool_part}
 
 
 class WorkerCase(unittest.IsolatedAsyncioTestCase):
@@ -370,6 +380,91 @@ class TestSteal(WorkerCase):
         # 実行者が新規なら初期残高 + 奪った額
         self.assertEqual(self.wallet.balances[ME], NEW_USER_BALANCE + 50)
         self.assertEqual(self.record(op["id"])["appliedAmount"], 50)
+
+
+class TestGamble(WorkerCase):
+    def gamble_op(self, **overrides):
+        base = {"kind": "gamble", "amount": 100, "reason": "casino_slot", "payout": 0}
+        base.update(overrides)
+        return self.add_op(**base)
+
+    async def test_gamble_loss_recycles_bet(self):
+        self.wallet.balances[ME] = 1000
+        op = self.gamble_op(payout=0)
+        self.assertEqual(await self.worker.poll_once(), 1)
+        record = self.record(op["id"])
+        self.assertEqual(record["status"], "done")
+        self.assertEqual(record["appliedAmount"], 0)
+        self.assertEqual(self.wallet.balances[ME], 900)
+        # 負けたベットは還流する（70% プール / 30% 国庫）
+        self.assertEqual(self.store.pool, 70)
+        self.assertEqual(self.store.treasury, 30)
+        self.assertEqual(self.history, [(ME, wb.WORLDBOX_ID, 100, "casino_slot")])
+
+    async def test_gamble_win_pays_profit_from_bankroll(self):
+        self.wallet.balances[ME] = 1000
+        self.store.pool = 1000
+        op = self.gamble_op(payout=350)  # 利益 250 はバンクロールから
+        self.assertEqual(await self.worker.poll_once(), 1)
+        record = self.record(op["id"])
+        self.assertEqual(record["status"], "done")
+        self.assertEqual(record["appliedAmount"], 350)
+        self.assertEqual(self.wallet.balances[ME], 1000 - 100 + 350)
+        self.assertEqual(self.store.pool, 1000 - 250)
+
+    async def test_gamble_win_capped_by_bankroll(self):
+        self.wallet.balances[ME] = 1000
+        self.store.pool = 40  # 利益 250 に対して原資 40 しかない
+        op = self.gamble_op(payout=350)
+        self.assertEqual(await self.worker.poll_once(), 1)
+        record = self.record(op["id"])
+        self.assertEqual(record["status"], "done")
+        # ベット分 100 は戻り、利益は確保できた 40 だけ
+        self.assertEqual(record["appliedAmount"], 140)
+        self.assertEqual(self.wallet.balances[ME], 1000 - 100 + 140)
+
+    async def test_gamble_insufficient_funds_pays_nothing(self):
+        self.wallet.balances[ME] = 50
+        self.store.pool = 1000
+        op = self.gamble_op(payout=30000)
+        self.assertEqual(await self.worker.poll_once(), 1)
+        record = self.record(op["id"])
+        self.assertEqual(record["status"], "failed")
+        self.assertEqual(record["error"], "insufficient_funds")
+        self.assertEqual(self.wallet.balances[ME], 50)
+        self.assertEqual(self.store.pool, 1000)
+        self.assertEqual(self.history, [])
+
+    async def test_gamble_reason_whitelist(self):
+        self.wallet.balances[ME] = 1000
+        op = self.gamble_op(reason="cheat", payout=0)
+        self.assertEqual(await self.worker.poll_once(), 1)
+        record = self.record(op["id"])
+        self.assertEqual(record["status"], "failed")
+        self.assertEqual(record["error"], "invalid_reason")
+        self.assertEqual(self.wallet.balances[ME], 1000)
+
+    async def test_gamble_missing_payout_is_invalid_op(self):
+        self.wallet.balances[ME] = 1000
+        op = self.add_op(kind="gamble", amount=100, reason="casino_slot")
+        self.assertEqual(await self.worker.poll_once(), 1)
+        record = self.record(op["id"])
+        self.assertEqual(record["status"], "failed")
+        self.assertEqual(record["error"], "invalid_op")
+        self.assertEqual(self.wallet.balances[ME], 1000)
+
+    async def test_gamble_credit_failure_refunds_bet_and_house(self):
+        self.wallet.balances[ME] = 1000
+        self.store.pool = 1000
+        self.wallet.none_on_positive_once = True  # 配当の入金だけが失敗する
+        op = self.gamble_op(payout=350)
+        self.assertEqual(await self.worker.poll_once(), 1)
+        record = self.record(op["id"])
+        self.assertEqual(record["status"], "failed")
+        self.assertEqual(record["error"], "credit_failed")
+        # ベットは返金され、原資も戻る（発行も喪失もしない）
+        self.assertEqual(self.wallet.balances[ME], 1000)
+        self.assertEqual(self.store.pool, 1000)
 
 
 class TestQueueBehavior(WorkerCase):

@@ -36,6 +36,8 @@ from core.leaderboard_image import (
 logger = logging.getLogger(__name__)
 
 HUB_COLOR = 0xFFFFFF
+#: 旧ダンジョン・旧国づくりの後継（共有ワールド）。ハブからの唯一のワールド導線。
+WORLDBOX_URL = "https://agobot.app/games/worldbox"
 
 GAME_COGS = {
     "jinrou": "JinrouCog",
@@ -56,7 +58,6 @@ GAME_COGS = {
     "poker": "Poker",
     "shogi": "Shogi",
     "chess": "Chess",
-    "dungeon": "DungeonCog",
     "quiz": "Quiz",
     "bingo": "Bingo",
     "majority": "Majority",
@@ -97,11 +98,11 @@ GAME_GENRES = {
     "solo": ("ミニゲーム", ""),
     "board": ("ボード・カードゲーム", ""),
 }
-# 導線最適化ラウンド3: 1件ジャンル「アドベンチャー」（ダンジョンのみ）は器を畳み、
-# ダンジョン（1人・自由にプレイ）を solo へ寄せた。分類だけの変更で機能には触らない。
+# 旧ダンジョンは廃止し WORLD BOX へ統合した（2026-11-15）。ワールド系の遊びは
+# ハブの WORLD BOX リンクボタンが唯一の導線。
 GAME_GENRE_BY_GAME = {
     **{game: "party" for game in ("jinrou", "wordwolf", "uno", "doubt", "ngword", "shiritori", "janken", "babanuki", "quiz", "bingo", "majority", "onenight", "loveletter", "codenames", "twochoice", "thirtyone", "justone", "ito", "insider", "gauge", "ruins", "hanabi", "hoshi", "liequiz", "cipher", "wirecut", "liardice", "mendou", "yotsuba", "nyokki")},
-    **{game: "solo" for game in ("wordle", "shinkei", "guess", "flash", "minesweeper", "sudoku", "game2048", "nonogram", "highlow", "dungeon")},
+    **{game: "solo" for game in ("wordle", "shinkei", "guess", "flash", "minesweeper", "sudoku", "game2048", "nonogram", "highlow")},
     **{game: "board" for game in ("daifugo", "othello", "poker", "shogi", "chess", "koikoi", "gomoku", "connect4")},
 }
 
@@ -436,6 +437,9 @@ class GameHubView(discord.ui.View):
                 custom_id="panel:game:page_indicator", row=next_row, disabled=True))
             self.add_item(GamePageButton(1, self.page, len(pages), row=next_row))
             next_row += 1
+        worldbox = discord.ui.Button(label="WORLD BOX", style=discord.ButtonStyle.link,
+                                     url=WORLDBOX_URL, row=next_row)
+        self.add_item(worldbox)
         monthly = discord.ui.Button(label="👑 今月のゲーム王", style=discord.ButtonStyle.primary,
                                     custom_id="panel:game:monthly", row=next_row)
         monthly.callback = self._monthly_callback

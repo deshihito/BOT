@@ -215,17 +215,11 @@ class CommandCatalogTest(unittest.TestCase):
                 self.assertTrue(entry['usage'].startswith('/' if entry['kind'] == 'slash' else '!'))
 
     def test_debug_and_owner_commands_are_hidden(self):
-        for key in ('!terminal', '!guild', '!all_stats', '!d1ping', '!check_api', '!dungeon_reset', '!coin'):
+        for key in ('!terminal', '!guild', '!all_stats', '!d1ping', '!check_api', '!coin'):
             with self.subTest(command=key):
                 entry = command_catalog.find_command(self.catalog, key, include_hidden=True)
                 self.assertTrue(entry['hidden'])
                 self.assertIsNone(command_catalog.find_command(self.catalog, key))
-
-    def test_nation_prefix_commands_are_hidden_from_help(self):
-        for key in ('!nation', '!nation found', '!nation join', '!nation status'):
-            with self.subTest(command=key):
-                self.assertIsNone(command_catalog.find_command(self.catalog, key))
-                self.assertTrue(command_catalog.find_command(self.catalog, key, include_hidden=True)['hidden'])
 
     def test_all_prefix_commands_are_hidden_from_help(self):
         for entry in self.catalog['commands']:
@@ -239,8 +233,6 @@ class CommandCatalogTest(unittest.TestCase):
             return command_catalog.find_command(self.catalog, key, include_hidden=True)
         self.assertTrue(get('/support')['guild_only'])
         self.assertEqual(get('/support')['options'], [])
-        self.assertTrue(get('!nation found')['guild_only'])
-        self.assertIn('administrator', get('!nation found')['permissions'])
         self.assertIn('bot_admin', get('!coin')['permissions'])
         self.assertFalse(get('/vc')['guild_only'])
         self.assertEqual(get('/vc')['options'], [])

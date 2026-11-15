@@ -1,5 +1,5 @@
 // AGO WORLD BOX アイテム基盤の検証:
-// - カタログの物量（120種以上・ブロック30種以上は耐久つき・道具4種×3段・作物10種）
+// - カタログの物量（250種以上・ブロック60種以上は耐久つき・道具4種×4段・作物22種）
 // - インベントリ（ホットバー5枠＋ストレージ10枠、旧かばんからの無損失移行、
 //   注ぐ順・引き出し順・枠入れ替え）
 // - タイル行為（伐採/採掘/耕作/作付け/収穫の検証、木の再生、所有者収穫）
@@ -77,7 +77,7 @@ const mapgenUrl = bundleModule(
 // ---------- カタログ ----------
 
 test("カタログ: 120種以上・ID一意・価格が正", () => {
-  assert.ok(inv.ITEMS.length >= 120, `items=${inv.ITEMS.length}`);
+  assert.ok(inv.ITEMS.length >= 320, `items=${inv.ITEMS.length}`);
   const ids = new Set(inv.ITEMS.map((i) => i.id));
   assert.equal(ids.size, inv.ITEMS.length);
   for (const item of inv.ITEMS) assert.ok(item.price > 0, item.id);
@@ -85,25 +85,25 @@ test("カタログ: 120種以上・ID一意・価格が正", () => {
 
 test("カタログ: ブロックは30種以上で全て耐久を持ち、硬さに幅がある", () => {
   const blocks = inv.ITEMS.filter((i) => i.category === "block");
-  assert.ok(blocks.length >= 30, `blocks=${blocks.length}`);
+  assert.ok(blocks.length >= 70, `blocks=${blocks.length}`);
   for (const b of blocks) assert.ok(typeof b.durability === "number" && b.durability > 0, b.id);
   const hardest = blocks.reduce((a, b) => (a.durability >= b.durability ? a : b));
-  assert.equal(hardest.id, "obsidian_block");
+  assert.equal(hardest.id, "bedrock_block");
   const softest = blocks.reduce((a, b) => (a.durability <= b.durability ? a : b));
   assert.ok(softest.durability < hardest.durability / 10);
 });
 
-test("カタログ: 道具は4種×3段（木・石・鉄）", () => {
+test("カタログ: 道具は4種×4段（木・石・鉄・ミスリル）", () => {
   for (const kind of ["axe", "pickaxe", "sword", "hoe"]) {
     const tools = inv.itemsWithTool(kind);
-    assert.equal(tools.length, 3, kind);
-    assert.deepEqual(tools.map((t) => t.tier), [1, 2, 3], kind);
+    assert.equal(tools.length, 4, kind);
+    assert.deepEqual(tools.map((t) => t.tier), [1, 2, 3, 4], kind);
     for (const t of tools) assert.equal(t.category, "tool");
   }
 });
 
 test("カタログ: 作物は10種以上で種・収穫物・成長時間が揃う", () => {
-  assert.ok(inv.CROPS.length >= 10, `crops=${inv.CROPS.length}`);
+  assert.ok(inv.CROPS.length >= 25, `crops=${inv.CROPS.length}`);
   for (const crop of inv.CROPS) {
     const seed = inv.itemById(crop.seedId);
     assert.ok(seed, crop.id);

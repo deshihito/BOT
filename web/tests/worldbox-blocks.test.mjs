@@ -95,7 +95,7 @@ function assertIconFile(item) {
 
 test("アイコン: 道具は全種アイコンつき", () => {
   const tools = inv.ITEMS.filter((i) => i.category === "tool");
-  assert.equal(tools.length, 12);
+  assert.equal(tools.length, 16);
   for (const item of tools) assertIconFile(item);
 });
 
@@ -111,7 +111,7 @@ test("アイコン: ブロックと種は全種、全体で100種以上にアイ
     else if (item.icon) assertIconFile(item);
   }
   const withIcon = inv.ITEMS.filter((i) => i.icon);
-  assert.ok(withIcon.length >= 100, `icons=${withIcon.length}`);
+  assert.ok(withIcon.length >= 300, `icons=${withIcon.length}`);
   assert.equal(new Set(inv.ITEM_ICON_IDS).size, inv.ITEM_ICON_IDS.length, "アイコン ID に重複");
   for (const id of inv.ITEM_ICON_IDS) assert.ok(inv.itemById(id), `アイコン ID が実在しない: ${id}`);
 });

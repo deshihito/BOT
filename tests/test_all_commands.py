@@ -60,14 +60,13 @@ SLASH_ARGUMENTS = {
 }
 
 PREFIX_ARGUMENTS = {
-    'all_stats': {}, 'mood': {}, 'doubt': {}, 'terminal': {}, 'guild': {}, 'd1ping': {}, 'check_api': {}, 'dungeon_reset': {},
+    'all_stats': {}, 'mood': {}, 'doubt': {}, 'terminal': {}, 'guild': {}, 'd1ping': {}, 'check_api': {},
     'ggrks': {'keyword': 'discord'},
     'coin': {'amount': 1},
     'ffversion': {},
     'ai': {}, 'aitools': {}, 'generate': {},
     'gvcperm': {'room_name': 'room'},
     'logs': {}, 'sttdebug': {}, 'usage_stats': {},
-    'nation': {}, 'nation join': {}, 'nation found': {}, 'nation status': {},
 }
 
 # このテストで見つかった既知の問題。直したら消すこと（消し忘れは test_known_issues_are_still_present が知らせる）。
@@ -79,7 +78,6 @@ SILENT_BY_DESIGN = {
     '!d1ping': '許可されたユーザー以外には反応しない（tests/test_admin_prefix.py）',
     '!check_api': '許可されたユーザー以外には反応しない（tests/test_admin_prefix.py）',
     '!usage_stats': '許可されたユーザー以外には反応しない（!check_api と同じ流儀）',
-    '!dungeon_reset': '許可されたユーザー以外には反応しない（tests/test_admin_prefix.py）',
     '!guild': '許可されたユーザー以外には反応しない（tests/test_guild_list.py で両方を確認）',
 }
 
@@ -201,18 +199,6 @@ class FakeQuery:
         return FakeResponse(data)
 
 
-def _spiral_coords(radius: int):
-    """docs/sql/nation_found.sql と同じ順に、原点から近い順の座標を返す（テスト用フェイク）。"""
-    yield 0, 0
-    for r in range(1, radius + 1):
-        for x in range(-r, r + 1):
-            yield x, -r
-            yield x, r
-        for y in range(-r + 1, r):
-            yield -r, y
-            yield r, y
-
-
 class FakeDBAPI:
     def __init__(self):
         self.tables: dict[str, list] = {}
@@ -223,29 +209,7 @@ class FakeDBAPI:
     from_ = table
 
     def rpc(self, name, params=None, **kwargs):
-        if name == 'nation_found':
-            return types.SimpleNamespace(execute=lambda: self._nation_found(params['p_guild_id'], params['p_user_id']))
         return types.SimpleNamespace(execute=lambda: FakeResponse(None))
-
-    def _nation_found(self, gid, uid):
-        """docs/sql/nation_found.sql と同じ手順の再現（1 回の呼び出しで全部作るか、何も作らない）。"""
-        t = self.tables
-        if any(g.get('guild_id') == gid for g in t.get('nation_guilds', [])):
-            raise RuntimeError('NATION_EXISTS: guild already has a nation')
-        if any(p.get('user_id') == uid and p.get('guild_id') for p in t.get('nation_players', [])):
-            raise RuntimeError('ALREADY_IN_NATION: user already belongs to a nation')
-        used = {(r.get('x'), r.get('y')) for r in t.get('nation_tiles', [])}
-        spot = next((c for c in _spiral_coords(50) if c not in used), None)
-        if spot is None:
-            raise RuntimeError('NO_FREE_TILE: no free tile')
-        x, y = spot
-        t.setdefault('nation_tiles', []).append(
-            {'x': x, 'y': y, 'owner_guild_id': gid, 'tile_type': 'capital', 'connected': True})
-        t.setdefault('nation_guilds', []).append({'guild_id': gid, 'capital_x': x, 'capital_y': y})
-        players = t.setdefault('nation_players', [])
-        players[:] = [p for p in players if p.get('user_id') != uid]
-        players.append({'user_id': uid, 'guild_id': gid, 'role': 'king', 'hunger': 100})
-        return FakeResponse([{'capital_x': x, 'capital_y': y}])
 
 
 # ---------------------------------------------------------------- 偽の Discord

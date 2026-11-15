@@ -3,12 +3,12 @@
   "total": 255,
   "counts": {
     "general": 75,
-    "vc": 46,
-    "game": 49,
+    "vc": 47,
+    "game": 48,
     "support": 84,
     "help": 1
   },
-  "game_count": 48,
+  "game_count": 47,
   "roots": [
     {
       "root": "general",
@@ -598,6 +598,12 @@
               "description": ""
             },
             {
+              "id": "vc:radio_panel",
+              "value": "radio_panel",
+              "title": "ラジオ",
+              "description": ""
+            },
+            {
               "id": "vc:music_playlist",
               "value": "music_playlist",
               "title": "プレイリスト管理",
@@ -1029,13 +1035,6 @@
               "title": "ゲーム開始: チェス",
               "description": "駒を動かして相手のキングを詰ませる、2人対戦の西洋ボードゲーム。",
               "note": "2人／約10〜30分（募集30秒）"
-            },
-            {
-              "id": "game:game:dungeon",
-              "value": "game:dungeon",
-              "title": "ゲーム開始: ダンジョン",
-              "description": "マップを探索し、戦闘と成長を重ねてダンジョンを攻略します。",
-              "note": "1人／自由にプレイ"
             },
             {
               "id": "game:game:quiz",

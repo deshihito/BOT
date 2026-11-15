@@ -37,6 +37,7 @@ const OP_KIND_LABEL: Record<EconomyOp["kind"], string> = {
   earn: "受取",
   transfer: "送金",
   steal: "steal",
+  gamble: "カジノ",
 };
 const OP_STATUS_LABEL: Record<EconomyOp["status"], string> = {
   pending: "処理中",

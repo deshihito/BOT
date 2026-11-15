@@ -42,7 +42,7 @@
     cogs/poker.py の台帳 data/poker_chips.json で起動時に全額返金する）、
     doubt（ダウト受付のリアルタイムウィンドウを含む）、
     ngword（手番のない会話常駐型）、
-    dungeon / seizon（大規模 RPG で別途設計対象）、guess / flash / dice
+    seizon（大規模 RPG で別途設計対象）、guess / flash / dice
     （セッション自体が無い一発勝負）。
 """
 from __future__ import annotations

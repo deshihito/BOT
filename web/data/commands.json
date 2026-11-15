@@ -141,60 +141,6 @@
       "guide": null
     },
     {
-      "name": "nation",
-      "kind": "prefix",
-      "category": "economy",
-      "summary": "国づくり機能",
-      "usage": "!nation",
-      "options": [],
-      "permissions": [],
-      "guild_only": true,
-      "aliases": [],
-      "hidden": true,
-      "guide": null
-    },
-    {
-      "name": "nation found",
-      "kind": "prefix",
-      "category": "economy",
-      "summary": "このサーバーの国を建国します（管理者かオーナーのみ）",
-      "usage": "!nation found",
-      "options": [],
-      "permissions": [
-        "administrator"
-      ],
-      "guild_only": true,
-      "aliases": [],
-      "hidden": true,
-      "guide": "## 1. 国に入る・国をつくる\n国づくりは、サーバーごとに 1 つの国を育てる遊びです。\n- このサーバーに国があれば、参加機能から国民になれます（入れるのは 1 人 1 か国）。\n- まだ国がなければ、サーバーの管理者かオーナーが建国できます。建国した人が国王になり、首都が共有マップに置かれます。\n\n## 2. 空腹度とコイン\n- **空腹度**: 参加したときは 100 です。これから時間とともに減っていくしくみが入る予定です。\n- **コイン（AGO）**: 所持金は `/general` の「プレイヤー状況」で確認できます。ほかのゲームで稼いだコインも国づくりで使えます。\n所属国・役職・所持金・空腹度は、状態確認機能で確認できます。\n\n## 3. まずやること\n1. 国民参加または建国の機能を使う\n2. 状態確認機能で自分の情報を見る\n3. Web サイトの共有マップで、自分の国の場所と広さを見てみる\n操作方法はサーバー管理者に確認してください。"
-    },
-    {
-      "name": "nation join",
-      "kind": "prefix",
-      "category": "economy",
-      "summary": "このサーバーの国に国民として参加します",
-      "usage": "!nation join",
-      "options": [],
-      "permissions": [],
-      "guild_only": true,
-      "aliases": [],
-      "hidden": true,
-      "guide": "## 1. 国に入る・国をつくる\n国づくりは、サーバーごとに 1 つの国を育てる遊びです。\n- このサーバーに国があれば、参加機能から国民になれます（入れるのは 1 人 1 か国）。\n- まだ国がなければ、サーバーの管理者かオーナーが建国できます。建国した人が国王になり、首都が共有マップに置かれます。\n\n## 2. 空腹度とコイン\n- **空腹度**: 参加したときは 100 です。これから時間とともに減っていくしくみが入る予定です。\n- **コイン（AGO）**: 所持金は `/general` の「プレイヤー状況」で確認できます。ほかのゲームで稼いだコインも国づくりで使えます。\n所属国・役職・所持金・空腹度は、状態確認機能で確認できます。\n\n## 3. まずやること\n1. 国民参加または建国の機能を使う\n2. 状態確認機能で自分の情報を見る\n3. Web サイトの共有マップで、自分の国の場所と広さを見てみる\n操作方法はサーバー管理者に確認してください。"
-    },
-    {
-      "name": "nation status",
-      "kind": "prefix",
-      "category": "economy",
-      "summary": "所属国・役職・所持金・空腹度を表示します",
-      "usage": "!nation status",
-      "options": [],
-      "permissions": [],
-      "guild_only": true,
-      "aliases": [],
-      "hidden": true,
-      "guide": "## 1. 国に入る・国をつくる\n国づくりは、サーバーごとに 1 つの国を育てる遊びです。\n- このサーバーに国があれば、参加機能から国民になれます（入れるのは 1 人 1 か国）。\n- まだ国がなければ、サーバーの管理者かオーナーが建国できます。建国した人が国王になり、首都が共有マップに置かれます。\n\n## 2. 空腹度とコイン\n- **空腹度**: 参加したときは 100 です。これから時間とともに減っていくしくみが入る予定です。\n- **コイン（AGO）**: 所持金は `/general` の「プレイヤー状況」で確認できます。ほかのゲームで稼いだコインも国づくりで使えます。\n所属国・役職・所持金・空腹度は、状態確認機能で確認できます。\n\n## 3. まずやること\n1. 国民参加または建国の機能を使う\n2. 状態確認機能で自分の情報を見る\n3. Web サイトの共有マップで、自分の国の場所と広さを見てみる\n操作方法はサーバー管理者に確認してください。"
-    },
-    {
       "name": "doubt",
       "kind": "prefix",
       "category": "game",
@@ -376,21 +322,6 @@
       "category": "admin",
       "summary": "d1 サーバーの応答を確かめ、止まっていれば起動します",
       "usage": "!d1ping",
-      "options": [],
-      "permissions": [
-        "bot_admin"
-      ],
-      "guild_only": false,
-      "aliases": [],
-      "hidden": true,
-      "guide": null
-    },
-    {
-      "name": "dungeon_reset",
-      "kind": "prefix",
-      "category": "admin",
-      "summary": "ダンジョンのマップを全サーバー分リセットします",
-      "usage": "!dungeon_reset",
       "options": [],
       "permissions": [
         "bot_admin"
