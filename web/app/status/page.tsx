@@ -11,6 +11,8 @@ import {
   type BotStatusHistory,
   type BotStatusSnapshot,
 } from "@/lib/site";
+import { isActivelyBuilding, prUrl } from "@/lib/build-status";
+import { loadBuildStatus } from "@/lib/build-status-server";
 import { InviteCtaBlock } from "../InviteCta";
 import { InteractiveHoursChart, InteractiveSeriesChart, InteractiveUptime } from "./StatusCharts";
 
@@ -101,6 +103,7 @@ function expectedSamples(date: string, today: string, now: Date): number {
 
 export default async function StatusPage() {
   const [snapshot, history] = await Promise.all([loadSnapshot(), loadHistory()]);
+  const buildStatus = loadBuildStatus();
   const now = new Date();
   const fresh = snapshot !== null && isBotStatusFresh(snapshot, now);
   const uptimeDates = lastJstDates(now, 30);
@@ -268,6 +271,61 @@ export default async function StatusPage() {
           </p>
         </>
       )}
+      {buildStatus !== null ? (
+        <section className="status-section" aria-label="Webデプロイ">
+          <div className="uptime-head">
+            <h2>Webデプロイ</h2>
+            <span className={buildStatus.state === "deployed" ? "uptime-state" : "uptime-state stale"}>
+              {buildStatus.state === "building"
+                ? isActivelyBuilding(buildStatus, now)
+                  ? "ビルド中"
+                  : "ビルド中（情報が古い）"
+                : buildStatus.state === "deployed"
+                  ? "反映済み"
+                  : "ビルド失敗"}
+            </span>
+          </div>
+          <table className="status-table">
+            <tbody>
+              <tr>
+                <th scope="row">対象PR</th>
+                <td>
+                  {buildStatus.prs.length > 0
+                    ? buildStatus.prs.map((pr, i) => (
+                        <span key={pr.number}>
+                          {i > 0 ? "・" : null}
+                          <a href={prUrl(pr.number)} target="_blank" rel="noreferrer">
+                            #{pr.number}
+                          </a>
+                        </span>
+                      ))
+                    : "—"}
+                </td>
+              </tr>
+              {buildStatus.prs.find((pr) => pr.title) ? (
+                <tr>
+                  <th scope="row">タイトル</th>
+                  <td>{buildStatus.prs.find((pr) => pr.title)?.title}</td>
+                </tr>
+              ) : null}
+              <tr>
+                <th scope="row">コミット</th>
+                <td>{buildStatus.commit ? buildStatus.commit.slice(0, 7) : "—"}</td>
+              </tr>
+              <tr>
+                <th scope="row">ビルド開始</th>
+                <td>{formatDateTime(buildStatus.started_at)}</td>
+              </tr>
+              {buildStatus.finished_at !== null ? (
+                <tr>
+                  <th scope="row">完了</th>
+                  <td>{formatDateTime(buildStatus.finished_at)}</td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
+        </section>
+      ) : null}
       <InviteCtaBlock />
     </section>
   );
