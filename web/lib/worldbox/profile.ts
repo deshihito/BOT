@@ -315,3 +315,55 @@ export function swapSlots(
   storage[si] = tmp;
   return withInv(profile, { hotbar, storage, items: inv.items });
 }
+
+/** スロットの住所（インベントリ整理用）。 */
+export type SlotZone = "hotbar" | "storage";
+export type SlotRef = { zone: SlotZone; index: number };
+
+function parseSlotRef(raw: unknown): SlotRef | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const v = raw as { zone?: unknown; index?: unknown };
+  if (v.zone !== "hotbar" && v.zone !== "storage") return null;
+  if (typeof v.index !== "number" || !Number.isFinite(v.index)) return null;
+  const index = Math.floor(v.index);
+  const max = v.zone === "hotbar" ? HOTBAR_SLOTS : STORAGE_SLOTS;
+  if (index < 0 || index >= max) return null;
+  return { zone: v.zone, index };
+}
+
+/**
+ * 任意スロット間の移動（マイクラ式の整理）: 空き枠へは移動、同種は
+ * 合算（上限 STACK_MAX、あふれた分は元の枠に残る）、異種は入れ替え。
+ * 住所が不正なら null。総量は常に保存されるため items 集計は不変。
+ */
+export function moveSlot(
+  profile: PlayerProfile,
+  fromRaw: unknown,
+  toRaw: unknown,
+): PlayerProfile | null {
+  const from = parseSlotRef(fromRaw);
+  const to = parseSlotRef(toRaw);
+  if (!from || !to) return null;
+  if (from.zone === to.zone && from.index === to.index) return profile;
+  const inv = invOf(profile);
+  const hotbar = [...inv.hotbar];
+  const storage = [...inv.storage];
+  const arr = (zone: SlotZone) => (zone === "hotbar" ? hotbar : storage);
+  const src = arr(from.zone)[from.index];
+  if (!src) return profile;
+  const dst = arr(to.zone)[to.index];
+  if (!dst) {
+    arr(to.zone)[to.index] = src;
+    arr(from.zone)[from.index] = null;
+  } else if (dst.id === src.id) {
+    const moved = Math.min(STACK_MAX - dst.count, src.count);
+    if (moved <= 0) return profile;
+    arr(to.zone)[to.index] = { id: dst.id, count: dst.count + moved };
+    const rest = src.count - moved;
+    arr(from.zone)[from.index] = rest > 0 ? { id: src.id, count: rest } : null;
+  } else {
+    arr(to.zone)[to.index] = src;
+    arr(from.zone)[from.index] = dst;
+  }
+  return withInv(profile, { hotbar, storage, items: inv.items });
+}

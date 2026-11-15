@@ -28,6 +28,16 @@ export type ItemDef = {
   tier?: number;
   /** 耐久の目安（block=壊されにくさ、tool=使用回数）。 */
   durability?: number;
+  /**
+   * 施設（作業台・家具など）: ブロック層に置くと、そのマスを占有する
+   * （他のブロック/施設は置けない）が、移動の当たり判定は持たず
+   * プレイヤーは通過できる。固体ブロックとの区別はこのデータで持つ。
+   */
+  facility?: boolean;
+  /** 硬いブロック（耐久50以上）を掘るのに要る道具（block のみ）。 */
+  mineTool?: "axe" | "pickaxe";
+  /** ドット絵アイコンのパス（public 配下）。無いアイテムは文字で出す。 */
+  icon?: string;
 };
 
 export const ITEMS: readonly ItemDef[] = [
@@ -99,17 +109,17 @@ export const ITEMS: readonly ItemDef[] = [
   { id: "sandstone_block", name: "砂岩ブロック", desc: "置ける砂岩", category: "block", price: 20, durability: 35 },
   { id: "stone_block", name: "石ブロック", desc: "置ける石", category: "block", price: 16, durability: 40 },
   { id: "cobblestone_block", name: "丸石ブロック", desc: "丸石の塊", category: "block", price: 18, durability: 45 },
-  { id: "brick_block", name: "レンガブロック", desc: "焼いたレンガ", category: "block", price: 45, durability: 55 },
-  { id: "stone_brick_block", name: "石レンガブロック", desc: "石を組んだ塊", category: "block", price: 56, durability: 60 },
+  { id: "brick_block", name: "レンガブロック", desc: "焼いたレンガ", category: "block", price: 45, durability: 55, mineTool: "pickaxe" },
+  { id: "stone_brick_block", name: "石レンガブロック", desc: "石を組んだ塊", category: "block", price: 56, durability: 60, mineTool: "pickaxe" },
   { id: "glass_block", name: "ガラスブロック", desc: "透明な塊（脆い）", category: "block", price: 65, durability: 10 },
   { id: "glowstone_block", name: "発光石ブロック", desc: "淡く光る石", category: "block", price: 45, durability: 30 },
   { id: "bookshelf_block", name: "本棚ブロック", desc: "本の詰まった棚", category: "block", price: 40, durability: 30 },
   { id: "slime_block", name: "スライムブロック", desc: "弾む塊", category: "block", price: 40, durability: 15 },
-  { id: "crystal_block", name: "水晶ブロック", desc: "水晶の塊", category: "block", price: 90, durability: 80 },
-  { id: "gold_block", name: "金ブロック", desc: "金の塊", category: "block", price: 120, durability: 100 },
-  { id: "iron_block", name: "鉄ブロック", desc: "鉄の塊", category: "block", price: 80, durability: 120 },
-  { id: "obsidian_block", name: "黒曜石ブロック", desc: "非常に硬い塊", category: "block", price: 150, durability: 300 },
-  { id: "mithril_block", name: "ミスリルブロック", desc: "希少金属の塊", category: "block", price: 300, durability: 200 },
+  { id: "crystal_block", name: "水晶ブロック", desc: "水晶の塊", category: "block", price: 90, durability: 80, mineTool: "pickaxe" },
+  { id: "gold_block", name: "金ブロック", desc: "金の塊", category: "block", price: 120, durability: 100, mineTool: "pickaxe" },
+  { id: "iron_block", name: "鉄ブロック", desc: "鉄の塊", category: "block", price: 80, durability: 120, mineTool: "pickaxe" },
+  { id: "obsidian_block", name: "黒曜石ブロック", desc: "非常に硬い塊", category: "block", price: 150, durability: 300, mineTool: "pickaxe" },
+  { id: "mithril_block", name: "ミスリルブロック", desc: "希少金属の塊", category: "block", price: 300, durability: 200, mineTool: "pickaxe" },
   // ---- 素材（追加分） ---------------------------------------------------
   { id: "stick", name: "棒", desc: "道具の柄になる", category: "material", price: 4 },
   { id: "fiber", name: "繊維", desc: "草から取れる素材", category: "material", price: 6 },
@@ -150,23 +160,66 @@ export const ITEMS: readonly ItemDef[] = [
   { id: "corn_soup", name: "コーンスープ", desc: "温かいスープ", category: "food", price: 50, hunger: 40 },
   { id: "salad", name: "サラダ", desc: "畑の盛り合わせ", category: "food", price: 56, hunger: 35 },
   { id: "pumpkin_pie", name: "パンプキンパイ", desc: "甘い焼き菓子", category: "food", price: 60, hunger: 50 },
-  // ---- 家具・装飾（ロビーの調度と同じ系統。設置は次フェーズ） -------------
-  { id: "bench", name: "ベンチ", desc: "座れる家具", category: "furniture", price: 30 },
-  { id: "chair", name: "椅子", desc: "座れる家具", category: "furniture", price: 30 },
-  { id: "sign_board", name: "看板", desc: "目印の板", category: "furniture", price: 35 },
+  // ---- 家具・装飾（施設: 占有するが通過できる。当たり判定なし） -------
+  { id: "bench", name: "ベンチ", desc: "座れる家具", category: "furniture", price: 30, facility: true },
+  { id: "chair", name: "椅子", desc: "座れる家具", category: "furniture", price: 30, facility: true },
+  { id: "sign_board", name: "看板", desc: "目印の板", category: "furniture", price: 35, facility: true },
   { id: "hedge", name: "生け垣", desc: "緑の仕切り", category: "furniture", price: 35 },
-  { id: "planter", name: "プランター", desc: "花を植える箱", category: "furniture", price: 38 },
-  { id: "barrel", name: "樽", desc: "物を入れる樽", category: "furniture", price: 45 },
-  { id: "crate", name: "木箱", desc: "物を入れる箱", category: "furniture", price: 45 },
+  { id: "planter", name: "プランター", desc: "花を植える箱", category: "furniture", price: 38, facility: true },
+  { id: "barrel", name: "樽", desc: "物を入れる樽", category: "furniture", price: 45, facility: true },
+  { id: "crate", name: "木箱", desc: "物を入れる箱", category: "furniture", price: 45, facility: true },
   { id: "fence_wood", name: "木の柵", desc: "区切りの柵", category: "furniture", price: 45 },
-  { id: "lamp", name: "ランプ", desc: "明かり", category: "furniture", price: 50 },
-  { id: "item_shelf", name: "棚", desc: "物を並べる棚", category: "furniture", price: 55 },
-  { id: "table_round", name: "丸テーブル", desc: "囲める机", category: "furniture", price: 60 },
-  { id: "tapestry", name: "タペストリー", desc: "壁に掛ける布", category: "furniture", price: 75 },
-  { id: "bookshelf", name: "本棚", desc: "本を収める棚", category: "furniture", price: 70 },
-  { id: "sofa", name: "ソファ", desc: "くつろぐ家具", category: "furniture", price: 120 },
-  { id: "piano", name: "ピアノ", desc: "大きな楽器", category: "furniture", price: 200 },
+  { id: "lamp", name: "ランプ", desc: "明かり", category: "furniture", price: 50, facility: true },
+  { id: "item_shelf", name: "棚", desc: "物を並べる棚", category: "furniture", price: 55, facility: true },
+  { id: "table_round", name: "丸テーブル", desc: "囲める机", category: "furniture", price: 60, facility: true },
+  { id: "tapestry", name: "タペストリー", desc: "壁に掛ける布", category: "furniture", price: 75, facility: true },
+  { id: "bookshelf", name: "本棚", desc: "本を収める棚", category: "furniture", price: 70, facility: true },
+  { id: "sofa", name: "ソファ", desc: "くつろぐ家具", category: "furniture", price: 120, facility: true },
+  { id: "piano", name: "ピアノ", desc: "大きな楽器", category: "furniture", price: 200, facility: true },
 ];
+
+/**
+ * ドット絵アイコンを持つアイテムの ID 一覧。実体は
+ * public/img/worldbox/items/<id>.png（生成: ago-world-box/make_item_icons.py、
+ * 素材はユーザー承認済みのドット絵セット＋家具はロビースプライト）。
+ * ここに無いアイテムはアイコンなし（UI は名前ラベルで出す）。
+ */
+export const ITEM_ICON_IDS: readonly string[] = [
+  // 道具（4種×3段すべて）
+  "wooden_axe", "stone_axe", "iron_axe",
+  "wooden_pickaxe", "stone_pickaxe", "iron_pickaxe",
+  "wooden_sword", "stone_sword", "iron_sword",
+  "wooden_hoe", "stone_hoe", "iron_hoe",
+  // 素材（すべて）
+  "wood", "stone", "herb", "cloth", "glass", "iron_ore", "gold_ore", "mithril",
+  "stick", "fiber", "clay", "paper", "string", "bamboo", "charcoal", "feather",
+  "bone", "slime", "leather", "iron_ingot", "gold_ingot",
+  // ブロック（すべて）
+  "dirt_block", "sand_block", "snow_block", "mud_block", "grass_block",
+  "gravel_block", "moss_block", "clay_block", "packed_snow_block", "wool_block",
+  "hay_bale", "ice_block", "charcoal_block", "bamboo_block", "planks_block",
+  "oak_log", "pine_log", "birch_log", "bone_block", "sandstone_block",
+  "stone_block", "cobblestone_block", "brick_block", "stone_brick_block",
+  "glass_block", "glowstone_block", "bookshelf_block", "slime_block",
+  "crystal_block", "gold_block", "iron_block", "obsidian_block", "mithril_block",
+  // 種（すべて）
+  "wheat_seed", "carrot_seed", "potato_seed", "cabbage_seed", "strawberry_seed",
+  "tomato_seed", "corn_seed", "rice_seed", "pumpkin_seed", "melon_seed",
+  // 作物・食事（一部）
+  "wheat", "carrot", "tomato", "strawberry", "melon",
+  "bread", "energy_drink", "meal", "cake",
+  // 合成品・特殊（一部）
+  "lantern", "blanket", "potion", "toolbox", "tent", "accessory", "star_shard",
+  // 家具（すべて）
+  "bench", "chair", "sign_board", "hedge", "planter", "barrel", "crate",
+  "fence_wood", "lamp", "item_shelf", "table_round", "tapestry", "bookshelf",
+  "sofa", "piano",
+];
+
+const ITEM_ICON_ID_SET = new Set(ITEM_ICON_IDS);
+for (const item of ITEMS) {
+  if (ITEM_ICON_ID_SET.has(item.id)) item.icon = `/img/worldbox/items/${item.id}.png`;
+}
 
 const ITEM_BY_ID = new Map(ITEMS.map((item) => [item.id, item]));
 

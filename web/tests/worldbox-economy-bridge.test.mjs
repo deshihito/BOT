@@ -354,7 +354,7 @@ const map = (globalThis.__wbPresence = new Map());
 export function isPresenceEnabled() { return true; }
 export async function findPresenceOwnerKey(id) { return map.has(id) ? map.get(id) : null; }
 `);
-const profileSwapUrl = bundleModule(["worldbox/items.ts", "worldbox/profile.ts"], ["swapSlots"]);
+const profileSwapUrl = bundleModule(["worldbox/items.ts", "worldbox/profile.ts"], ["swapSlots", "moveSlot"]);
 const profileRoute = await import(
   dataUrl(
     transpile("api/worldbox/profile/route.ts", rootDir + "/app")
