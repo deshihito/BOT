@@ -17,8 +17,8 @@ import { DASH_SPEED, SWIM_DASH_SPEED, SWIM_SPEED, WALK_SPEED, findFreeNear, isWa
 import { nightAmount, phaseAtTime } from "@/lib/worldbox/daynight";
 import { advanceWalkPhase, attackSwingAngle, damp, moveLean, stepBeatIndex, walkBob, walkSquashY } from "@/lib/worldbox/anim";
 import {
-  ambientKindFor, createFxSystem, createShake, fxLifeRatio, popProgress, popScale, shakeOffsetAt,
-  slashAlpha, spawnAmbient, spawnBurst, startShake, stepFx, swingProgress,
+  WHIFF_ALPHA_SCALE, createFxSystem, createShake, fxLifeRatio, phaseKind, popProgress, popScale, shakeOffsetAt,
+  slashAlpha, spawnAmbient, spawnBurst, spawnMobFx, startShake, stepFx, swingProgress, weatherAmbientKind, weatherAt,
   type FxBurstKind, type FxShake, type FxSystem,
 } from "@/lib/worldbox/fx";
 import type { PresenceEntry } from "@/lib/worldbox/presence";
@@ -48,6 +48,7 @@ import { loadDungeonTiles, loadFarmSprites, loadLobbySprites, loadTextures } fro
 import { isStickTouch, stickBase, stickVector } from "@/lib/worldbox/stick";
 import { useGamesNav } from "../GamesShell";
 import WorldBoxCasinoPanel from "./WorldBoxCasinoPanel";
+import WorldBoxArenaPanel from "./WorldBoxArenaPanel";
 import WorldBoxEconomyPanel from "./WorldBoxEconomyPanel";
 import WorldBoxGuildBoardPanel from "./WorldBoxGuildBoardPanel";
 
@@ -243,6 +244,8 @@ const STATION_LABEL: Record<LobbyStation, string> = {
   casino: "カジノ",
   arena: "闘技場",
   smith: "鍛冶屋",
+  fountain: "噴水",
+  rest: "休憩",
 };
 
 export default function WorldBoxClient() {
@@ -355,6 +358,9 @@ export default function WorldBoxClient() {
   const [stationUi, setStationUi] = useState<LobbyStation | null>(null);
   const warpActionRef = useRef<(target: SaveSpace) => void>(() => {});
   const [casinoOpen, setCasinoOpen] = useState(false);
+  const [arenaOpen, setArenaOpen] = useState(false);
+  const [plazaMsg, setPlazaMsg] = useState("");
+  const staminaBoostRef = useRef(false);
   const [boardOpen, setBoardOpen] = useState(false);
   const [guildBoardOpen, setGuildBoardOpen] = useState(false);
   const [boardPosts, setBoardPosts] = useState<BoardPost[]>([]);
@@ -404,7 +410,41 @@ export default function WorldBoxClient() {
     if (stationUi !== "board") setBoardOpen(false);
     if (stationUi !== "casino") setCasinoOpen(false);
     if (stationUi !== "guild") setGuildBoardOpen(false);
+    if (stationUi !== "arena") setArenaOpen(false);
+    setPlazaMsg("");
   }, [stationUi]);
+
+  // 噴水・休憩の小施設アクション（場所検証はサーバー側、回復はここで適用）
+  const plazaAction = async (action: "fountain" | "rest") => {
+    try {
+      const res = await fetch("/api/worldbox/plaza", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ action }),
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        error?: string; item?: string | null; retryAfterSec?: number;
+      };
+      if (!res.ok) {
+        setPlazaMsg(
+          data.error === "insufficient_balance" ? "コインが足りません"
+          : data.error === "rest_cooldown" ? `まだ休めません（あと ${data.retryAfterSec ?? "?"} 秒）`
+          : data.error === "unauthorized" ? "ログインが必要です"
+          : "受け付けられませんでした",
+        );
+        return;
+      }
+      staminaBoostRef.current = true;
+      if (action === "fountain") {
+        const itemName = data.item ? itemById(data.item)?.name ?? data.item : null;
+        setPlazaMsg(itemName ? `スタミナが回復した。${itemName} を手に入れた` : "スタミナが回復した");
+      } else {
+        setPlazaMsg("スタミナが回復した");
+      }
+    } catch {
+      setPlazaMsg("受け付けられませんでした");
+    }
+  };
 
   const applyNationsData = (data: NationsResponse) => {
     nationsRef.current = data;
@@ -460,6 +500,12 @@ export default function WorldBoxClient() {
       const data = (await res.json().catch(() => ({}))) as { error?: string };
       if (!res.ok) {
         setNationMsg(BUILDING_ERROR_LABEL[data.error ?? ""] ?? "失敗しました");
+        // 失敗は空振りで返す（風切りだけ・成功の粒は出さない）
+        fxEventsRef.current.push({
+          kind: "whiff",
+          x: typeof body.x === "number" ? body.x : Math.floor(playerPosRef.current.x),
+          y: typeof body.y === "number" ? body.y : Math.floor(playerPosRef.current.y),
+        });
         return;
       }
       if (typeof body.x === "number" && typeof body.y === "number") {
@@ -508,8 +554,9 @@ export default function WorldBoxClient() {
   }, []);
   const tilesRef = useRef<TileOverridesMap>({});
   const tilesVersionRef = useRef(0);
-  /** 演出イベントの受け渡し（行為の成功→描画ループでパーティクル/揺れ/ポップに変換）。 */
-  const fxEventsRef = useRef<{ kind: FxBurstKind; x: number; y: number }[]>([]);
+  /** 演出イベントの受け渡し（行為の成功/失敗→描画ループでパーティクル/揺れ/ポップに変換）。
+   * whiff は空振り（風切りのみ、粒なし）。hit/death/spawn はモブ演出用（sizeTiles/color 任意）。 */
+  const fxEventsRef = useRef<{ kind: FxBurstKind | "whiff"; x: number; y: number; sizeTiles?: number; color?: string }[]>([]);
   /** 自分の不透明 ID（プレゼンス ID）。自分のブロック判定に使う。 */
   const selfIdRef = useRef<string | null>(null);
   /** タイル上書きから設置ブロックの固体集合を作り直す（施設は占有のみで固体にしない）。 */
@@ -571,6 +618,8 @@ export default function WorldBoxClient() {
       };
       if (!res.ok) {
         setTileMsg(TILE_ERROR_LABEL[data.error ?? ""] ?? "できませんでした");
+        // 失敗は空振りで返す（風切りだけ・成功の粒は出さない）
+        fxEventsRef.current.push({ kind: "whiff", x, y });
         return;
       }
       // 成功した行為は演出で返す（粒・揺れ・出現ポップは描画ループ側で出す）
@@ -590,6 +639,7 @@ export default function WorldBoxClient() {
       if (data.profile) setInvProfile(data.profile);
     } catch {
       setTileMsg("できませんでした");
+      fxEventsRef.current.push({ kind: "whiff", x, y });
     }
   };
   const postTileActionRef = useRef(postTileAction);
@@ -712,14 +762,16 @@ export default function WorldBoxClient() {
     const fxSys: FxSystem = createFxSystem((Date.now() % 2147483646) + 1);
     if (reducedMotion) fxSys.intensity = 0.35;
     let shake: FxShake = createShake();
-    /** 道具スイング（タップ即時応答）。itemId のアイコンを振る。 */
-    let swing = { startedAt: 0, itemId: null as string | null, face: 1 as 1 | -1 };
+    /** 道具スイング（タップ即時応答）。itemId のアイコンを振る。whiff は空振り（風切りのみ）。 */
+    let swing = { startedAt: 0, itemId: null as string | null, face: 1 as 1 | -1, whiff: false };
     /** 出現ポップ中タイル "x,y" → 開始時刻。 */
     const pops = new Map<string, number>();
     let lastBeat = 0;
     let lastDashFxAt = 0;
     let lastSwimFxAt = 0;
     let lastAmbientAt = 0;
+    /** 直前フレームの時間帯（切り替わった瞬間に環境粒を足す）。 */
+    let lastPhaseKind = "";
     const popScaleFor = (key: string, nowMs: number): number => {
       const started = pops.get(key);
       if (started === undefined) return 1;
@@ -868,9 +920,16 @@ export default function WorldBoxClient() {
     const handleTileTap = (t: { x: number; y: number }): boolean => {
       const prof = invRef.current;
       if (!prof) return false;
+      const slot = prof.hotbar[selSlotRef.current] ?? null;
+      const selItem = slot ? itemById(slot.id) : null;
+      const wantsPlace = !!selItem && (selItem.category === "block" || selItem.facility === true);
       const px = Math.floor(player.x);
       const py = Math.floor(player.y);
-      if (Math.max(Math.abs(t.x - px), Math.abs(t.y - py)) > 1) return false;
+      if (Math.max(Math.abs(t.x - px), Math.abs(t.y - py)) > 1) {
+        // ブロック選択中の遠いタップは設置のつもりなので、無反応で終わらせない
+        if (wantsPlace) setTileMsg(TILE_ERROR_LABEL.too_far);
+        return false;
+      }
       const view = tileView(map, tilesRef.current, t.x, t.y, Date.now(), null);
       // 自分のブロックかどうかは、サーバーが返した自分の ID で判定する
       if (view.block) {
@@ -880,20 +939,22 @@ export default function WorldBoxClient() {
           mine: selfIdRef.current !== null && ov?.block?.ownerId === selfIdRef.current,
         };
       }
-      const slot = prof.hotbar[selSlotRef.current] ?? null;
-      const selItem = slot ? itemById(slot.id) : null;
       const act = actionForTile(view, {
         tool: selItem?.tool,
         seedId: selItem && selItem.category === "seed" ? selItem.id : undefined,
         blockId: selItem && (selItem.category === "block" || selItem.facility) ? selItem.id : undefined,
       });
-      if (!act) return false;
+      if (!act) {
+        // 隣接タップで何も起きない場合は理由を出す（素材は置けない・その地形には置けない等）
+        if (selItem) setTileMsg(TILE_ERROR_LABEL.tile_blocked);
+        return false;
+      }
       if (act.action === "plant-picker") {
         setSeedPicker({ x: t.x, y: t.y });
         return true;
       }
       // 入力への即時応答として道具を振る（結果の粒は成功時に別で出す）
-      swing = { startedAt: performance.now(), itemId: selItem?.id ?? null, face: player.face };
+      swing = { startedAt: performance.now(), itemId: selItem?.id ?? null, face: player.face, whiff: false };
       void postTileActionRef.current(act.action, t.x, t.y, act.seedId, act.itemId);
       return true;
     };
@@ -1331,6 +1392,11 @@ export default function WorldBoxClient() {
         wasSwimming = inWaterNow;
       }
       stamina = stepStamina(stamina, staminaUse, dt).state;
+      if (staminaBoostRef.current) {
+        // 噴水・休憩の回復（サーバー許可済み）
+        stamina = createStamina();
+        staminaBoostRef.current = false;
+      }
       playerSwimming = inWaterNow;
       if (inWaterNow && stamina.value <= 0) {
         stamina = rescueStamina(stamina);
@@ -1364,6 +1430,18 @@ export default function WorldBoxClient() {
 
       // ---- 演出の更新（行為イベントの消化・粒の前進・移動の副産物） ----
       for (const ev of fxEventsRef.current.splice(0)) {
+        if (ev.kind === "whiff") {
+          // 空振り: 風切りだけのスイングを再生する（粒も道具アイコンも出さない）
+          swing = { startedAt: now, itemId: null, face: player.face, whiff: true };
+          continue;
+        }
+        if (ev.kind === "hit" || ev.kind === "death" || ev.kind === "spawn") {
+          // モブ演出: 大きさに応じて粒をスケール。死亡は小さな揺れ、出現はポップも併用
+          spawnMobFx(fxSys, ev.kind, ev.x + 0.5, ev.y + 0.5, { sizeTiles: ev.sizeTiles, color: ev.color });
+          if (ev.kind === "death") shake = startShake(shake, 3, now);
+          if (ev.kind === "spawn") pops.set(`${ev.x},${ev.y}`, now);
+          continue;
+        }
         spawnBurst(fxSys, ev.kind, ev.x + 0.5, ev.y + 0.5);
         if (ev.kind === "chop" || ev.kind === "mine") shake = startShake(shake, 2, now);
         else if (ev.kind === "debris" || ev.kind === "build") shake = startShake(shake, 3, now);
@@ -1487,6 +1565,31 @@ export default function WorldBoxClient() {
               ctx.fillRect(bx + 5, by + 5, TILE - 10, TILE - 10);
             }
             ctx.restore();
+          }
+        }
+      }
+
+      // ブロック/施設を選択中は、置ける隣接タイルを薄く光らせる（置ける場所を構造で示す）
+      if (!buildRef.current.active) {
+        const prof = invRef.current;
+        const slot = prof?.hotbar[selSlotRef.current] ?? null;
+        const selDef = slot ? itemById(slot.id) : null;
+        if (prof && selDef && (selDef.category === "block" || selDef.facility === true)) {
+          const px = Math.floor(player.x);
+          const py = Math.floor(player.y);
+          for (let dy = -1; dy <= 1; dy++) {
+            for (let dx = -1; dx <= 1; dx++) {
+              const vx = px + dx;
+              const vy = py + dy;
+              if (vx < 0 || vy < 0 || vx >= MAP_W || vy >= MAP_H) continue;
+              const v = tileView(map, tilesRef.current, vx, vy, nowMs, null);
+              if (actionForTile(v, { blockId: selDef.id })?.action !== "place_block") continue;
+              ctx.fillStyle = "rgba(140,255,150,0.20)";
+              ctx.fillRect(toScreenX(vx), toScreenY(vy), TILE, TILE);
+              ctx.strokeStyle = "rgba(225,255,225,0.55)";
+              ctx.lineWidth = 1.5;
+              ctx.strokeRect(toScreenX(vx) + 1, toScreenY(vy) + 1, TILE - 2, TILE - 2);
+            }
           }
         }
       }
@@ -1710,12 +1813,28 @@ export default function WorldBoxClient() {
           }
         }
       };
-      // 環境パーティクル（雪原=雪、森=落葉、夜=蛍、それ以外=花粉。ワールドのみ）
+      // 環境パーティクル（雪原=雪、雨天=雨、森=落葉、夜=蛍、それ以外=花粉。ワールドのみ）
+      // 天候は fx.ts の決定的サイクルで全員一致。時間帯が切り替わったフレームは数粒追加で出す
       if (space === "world" && now - lastAmbientAt > 150 && !reducedMotion) {
         lastAmbientAt = now;
         const ptile = mapTileAt(effMap, Math.floor(player.x), Math.floor(player.y));
-        const kind = ambientKindFor(ptile, ptile === T_TREE || ptile === T_SNOW_TREE, nightAmount(phaseAtTime(nowMs / 1000)));
-        spawnAmbient(fxSys, kind, cam.x - cw / TILE / 2 - 1, cam.x + cw / TILE / 2 + 1, cam.y - ch / TILE / 2 - 1);
+        const nowSec = nowMs / 1000;
+        const phase = phaseAtTime(nowSec);
+        const kind = weatherAmbientKind(weatherAt(nowSec), ptile, ptile === T_TREE || ptile === T_SNOW_TREE, nightAmount(phase));
+        const ax0 = cam.x - cw / TILE / 2 - 1;
+        const ax1 = cam.x + cw / TILE / 2 + 1;
+        const ay0 = cam.y - ch / TILE / 2 - 1;
+        const pk = phaseKind(phase);
+        if (lastPhaseKind !== "" && pk !== lastPhaseKind) {
+          for (let i = 0; i < 4; i++) spawnAmbient(fxSys, kind, ax0, ax1, ay0);
+        }
+        lastPhaseKind = pk;
+        spawnAmbient(fxSys, kind, ax0, ax1, ay0);
+        if (kind === "rain") {
+          // 雨は密度を上げる（速く落ちるので数を足しても上限に触れない）
+          spawnAmbient(fxSys, kind, ax0, ax1, ay0);
+          spawnAmbient(fxSys, kind, ax0, ax1, ay0);
+        }
       }
       drawParticles(false);
 
@@ -1729,14 +1848,14 @@ export default function WorldBoxClient() {
           ctx.save();
           ctx.translate(cxp, cyp);
           ctx.scale(swing.face, 1);
-          // 風切り（振り抜きの瞬間だけ出る弧）
-          ctx.strokeStyle = `rgba(255,255,255,${(slashAlpha(sk) * 0.85).toFixed(3)})`;
-          ctx.lineWidth = 3;
+          // 風切り（振り抜きの瞬間だけ出る弧。空振りは薄く・細く）
+          ctx.strokeStyle = `rgba(255,255,255,${(slashAlpha(sk) * 0.85 * (swing.whiff ? WHIFF_ALPHA_SCALE : 1)).toFixed(3)})`;
+          ctx.lineWidth = swing.whiff ? 1.5 : 3;
           ctx.beginPath();
           ctx.arc(0, 0, TILE * 0.78, ang - 1.15, ang + 0.35);
           ctx.stroke();
-          // 道具アイコンを振る（無い道具は弧だけ）
-          const img = swing.itemId ? itemIcons[swing.itemId] : undefined;
+          // 道具アイコンを振る（空振りと、無い道具は弧だけ）
+          const img = !swing.whiff && swing.itemId ? itemIcons[swing.itemId] : undefined;
           if (texReady(img)) {
             ctx.rotate(ang);
             ctx.drawImage(img, TILE * 0.30, -TILE * 0.30, TILE * 0.62, TILE * 0.62);
@@ -2138,6 +2257,43 @@ export default function WorldBoxClient() {
                 {guildBoardOpen ? "閉じる" : "開く"}
               </button>
             )}
+            {(stationUi === "shop" || stationUi === "bank" || stationUi === "smith") && (
+              <button
+                type="button"
+                style={{ ...btn, minHeight: 32, padding: "2px 10px" }}
+                onClick={() => setShowEconomy(true)}
+              >
+                開く
+              </button>
+            )}
+            {stationUi === "arena" && (
+              <button
+                type="button"
+                style={{ ...btn, minHeight: 32, padding: "2px 10px" }}
+                onClick={() => setArenaOpen((v) => !v)}
+              >
+                {arenaOpen ? "閉じる" : "戦う"}
+              </button>
+            )}
+            {stationUi === "fountain" && (
+              <button
+                type="button"
+                style={{ ...btn, minHeight: 32, padding: "2px 10px" }}
+                onClick={() => void plazaAction("fountain")}
+              >
+                コインを投げる（10）
+              </button>
+            )}
+            {stationUi === "rest" && (
+              <button
+                type="button"
+                style={{ ...btn, minHeight: 32, padding: "2px 10px" }}
+                onClick={() => void plazaAction("rest")}
+              >
+                休む
+              </button>
+            )}
+            {plazaMsg && <span role="status">{plazaMsg}</span>}
           </div>
         )}
         {showMap && spaceUi === "world" && (
@@ -2408,6 +2564,9 @@ export default function WorldBoxClient() {
       {showEconomy && <WorldBoxEconomyPanel space={spaceUi} station={stationUi} onClose={() => setShowEconomy(false)} />}
       {casinoOpen && spaceUi === "lobby" && (
         <WorldBoxCasinoPanel onClose={() => setCasinoOpen(false)} />
+      )}
+      {arenaOpen && spaceUi === "lobby" && (
+        <WorldBoxArenaPanel onClose={() => setArenaOpen(false)} />
       )}
       {guildBoardOpen && spaceUi === "lobby" && (
         <WorldBoxGuildBoardPanel

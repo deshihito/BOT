@@ -511,6 +511,27 @@ test("クライアント: アイコン・設置ブロック描画・固体化が
   assert.ok(panel.includes(".icon"), "経済パネルが icon を見ていない");
 });
 
+test("家具は全種 facility で置ける（柵・生け垣も設置対象）", () => {
+  const furniture = inv.ITEMS.filter((i) => i.category === "furniture");
+  assert.ok(furniture.length > 0);
+  for (const item of furniture) {
+    assert.equal(item.facility, true, `${item.id} に facility が無い（置けない家具）`);
+    const placed = place(null, withItems({ [item.id]: 1 }), ME_KEY, grassAt, item.id);
+    assert.equal(placed.ok, true, `${item.id} が設置できない: ${placed.error ?? ""}`);
+  }
+});
+
+test("クライアント: 設置できないタップは無反応で終わらず、置けるタイルを光らせる", () => {
+  const client = fs.readFileSync(path.join(rootDir, "app/games/worldbox/WorldBoxClient.tsx"), "utf8");
+  // 隣接タップで行為が無いときは理由（断片）を出す
+  assert.ok(client.includes("TILE_ERROR_LABEL.tile_blocked"), "行為なしタップへのフィードバックが無い");
+  // ブロック選択中の遠いタップは「遠すぎる」を出す
+  assert.ok(client.includes("TILE_ERROR_LABEL.too_far"), "遠い設置タップへのフィードバックが無い");
+  // ブロック/施設の選択中は置ける隣接タイルをハイライトする
+  assert.ok(client.includes("置ける隣接タイルを薄く光らせる"), "設置先ハイライトが無い");
+  assert.ok(client.includes('actionForTile(v, { blockId: selDef.id })'), "ハイライトが設置可否判定と一致していない");
+});
+
 test("クライアント: 全パネルはステージ内オーバーレイで、スロットはスプライトのみ", () => {
   const client = fs.readFileSync(path.join(rootDir, "app/games/worldbox/WorldBoxClient.tsx"), "utf8");
   const panel = fs.readFileSync(path.join(rootDir, "app/games/worldbox/WorldBoxEconomyPanel.tsx"), "utf8");
