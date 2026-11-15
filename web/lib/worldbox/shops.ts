@@ -44,9 +44,29 @@ export function genreOfItem(itemId: unknown): ShopGenreId | null {
   return genreForCategory(item.category)?.id ?? null;
 }
 
-/** そのジャンルで売られている品目（カタログ順）。 */
+/**
+ * 店で売らないレア品（ユーザー決定）: 特殊カテゴリ全品・道具の tier 4
+ * （ミスリル）・宝石ブロック4種。入手は合成・ドロップ・探索のみ。
+ * 売却は従来どおり可（ジャンル不問で売れる）。
+ * 宝石ブロックは「宝石名+_block」が鉱石ブロック（diamond_ore_block 等）と
+ * 紛らわしいため、名前パターンでなく明示 ID 集合で判定する。
+ */
+const GEM_BLOCK_IDS: ReadonlySet<string> = new Set([
+  "diamond_block",
+  "emerald_block",
+  "ruby_block",
+  "sapphire_block",
+]);
+
+export function isShopExcluded(item: ItemDef): boolean {
+  if (item.category === "special") return true;
+  if (item.category === "tool" && item.tier === 4) return true;
+  return GEM_BLOCK_IDS.has(item.id);
+}
+
+/** そのジャンルで売られている品目（カタログ順、レア品は除く）。 */
 export function itemsForGenre(genreId: ShopGenreId): ItemDef[] {
-  return ITEMS.filter((item) => genreOfItem(item.id) === genreId);
+  return ITEMS.filter((item) => genreOfItem(item.id) === genreId && !isShopExcluded(item));
 }
 
 /**
@@ -60,4 +80,15 @@ export function checkBuyGenre(shopGenre: ShopGenreId | null, itemId: unknown): "
   const itemGenre = genreOfItem(itemId);
   if (itemGenre === null) return null;
   return itemGenre === shopGenre ? null : "wrong_shop";
+}
+
+/**
+ * 購入の在庫検証: レア品（isShopExcluded）はどの店でも売っていないので
+ * "not_sold"。未知のアイテムはここでは弾かず、buyItem 側の
+ * unknown_item に委ねる。
+ */
+export function checkBuySold(itemId: unknown): "not_sold" | null {
+  const item = itemById(itemId);
+  if (!item) return null;
+  return isShopExcluded(item) ? "not_sold" : null;
 }
