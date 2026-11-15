@@ -20,7 +20,7 @@ import {
 } from "@/lib/worldbox/nations";
 import { parseSave, serializeSave } from "@/lib/worldbox/save";
 import { chooseInitialSave } from "@/lib/worldbox/save-source";
-import { loadTextures } from "@/lib/worldbox/textures";
+import { loadDungeonTiles, loadTextures } from "@/lib/worldbox/textures";
 import { useGamesNav } from "../GamesShell";
 
 const SAVE_KEY = "ago-worldbox-save-v4";
@@ -30,11 +30,15 @@ const TILE = 44;
 const AVATAR_TILES = 1.3;
 
 const TILE_TEXTURE: Record<number, string> = {
-  [T_GRASS]: "grass",
   [T_WATER]: "water",
   [T_SAND]: "sand",
+};
+/** ダンジョン流用タイル（/img/worldbox/*.png、64×64 ピクセルアート）。 */
+const TILE_DUNGEON: Record<number, string> = {
+  [T_GRASS]: "grass",
   [T_DIRT]: "dirt",
-  [T_ROCK]: "stone",
+  [T_TREE]: "tree",
+  [T_ROCK]: "rock",
 };
 const TILE_FALLBACK: Record<number, string> = {
   [T_GRASS]: "#57a639",
@@ -202,6 +206,7 @@ export default function WorldBoxClient() {
 
     const map: TopDownMap = generateMap(MAP_SEED);
     const textures = loadTextures();
+    const dungeon = loadDungeonTiles();
     const avatar = new Image();
     avatar.src = "/img/nomal.png";
 
@@ -677,24 +682,19 @@ export default function WorldBoxClient() {
       const tx1 = Math.min(MAP_W - 1, Math.ceil(cam.x + cw / TILE / 2 + 1));
       const ty0 = Math.max(0, Math.floor(cam.y - ch / TILE / 2 - 1));
       const ty1 = Math.min(MAP_H - 1, Math.ceil(cam.y + ch / TILE / 2 + 1));
+      // 流用タイルはピクセルアートなので補間を切ってクッキリ描く（アバター側は後で戻す）
+      ctx.imageSmoothingEnabled = false;
       for (let ty = ty0; ty <= ty1; ty++) {
         for (let tx = tx0; tx <= tx1; tx++) {
           const id = mapTileAt(map, tx, ty);
           const sx = toScreenX(tx);
           const sy = toScreenY(ty);
-          const baseTex = id === T_TREE ? textures.grass : textures[TILE_TEXTURE[id]];
+          const dungeonKey = TILE_DUNGEON[id];
+          const baseTex = dungeonKey ? dungeon[dungeonKey] : textures[TILE_TEXTURE[id]];
           if (texReady(baseTex)) ctx.drawImage(baseTex, sx, sy, TILE + 1, TILE + 1);
           else {
             ctx.fillStyle = TILE_FALLBACK[id] ?? "#57a639";
             ctx.fillRect(sx, sy, TILE + 1, TILE + 1);
-          }
-          if (id === T_TREE && texReady(textures.leaves)) {
-            ctx.fillStyle = "rgba(20,40,16,0.25)";
-            ctx.beginPath();
-            ctx.ellipse(sx + TILE / 2, sy + TILE * 0.58, TILE * 0.34, TILE * 0.14, 0, 0, Math.PI * 2);
-            ctx.fill();
-            const inset = TILE * 0.05;
-            ctx.drawImage(textures.leaves, sx + inset, sy + inset - TILE * 0.08, TILE - inset * 2, TILE - inset * 2);
           }
           // 領地ティント（国色の薄塗り＋境界の強調）
           const terr = territoryAt(nationsRef.current.nations, tx, ty);
@@ -714,6 +714,8 @@ export default function WorldBoxClient() {
           }
         }
       }
+
+      ctx.imageSmoothingEnabled = true;
 
       // 建築モード: 狙っているタイルの可否ハイライト
       if (buildRef.current.active && hoverTile) {
