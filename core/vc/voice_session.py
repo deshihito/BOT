@@ -52,11 +52,12 @@ FEATURES: dict[str, tuple[str, str]] = {
     "changer": ("ボイスチェンジャー", "/vc のパネルからボイスチェンジャー停止"),
     "match": ("ランダム通話", "/vc のパネルからランダム通話退出"),
     "global": ("グローバルVC", "/vc のパネルからグローバルVC退出"),
+    "radio": ("ラジオ", "/vc のラジオパネルから停止"),
 }
 # These features share a single voice client and the PCM/sink multiplexers in voice_media.
 # match（ランダム通話）も共有対象: 通話中に音楽・読み上げを併用でき、
 # それらの再生音声は voice_media のタップ経由で相手サーバーへも送られる。
-SHARED_FEATURES = frozenset({"music", "global", "transcribe", "tts", "match"})
+SHARED_FEATURES = frozenset({"music", "global", "transcribe", "tts", "match", "radio"})
 
 # release() の理由ごとに、使っていたチャンネルへ送るお知らせ。None は送らない（コマンド側で返信する）。
 DEFAULT_NOTICES: dict[str, Optional[str]] = {
@@ -118,6 +119,8 @@ class VoiceSession:
     text_channel: Any = None
     vc: Any = None
     idle_task: Optional[asyncio.Task] = None
+    # True の間は「誰もいない」自動退出をしない（24/7 ラジオ用）。
+    idle_exempt: bool = False
     shared_leases: dict[str, VoiceLease] = dataclasses.field(default_factory=dict)
 
     @property
@@ -409,7 +412,20 @@ class VoiceSessionManager:
                 logger.debug("notice send failed", exc_info=True)
 
     # ------------------------------------------------------------ 自動退出・外部切断
+    def set_idle_exempt(self, guild_id: int, exempt: bool) -> None:
+        """セッションの自動退出免除を切り替える（24/7 ラジオ用）。"""
+        session = self._sessions.get(guild_id)
+        if session is None:
+            return
+        session.idle_exempt = exempt
+        self._evaluate_idle(session)
+
     def _evaluate_idle(self, session: VoiceSession) -> None:
+        if session.idle_exempt:
+            if session.idle_task is not None and not session.idle_task.done():
+                session.idle_task.cancel()
+            session.idle_task = None
+            return
         channel = self._current_channel(session)
         if channel is None or _has_humans(channel):
             if session.idle_task is not None and not session.idle_task.done():
@@ -428,6 +444,8 @@ class VoiceSessionManager:
             if self._sessions.get(session.guild_id) is not session:
                 return
             session.idle_task = None
+            if session.idle_exempt:
+                return
             channel = self._current_channel(session)
             if channel is not None and _has_humans(channel):
                 return
