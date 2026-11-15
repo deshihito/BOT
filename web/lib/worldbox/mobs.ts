@@ -116,6 +116,38 @@ export const MOBS: readonly MobDef[] = [
     { itemId: "slime", min: 1, max: 2, chance: 1 }, { itemId: "slime_core", min: 1, max: 1, chance: 0.2 }] },
   { id: "cave_bat", name: "洞窟コウモリ", temperament: "neutral", size: 1, hp: 6, attack: 2, biomes: ["highland"], time: "any", density: 0.4, instanceOnly: "cave", loot: [
     { itemId: "feather", min: 1, max: 1, chance: 0.5 }, { itemId: "sulfur", min: 1, max: 1, chance: 0.25 }] },
+  { id: "cat", name: "ネコ", temperament: "passive", size: 1, hp: 5, attack: 0, biomes: ["plains", "forest"], time: "any", density: 0.5, loot: [
+    { itemId: "string", min: 1, max: 1, chance: 0.4 }, { itemId: "fish", min: 1, max: 1, chance: 0.2 }] },
+  { id: "dog", name: "イヌ", temperament: "passive", size: 1, hp: 7, attack: 0, biomes: ["plains"], time: "any", density: 0.5, loot: [
+    { itemId: "bone", min: 1, max: 1, chance: 0.4 }, { itemId: "raw_meat", min: 1, max: 1, chance: 0.5 }] },
+  { id: "duck", name: "アヒル", temperament: "passive", size: 1, hp: 5, attack: 0, biomes: ["lake", "beach"], time: "any", density: 0.6, loot: [
+    { itemId: "feather", min: 1, max: 2, chance: 1 }, { itemId: "egg", min: 1, max: 1, chance: 0.5 }] },
+  { id: "fox", name: "キツネ", temperament: "neutral", size: 1, hp: 8, attack: 3, biomes: ["forest", "dense_forest"], time: "any", density: 0.35, loot: [
+    { itemId: "raw_meat", min: 1, max: 1, chance: 0.8 }, { itemId: "leather", min: 1, max: 1, chance: 0.5 }] },
+  { id: "tanuki", name: "タヌキ", temperament: "passive", size: 1, hp: 7, attack: 0, biomes: ["forest"], time: "any", density: 0.4, loot: [
+    { itemId: "raw_meat", min: 1, max: 1, chance: 0.7 }, { itemId: "leather", min: 1, max: 1, chance: 0.4 }] },
+  { id: "bird_blue", name: "アオトリ", temperament: "passive", size: 1, hp: 3, attack: 0, biomes: ["forest", "plains"], time: "day", density: 0.5, loot: [
+    { itemId: "feather", min: 1, max: 2, chance: 1 }] },
+  { id: "crow", name: "カラス", temperament: "passive", size: 1, hp: 4, attack: 0, biomes: ["plains", "forest", "highland"], time: "day", density: 0.5, loot: [
+    { itemId: "feather", min: 1, max: 2, chance: 1 }] },
+  { id: "owl", name: "フクロウ", temperament: "passive", size: 1, hp: 5, attack: 0, biomes: ["forest", "dense_forest"], time: "night", density: 0.35, loot: [
+    { itemId: "feather", min: 1, max: 2, chance: 1 }] },
+  { id: "penguin", name: "ペンギン", temperament: "passive", size: 1, hp: 6, attack: 0, biomes: ["snowfield", "beach"], time: "any", density: 0.5, loot: [
+    { itemId: "feather", min: 1, max: 1, chance: 0.8 }, { itemId: "fish", min: 1, max: 1, chance: 0.5 }] },
+  { id: "butterfly", name: "チョウ", temperament: "passive", size: 1, hp: 2, attack: 0, biomes: ["plains", "forest"], time: "day", density: 0.5, loot: [
+    { itemId: "fiber", min: 1, max: 1, chance: 0.3 }] },
+  { id: "ladybug", name: "テントウムシ", temperament: "passive", size: 1, hp: 3, attack: 0, biomes: ["plains"], time: "day", density: 0.5, loot: [
+    { itemId: "herb", min: 1, max: 1, chance: 0.3 }] },
+  { id: "snail", name: "カタツムリ", temperament: "passive", size: 1, hp: 4, attack: 0, biomes: ["wetland", "forest"], time: "any", density: 0.4, loot: [
+    { itemId: "slime", min: 1, max: 1, chance: 0.4 }] },
+  { id: "fish_blue", name: "アオウオ", temperament: "passive", size: 1, hp: 4, attack: 0, biomes: ["lake"], time: "any", density: 0.6, loot: [
+    { itemId: "fish", min: 1, max: 2, chance: 1 }] },
+  { id: "fish_orange", name: "アカウオ", temperament: "passive", size: 1, hp: 4, attack: 0, biomes: ["lake"], time: "any", density: 0.5, loot: [
+    { itemId: "fish", min: 1, max: 2, chance: 1 }, { itemId: "pearl", min: 1, max: 1, chance: 0.15 }] },
+  { id: "jellyfish", name: "クラゲ", temperament: "hostile", size: 1, hp: 8, attack: 4, biomes: ["lake"], time: "any", density: 0.4, loot: [
+    { itemId: "slime", min: 1, max: 1, chance: 0.6 }, { itemId: "fish", min: 1, max: 1, chance: 0.3 }] },
+  { id: "mushroom", name: "キノコモブ", temperament: "neutral", size: 1, hp: 9, attack: 3, biomes: ["forest", "dense_forest"], time: "any", density: 0.35, loot: [
+    { itemId: "mushroom", min: 1, max: 2, chance: 1 }, { itemId: "herb", min: 1, max: 1, chance: 0.4 }] },
   // ---- 中型（2〜3マス） -----------------------------------------------------
   { id: "pig", name: "ブタ", temperament: "passive", size: 2, hp: 12, attack: 0, biomes: ["plains", "forest"], time: "any", density: 0.5, loot: [
     { itemId: "raw_meat", min: 1, max: 3, chance: 1 }] },
@@ -145,6 +177,14 @@ export const MOBS: readonly MobDef[] = [
   { id: "golem", name: "ゴーレム", temperament: "hostile", size: 3, hp: 60, attack: 10, biomes: ["highland"], time: "any", density: 0.18, loot: [
     { itemId: "stone", min: 3, max: 6, chance: 1 }, { itemId: "iron_ore", min: 1, max: 3, chance: 0.8 },
     { itemId: "copper_ore", min: 1, max: 3, chance: 0.6 }] },
+  { id: "goat", name: "ヤギ", temperament: "neutral", size: 2, hp: 11, attack: 3, biomes: ["plains", "highland"], time: "any", density: 0.4, loot: [
+    { itemId: "raw_meat", min: 1, max: 2, chance: 1 }, { itemId: "leather", min: 1, max: 1, chance: 0.6 },
+    { itemId: "milk", min: 1, max: 1, chance: 0.4 }] },
+  { id: "octopus", name: "タコ", temperament: "neutral", size: 2, hp: 14, attack: 4, biomes: ["lake"], time: "any", density: 0.3, loot: [
+    { itemId: "raw_meat", min: 1, max: 2, chance: 0.9 }, { itemId: "fish", min: 1, max: 1, chance: 0.5 }] },
+  { id: "werewolf", name: "ワーウルフ", temperament: "hostile", size: 2, hp: 26, attack: 8, biomes: ["forest", "dense_forest", "snow_forest"], time: "night", density: 0.2, loot: [
+    { itemId: "wolf_fang", min: 1, max: 2, chance: 0.7 }, { itemId: "leather", min: 1, max: 2, chance: 0.8 },
+    { itemId: "raw_meat", min: 1, max: 2, chance: 0.9 }] },
   // ---- 大型（4〜6マス）: スーパーセル配置 ----------------------------------
   { id: "treant", name: "トレント", temperament: "neutral", size: 4, hp: 80, attack: 12, biomes: ["dense_forest", "forest"], time: "any", density: 0, regionChance: 0.35, loot: [
     { itemId: "wood", min: 5, max: 10, chance: 1 }, { itemId: "herb", min: 2, max: 4, chance: 0.8 },
