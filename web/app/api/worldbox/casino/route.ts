@@ -4,7 +4,7 @@ import {
   canDouble, createBlackjackGame, doubleDown, handValue, hit, stand, startRound,
 } from "@/lib/blackjack";
 import {
-  CASINO_REASON, CASINO_SESSION_REASONS, casinoMachineNear, isCasinoSpendReason,
+  CASINO_REASON, CASINO_SESSION_REASONS, casinoMachineNear, isCasinoSpendReason, type CasinoMachine,
   playRoulette, playSlot, validateCasinoBet, type CasinoGame, type RoulettePick,
 } from "@/lib/worldbox/casino";
 import {
@@ -293,7 +293,7 @@ export async function POST(request: Request) {
   const effectiveBalance = balance - pendingCasinoTotal(ops);
   const activeSession = await loadSessionFor(ctx);
 
-  const requireMachine = (want: "slot" | "roulette") =>
+  const requireMachine = (want: CasinoMachine) =>
     machine === want ? null : errorResponse("wrong_machine", 409);
   const requireNoSession = () =>
     activeSession ? errorResponse("session_active", 409) : null;
@@ -314,7 +314,7 @@ export async function POST(request: Request) {
     if (game === null) return errorResponse("invalid_game", 400);
     const bet = validateCasinoBet(fields.bet);
     if (bet === null) return errorResponse("invalid_bet", 400);
-    const machineError = requireMachine(game === "slot" ? "slot" : "roulette");
+    const machineError = requireMachine(game);
     if (machineError) return machineError;
     if (bet > effectiveBalance) return errorResponse("not_enough_coins", 409);
 
@@ -353,7 +353,7 @@ export async function POST(request: Request) {
 
   // ------------------------------------------------------------ セブンスロット
   if (action === "slot7_start") {
-    const machineError = requireMachine("slot");
+    const machineError = requireMachine("slot7");
     if (machineError) return machineError;
     const noSession = requireNoSession();
     if (noSession) return noSession;
@@ -379,7 +379,7 @@ export async function POST(request: Request) {
   }
 
   if (action === "slot7_spin") {
-    const machineError = requireMachine("slot");
+    const machineError = requireMachine("slot7");
     if (machineError) return machineError;
     const { session: s7, error } = requireSession("slot7");
     if (error || !s7) return error ?? errorResponse("no_session", 409);
@@ -411,7 +411,7 @@ export async function POST(request: Request) {
 
   // ------------------------------------------------------------ ダブルアップ
   if (action === "double_start") {
-    const machineError = requireMachine("roulette");
+    const machineError = requireMachine("double");
     if (machineError) return machineError;
     const noSession = requireNoSession();
     if (noSession) return noSession;
@@ -430,7 +430,7 @@ export async function POST(request: Request) {
   }
 
   if (action === "double_go") {
-    const machineError = requireMachine("roulette");
+    const machineError = requireMachine("double");
     if (machineError) return machineError;
     const { session: dbl, error } = requireSession("double");
     if (error || !dbl) return error ?? errorResponse("no_session", 409);
@@ -456,7 +456,7 @@ export async function POST(request: Request) {
   }
 
   if (action === "double_cashout") {
-    const machineError = requireMachine("roulette");
+    const machineError = requireMachine("double");
     if (machineError) return machineError;
     const { session: dbl, error } = requireSession("double");
     if (error || !dbl) return error ?? errorResponse("no_session", 409);
@@ -477,7 +477,7 @@ export async function POST(request: Request) {
 
   // ------------------------------------------------------------ ブラックジャック
   if (action === "bj_start") {
-    const machineError = requireMachine("roulette");
+    const machineError = requireMachine("blackjack");
     if (machineError) return machineError;
     const noSession = requireNoSession();
     if (noSession) return noSession;
@@ -504,7 +504,7 @@ export async function POST(request: Request) {
   }
 
   if (action === "bj_hit" || action === "bj_stand") {
-    const machineError = requireMachine("roulette");
+    const machineError = requireMachine("blackjack");
     if (machineError) return machineError;
     const { session: bjs, error } = requireSession("blackjack");
     if (error || !bjs) return error ?? errorResponse("no_session", 409);
@@ -521,7 +521,7 @@ export async function POST(request: Request) {
   }
 
   if (action === "bj_double") {
-    const machineError = requireMachine("roulette");
+    const machineError = requireMachine("blackjack");
     if (machineError) return machineError;
     const { session: bjs, error } = requireSession("blackjack");
     if (error || !bjs) return error ?? errorResponse("no_session", 409);

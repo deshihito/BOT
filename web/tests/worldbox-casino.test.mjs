@@ -106,6 +106,10 @@ test("casino: 機器の隣接判定はロビーの実配置で決まる", () => 
   assert.equal(casino.casinoMachineNear(objects, 39, 20), "slot");
   // カジノテーブル (41,23) の前
   assert.equal(casino.casinoMachineNear(objects, 41, 24), "roulette");
+  assert.equal(casino.casinoMachineNear(objects, 46, 20), "slot7");
+  assert.equal(casino.casinoMachineNear(objects, 44, 23), "dice");
+  assert.equal(casino.casinoMachineNear(objects, 48, 23), "blackjack");
+  assert.equal(casino.casinoMachineNear(objects, 40, 28), "double");
   // 広場の中央はどの機器でもない
   assert.equal(casino.casinoMachineNear(objects, 28, 28), null);
   // ショップカウンターの前では遊べない
@@ -299,7 +303,7 @@ test("API(casino): スロットを回すと gamble オプが積まれ、残高�
 });
 
 test("API(casino): ルーレットはテーブルの前で pick 必須", async () => {
-  setPresence(41.5, 24.5, "lobby");
+  setPresence(40.5, 23.5, "lobby");
   const noPick = await casinoRoute.POST(apiRequest(URL_C, "POST", cookie, { game: "roulette", bet: 10 }));
   assert.equal(noPick.status, 400);
   assert.equal((await noPick.json()).error, "invalid_pick");
@@ -456,7 +460,7 @@ function clearSession() {
 test("API(casino): ダイスはテーブルの前で遊べ、当たれば bet×範囲", async () => {
   globalThis.__wbCasinoUsers.set(ME, 10000);
   clearSession();
-  setPresence(41.5, 24.5, "lobby");
+  setPresence(44.5, 23.5, "lobby");
   const bad = await casinoRoute.POST(apiRequest(URL_C, "POST", cookie, { action: "play", game: "dice", bet: 10, maxValue: 6, number: 9 }));
   assert.equal(bad.status, 400);
   assert.equal((await bad.json()).error, "invalid_dice_number");
@@ -472,7 +476,7 @@ test("API(casino): ダイスはテーブルの前で遊べ、当たれば bet×�
 test("API(casino): ダブルアップは先払い→キャッシュアウトで prepaid 精算される", async () => {
   globalThis.__wbCasinoUsers.set(ME, 10000);
   clearSession();
-  setPresence(41.5, 24.5, "lobby");
+  setPresence(40.5, 28.5, "lobby");
   const start = await casinoRoute.POST(apiRequest(URL_C, "POST", cookie, { action: "double_start", bet: 100 }));
   assert.equal(start.status, 200);
   const startData = await start.json();
@@ -500,7 +504,7 @@ test("API(casino): ダブルアップは先払い→キャッシュアウトで 
 test("API(casino): ブラックジャックは配ってスタンドすると精算オプが積まれる", async () => {
   globalThis.__wbCasinoUsers.set(ME, 10000);
   clearSession();
-  setPresence(41.5, 24.5, "lobby");
+  setPresence(48.5, 23.5, "lobby");
   const start = await casinoRoute.POST(apiRequest(URL_C, "POST", cookie, { action: "bj_start", bet: 100 }));
   assert.equal(start.status, 200);
   const startData = await start.json();
@@ -527,7 +531,7 @@ test("API(casino): ブラックジャックは配ってスタンドすると精�
 test("API(casino): セブンスロットは先払いして回し切ると集計精算される", async () => {
   globalThis.__wbCasinoUsers.set(ME, 10000);
   clearSession();
-  setPresence(39.5, 20.5, "lobby");
+  setPresence(46.5, 20.5, "lobby");
   const start = await casinoRoute.POST(apiRequest(URL_C, "POST", cookie, { action: "slot7_start", bet: 10, spins: 10 }));
   assert.equal(start.status, 200);
   const spends = findOps((o) => o.kind === "spend" && o.reason === "casino_slot7_prepay");
