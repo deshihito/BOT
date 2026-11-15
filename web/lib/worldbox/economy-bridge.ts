@@ -55,6 +55,8 @@ export const EARN_REASONS: ReadonlySet<string> = new Set([
   "arena_prize",
   "shop_sale",
   "work",
+  "guild_request_reward",
+  "guild_request_refund",
 ]);
 
 /** gamble の理由ホワイトリスト（Bot 側でも同じ集合で検証する）。 */
