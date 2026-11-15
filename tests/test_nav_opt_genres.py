@@ -23,11 +23,17 @@ class GenreAbsorptionTest(unittest.TestCase):
         # ジャンルの一級アクションになった（旧ハブ1件→各機能23件）。
         self.assertNotIn("assist", SUPPORT_GENRES)
         automation = [value for _label, value in SUPPORT_ACTIONS_BY_GENRE["automation"]]
+        notices = [value for _label, value in SUPPORT_ACTIONS_BY_GENRE["notices"]]
         moderation = [value for _label, value in SUPPORT_ACTIONS_BY_GENRE["moderation"]]
-        self.assertIn("language", automation)
+        self.assertIn("language", notices)
         self.assertIn("giveaway", moderation)
         self.assertIn("assist_welcome", automation)
         self.assertIn("assist_automod", moderation)
+        # 導線最適化 U2: 1件ジャンル「rta」は boardnotify へ吸収され、
+        # ジャンル自体が無い（旧保存ジャンルはエイリアスで boardnotify へ）。
+        self.assertNotIn("rta", SUPPORT_GENRES)
+        self.assertIn("sokunuke_settings",
+                      [value for _label, value in SUPPORT_ACTIONS_BY_GENRE["boardnotify"]])
         total = sum(len(items) for items in SUPPORT_ACTIONS_BY_GENRE.values())
         # 機能数再編: 55件 −旧 bumprta_* 4件 −旧 sns_notify 1件 ＋分割で増えた31件 = 81件。Luna AI 追加で 82件、人物分析（新ジャンル analysis）追加で 83件、サーバー分析追加で 84件、DiscordServers.io 入口（bumprta_dsio）追加で 85件、DISCOM 入口（bumprta_discom）追加で 86件、地震情報（automation）追加で 87件、ニュース通知（automation）追加で 88件。即抜けRTA設定の統合（rta 5件→設定パネル1件）で 84件。
         self.assertEqual(total, 84)
@@ -40,6 +46,10 @@ class GenreAbsorptionTest(unittest.TestCase):
         self.assertEqual(SUPPORT_GENRE_ALIASES["language"], "automation")
         self.assertEqual(SUPPORT_GENRE_ALIASES["event"], "moderation")
         self.assertEqual(SUPPORT_GENRE_ALIASES["assist"], "automation")
+        # 導線最適化 U2: rta 吸収後の移行先は boardnotify。
+        self.assertEqual(SUPPORT_GENRE_ALIASES["rta"], "boardnotify")
+        self.assertEqual(SUPPORT_GENRE_ALIASES["bumprta"], "boardnotify")
+        self.assertEqual(SUPPORT_GENRE_ALIASES["sokunuke"], "boardnotify")
 
 
 class VoiceTriggerLabelTest(unittest.TestCase):

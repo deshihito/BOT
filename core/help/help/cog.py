@@ -67,7 +67,7 @@ def entry_line(entry: dict) -> str:
 # カテゴリに割り当てる（テストで網羅を固定する）。
 ACTION_CATEGORY_MAP: dict[str, list[tuple[str, str | None]]] = {
     "support": [("general", "survival"), ("support", "automation"),
-                ("support", "analysis")],
+                ("support", "notices"), ("support", "analysis")],
     "economy": [("general", "money"), ("general", "trade_craft"),
                 ("general", "play"), ("general", "rta"),
                 ("general", "boardnotify_rta")],
@@ -80,7 +80,6 @@ ACTION_CATEGORY_MAP: dict[str, list[tuple[str, str | None]]] = {
             ("general", "garden"), ("general", "fortune"),
             ("general", "utility")],
     "admin": [("support", "moderation"), ("support", "roles"), ("support", "logs"),
-              ("support", "rta"),
               ("support", "boardnotify"), ("support", "sns")],
 }
 
