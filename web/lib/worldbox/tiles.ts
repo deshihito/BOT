@@ -3,9 +3,9 @@
 // 扱うのはプレイヤーの行為で変わった差分だけ: 伐採・採掘・耕作・作付け。
 // 農業は「畑を設置」するのではなく、地面を耕して好きな作物を植える。
 // 保存は tiles-online.ts（bot_kv、タイルごとのキー）が担う。
-import { ITEMS, cropById, cropBySeedId, type ToolKind } from "./items";
+import { ITEMS, cropById, cropBySeedId, itemById, type ItemDef, type ToolKind } from "./items";
 import {
-  MAP_H, MAP_W, T_DIRT, T_GRASS, T_ROCK, T_SNOW, T_SNOW_TREE, T_TREE,
+  MAP_H, MAP_W, T_DIRT, T_GRASS, T_ROCK, T_SAND, T_SNOW, T_SNOW_TREE, T_TREE,
   mapTileAt, type TopDownMap,
 } from "./mapgen";
 import { addItem, countItem, removeItem, type PlayerProfile } from "./profile";
@@ -13,8 +13,9 @@ import { presenceIdFor } from "./presence";
 
 /** 伐採した木が再生するまでの時間（6時間）。 */
 export const TREE_REGROW_MS = 6 * 3600 * 1000;
-/** 伐採・採掘の収穫数。 */
+/** 伐採・採掘の収穫数。伐採は素手でもでき、斧があると収量が2倍になる。 */
 export const CHOP_WOOD_COUNT = 2;
+export const CHOP_WOOD_BAREHAND = 1;
 export const MINE_STONE_COUNT = 2;
 
 export type CropState = {
@@ -22,6 +23,25 @@ export type CropState = {
   plantedAt: number;
   readyAt: number;
 };
+
+/** 設置されたブロック/施設（自由建築）。掘れるのは設置者だけ（後述）。 */
+export type PlacedBlock = {
+  /** ブロック/施設カテゴリのアイテム ID。 */
+  itemId: string;
+  /** 設置者の不透明 ID。 */
+  ownerId: string;
+};
+
+/**
+ * 設置物が移動の当たり判定を持つか。固体ブロックは true、施設
+ * （ItemDef.facility: 作業台・家具など）は false — 施設はそのマスを
+ * 占有する（他のブロック/施設は置けない）が、プレイヤーは通過できる。
+ * 区別はアイテム定義のデータで持つ。
+ */
+export function placedBlockSolid(itemId: string): boolean {
+  const def = itemById(itemId);
+  return def !== null && def.facility !== true;
+}
 
 /** 1タイルの上書き。無い項目は「地形どおり・素の状態」を意味する。 */
 export type TileOverride = {
@@ -33,6 +53,8 @@ export type TileOverride = {
   crop?: CropState | null;
   /** 伐採直後の切り株（再生までの間だけ描く）。 */
   stump?: boolean;
+  /** 設置されたブロック/施設。固体ブロックのタイルは立てない。施設は占有のみで通過できる。 */
+  block?: PlacedBlock;
   /** 最後に手を入れた人（作物の所有者）の不透明 ID。 */
   ownerId: string;
   /** この上書きが失効する時刻（木の再生）。過ぎたら地形どおりに戻る。 */
@@ -90,6 +112,8 @@ export type TileView = {
   farmland: boolean;
   stump: boolean;
   crop: { cropId: string; stage: 0 | 1 | 2; ready: boolean } | null;
+  /** 設置されたブロック（自分のものかどうか付き）。 */
+  block: { itemId: string; mine: boolean } | null;
   /** 自分の作物・作業かどうか。 */
   mine: boolean;
 };
@@ -105,6 +129,7 @@ export function tileView(
   const ov = overrides[tileKey(x, y)];
   const active = isOverrideActive(ov, now) ? ov : null;
   const crop = active?.crop ?? null;
+  const selfId = selfKey !== null ? presenceIdFor(selfKey) : null;
   return {
     x,
     y,
@@ -114,7 +139,10 @@ export function tileView(
     crop: crop
       ? { cropId: crop.cropId, stage: cropStage(crop, now), ready: now >= crop.readyAt }
       : null,
-    mine: selfKey !== null && active !== null && active.ownerId === presenceIdFor(selfKey),
+    block: active?.block
+      ? { itemId: active.block.itemId, mine: selfId !== null && active.block.ownerId === selfId }
+      : null,
+    mine: selfId !== null && active !== null && active.ownerId === selfId,
   };
 }
 
@@ -124,7 +152,9 @@ export function hasTool(profile: PlayerProfile, kind: ToolKind): boolean {
   return ITEMS.some((i) => i.tool === kind && countItem(profile, i.id) > 0);
 }
 
-export type TileActionKind = "chop" | "mine" | "till" | "plant" | "harvest";
+export type TileActionKind =
+  | "chop" | "mine" | "till" | "plant" | "harvest"
+  | "place_block" | "mine_block";
 
 export type TileActionResult =
   | {
@@ -166,8 +196,8 @@ function viewAfter(
 /**
  * タイル行為の適用（1タイル分）。地形の適否・道具の所持・作物の成長を
  * すべてサーバー側の真値（生成地形＋保存済み上書き）で検証する。
- * - chop: 斧で木/雪の木 → 草/雪＋木材。切り株が残り、6時間で再生する
- * - mine: ツルハシで岩 → 土＋石材（再生しない）
+ * - chop: 木/雪の木 → 草/雪＋木材（素手可。斧所持で収量2倍）。切り株が残り、6時間で再生する
+ * - mine: ツルハシで岩 → 土＋石材（再生しない。ツルハシ必須）
  * - till: クワで草/土 → 畑
  * - plant: 畑に種を植える（種を消費、成長時間はカタログ）
  * - harvest: 育った作物を持つ（所有者だけが収穫できる）
@@ -210,14 +240,15 @@ export function applyTileAction(
   switch (action) {
     case "chop": {
       if (eff !== T_TREE && eff !== T_SNOW_TREE) return { ok: false, error: "tile_blocked" };
-      if (!hasTool(profile, "axe")) return { ok: false, error: "tool_required" };
+      // 伐採は素手でもできる。道具は必須ではなく効率に効く（斧所持で2倍）
+      const count = hasTool(profile, "axe") ? CHOP_WOOD_COUNT : CHOP_WOOD_BAREHAND;
       const next: TileOverride = {
         tile: eff === T_SNOW_TREE ? T_SNOW : T_GRASS,
         stump: true,
         ownerId: selfId,
         until: now + TREE_REGROW_MS,
       };
-      return done(next, addItem(profile, "wood", CHOP_WOOD_COUNT), { wood: CHOP_WOOD_COUNT });
+      return done(next, addItem(profile, "wood", count), { wood: count });
     }
     case "mine": {
       if (eff !== T_ROCK) return { ok: false, error: "tile_blocked" };
@@ -229,6 +260,7 @@ export function applyTileAction(
       if (eff !== T_GRASS && eff !== T_DIRT) return { ok: false, error: "tile_blocked" };
       if (active?.farmland) return { ok: false, error: "tile_blocked" };
       if (active?.crop) return { ok: false, error: "tile_blocked" };
+      if (active?.block) return { ok: false, error: "tile_blocked" };
       if (!hasTool(profile, "hoe")) return { ok: false, error: "tool_required" };
       const next: TileOverride = {
         ...(active?.tile !== undefined ? { tile: active.tile } : {}),
@@ -273,6 +305,120 @@ export function applyTileAction(
   }
 }
 
+// ---------------------------------------------------------------- 自由建築
+/** ブロックを置ける地形（更地のみ。畑・作物・再生待ちの上には置けない）。 */
+const PLACEABLE_TERRAIN: ReadonlySet<number> = new Set([T_GRASS, T_DIRT, T_SAND, T_SNOW]);
+/** この耐久以上のブロックは、素材に合った道具がないと掘れない。 */
+export const HARD_BLOCK_DURABILITY = 50;
+
+/** 硬いブロックを掘るのに要る道具（柔らかいブロックは素手で掘れる）。 */
+export function blockMineTool(def: ItemDef): ToolKind | null {
+  if ((def.durability ?? 0) < HARD_BLOCK_DURABILITY) return null;
+  return def.mineTool ?? "pickaxe";
+}
+
+/** 設置の文脈（首都・スポーン広場・建物レイヤーはルート側が真値を持つ）。 */
+export type PlaceBlockContext = {
+  onCapital: boolean;
+  onSpawnPlaza: boolean;
+  hasBuilding: boolean;
+};
+
+/**
+ * ブロック設置: ブロック/施設カテゴリのアイテムを1つ消費し、更地に置く。
+ * 家は「設置」ではなくブロックを積んで作る、が自由建築の前提。
+ * 施設も同じ枠で置く（占有あり・当たり判定なし）。
+ */
+export function applyPlaceBlock(
+  current: TileOverride | null,
+  profile: PlayerProfile,
+  map: TopDownMap,
+  ownerKey: string,
+  xRaw: unknown,
+  yRaw: unknown,
+  itemIdRaw: unknown,
+  now: number,
+  ctx: PlaceBlockContext,
+): TileActionResult {
+  const def = itemById(itemIdRaw);
+  if (!def || (def.category !== "block" && def.facility !== true)) {
+    return { ok: false, error: "unknown_block" };
+  }
+  const tile = checkedTile(xRaw, yRaw);
+  if (!tile) return { ok: false, error: "invalid_tile" };
+  const { x, y } = tile;
+  const key = tileKey(x, y);
+  if (ctx.onCapital) return { ok: false, error: "on_capital" };
+  if (ctx.onSpawnPlaza) return { ok: false, error: "on_spawn" };
+  if (ctx.hasBuilding) return { ok: false, error: "tile_blocked" };
+  const active = isOverrideActive(current, now) ? current : null;
+  if (active?.block) return { ok: false, error: "tile_blocked" };
+  if (active?.crop) return { ok: false, error: "tile_blocked" };
+  if (active?.farmland) return { ok: false, error: "tile_blocked" };
+  if (active?.until !== undefined) return { ok: false, error: "tile_blocked" }; // 木の再生待ち
+  const eff = active?.tile !== undefined ? active.tile : mapTileAt(map, x, y);
+  if (!PLACEABLE_TERRAIN.has(eff)) return { ok: false, error: "tile_blocked" };
+  const removed = removeItem(profile, def.id, 1);
+  if (!removed) return { ok: false, error: "not_enough_items" };
+  const selfId = presenceIdFor(ownerKey);
+  const next: TileOverride = {
+    ...(active ?? { ownerId: selfId }),
+    block: { itemId: def.id, ownerId: selfId },
+    ownerId: selfId,
+  };
+  const overrides: TileOverridesMap = current ? { [key]: current } : {};
+  return {
+    ok: true,
+    override: next,
+    profile: removed,
+    view: viewAfter(map, overrides, key, next, x, y, now, ownerKey),
+    gained: {},
+  };
+}
+
+/**
+ * ブロック採掘: 設置者だけが掘れる（ユニオン/レイドで他人のブロックを
+ * 壊せるようにするのは防衛フェーズで開く）。硬いブロックは道具が要る。
+ * 掘ったブロックはそのままアイテムに戻る。
+ */
+export function applyMineBlock(
+  current: TileOverride | null,
+  profile: PlayerProfile,
+  map: TopDownMap,
+  ownerKey: string,
+  xRaw: unknown,
+  yRaw: unknown,
+  now: number,
+): TileActionResult {
+  const tile = checkedTile(xRaw, yRaw);
+  if (!tile) return { ok: false, error: "invalid_tile" };
+  const { x, y } = tile;
+  const key = tileKey(x, y);
+  const active = isOverrideActive(current, now) ? current : null;
+  const block = active?.block;
+  if (!active || !block) return { ok: false, error: "no_block" };
+  const selfId = presenceIdFor(ownerKey);
+  if (block.ownerId !== selfId) return { ok: false, error: "not_owner" };
+  const def = itemById(block.itemId);
+  if (!def) return { ok: false, error: "no_block" };
+  const tool = blockMineTool(def);
+  if (tool && !hasTool(profile, tool)) return { ok: false, error: "tool_required" };
+  const rest: TileOverride = { ...active, ownerId: selfId };
+  delete rest.block;
+  const empty =
+    rest.tile === undefined && rest.farmland !== true && rest.crop === undefined &&
+    rest.stump !== true && rest.until === undefined;
+  const next = empty ? null : rest;
+  const overrides: TileOverridesMap = { [key]: active };
+  return {
+    ok: true,
+    override: next,
+    profile: addItem(profile, def.id, 1),
+    view: viewAfter(map, overrides, key, next, x, y, now, ownerKey),
+    gained: { [def.id]: 1 },
+  };
+}
+
 // ---------------------------------------------------------------- 保存形式
 function parseCropState(raw: unknown): CropState | null {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
@@ -282,6 +428,15 @@ function parseCropState(raw: unknown): CropState | null {
   if (typeof v.plantedAt !== "number" || !Number.isFinite(v.plantedAt)) return null;
   if (typeof v.readyAt !== "number" || !Number.isFinite(v.readyAt)) return null;
   return { cropId: def.id, plantedAt: v.plantedAt, readyAt: v.readyAt };
+}
+
+function parsePlacedBlock(raw: unknown): PlacedBlock | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const v = raw as Record<string, unknown>;
+  const def = itemById(v.itemId);
+  if (!def || (def.category !== "block" && def.facility !== true)) return null;
+  if (typeof v.ownerId !== "string" || v.ownerId.length === 0) return null;
+  return { itemId: def.id, ownerId: v.ownerId };
 }
 
 /** bot_kv の1値から上書きを復元する。壊れていれば null。 */
@@ -303,6 +458,10 @@ export function parseTileOverride(raw: unknown): TileOverride | null {
   }
   if (v.farmland === true) out.farmland = true;
   if (v.stump === true) out.stump = true;
+  if (v.block !== undefined) {
+    const block = parsePlacedBlock(v.block);
+    if (block) out.block = block;
+  }
   if (v.crop === null) out.crop = null;
   else if (v.crop !== undefined) {
     const crop = parseCropState(v.crop);
@@ -325,27 +484,37 @@ export function parseTileOverrides(rows: ReadonlyMap<string, unknown>): TileOver
 
 // ---------------------------------------------------------------- クライアント判定
 export type TileContextAction =
-  | { action: TileActionKind; seedId?: string }
+  | { action: TileActionKind; seedId?: string; itemId?: string }
   | { action: "plant-picker" }
   | null;
 
 /**
- * 選択中の枠（道具 or 種）とタイルの状態から、タップで起きる行為を決める。
- * 優先順: 収穫（育っていれば素手でも）→ 作付け → 道具ごとの行為。
+ * 選択中の枠（道具 or 種 or ブロック）とタイルの状態から、タップで起きる
+ * 行為を決める。優先順: 収穫（育っていれば素手でも）→ ブロック採掘 →
+ * 作付け → ブロック設置 → 道具ごとの行為。
  */
 export function actionForTile(
   view: TileView,
-  selected: { tool?: ToolKind; seedId?: string } | null,
+  selected: { tool?: ToolKind; seedId?: string; blockId?: string } | null,
 ): TileContextAction {
   if (view.crop?.ready) return { action: "harvest" };
+  if (view.block) {
+    // 自分のブロックは道具を持っているときだけ掘る。他人のブロックは触れない。
+    if (view.block.mine && selected?.tool) return { action: "mine_block" };
+    return null;
+  }
   if (view.farmland && !view.crop) {
     if (selected?.seedId) return { action: "plant", seedId: selected.seedId };
     return { action: "plant-picker" };
   }
   if (view.crop) return null; // 育ちきるまでは何もしない
+  if (selected?.blockId && PLACEABLE_TERRAIN.has(view.tile) && !view.farmland && !view.stump) {
+    return { action: "place_block", itemId: selected.blockId };
+  }
+  // 木は素手でも伐採できる（選択中の道具を問わない）
+  if (view.tile === T_TREE || view.tile === T_SNOW_TREE) return { action: "chop" };
   const tool = selected?.tool;
   if (!tool) return null;
-  if ((view.tile === T_TREE || view.tile === T_SNOW_TREE) && tool === "axe") return { action: "chop" };
   if (view.tile === T_ROCK && tool === "pickaxe") return { action: "mine" };
   if ((view.tile === T_GRASS || view.tile === T_DIRT) && !view.farmland && tool === "hoe") {
     return { action: "till" };

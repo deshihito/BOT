@@ -8,7 +8,7 @@ import { buildEconomyOp, type EconomyOp } from "@/lib/worldbox/economy-bridge";
 import {
   enqueueEconomyOp, isEconomyEnabled, readUserBalance,
 } from "@/lib/worldbox/economy-bridge-online";
-import { swapSlots, type PlayerProfile } from "@/lib/worldbox/profile";
+import { moveSlot, swapSlots, type PlayerProfile } from "@/lib/worldbox/profile";
 import { findPresenceOwnerKey, isPresenceEnabled } from "@/lib/worldbox/presence-online";
 import { isProfileEnabled, loadProfile, storeProfile } from "@/lib/worldbox/profile-online";
 
@@ -98,7 +98,7 @@ export async function POST(request: Request) {
   }
   const data = (body ?? {}) as {
     action?: unknown; itemId?: unknown; count?: unknown; recipeId?: unknown; targetId?: unknown;
-    hotbarIndex?: unknown; storageIndex?: unknown;
+    hotbarIndex?: unknown; storageIndex?: unknown; from?: unknown; to?: unknown;
   };
   const ownerKey = sessionOwnerKey(session);
   const current = await loadProfile(ownerKey);
@@ -163,6 +163,12 @@ export async function POST(request: Request) {
       const swapped = swapSlots(current, data.hotbarIndex, data.storageIndex);
       if (!swapped) return errorResponse("invalid_action");
       return saveAndReturn({ ok: true, profile: swapped });
+    }
+    case "move": {
+      // 任意スロット間の移動・合算・入れ替え（インベントリ整理。コインは動かない）
+      const movedProfile = moveSlot(current, data.from, data.to);
+      if (!movedProfile) return errorResponse("invalid_action");
+      return saveAndReturn({ ok: true, profile: movedProfile });
     }
     case "eat": {
       const result = eatItem(current, data.itemId);

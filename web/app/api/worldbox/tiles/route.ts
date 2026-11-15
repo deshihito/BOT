@@ -7,16 +7,21 @@ import { presenceIdFor } from "@/lib/worldbox/presence";
 import { parseSave } from "@/lib/worldbox/save";
 import { loadWorldBoxSave } from "@/lib/worldbox/save-online";
 import {
-  applyTileAction, isOverrideActive, tileKey,
-  type TileOverridesMap,
+  applyMineBlock, applyPlaceBlock, applyTileAction, isOverrideActive, tileKey,
+  type TileActionResult, type TileOverridesMap,
 } from "@/lib/worldbox/tiles";
+import { isSpawnPlazaTile } from "@/lib/worldbox/buildings";
+import { loadBuildings } from "@/lib/worldbox/buildings-online";
+import { loadNationsState } from "@/lib/worldbox/nations-online";
 import {
   isTilesEnabled, loadTileOverride, loadTileOverrides, storeTileOverride,
 } from "@/lib/worldbox/tiles-online";
 
 export const runtime = "nodejs";
 
-// AGO WORLD BOX のタイル行為（伐採・採掘・耕作・作付け・収穫）。
+// AGO WORLD BOX のタイル行為（伐採・採掘・耕作・作付け・収穫・
+// ブロック設置/採掘＝自由建築）。設置は首都・スポーン広場・既存の
+// 建物タイルを避け、採掘は設置者だけが行える。
 // 地形の真値は生成マップ＋bot_kv の上書き（名前空間 worldbox_tiles、
 // キー "x,y"）で、行為の可否はすべてサーバー側で検証する。
 // 隣接検証: サーバーが知る本人の位置（プレゼンス優先、無ければ
@@ -33,7 +38,7 @@ const MAX_RECT_SPAN = 128;
 /** 行為できるタイルと本人位置のチェビシェフ距離の上限（保存の遅れを許容）。 */
 const MAX_ACTION_DISTANCE = 2;
 
-const BAD_REQUEST_ERRORS = new Set(["invalid_action", "invalid_request", "invalid_tile", "unknown_seed"]);
+const BAD_REQUEST_ERRORS = new Set(["invalid_action", "invalid_request", "invalid_tile", "unknown_seed", "unknown_block"]);
 
 function errorStatus(error: string): number {
   if (error === "not_owner") return 403;
@@ -86,7 +91,12 @@ export async function GET(request: Request) {
     overrides[key] = ov;
   }
   return NextResponse.json(
-    { overrides, loggedIn: session !== null },
+    {
+      overrides,
+      loggedIn: session !== null,
+      // 自分のブロック判定用に、本人の不透明 ID（プレゼンス ID）を返す
+      selfId: session ? presenceIdFor(sessionOwnerKey(session)) : null,
+    },
     { headers: NO_STORE },
   );
 }
@@ -108,7 +118,7 @@ export async function POST(request: Request) {
   } catch {
     return NextResponse.json({ error: "invalid_request" }, { status: 400, headers: NO_STORE });
   }
-  const fields = (body ?? {}) as { action?: unknown; x?: unknown; y?: unknown; seedId?: unknown };
+  const fields = (body ?? {}) as { action?: unknown; x?: unknown; y?: unknown; seedId?: unknown; itemId?: unknown };
   const ownerKey = sessionOwnerKey(session);
 
   // 隣接検証（本人の位置がサーバー側で分かる場合だけ）
@@ -129,10 +139,28 @@ export async function POST(request: Request) {
   const ty = typeof fields.y === "number" ? Math.floor(fields.y) : -1;
   const current = tx >= 0 && ty >= 0 ? await loadTileOverride(tx, ty) : null;
   const profile = await loadProfile(ownerKey);
-  const result = applyTileAction(
-    current, profile, generateMap(), ownerKey,
-    fields.action, fields.x, fields.y, fields.seedId, Date.now(),
-  );
+  const map = generateMap();
+  let result: TileActionResult;
+  if (fields.action === "place_block") {
+    // 首都・スポーン広場・建物レイヤーの保護はルート側の真値で判定する
+    const [nationsState, buildings] = await Promise.all([loadNationsState(), loadBuildings()]);
+    const capitals = Object.values(nationsState.nations).map((n) => n.capital);
+    result = applyPlaceBlock(
+      current, profile, map, ownerKey, fields.x, fields.y, fields.itemId, Date.now(),
+      {
+        onCapital: tx >= 0 && capitals.some((c) => c.x === tx && c.y === ty),
+        onSpawnPlaza: tx >= 0 && ty >= 0 && isSpawnPlazaTile(map, tx, ty),
+        hasBuilding: tx >= 0 && buildings[`${tx},${ty}`] !== undefined,
+      },
+    );
+  } else if (fields.action === "mine_block") {
+    result = applyMineBlock(current, profile, map, ownerKey, fields.x, fields.y, Date.now());
+  } else {
+    result = applyTileAction(
+      current, profile, map, ownerKey,
+      fields.action, fields.x, fields.y, fields.seedId, Date.now(),
+    );
+  }
   if (!result.ok) {
     return NextResponse.json({ error: result.error }, { status: errorStatus(result.error), headers: NO_STORE });
   }

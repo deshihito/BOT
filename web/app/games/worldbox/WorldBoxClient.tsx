@@ -34,11 +34,11 @@ import type { BoardPost } from "@/lib/worldbox/board";
 import { parseSave, serializeSave, type SaveSpace } from "@/lib/worldbox/save";
 import { chooseInitialSave } from "@/lib/worldbox/save-source";
 import {
-  actionForTile, cropStage, isOverrideActive, tileKey, tileView,
+  actionForTile, cropStage, isOverrideActive, placedBlockSolid, tileKey, tileView,
   type TileActionKind, type TileOverridesMap,
 } from "@/lib/worldbox/tiles";
-import { CROPS, itemById } from "@/lib/worldbox/items";
-import { countItem, type PlayerProfile } from "@/lib/worldbox/profile";
+import { CROPS, ITEMS, itemById } from "@/lib/worldbox/items";
+import { countItem, type ItemSlot, type PlayerProfile, type SlotRef } from "@/lib/worldbox/profile";
 import { loadDungeonTiles, loadFarmSprites, loadLobbySprites, loadTextures } from "@/lib/worldbox/textures";
 import { useGamesNav } from "../GamesShell";
 import WorldBoxEconomyPanel from "./WorldBoxEconomyPanel";
@@ -141,15 +141,73 @@ const NATION_ERROR_LABEL: Record<string, string> = {
 const TILE_ERROR_LABEL: Record<string, string> = {
   tool_required: "道具が必要",
   tile_blocked: "そこではできない",
-  not_owner: "他人の作物",
+  not_owner: "他人のもの",
   not_ready: "まだ育っていない",
   no_crop: "作物がない",
   unknown_seed: "種が不正",
-  not_enough_items: "種が足りない",
+  unknown_block: "ブロックが不正",
+  no_block: "ブロックがない",
+  on_capital: "首都には置けない",
+  on_spawn: "広場には置けない",
+  not_enough_items: "足りない",
   too_far: "遠すぎる",
   unauthorized: "ログインが必要",
   tiles_unavailable: "いま使えない",
 };
+
+/** アイテムのドット絵アイコン（無いアイテムは名前ラベルのみで出す）。 */
+function ItemIcon({ id, size = 22 }: { id: string; size?: number }) {
+  const def = itemById(id);
+  if (!def?.icon) return null;
+  return (
+    <img
+      src={def.icon}
+      alt=""
+      width={size}
+      height={size}
+      draggable={false}
+      style={{ imageRendering: "pixelated", flexShrink: 0, display: "block", margin: "0 auto" }}
+    />
+  );
+}
+
+/**
+ * スロットの中身: スプライトのみで出す（名前テキストはスロットに置かない）。
+ * アイコンの無いアイテムは枠だけ、個数は右下のバッジ。
+ * 親ボタンは position: relative 前提。
+ */
+function SlotContent({ slot }: { slot: ItemSlot }) {
+  if (!slot) return null;
+  const def = itemById(slot.id);
+  return (
+    <>
+      {def?.icon ? (
+        <img
+          src={def.icon}
+          alt=""
+          width={26}
+          height={26}
+          draggable={false}
+          style={{ imageRendering: "pixelated", display: "block" }}
+        />
+      ) : (
+        <span
+          aria-hidden
+          style={{ width: 18, height: 18, borderRadius: 4, border: "1px dashed rgba(255,255,255,0.45)", display: "block" }}
+        />
+      )}
+      <span
+        aria-hidden
+        style={{
+          position: "absolute", right: 2, bottom: 1, fontSize: 10, fontWeight: 700,
+          lineHeight: 1, color: "#fff", textShadow: "0 1px 2px rgba(0,0,0,0.9)", pointerEvents: "none",
+        }}
+      >
+        {slot.count}
+      </span>
+    </>
+  );
+}
 
 /** 建物側の文言（not_owner は国家側と意味が違うため上書きする）。 */
 const BUILDING_ERROR_LABEL: Record<string, string> = {
@@ -207,6 +265,16 @@ export default function WorldBoxClient() {
   const buildRef = useRef<{ active: boolean; tool: BuildTool }>({ active: false, tool: "house" });
   /** 建物の当たり判定（"x,y" の集合）。建物データの更新に合わせて作り直す。 */
   const blockedRef = useRef<ReadonlySet<string>>(new Set());
+  /** 建物レイヤー分の固体タイル。 */
+  const buildingBlockedRef = useRef<ReadonlySet<string>>(new Set());
+  /** 設置ブロック分の固体タイル（タイル上書きから作る）。 */
+  const blockBlockedRef = useRef<ReadonlySet<string>>(new Set());
+  /** ワールドの固体タイル = 建物 ∪ 設置ブロック。 */
+  const syncWorldBlocked = () => {
+    const merged = new Set<string>(buildingBlockedRef.current);
+    for (const k of blockBlockedRef.current) merged.add(k);
+    blockedRef.current = merged;
+  };
   const buildActionRef = useRef<(tool: BuildTool, x: number, y: number) => void>(() => {});
 
   const chooseBuildTool = (tool: BuildTool) => {
@@ -316,7 +384,8 @@ export default function WorldBoxClient() {
   };
   const applyBuildingsData = (data: BuildingsData) => {
     buildingsRef.current = data;
-    blockedRef.current = new Set(data.buildings.map((b) => `${b.x},${b.y}`));
+    buildingBlockedRef.current = new Set(data.buildings.map((b) => `${b.x},${b.y}`));
+    syncWorldBlocked();
     if (!data.loggedIn && buildRef.current.active) endBuildMode();
     setBuildingsUi(data);
   };
@@ -377,10 +446,24 @@ export default function WorldBoxClient() {
   const selSlotRef = useRef(0);
   selSlotRef.current = selSlot;
   const [storageOpen, setStorageOpen] = useState(false);
+  /** インベントリ整理で持ち上げ中のスロット（タップ→タップで移動）。 */
+  const [heldSlot, setHeldSlot] = useState<SlotRef | null>(null);
   const [seedPicker, setSeedPicker] = useState<{ x: number; y: number } | null>(null);
   const [tileMsg, setTileMsg] = useState("");
   const tilesRef = useRef<TileOverridesMap>({});
   const tilesVersionRef = useRef(0);
+  /** 自分の不透明 ID（プレゼンス ID）。自分のブロック判定に使う。 */
+  const selfIdRef = useRef<string | null>(null);
+  /** タイル上書きから設置ブロックの固体集合を作り直す（施設は占有のみで固体にしない）。 */
+  const syncBlockBlocked = () => {
+    const now = Date.now();
+    const next = new Set<string>();
+    for (const [key, ov] of Object.entries(tilesRef.current)) {
+      if (ov.block && placedBlockSolid(ov.block.itemId) && isOverrideActive(ov, now)) next.add(key);
+    }
+    blockBlockedRef.current = next;
+    syncWorldBlocked();
+  };
 
   const refreshInv = async () => {
     try {
@@ -401,7 +484,8 @@ export default function WorldBoxClient() {
         { headers: { Accept: "application/json" } },
       );
       if (!res.ok) return;
-      const data = (await res.json()) as { overrides?: TileOverridesMap };
+      const data = (await res.json()) as { overrides?: TileOverridesMap; selfId?: string | null };
+      if (data.selfId !== undefined) selfIdRef.current = data.selfId;
       const next: TileOverridesMap = { ...tilesRef.current };
       for (const key of Object.keys(next)) {
         const m = /^(-?\d+),(-?\d+)$/.exec(key);
@@ -413,15 +497,16 @@ export default function WorldBoxClient() {
       Object.assign(next, data.overrides ?? {});
       tilesRef.current = next;
       tilesVersionRef.current += 1;
+      syncBlockBlocked();
     } catch { /* 読めなくても歩き続けられる */ }
   };
-  const postTileAction = async (action: TileActionKind, x: number, y: number, seedId?: string) => {
+  const postTileAction = async (action: TileActionKind, x: number, y: number, seedId?: string, itemId?: string) => {
     setTileMsg("");
     try {
       const res = await fetch("/api/worldbox/tiles", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action, x, y, ...(seedId ? { seedId } : {}) }),
+        body: JSON.stringify({ action, x, y, ...(seedId ? { seedId } : {}), ...(itemId ? { itemId } : {}) }),
       });
       const data = (await res.json().catch(() => ({}))) as {
         error?: string; key?: string; override?: TileOverridesMap[string] | null; profile?: PlayerProfile;
@@ -436,6 +521,7 @@ export default function WorldBoxClient() {
         else delete next[data.key];
         tilesRef.current = next;
         tilesVersionRef.current += 1;
+        syncBlockBlocked();
       }
       if (data.profile) setInvProfile(data.profile);
     } catch {
@@ -444,16 +530,33 @@ export default function WorldBoxClient() {
   };
   const postTileActionRef = useRef(postTileAction);
   postTileActionRef.current = postTileAction;
-  const swapStorage = async (storageIndex: number) => {
+  /** インベントリ整理: 任意スロット間の移動（サーバー側 moveSlot が正）。 */
+  const moveItem = async (from: SlotRef, to: SlotRef) => {
     try {
       const res = await fetch("/api/worldbox/profile", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "swap", hotbarIndex: selSlot, storageIndex }),
+        body: JSON.stringify({ action: "move", from, to }),
       });
       const data = (await res.json().catch(() => ({}))) as { profile?: PlayerProfile };
       if (res.ok && data.profile) setInvProfile(data.profile);
     } catch { /* noop */ }
+  };
+  /** スロットのタップ: 持ち上げ → 置く/交換。同じ枠の再タップで解除。 */
+  const tapSlot = (zone: SlotRef["zone"], index: number) => {
+    if (!invProfile) return;
+    const slot = zone === "hotbar" ? invProfile.hotbar[index] : invProfile.storage[index];
+    if (!heldSlot) {
+      if (slot) setHeldSlot({ zone, index });
+      return;
+    }
+    if (heldSlot.zone === zone && heldSlot.index === index) {
+      setHeldSlot(null);
+      return;
+    }
+    const from = heldSlot;
+    setHeldSlot(null);
+    void moveItem(from, { zone, index });
   };
 
   useEffect(() => {
@@ -483,6 +586,14 @@ export default function WorldBoxClient() {
     const dungeon = loadDungeonTiles();
     const lobbySprites = loadLobbySprites();
     const farmSprites = loadFarmSprites();
+    // アイテムアイコン（設置ブロックの描画用。アイコンの無いアイテムは平色）
+    const itemIcons: Record<string, HTMLImageElement> = {};
+    for (const item of ITEMS) {
+      if (!item.icon) continue;
+      const img = new Image();
+      img.src = item.icon;
+      itemIcons[item.id] = img;
+    }
     const avatar = new Image();
     avatar.src = "/img/nomal.png";
 
@@ -671,18 +782,27 @@ export default function WorldBoxClient() {
       const py = Math.floor(player.y);
       if (Math.max(Math.abs(t.x - px), Math.abs(t.y - py)) > 1) return false;
       const view = tileView(map, tilesRef.current, t.x, t.y, Date.now(), null);
+      // 自分のブロックかどうかは、サーバーが返した自分の ID で判定する
+      if (view.block) {
+        const ov = tilesRef.current[tileKey(t.x, t.y)];
+        view.block = {
+          ...view.block,
+          mine: selfIdRef.current !== null && ov?.block?.ownerId === selfIdRef.current,
+        };
+      }
       const slot = prof.hotbar[selSlotRef.current] ?? null;
       const selItem = slot ? itemById(slot.id) : null;
       const act = actionForTile(view, {
         tool: selItem?.tool,
         seedId: selItem && selItem.category === "seed" ? selItem.id : undefined,
+        blockId: selItem && (selItem.category === "block" || selItem.facility) ? selItem.id : undefined,
       });
       if (!act) return false;
       if (act.action === "plant-picker") {
         setSeedPicker({ x: t.x, y: t.y });
         return true;
       }
-      void postTileActionRef.current(act.action, t.x, t.y, act.seedId);
+      void postTileActionRef.current(act.action, t.x, t.y, act.seedId, act.itemId);
       return true;
     };
     const onPointerDown = (e: PointerEvent) => {
@@ -1230,6 +1350,17 @@ export default function WorldBoxClient() {
             const img = farmSprites[`crop${cropStage(ov!.crop, nowMs)}`];
             if (texReady(img)) ctx.drawImage(img, sx, sy, TILE, TILE);
           }
+          if (ov!.block) {
+            // 設置ブロックはアイコンをタイル大で描く（ピクセル固定: 整数座標）
+            const img = itemIcons[ov!.block.itemId];
+            const bx = Math.round(sx);
+            const by = Math.round(sy);
+            if (texReady(img)) ctx.drawImage(img, bx, by, TILE, TILE);
+            else {
+              ctx.fillStyle = "#9a7b4f";
+              ctx.fillRect(bx + 5, by + 5, TILE - 10, TILE - 10);
+            }
+          }
         }
       }
 
@@ -1512,6 +1643,45 @@ export default function WorldBoxClient() {
     touchAction: "manipulation", userSelect: "none", WebkitUserSelect: "none", WebkitTouchCallout: "none",
   };
 
+  /** パネルは全てゲームステージ内のオーバーレイにする（ページ側へはみ出さない）。 */
+  const panelOverlay: React.CSSProperties = {
+    position: "absolute", left: "50%", top: "50%", transform: "translate(-50%, -50%)",
+    width: "min(600px, calc(100% - 20px))", maxHeight: "calc(100% - 20px)", overflowY: "auto",
+    overscrollBehavior: "contain", touchAction: "pan-y",
+    padding: 12, borderRadius: 12, zIndex: 6, textAlign: "left",
+    border: "1px solid rgba(255,255,255,0.22)", background: "rgba(10,12,18,0.93)", color: "#f2f2f2",
+    boxShadow: "0 12px 36px rgba(0,0,0,0.5)",
+  };
+  /** スロット枠（中身はスプライトのみ。SlotContent と対で使う）。 */
+  const slotBox: React.CSSProperties = {
+    ...btn, position: "relative", width: 42, height: 42, minHeight: 42, padding: 2,
+    display: "flex", alignItems: "center", justifyContent: "center",
+    color: "#fff", background: "rgba(255,255,255,0.08)",
+  };
+  /** インベントリパネルの1枠（持ち上げ中は金枠）。 */
+  const renderInvSlot = (zone: SlotRef["zone"], index: number, slot: ItemSlot) => {
+    const held = heldSlot?.zone === zone && heldSlot?.index === index;
+    return (
+      <button
+        key={`${zone}-${index}`}
+        type="button"
+        aria-label={slot ? (itemById(slot.id)?.name ?? slot.id) : "空き枠"}
+        aria-pressed={held}
+        onClick={() => tapSlot(zone, index)}
+        style={{
+          ...slotBox, width: "100%", height: 44,
+          ...(held ? { background: "rgba(255,210,62,0.30)", borderColor: "rgba(255,210,62,0.85)" } : {}),
+        }}
+      >
+        <SlotContent slot={slot} />
+      </button>
+    );
+  };
+  /** 持ち上げ中のスタック（パネル見出しの識別表示用）。 */
+  const heldStack: ItemSlot = heldSlot && invProfile
+    ? (heldSlot.zone === "hotbar" ? invProfile.hotbar[heldSlot.index] : invProfile.storage[heldSlot.index]) ?? null
+    : null;
+
   // ハンバーガーはアクションの集約場所。項目はデータ駆動のリストで持ち、
   // アクションの追加はここへ1件足すだけで済む。
   type MenuAction = { id: string; label: string; show: boolean; run: () => void };
@@ -1711,7 +1881,7 @@ export default function WorldBoxClient() {
           <div
             style={{
               position: "absolute", left: "50%", bottom: 10, transform: "translateX(-50%)",
-              display: "flex", gap: 6, alignItems: "stretch", padding: 6, borderRadius: 10,
+              display: "flex", gap: 4, alignItems: "stretch", padding: 4, borderRadius: 10,
               background: "rgba(0,0,0,0.6)", zIndex: 4, maxWidth: "calc(100% - 16px)",
             }}
           >
@@ -1723,30 +1893,22 @@ export default function WorldBoxClient() {
                 aria-label={slot ? (itemById(slot.id)?.name ?? slot.id) : "空き枠"}
                 onClick={() => setSelSlot(i)}
                 style={{
-                  ...btn, minHeight: 46, minWidth: 54, padding: "2px 4px", fontSize: 11, lineHeight: 1.25,
-                  color: "#fff", background: "rgba(255,255,255,0.08)",
+                  ...slotBox,
                   ...(selSlot === i
                     ? { background: "rgba(255,210,62,0.30)", borderColor: "rgba(255,210,62,0.85)" }
                     : {}),
                 }}
               >
-                {slot ? (
-                  <>
-                    {itemById(slot.id)?.name ?? slot.id}
-                    <br />×{slot.count}
-                  </>
-                ) : (
-                  "―"
-                )}
+                <SlotContent slot={slot} />
               </button>
             ))}
             <button
               type="button"
-              style={{ ...btn, minHeight: 46, padding: "2px 10px", fontSize: 12, color: "#fff", background: "rgba(255,255,255,0.08)" }}
+              style={{ ...btn, height: 42, minHeight: 42, padding: "2px 8px", fontSize: 11, color: "#fff", background: "rgba(255,255,255,0.08)" }}
               onClick={() => setStorageOpen((v) => !v)}
               aria-expanded={storageOpen}
             >
-              ストレージ
+              インベントリ
             </button>
           </div>
         )}
@@ -1754,7 +1916,7 @@ export default function WorldBoxClient() {
           <div
             role="status"
             style={{
-              position: "absolute", left: "50%", bottom: 68, transform: "translateX(-50%)",
+              position: "absolute", left: "50%", bottom: 58, transform: "translateX(-50%)",
               padding: "4px 12px", borderRadius: 10, background: "rgba(0,0,0,0.6)",
               color: "#fff", fontSize: 13, whiteSpace: "nowrap", zIndex: 4,
             }}
@@ -1762,51 +1924,44 @@ export default function WorldBoxClient() {
             {tileMsg}
           </div>
         )}
-      </div>
-
       {storageOpen && invProfile && (
-        <div
-          style={{
-            maxWidth: 640, margin: "12px auto 0", padding: 14, borderRadius: 12,
-            border: "1px solid rgba(255,255,255,0.18)", background: "rgba(255,255,255,0.04)", textAlign: "left",
-          }}
-        >
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <strong>ストレージ</strong>
+        <div style={{ ...panelOverlay, width: "min(330px, calc(100% - 20px))" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <strong>インベントリ</strong>
+            {heldStack && (
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12 }}>
+                <ItemIcon id={heldStack.id} size={18} />
+                {itemById(heldStack.id)?.name ?? heldStack.id}
+              </span>
+            )}
             <span style={{ flex: 1 }} />
-            <button type="button" style={btn} onClick={() => setStorageOpen(false)}>
+            <button
+              type="button"
+              style={btn}
+              onClick={() => {
+                setStorageOpen(false);
+                setHeldSlot(null);
+              }}
+            >
               閉じる
             </button>
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 6, marginTop: 10 }}>
-            {invProfile.storage.map((slot, i) => (
-              <button
-                key={i}
-                type="button"
-                style={{ ...btn, minHeight: 44, padding: "2px 4px", fontSize: 11, lineHeight: 1.25 }}
-                onClick={() => void swapStorage(i)}
-              >
-                {slot ? (
-                  <>
-                    {itemById(slot.id)?.name ?? slot.id}
-                    <br />×{slot.count}
-                  </>
-                ) : (
-                  "―"
-                )}
-              </button>
-            ))}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 4, marginTop: 8 }}>
+            {invProfile.storage.map((slot, i) => renderInvSlot("storage", i, slot))}
+          </div>
+          <div
+            style={{
+              display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 4,
+              marginTop: 6, paddingTop: 6, borderTop: "1px solid rgba(255,255,255,0.18)",
+            }}
+          >
+            {invProfile.hotbar.map((slot, i) => renderInvSlot("hotbar", i, slot))}
           </div>
         </div>
       )}
 
       {seedPicker && invProfile && (
-        <div
-          style={{
-            maxWidth: 640, margin: "12px auto 0", padding: 14, borderRadius: 12,
-            border: "1px solid rgba(255,255,255,0.18)", background: "rgba(255,255,255,0.04)", textAlign: "left",
-          }}
-        >
+        <div style={panelOverlay}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <strong>種</strong>
             <span style={{ flex: 1 }} />
@@ -1825,6 +1980,7 @@ export default function WorldBoxClient() {
                   setSeedPicker(null);
                 }}
               >
+                <ItemIcon id={c.seedId} size={20} />
                 {itemById(c.seedId)?.name ?? c.seedId} ×{countItem(invProfile, c.seedId)}
               </button>
             ))}
@@ -1836,12 +1992,7 @@ export default function WorldBoxClient() {
       )}
 
       {boardOpen && spaceUi === "lobby" && (
-        <div
-          style={{
-            maxWidth: 640, margin: "12px auto 0", padding: 14, borderRadius: 12,
-            border: "1px solid rgba(255,255,255,0.18)", background: "rgba(255,255,255,0.04)", textAlign: "left",
-          }}
-        >
+        <div style={panelOverlay}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <strong>グローバル掲示板</strong>
             <span style={{ flex: 1 }} />
@@ -1890,12 +2041,7 @@ export default function WorldBoxClient() {
       )}
 
       {craftOpen && (
-        <div
-          style={{
-            maxWidth: 640, margin: "12px auto 0", padding: 14, borderRadius: 12,
-            border: "1px solid rgba(255,255,255,0.18)", background: "rgba(255,255,255,0.04)", textAlign: "left",
-          }}
-        >
+        <div style={panelOverlay}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <strong>クラフト</strong>
             <span style={{ flex: 1 }} />
@@ -1909,12 +2055,7 @@ export default function WorldBoxClient() {
       )}
 
       {mapView && (
-        <div
-          style={{
-            maxWidth: 640, margin: "12px auto 0", padding: 14, borderRadius: 12,
-            border: "1px solid rgba(255,255,255,0.18)", background: "rgba(255,255,255,0.04)", textAlign: "left",
-          }}
-        >
+        <div style={panelOverlay}>
           <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
             <strong>マップ</strong>
             <span className="muted">あなたの座標 X {coords.x} / Y {coords.y}</span>
@@ -1942,12 +2083,7 @@ export default function WorldBoxClient() {
       {/* パネルの開閉は左上の ≡ メニューに統合（ボタン行は置かない） */}
 
       {showNations && (
-        <div
-          style={{
-            maxWidth: 640, margin: "12px auto 0", padding: 14, borderRadius: 12,
-            border: "1px solid rgba(255,255,255,0.18)", background: "rgba(255,255,255,0.04)", textAlign: "left",
-          }}
-        >
+        <div style={panelOverlay}>
           {(() => {
             const me = nationsUi.me;
             const myNation = me ? nationsUi.nations.find((n) => n.id === me.nationId) ?? null : null;
@@ -2096,6 +2232,7 @@ export default function WorldBoxClient() {
       )}
 
       {showEconomy && <WorldBoxEconomyPanel space={spaceUi} />}
+      </div>
     </div>
   );
 }

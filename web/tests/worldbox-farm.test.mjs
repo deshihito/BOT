@@ -63,7 +63,7 @@ const tilesUrl = bundleModule(
   [
     "generateMap", "T_GRASS", "T_TREE", "T_ROCK", "T_DIRT", "T_SNOW", "T_SNOW_TREE",
     "parseProfile", "addItem", "countItem",
-    "applyTileAction", "tileView", "actionForTile", "tileKey",
+    "applyTileAction", "applyPlaceBlock", "applyMineBlock", "tileView", "actionForTile", "tileKey",
     "parseTileOverride", "parseTileOverrides", "isOverrideActive", "TREE_REGROW_MS",
   ],
 );
@@ -216,9 +216,10 @@ const ME_KEY = "discord:611111111111111111";
 const OTHER_KEY = "discord:622222222222222222";
 const withItems = (items) => inv.parseProfile({ items });
 
-test("タイル: 伐採は斧が要り、木材が得られ、切り株つきで草地になり再生する", () => {
-  const noTool = T.applyTileAction(null, withItems({}), map, ME_KEY, "chop", treeAt.x, treeAt.y, undefined, NOW);
-  assert.equal(noTool.error, "tool_required");
+test("タイル: 伐採は素手でもでき（収量1）、斧があると収量2、切り株つきで草地になり再生する", () => {
+  const bare = T.applyTileAction(null, withItems({}), map, ME_KEY, "chop", treeAt.x, treeAt.y, undefined, NOW);
+  assert.equal(bare.ok, true, "素手でも伐採できる");
+  assert.deepEqual(bare.gained, { wood: 1 });
   const ok = T.applyTileAction(null, withItems({ wooden_axe: 1 }), map, ME_KEY, "chop", treeAt.x, treeAt.y, undefined, NOW);
   assert.equal(ok.ok, true);
   assert.equal(ok.override.tile, T.T_GRASS);
@@ -339,7 +340,8 @@ test("タイル: タップ判定（actionForTile）の優先順", () => {
   assert.deepEqual(T.actionForTile(emptyFarm, { tool: "hoe" }), { action: "plant-picker" });
   const tree = { ...ready, tile: T.T_TREE, farmland: false, crop: null };
   assert.deepEqual(T.actionForTile(tree, { tool: "axe" }), { action: "chop" });
-  assert.equal(T.actionForTile(tree, { tool: "pickaxe" }), null);
+  assert.deepEqual(T.actionForTile(tree, null), { action: "chop" }, "素手（未選択）でも伐採");
+  assert.deepEqual(T.actionForTile(tree, { tool: "pickaxe" }), { action: "chop" }, "選択中の道具を問わない");
   const rock = { ...tree, tile: T.T_ROCK };
   assert.deepEqual(T.actionForTile(rock, { tool: "pickaxe" }), { action: "mine" });
   const grass = { ...tree, tile: T.T_GRASS };
@@ -359,6 +361,18 @@ const authUrl = dataUrl(
 const auth = await import(authUrl);
 
 const presenceBundleUrl = bundleModule(["worldbox/presence.ts"], ["presenceIdFor"]);
+const buildingsBundleUrl = bundleModule(
+  ["worldbox/rng.ts", "worldbox/mapgen.ts", "worldbox/presence.ts", "worldbox/buildings.ts"],
+  ["isSpawnPlazaTile"],
+);
+const nationsOnlineStubUrl = dataUrl(`
+export function isNationsEnabled() { return true; }
+export async function loadNationsState() { return { nations: {} }; }
+`);
+const buildingsOnlineStubUrl = dataUrl(`
+export function isBuildingsEnabled() { return true; }
+export async function loadBuildings() { return {}; }
+`);
 const profileOnlineStubUrl = dataUrl(`
 import { parseProfile, serializeProfile } from ${JSON.stringify(invUrl)};
 const store = (globalThis.__wbFarmProfiles ??= new Map());
@@ -401,7 +415,10 @@ const tilesRoute = await import(
       .replaceAll('"@/lib/worldbox/save"', JSON.stringify(saveStubUrl))
       .replaceAll('"@/lib/worldbox/save-online"', JSON.stringify(saveOnlineStubUrl))
       .replaceAll('"@/lib/worldbox/tiles"', JSON.stringify(tilesUrl))
-      .replaceAll('"@/lib/worldbox/tiles-online"', JSON.stringify(tilesOnlineStubUrl)),
+      .replaceAll('"@/lib/worldbox/tiles-online"', JSON.stringify(tilesOnlineStubUrl))
+      .replaceAll('"@/lib/worldbox/buildings"', JSON.stringify(buildingsBundleUrl))
+      .replaceAll('"@/lib/worldbox/buildings-online"', JSON.stringify(buildingsOnlineStubUrl))
+      .replaceAll('"@/lib/worldbox/nations-online"', JSON.stringify(nationsOnlineStubUrl)),
   ),
 );
 
@@ -435,16 +452,20 @@ test("API(tiles): 未ログインの POST は 401、他オリジンは 403", asy
   assert.equal((await tilesRoute.POST(cross)).status, 403);
 });
 
-test("API(tiles): 伐採は道具検証つきで適用され、プロフィールと上書きが保存される", async () => {
+test("API(tiles): 伐採は素手でも適用され（収量1）、斧があると収量2、上書きが保存される", async () => {
   const cookie = sessionCookie(ME, "farm-user");
   globalThis.__wbFarmTiles.clear();
   globalThis.__wbFarmProfiles.clear();
   globalThis.__wbFarmPresence = [];
-  // 斧なし → 409 tool_required
-  const denied = await tilesRoute.POST(apiRequest(URL_T, "POST", cookie, { action: "chop", x: treeAt.x, y: treeAt.y }));
-  assert.equal(denied.status, 409);
-  assert.equal((await denied.json()).error, "tool_required");
-  // 斧を持たせる
+  // 素手（空のプロフィール）でも伐採できる
+  const bare = await tilesRoute.POST(apiRequest(URL_T, "POST", cookie, { action: "chop", x: treeAt.x, y: treeAt.y }));
+  assert.equal(bare.status, 200);
+  const bareData = await bare.json();
+  assert.deepEqual(bareData.gained, { wood: 1 });
+  assert.equal(bareData.tile.tile, T.T_GRASS);
+  assert.ok(globalThis.__wbFarmTiles.has(`${treeAt.x},${treeAt.y}`), "上書きが保存される");
+  // 斧を持たせると収量2（別の木で確認）
+  globalThis.__wbFarmTiles.clear();
   globalThis.__wbFarmProfiles.set(MY_KEY, inv.serializeProfile(inv.parseProfile({ items: { wooden_axe: 1 } })));
   const ok = await tilesRoute.POST(apiRequest(URL_T, "POST", cookie, { action: "chop", x: treeAt.x, y: treeAt.y }));
   assert.equal(ok.status, 200);
@@ -452,7 +473,6 @@ test("API(tiles): 伐採は道具検証つきで適用され、プロフィー�
   assert.equal(data.tile.tile, T.T_GRASS);
   assert.deepEqual(data.gained, { wood: 2 });
   assert.equal(inv.countItem(data.profile, "wood"), 2);
-  assert.ok(globalThis.__wbFarmTiles.has(`${treeAt.x},${treeAt.y}`), "上書きが保存される");
 });
 
 test("API(tiles): 本人位置が分かる場合は遠くのタイルを拒む（too_far）", async () => {
@@ -488,7 +508,7 @@ test("クライアント: ホットバー・ストレージ・種ピッカー・
   assert.ok(client.includes("invProfile.hotbar"), "ホットバーを描いていない");
   assert.ok(client.includes("invProfile.storage"), "ストレージを描いていない");
   assert.ok(client.includes("ストレージ"), "ストレージ UI が無い");
-  assert.ok(client.includes('action: "swap"'), "枠入れ替えを送っていない");
+  assert.ok(client.includes('action: "move"'), "スロット移動を送っていない");
   const textures = fs.readFileSync(path.join(libDir, "worldbox/textures.ts"), "utf8");
   assert.ok(textures.includes("loadFarmSprites"), "テクスチャ側に農業読み込みが無い");
   for (const name of ["farmland", "stump", "crop_stage0", "crop_stage1", "crop_stage2"]) {

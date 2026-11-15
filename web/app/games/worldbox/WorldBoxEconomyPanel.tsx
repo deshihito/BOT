@@ -44,9 +44,14 @@ const OP_STATUS_LABEL: Record<EconomyOp["status"], string> = {
   failed: "失敗",
 };
 
+/** 経済パネルもゲームステージ内のオーバーレイ（クライアント側 panelOverlay と同値）。 */
 const panel: React.CSSProperties = {
-  maxWidth: 640, margin: "12px auto 0", padding: 14, borderRadius: 12,
-  border: "1px solid rgba(255,255,255,0.18)", background: "rgba(255,255,255,0.04)", textAlign: "left",
+  position: "absolute", left: "50%", top: "50%", transform: "translate(-50%, -50%)",
+  width: "min(600px, calc(100% - 20px))", maxHeight: "calc(100% - 20px)", overflowY: "auto",
+  overscrollBehavior: "contain", touchAction: "pan-y",
+  padding: 12, borderRadius: 12, zIndex: 6, textAlign: "left",
+  border: "1px solid rgba(255,255,255,0.22)", background: "rgba(10,12,18,0.93)", color: "#f2f2f2",
+  boxShadow: "0 12px 36px rgba(0,0,0,0.5)",
 };
 const btn: React.CSSProperties = {
   minHeight: 36, padding: "4px 12px", borderRadius: 10, cursor: "pointer",
@@ -57,6 +62,22 @@ const row: React.CSSProperties = {
   display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap",
   padding: "7px 0", borderBottom: "1px solid rgba(255,255,255,0.08)",
 };
+
+/** アイテムのドット絵アイコン（無いアイテムは名前ラベルのみで出す）。 */
+function ItemIcon({ id, size = 24 }: { id: string; size?: number }) {
+  const def = itemById(id);
+  if (!def?.icon) return null;
+  return (
+    <img
+      src={def.icon}
+      alt=""
+      width={size}
+      height={size}
+      draggable={false}
+      style={{ imageRendering: "pixelated", flexShrink: 0 }}
+    />
+  );
+}
 
 export default function WorldBoxEconomyPanel({ space }: { space: SaveSpace }) {
   // ショップ（売買）はロビー空間でのみ開く。ワールドではタブ自体を出さない。
@@ -245,6 +266,7 @@ export default function WorldBoxEconomyPanel({ space }: { space: SaveSpace }) {
           {owned.length === 0 && <p className="muted">かばんは空です</p>}
           {owned.map((item) => (
             <div key={item.id} style={row}>
+              <ItemIcon id={item.id} />
               <strong>{item.name}</strong>
               <span className="muted">× {profile.items[item.id]}</span>
               <span className="muted">{item.desc}</span>
@@ -270,6 +292,7 @@ export default function WorldBoxEconomyPanel({ space }: { space: SaveSpace }) {
         <div style={{ marginTop: 6 }}>
           {ITEMS.map((item) => (
             <div key={item.id} style={row}>
+              <ItemIcon id={item.id} />
               <strong>{item.name}</strong>
               <span className="muted">{item.desc}</span>
               {item.hunger ? <span className="muted">空腹度 +{item.hunger}</span> : null}
@@ -293,6 +316,7 @@ export default function WorldBoxEconomyPanel({ space }: { space: SaveSpace }) {
               .join(" + ");
             return (
               <div key={recipe.id} style={row}>
+                <ItemIcon id={recipe.output} />
                 <strong>{output?.name ?? recipe.output}</strong>
                 <span className="muted">{inputs}</span>
                 {recipe.rareItem && <span className="muted">レア: {itemById(recipe.rareItem)?.name}</span>}
