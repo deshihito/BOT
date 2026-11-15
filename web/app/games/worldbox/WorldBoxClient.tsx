@@ -15,7 +15,12 @@ import {
 } from "@/lib/worldbox/mapgen";
 import { DASH_SPEED, SWIM_DASH_SPEED, SWIM_SPEED, WALK_SPEED, findFreeNear, isWaterAt, stepMove } from "@/lib/worldbox/move";
 import { nightAmount, phaseAtTime } from "@/lib/worldbox/daynight";
-import { advanceWalkPhase, damp, moveLean, walkBob, walkSquashY } from "@/lib/worldbox/anim";
+import { advanceWalkPhase, attackSwingAngle, damp, moveLean, stepBeatIndex, walkBob, walkSquashY } from "@/lib/worldbox/anim";
+import {
+  ambientKindFor, createFxSystem, createShake, fxLifeRatio, popProgress, popScale, shakeOffsetAt,
+  slashAlpha, spawnAmbient, spawnBurst, startShake, stepFx, swingProgress,
+  type FxBurstKind, type FxShake, type FxSystem,
+} from "@/lib/worldbox/fx";
 import type { PresenceEntry } from "@/lib/worldbox/presence";
 import {
   STAMINA_MAX, canDash, createStamina, createTapTracker, isStickDash, registerKeyTap, rescueStamina,
@@ -446,6 +451,9 @@ export default function WorldBoxClient() {
         setNationMsg(BUILDING_ERROR_LABEL[data.error ?? ""] ?? "失敗しました");
         return;
       }
+      if (typeof body.x === "number" && typeof body.y === "number") {
+        fxEventsRef.current.push({ kind: body.action === "demolish" ? "debris" : "build", x: body.x, y: body.y });
+      }
       await refreshBuildings();
     } catch {
       setNationMsg("失敗しました");
@@ -471,6 +479,8 @@ export default function WorldBoxClient() {
   const [tileMsg, setTileMsg] = useState("");
   const tilesRef = useRef<TileOverridesMap>({});
   const tilesVersionRef = useRef(0);
+  /** 演出イベントの受け渡し（行為の成功→描画ループでパーティクル/揺れ/ポップに変換）。 */
+  const fxEventsRef = useRef<{ kind: FxBurstKind; x: number; y: number }[]>([]);
   /** 自分の不透明 ID（プレゼンス ID）。自分のブロック判定に使う。 */
   const selfIdRef = useRef<string | null>(null);
   /** タイル上書きから設置ブロックの固体集合を作り直す（施設は占有のみで固体にしない）。 */
@@ -534,6 +544,12 @@ export default function WorldBoxClient() {
         setTileMsg(TILE_ERROR_LABEL[data.error ?? ""] ?? "できませんでした");
         return;
       }
+      // 成功した行為は演出で返す（粒・揺れ・出現ポップは描画ループ側で出す）
+      const fxKind: Record<TileActionKind, FxBurstKind> = {
+        chop: "chop", mine: "mine", till: "till", plant: "plant", harvest: "harvest",
+        place_block: "place", mine_block: "debris",
+      };
+      fxEventsRef.current.push({ kind: fxKind[action], x, y });
       if (data.key) {
         const next = { ...tilesRef.current };
         if (data.override) next[data.key] = data.override;
@@ -659,6 +675,30 @@ export default function WorldBoxClient() {
     let playerSwimming = false;
     /** 入水/出水時の波紋（中心・発生時刻ミリ秒）。 */
     const splashes: { x: number; y: number; at: number }[] = [];
+    // ---- 演出（パーティクル/揺れ/ポップ/スイング）。計算は lib/worldbox/fx.ts ----
+    const reducedMotion =
+      typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const fxSys: FxSystem = createFxSystem((Date.now() % 2147483646) + 1);
+    if (reducedMotion) fxSys.intensity = 0.35;
+    let shake: FxShake = createShake();
+    /** 道具スイング（タップ即時応答）。itemId のアイコンを振る。 */
+    let swing = { startedAt: 0, itemId: null as string | null, face: 1 as 1 | -1 };
+    /** 出現ポップ中タイル "x,y" → 開始時刻。 */
+    const pops = new Map<string, number>();
+    let lastBeat = 0;
+    let lastDashFxAt = 0;
+    let lastSwimFxAt = 0;
+    let lastAmbientAt = 0;
+    const popScaleFor = (key: string, nowMs: number): number => {
+      const started = pops.get(key);
+      if (started === undefined) return 1;
+      const pr = popProgress(started, nowMs);
+      if (pr >= 1) {
+        pops.delete(key);
+        return 1;
+      }
+      return popScale(pr);
+    };
     let loggedIn = false;
     let disposed = false;
     let lastSaved = { x: player.x, y: player.y, at: 0 };
@@ -821,6 +861,8 @@ export default function WorldBoxClient() {
         setSeedPicker({ x: t.x, y: t.y });
         return true;
       }
+      // 入力への即時応答として道具を振る（結果の粒は成功時に別で出す）
+      swing = { startedAt: performance.now(), itemId: selItem?.id ?? null, face: player.face };
       void postTileActionRef.current(act.action, t.x, t.y, act.seedId, act.itemId);
       return true;
     };
@@ -1176,6 +1218,7 @@ export default function WorldBoxClient() {
         const dest = worldReturn ?? spawn;
         placePlayer(dest.x, dest.y);
       }
+      spawnBurst(fxSys, "warp", player.x, player.y - 0.3);
       void pollOthers();
     };
     warpActionRef.current = doWarp;
@@ -1257,6 +1300,7 @@ export default function WorldBoxClient() {
       if (space === "world" && !inWaterNow) lastLand = { x: player.x, y: player.y };
       if (inWaterNow !== wasSwimming) {
         splashes.push({ x: player.x, y: player.y, at: now });
+        spawnBurst(fxSys, "splash", player.x, player.y);
         wasSwimming = inWaterNow;
       }
       stamina = stepStamina(stamina, staminaUse, dt).state;
@@ -1272,6 +1316,7 @@ export default function WorldBoxClient() {
         wasSwimming = false;
         playerSwimming = false;
         splashes.push({ x: player.x, y: player.y, at: now });
+        spawnBurst(fxSys, "warp", player.x, player.y - 0.3);
         saveNow();
       }
       checkTileTriggers();
@@ -1289,6 +1334,31 @@ export default function WorldBoxClient() {
       else if (player.vx > 0.2) player.face = 1;
       player.phase = advanceWalkPhase(player.phase, speed, dt);
       const speedRatio = Math.min(1, speed / WALK_SPEED);
+
+      // ---- 演出の更新（行為イベントの消化・粒の前進・移動の副産物） ----
+      for (const ev of fxEventsRef.current.splice(0)) {
+        spawnBurst(fxSys, ev.kind, ev.x + 0.5, ev.y + 0.5);
+        if (ev.kind === "chop" || ev.kind === "mine") shake = startShake(shake, 2, now);
+        else if (ev.kind === "debris" || ev.kind === "build") shake = startShake(shake, 3, now);
+        if (ev.kind === "place" || ev.kind === "build") pops.set(`${ev.x},${ev.y}`, now);
+      }
+      stepFx(fxSys, dt);
+      const beat = stepBeatIndex(player.phase);
+      if (beat !== lastBeat) {
+        lastBeat = beat;
+        if (speed > 0.6 && !reducedMotion) {
+          if (playerSwimming) spawnBurst(fxSys, "step", player.x, player.y, { color: "#bfe6ff" });
+          else spawnBurst(fxSys, "step", player.x, player.y + 0.05);
+        }
+      }
+      if (dashing && speed > 0.6 && now - lastDashFxAt > 45 && !reducedMotion) {
+        lastDashFxAt = now;
+        spawnBurst(fxSys, "dash", player.x - player.vx * 0.06, player.y - 0.35);
+      }
+      if (playerSwimming && speed > 0.6 && now - lastSwimFxAt > 200) {
+        lastSwimFxAt = now;
+        spawnBurst(fxSys, "step", player.x, player.y, { color: "#7cc0e8" });
+      }
       playerPosRef.current.x = player.x;
       playerPosRef.current.y = player.y;
 
@@ -1318,8 +1388,10 @@ export default function WorldBoxClient() {
       const dpr = Math.min(2, window.devicePixelRatio || 1);
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.clearRect(0, 0, cw, ch);
-      const toScreenX = (wx: number) => (wx - cam.x) * TILE + cw / 2;
-      const toScreenY = (wy: number) => (wy - cam.y) * TILE + ch / 2;
+      // 画面の揺れ（ワールドのみ。ロビーはピクセル固定のため揺らさない）
+      const shakeOff = space === "world" && !reducedMotion ? shakeOffsetAt(shake, now) : { x: 0, y: 0 };
+      const toScreenX = (wx: number) => (wx - cam.x) * TILE + cw / 2 + shakeOff.x;
+      const toScreenY = (wy: number) => (wy - cam.y) * TILE + ch / 2 + shakeOff.y;
       // ロビー描画用: カメラを整数ピクセルへスナップした原点（ピクセル固定）
       let lobbyOx = 0;
       let lobbyOy = 0;
@@ -1371,14 +1443,23 @@ export default function WorldBoxClient() {
           }
           if (ov!.block) {
             // 設置ブロックはアイコンをタイル大で描く（ピクセル固定: 整数座標）
+            // 設置直後は出現ポップ（小さく生まれて行き過ぎて収まる）
             const img = itemIcons[ov!.block.itemId];
             const bx = Math.round(sx);
             const by = Math.round(sy);
+            const ps = popScaleFor(tileKey(tx, ty), now);
+            ctx.save();
+            if (ps !== 1) {
+              ctx.translate(bx + TILE / 2, by + TILE / 2);
+              ctx.scale(ps, ps);
+              ctx.translate(-(bx + TILE / 2), -(by + TILE / 2));
+            }
             if (texReady(img)) ctx.drawImage(img, bx, by, TILE, TILE);
             else {
               ctx.fillStyle = "#9a7b4f";
               ctx.fillRect(bx + 5, by + 5, TILE - 10, TILE - 10);
             }
+            ctx.restore();
           }
         }
       }
@@ -1477,7 +1558,21 @@ export default function WorldBoxClient() {
           const color = nationsRef.current.playerNations[b.ownerId]?.color ?? "#888888";
           drawList.push({
             y: b.y + 1,
-            draw: () => drawBuilding(ctx, toScreenX(b.x), toScreenY(b.y), b.type, color),
+            draw: () => {
+              const ps = popScaleFor(`${b.x},${b.y}`, now);
+              if (ps === 1) {
+                drawBuilding(ctx, toScreenX(b.x), toScreenY(b.y), b.type, color);
+                return;
+              }
+              ctx.save();
+              const cxp = toScreenX(b.x) + TILE / 2;
+              const cyp = toScreenY(b.y) + TILE;
+              ctx.translate(cxp, cyp);
+              ctx.scale(ps, ps);
+              ctx.translate(-cxp, -cyp);
+              drawBuilding(ctx, toScreenX(b.x), toScreenY(b.y), b.type, color);
+              ctx.restore();
+            },
           });
         }
       }
@@ -1527,12 +1622,110 @@ export default function WorldBoxClient() {
         }
       }
 
+      // ---- パーティクル（形は fx.ts の shape、描き分けはここだけ） ----
+      const drawParticles = (glowPass: boolean) => {
+        for (const p of fxSys.particles) {
+          const isGlow = p.shape === "glow";
+          if (isGlow !== glowPass) continue;
+          const sx = space === "lobby" ? Math.round(lobbyOx + p.x * TILE) : toScreenX(p.x);
+          const sy = space === "lobby" ? Math.round(lobbyOy + p.y * TILE) : toScreenY(p.y);
+          if (sx < -TILE || sy < -TILE || sx > cw + TILE || sy > ch + TILE) continue;
+          const ratio = fxLifeRatio(p);
+          const sizePx = Math.max(1.5, p.size * TILE);
+          ctx.fillStyle = p.color;
+          ctx.strokeStyle = p.color;
+          if (p.shape === "chip" || p.shape === "leaf") {
+            ctx.save();
+            ctx.globalAlpha = Math.min(1, ratio * 1.6);
+            ctx.translate(sx, sy);
+            ctx.rotate(p.rot);
+            ctx.fillRect(-sizePx / 2, -sizePx / 4, sizePx, sizePx / 2);
+            ctx.restore();
+          } else if (p.shape === "spark") {
+            ctx.save();
+            ctx.globalAlpha = Math.min(1, ratio * 1.8);
+            ctx.translate(sx, sy);
+            ctx.rotate(Math.atan2(p.vy, p.vx));
+            ctx.fillRect(-sizePx / 2, -1, sizePx, 2);
+            ctx.restore();
+          } else if (p.shape === "ring") {
+            const prog = 1 - ratio;
+            ctx.save();
+            ctx.globalAlpha = 0.65 * ratio;
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.ellipse(sx, sy, sizePx * (0.6 + 2.2 * prog), sizePx * (0.25 + 0.8 * prog), 0, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.restore();
+          } else if (p.shape === "puff") {
+            ctx.save();
+            ctx.globalAlpha = 0.32 * ratio;
+            ctx.beginPath();
+            ctx.arc(sx, sy, sizePx * (1.15 - 0.35 * ratio), 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+          } else if (p.shape === "glow") {
+            ctx.save();
+            ctx.globalCompositeOperation = "lighter";
+            ctx.globalAlpha = 0.75 * ratio;
+            ctx.beginPath();
+            ctx.arc(sx, sy, sizePx / 2, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+          } else {
+            // drop / snow: 小さな丸（暗色も混ぜてあるので背景を選ばない）
+            ctx.save();
+            ctx.globalAlpha = Math.min(1, ratio * 1.7);
+            ctx.beginPath();
+            ctx.arc(sx, sy, sizePx / 2, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+          }
+        }
+      };
+      // 環境パーティクル（雪原=雪、森=落葉、夜=蛍、それ以外=花粉。ワールドのみ）
+      if (space === "world" && now - lastAmbientAt > 150 && !reducedMotion) {
+        lastAmbientAt = now;
+        const ptile = mapTileAt(effMap, Math.floor(player.x), Math.floor(player.y));
+        const kind = ambientKindFor(ptile, ptile === T_TREE || ptile === T_SNOW_TREE, nightAmount(phaseAtTime(nowMs / 1000)));
+        spawnAmbient(fxSys, kind, cam.x - cw / TILE / 2 - 1, cam.x + cw / TILE / 2 + 1, cam.y - ch / TILE / 2 - 1);
+      }
+      drawParticles(false);
+
+      // 道具スイングと風切り（自分のタップへの応答。ワールドのみ）
+      if (space === "world") {
+        const sk = swingProgress(swing.startedAt, now);
+        if (sk < 1) {
+          const cxp = toScreenX(player.x);
+          const cyp = toScreenY(player.y) - TILE * 0.45;
+          const ang = attackSwingAngle(sk);
+          ctx.save();
+          ctx.translate(cxp, cyp);
+          ctx.scale(swing.face, 1);
+          // 風切り（振り抜きの瞬間だけ出る弧）
+          ctx.strokeStyle = `rgba(255,255,255,${(slashAlpha(sk) * 0.85).toFixed(3)})`;
+          ctx.lineWidth = 3;
+          ctx.beginPath();
+          ctx.arc(0, 0, TILE * 0.78, ang - 1.15, ang + 0.35);
+          ctx.stroke();
+          // 道具アイコンを振る（無い道具は弧だけ）
+          const img = swing.itemId ? itemIcons[swing.itemId] : undefined;
+          if (texReady(img)) {
+            ctx.rotate(ang);
+            ctx.drawImage(img, TILE * 0.30, -TILE * 0.30, TILE * 0.62, TILE * 0.62);
+          }
+          ctx.restore();
+        }
+      }
+
       // 昼夜の薄い色づけ（共有時計。ロビーは屋内なので付けない）
       const night = nightAmount(phaseAtTime(nowMs / 1000));
       if (space === "world" && night > 0.01) {
         ctx.fillStyle = `rgba(9,13,42,${(night * 0.36).toFixed(3)})`;
         ctx.fillRect(0, 0, cw, ch);
       }
+      // 光る粒（蛍・ワープの光）は夜の色づけの上に出す
+      if (space === "world") drawParticles(true);
 
       // スティック
       if (joy.active) {
