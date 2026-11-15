@@ -160,9 +160,27 @@ test("設置: 更地（草・土・砂・雪）に置け、アイテムを1つ�
   }
 });
 
+test("設置: 基本素材（木材・石材）はそのままブロックとして置ける", () => {
+  // 木材 → オークの原木として設置され、消費は木材
+  const p = withItems({ wood: 2 });
+  const ok = place(null, p, ME_KEY, grassAt, "wood");
+  assert.equal(ok.ok, true);
+  assert.equal(ok.override.block.itemId, "oak_log");
+  assert.equal(ok.view.block.itemId, "oak_log");
+  assert.equal(inv.countItem(ok.profile, "wood"), 1);
+  // 石材 → 石ブロック
+  const p2 = withItems({ stone: 1 });
+  const ok2 = place(null, p2, ME_KEY, dirtAt, "stone");
+  assert.equal(ok2.ok, true);
+  assert.equal(ok2.override.block.itemId, "stone_block");
+  assert.equal(inv.countItem(ok2.profile, "stone"), 0);
+  // 在庫がなければ置けない
+  assert.equal(place(null, withItems({}), ME_KEY, grassAt, "wood").error, "not_enough_items");
+});
+
 test("設置: ブロック以外・在庫なし・置けない地形は拒む", () => {
-  const p = withItems({ wood: 3, dirt_block: 1 });
-  assert.equal(place(null, p, ME_KEY, grassAt, "wood").error, "unknown_block");
+  const p = withItems({ herb: 3, dirt_block: 1 });
+  assert.equal(place(null, p, ME_KEY, grassAt, "herb").error, "unknown_block");
   assert.equal(place(null, p, ME_KEY, grassAt, "nope").error, "unknown_block");
   assert.equal(place(null, withItems({}), ME_KEY, grassAt, "dirt_block").error, "not_enough_items");
   for (const at of [waterAt, rockAt, treeAt]) {

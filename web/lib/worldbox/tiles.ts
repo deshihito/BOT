@@ -340,8 +340,11 @@ export function applyPlaceBlock(
   now: number,
   ctx: PlaceBlockContext,
 ): TileActionResult {
-  const def = itemById(itemIdRaw);
-  if (!def || (def.category !== "block" && def.facility !== true)) {
+  const held = itemById(itemIdRaw);
+  // 基本素材（木材・石材）はそのままブロックとして置ける: 消費は素材、
+  // 設置されるのは placesBlock のブロック定義（描画・耐久・回収はブロック側）
+  const def = held?.placesBlock ? itemById(held.placesBlock) : held;
+  if (!held || !def || (def.category !== "block" && def.facility !== true)) {
     return { ok: false, error: "unknown_block" };
   }
   const tile = checkedTile(xRaw, yRaw);
@@ -358,7 +361,7 @@ export function applyPlaceBlock(
   if (active?.until !== undefined) return { ok: false, error: "tile_blocked" }; // 木の再生待ち
   const eff = active?.tile !== undefined ? active.tile : mapTileAt(map, x, y);
   if (!PLACEABLE_TERRAIN.has(eff)) return { ok: false, error: "tile_blocked" };
-  const removed = removeItem(profile, def.id, 1);
+  const removed = removeItem(profile, held.id, 1);
   if (!removed) return { ok: false, error: "not_enough_items" };
   const selfId = presenceIdFor(ownerKey);
   const next: TileOverride = {
