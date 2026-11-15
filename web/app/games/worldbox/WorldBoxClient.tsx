@@ -88,6 +88,7 @@ import WorldBoxArenaPanel from "./WorldBoxArenaPanel";
 import WorldBoxMachinePanel from "./WorldBoxMachinePanel";
 import WorldBoxEconomyPanel from "./WorldBoxEconomyPanel";
 import WorldBoxGuildBoardPanel from "./WorldBoxGuildBoardPanel";
+import WorldBoxGuildShopPanel from "./WorldBoxGuildShopPanel";
 
 const SAVE_KEY = "ago-worldbox-save-v6";
 /** 1タイルの表示サイズ（CSS px）。 */
@@ -518,6 +519,7 @@ export default function WorldBoxClient() {
   const staminaBoostRef = useRef(false);
   const [boardOpen, setBoardOpen] = useState(false);
   const [guildBoardOpen, setGuildBoardOpen] = useState(false);
+  const [guildShopOpen, setGuildShopOpen] = useState(false);
   const [boardPosts, setBoardPosts] = useState<BoardPost[]>([]);
   const [boardLoggedIn, setBoardLoggedIn] = useState(false);
   const [boardText, setBoardText] = useState("");
@@ -4533,6 +4535,12 @@ export default function WorldBoxClient() {
       run: () => setShowMap((v) => !v),
     },
     {
+      id: "guild_shop",
+      label: guildShopOpen ? "ギルドショップを閉じる" : "ギルドショップ",
+      show: spaceUi === "lobby",
+      run: () => setGuildShopOpen((v) => !v),
+    },
+    {
       id: "economy",
       label: showEconomy ? "経済を閉じる" : "経済",
       show: true,
@@ -5343,6 +5351,13 @@ export default function WorldBoxClient() {
           y={machinePanel.y}
           onProfileChange={(profile) => setInvProfile(profile)}
           onClose={() => setMachinePanel(null)}
+        />
+      )}
+      {guildShopOpen && spaceUi === "lobby" && (
+        <WorldBoxGuildShopPanel
+          profile={invProfile}
+          onProfileChange={setInvProfile}
+          onClose={() => setGuildShopOpen(false)}
         />
       )}
       {guildBoardOpen && spaceUi === "lobby" && (
