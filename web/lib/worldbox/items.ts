@@ -2,7 +2,7 @@
 // Discord ボット側の経済機能（core/general/items・workshop/craft・
 // circulation/steal）の仕組みをワールドボックスに持ち込んだもの。
 // カタログは「入口としての物量」を優先し、データ追加だけで厚くする:
-// 食事・素材・合成品・特殊に加え、道具（斧/ツルハシ/剣/クワ×素材3段）、
+// 食事・素材・合成品・特殊に加え、道具（斧/ツルハシ/剣/クワ×素材4段）、
 // ブロック（耐久つき）、種と作物、家具を用意する。
 // 効果が未実装のアイテムは作らない（ボット側 items.py と同じ方針）。
 
@@ -176,7 +176,152 @@ export const ITEMS: readonly ItemDef[] = [
   { id: "bookshelf", name: "本棚", desc: "本を収める棚", category: "furniture", price: 70, facility: true },
   { id: "sofa", name: "ソファ", desc: "くつろぐ家具", category: "furniture", price: 120, facility: true },
   { id: "piano", name: "ピアノ", desc: "大きな楽器", category: "furniture", price: 200, facility: true },
+  // ---- 道具（ミスリル段位: 鉄の上の4段目） ------------------------------
+  { id: "mithril_axe", name: "ミスリルの斧", desc: "木を伐る道具", category: "tool", price: 850, tool: "axe", tier: 4, durability: 500 },
+  { id: "mithril_pickaxe", name: "ミスリルのツルハシ", desc: "岩を掘る道具", category: "tool", price: 850, tool: "pickaxe", tier: 4, durability: 500 },
+  { id: "mithril_sword", name: "ミスリルの剣", desc: "戦う道具", category: "tool", price: 850, tool: "sword", tier: 4, durability: 500 },
+  { id: "mithril_hoe", name: "ミスリルのクワ", desc: "地面を耕す道具", category: "tool", price: 850, tool: "hoe", tier: 4, durability: 500 },
+  // ---- 素材（追加分: 金属・宝石・自然素材） ------------------------------
+  { id: "copper_ore", name: "銅鉱石", desc: "金属の素材", category: "material", price: 18 },
+  { id: "copper_ingot", name: "銅インゴット", desc: "精錬した銅", category: "material", price: 30 },
+  { id: "coal", name: "石炭", desc: "燃料になる素材", category: "material", price: 12 },
+  { id: "flint", name: "火打石", desc: "火を起こす素材", category: "material", price: 9 },
+  { id: "sulfur", name: "硫黄", desc: "洞窟で取れる素材", category: "material", price: 26 },
+  { id: "salt", name: "塩", desc: "料理の素材", category: "material", price: 7 },
+  { id: "ruby", name: "ルビー", desc: "赤い宝石", category: "material", price: 180 },
+  { id: "sapphire", name: "サファイア", desc: "青い宝石", category: "material", price: 180 },
+  { id: "emerald", name: "エメラルド", desc: "緑の宝石", category: "material", price: 200 },
+  { id: "diamond", name: "ダイヤモンド", desc: "最も硬い宝石", category: "material", price: 260 },
+  { id: "pearl", name: "真珠", desc: "水辺で取れる宝石", category: "material", price: 90 },
+  { id: "honey", name: "はちみつ", desc: "甘い素材", category: "material", price: 28 },
+  { id: "beeswax", name: "ミツロウ", desc: "巣から取れる素材", category: "material", price: 20 },
+  { id: "flower", name: "花", desc: "野に咲く花", category: "material", price: 8 },
+  // ---- ブロック（追加分: 防衛・装飾・特殊） ------------------------------
+  { id: "copper_block", name: "銅ブロック", desc: "銅の塊", category: "block", price: 230, durability: 90, mineTool: "pickaxe" },
+  { id: "coal_block", name: "石炭ブロック", desc: "石炭の塊", category: "block", price: 95, durability: 20 },
+  { id: "bedrock_block", name: "岩盤ブロック", desc: "ほぼ壊れない塊", category: "block", price: 400, durability: 999, mineTool: "pickaxe" },
+  { id: "cactus_block", name: "サボテンブロック", desc: "置けるサボテン", category: "block", price: 14, durability: 8 },
+  { id: "leaves_block", name: "葉ブロック", desc: "葉の塊", category: "block", price: 6, durability: 4 },
+  { id: "diamond_block", name: "ダイヤブロック", desc: "ダイヤの塊", category: "block", price: 1900, durability: 150, mineTool: "pickaxe" },
+  { id: "emerald_block", name: "エメラルドブロック", desc: "エメラルドの塊", category: "block", price: 1450, durability: 130, mineTool: "pickaxe" },
+  { id: "ruby_block", name: "ルビーブロック", desc: "ルビーの塊", category: "block", price: 1300, durability: 120, mineTool: "pickaxe" },
+  { id: "sapphire_block", name: "サファイアブロック", desc: "サファイアの塊", category: "block", price: 1300, durability: 120, mineTool: "pickaxe" },
+  { id: "magma_block", name: "マグマブロック", desc: "熱く光る塊", category: "block", price: 70, durability: 40 },
+  { id: "honey_block", name: "はちみつブロック", desc: "はちみつの塊", category: "block", price: 210, durability: 10 },
+  { id: "mushroom_block", name: "キノコブロック", desc: "キノコの塊", category: "block", price: 95, durability: 10 },
+  { id: "path_block", name: "小道ブロック", desc: "踏み固めた道", category: "block", price: 6, durability: 6 },
+  { id: "flower_block", name: "花壇ブロック", desc: "花の咲く塊", category: "block", price: 16, durability: 6 },
+  { id: "pumpkin_block", name: "カボチャブロック", desc: "カボチャの塊", category: "block", price: 40, durability: 12 },
+  { id: "melon_block", name: "メロンブロック", desc: "メロンの塊", category: "block", price: 48, durability: 12 },
+  // ---- 食事（追加分: 自然の恵みと調理品） --------------------------------
+  { id: "egg", name: "たまご", desc: "そのままでも食べられる", category: "food", price: 9, hunger: 5 },
+  { id: "raw_meat", name: "生肉", desc: "焼くとおいしい素材", category: "food", price: 14, hunger: 5 },
+  { id: "mushroom", name: "キノコ", desc: "森で取れる食材", category: "food", price: 12, hunger: 8 },
+  { id: "apple", name: "りんご", desc: "木になる果物", category: "food", price: 14, hunger: 12 },
+  { id: "berry", name: "木の実", desc: "茂みで取れる果物", category: "food", price: 11, hunger: 10 },
+  { id: "fish", name: "サカナ", desc: "水辺で取れる食材", category: "food", price: 16, hunger: 15 },
+  { id: "cookie", name: "クッキー", desc: "甘い焼き菓子", category: "food", price: 75, hunger: 18 },
+  { id: "grilled_meat", name: "焼き肉", desc: "焼いた肉", category: "food", price: 38, hunger: 40 },
+  { id: "grilled_fish", name: "焼き魚", desc: "焼いた魚", category: "food", price: 30, hunger: 30 },
+  { id: "omelette", name: "オムレツ", desc: "たまご料理", category: "food", price: 32, hunger: 35 },
+  { id: "baked_potato", name: "ベイクドポテト", desc: "焼いたジャガイモ", category: "food", price: 20, hunger: 25 },
+  { id: "stew", name: "シチュー", desc: "具だくさんの煮込み", category: "food", price: 70, hunger: 65 },
+  // ---- 種（追加分） -------------------------------------------------------
+  { id: "onion_seed", name: "タマネギの種", desc: "畑に植える種", category: "seed", price: 8 },
+  { id: "soybean_seed", name: "大豆の種", desc: "畑に植える種", category: "seed", price: 8 },
+  { id: "cucumber_seed", name: "キュウリの種", desc: "畑に植える種", category: "seed", price: 10 },
+  { id: "eggplant_seed", name: "ナスの種", desc: "畑に植える種", category: "seed", price: 10 },
+  { id: "sweet_potato_seed", name: "サツマイモの種", desc: "畑に植える種芋", category: "seed", price: 10 },
+  { id: "pepper_seed", name: "ピーマンの種", desc: "畑に植える種", category: "seed", price: 12 },
+  { id: "grape_seed", name: "ブドウの種", desc: "畑に植える種", category: "seed", price: 16 },
+  { id: "turnip_seed", name: "カブの種", desc: "畑に植える種", category: "seed", price: 8 },
+  // ---- 作物（追加分） -----------------------------------------------------
+  { id: "onion", name: "タマネギ", desc: "収穫した作物", category: "crop", price: 10, hunger: 6 },
+  { id: "soybean", name: "大豆", desc: "収穫した作物", category: "crop", price: 10, hunger: 8 },
+  { id: "cucumber", name: "キュウリ", desc: "収穫した作物", category: "crop", price: 11, hunger: 8 },
+  { id: "eggplant", name: "ナス", desc: "収穫した作物", category: "crop", price: 12, hunger: 8 },
+  { id: "sweet_potato", name: "サツマイモ", desc: "収穫した作物", category: "crop", price: 13, hunger: 14 },
+  { id: "pepper", name: "ピーマン", desc: "収穫した作物", category: "crop", price: 13, hunger: 6 },
+  { id: "grape", name: "ブドウ", desc: "収穫した作物", category: "crop", price: 22, hunger: 14 },
+  { id: "turnip", name: "カブ", desc: "収穫した作物", category: "crop", price: 10, hunger: 8 },
+  // ---- 合成品（追加分: 宝石細工・日用品） ---------------------------------
+  { id: "rope", name: "ロープ", desc: "糸を編んだ実用品", category: "crafted", price: 32 },
+  { id: "stone_statue", name: "石像", desc: "石を彫った像", category: "crafted", price: 90 },
+  { id: "flower_wreath", name: "花冠", desc: "花を編んだ飾り", category: "crafted", price: 58 },
+  { id: "embroidered_cloth", name: "刺繍布", desc: "花を刺繍した布", category: "crafted", price: 85 },
+  { id: "gem_ring", name: "宝石の指輪", desc: "金と宝石の指輪", category: "crafted", price: 510 },
+  { id: "pearl_necklace", name: "真珠のネックレス", desc: "真珠をつないだ首飾り", category: "crafted", price: 520 },
+  { id: "honey_candy", name: "はちみつ飴", desc: "甘い飴", category: "crafted", price: 105, hunger: 20 },
+  // ---- 特殊（追加分: 遺跡・洞窟・ダンジョンの宝） -------------------------
+  { id: "ancient_coin", name: "古代のコイン", desc: "遺跡で見つかる古い硬貨", category: "special", price: 240 },
+  { id: "ancient_relic", name: "古代の遺物", desc: "遺跡の奥に眠る遺物", category: "special", price: 420 },
+  { id: "dragon_scale", name: "竜のうろこ", desc: "強敵が落とす希少なうろこ", category: "special", price: 380 },
+  { id: "ghost_tear", name: "幽霊の涙", desc: "ダンジョンで見つかる雫", category: "special", price: 300 },
+  { id: "golden_key", name: "金の鍵", desc: "宝箱を開ける鍵", category: "special", price: 350 },
+  { id: "star_map", name: "星の地図", desc: "星の位置を記した古地図", category: "special", price: 280 },
+  // ---- 施設（追加分: 作業台・鍛冶台・かまど等の特殊オブジェクト） --------
+  { id: "workbench", name: "作業台", desc: "合成をする台", category: "furniture", price: 80, facility: true },
+  { id: "smithing_table", name: "鍛冶台", desc: "道具を鍛える台", category: "furniture", price: 160, facility: true },
+  { id: "furnace", name: "かまど", desc: "精錬をするかまど", category: "furniture", price: 120, facility: true },
+  { id: "anvil", name: "金床", desc: "金属を打つ台", category: "furniture", price: 180, facility: true },
+  { id: "storage_chest", name: "収納箱", desc: "物をしまう箱", category: "furniture", price: 70, facility: true },
+  { id: "bed", name: "ベッド", desc: "休める家具", category: "furniture", price: 105, facility: true },
+  { id: "torch", name: "松明", desc: "周りを照らす明かり", category: "furniture", price: 15, facility: true },
+  { id: "campfire", name: "焚き火", desc: "調理と明かりの火", category: "furniture", price: 68, facility: true },
+  { id: "well", name: "井戸", desc: "水を汲む施設", category: "furniture", price: 150, facility: true },
+  { id: "loom", name: "織り機", desc: "布を織る機械", category: "furniture", price: 110, facility: true },
+  { id: "cooking_pot", name: "調理鍋", desc: "煮込み料理の鍋", category: "furniture", price: 95, facility: true },
+  { id: "flower_pot", name: "植木鉢", desc: "花を植える鉢", category: "furniture", price: 25, facility: true },
+  // ---- ブロック（追加分2: 木種・石種・色ブロック） -----------------------
+  { id: "sakura_log", name: "桜の原木", desc: "置ける原木", category: "block", price: 14, durability: 25 },
+  { id: "dark_log", name: "黒木の原木", desc: "置ける原木", category: "block", price: 14, durability: 28 },
+  { id: "mossy_stone_block", name: "苔石ブロック", desc: "苔むした石", category: "block", price: 42, durability: 40 },
+  { id: "cracked_stone_block", name: "ひび石ブロック", desc: "ひびの入った石", category: "block", price: 14, durability: 30 },
+  { id: "sand_brick_block", name: "砂レンガブロック", desc: "砂を固めたレンガ", category: "block", price: 32, durability: 35 },
+  { id: "mud_brick_block", name: "泥レンガブロック", desc: "泥を焼いたレンガ", category: "block", price: 40, durability: 32 },
+  { id: "snow_brick_block", name: "雪レンガブロック", desc: "雪を固めたレンガ", category: "block", price: 32, durability: 18 },
+  { id: "red_block", name: "赤ブロック", desc: "赤く染めた塊", category: "block", price: 125, durability: 12 },
+  { id: "blue_block", name: "青ブロック", desc: "青く染めた塊", category: "block", price: 440, durability: 12 },
+  { id: "green_block", name: "緑ブロック", desc: "緑に染めた塊", category: "block", price: 480, durability: 12 },
+  { id: "white_block", name: "白ブロック", desc: "白く染めた塊", category: "block", price: 125, durability: 12 },
+  { id: "black_block", name: "黒ブロック", desc: "黒く染めた塊", category: "block", price: 135, durability: 12 },
+  // ---- 素材（追加分2） -----------------------------------------------------
+  { id: "silk", name: "絹", desc: "なめらかな素材", category: "material", price: 36 },
+  { id: "ceramic", name: "陶器", desc: "焼き物の素材", category: "material", price: 22 },
+  { id: "gunpowder", name: "火薬", desc: "硫黄と石炭の粉", category: "material", price: 72 },
+  { id: "milk", name: "ミルク", desc: "料理の素材", category: "material", price: 12 },
+  // ---- 種・作物（追加分2） ---------------------------------------------------
+  { id: "chili_seed", name: "トウガラシの種", desc: "畑に植える種", category: "seed", price: 12 },
+  { id: "lettuce_seed", name: "レタスの種", desc: "畑に植える種", category: "seed", price: 8 },
+  { id: "radish_seed", name: "大根の種", desc: "畑に植える種", category: "seed", price: 8 },
+  { id: "spinach_seed", name: "ホウレンソウの種", desc: "畑に植える種", category: "seed", price: 10 },
+  { id: "chili", name: "トウガラシ", desc: "収穫した作物", category: "crop", price: 14, hunger: 4 },
+  { id: "lettuce", name: "レタス", desc: "収穫した作物", category: "crop", price: 10, hunger: 8 },
+  { id: "radish", name: "大根", desc: "収穫した作物", category: "crop", price: 12, hunger: 10 },
+  { id: "spinach", name: "ホウレンソウ", desc: "収穫した作物", category: "crop", price: 12, hunger: 8 },
+  // ---- 食事（追加分2） -------------------------------------------------------
+  { id: "stir_fry", name: "野菜炒め", desc: "畑の炒め物", category: "food", price: 62, hunger: 42 },
+  { id: "pickles", name: "漬物", desc: "塩漬けの野菜", category: "food", price: 35, hunger: 18 },
+  { id: "fruit_punch", name: "フルーツポンチ", desc: "果物の盛り合わせ", category: "food", price: 88, hunger: 38 },
+  { id: "veggie_soup", name: "野菜スープ", desc: "温かいスープ", category: "food", price: 64, hunger: 36 },
+  { id: "honey_tea", name: "はちみつティー", desc: "甘い温かい飲み物", category: "food", price: 75, hunger: 16 },
+  { id: "cheese", name: "チーズ", desc: "発酵した乳製品", category: "food", price: 46, hunger: 20 },
+  // ---- 合成品（追加分2） -------------------------------------------------------
+  { id: "ceramic_vase", name: "陶器の壺", desc: "焼き物の壺", category: "crafted", price: 125 },
+  { id: "silk_cloth", name: "絹布", desc: "絹を織った布", category: "crafted", price: 135 },
+  { id: "painting", name: "絵画", desc: "紙と花の絵", category: "crafted", price: 110 },
+  { id: "music_box", name: "オルゴール", desc: "音の出る小箱", category: "crafted", price: 150 },
+  // ---- 特殊（追加分2: モブの落とし物） -----------------------------------------
+  { id: "slime_core", name: "スライムコア", desc: "スライムの核", category: "special", price: 160 },
+  { id: "wolf_fang", name: "狼の牙", desc: "狼が落とす牙", category: "special", price: 190 },
+  // ---- 家具（追加分2） -----------------------------------------------------------
+  { id: "stone_fence", name: "石の柵", desc: "石の区切り", category: "furniture", price: 55 },
+  { id: "iron_fence", name: "鉄の柵", desc: "鉄の区切り", category: "furniture", price: 128 },
+  { id: "wooden_gate", name: "木の門", desc: "出入りの門", category: "furniture", price: 65, facility: true },
+  { id: "rug", name: "じゅうたん", desc: "敷く布", category: "furniture", price: 76, facility: true },
 ];
+
+
 
 /**
  * ドット絵アイコンを持つアイテムの ID 一覧。実体は
@@ -214,7 +359,38 @@ export const ITEM_ICON_IDS: readonly string[] = [
   "bench", "chair", "sign_board", "hedge", "planter", "barrel", "crate",
   "fence_wood", "lamp", "item_shelf", "table_round", "tapestry", "bookshelf",
   "sofa", "piano",
+  // 拡張分（ミスリル道具・金属/宝石素材・特殊ブロック）
+  "mithril_axe", "mithril_pickaxe", "mithril_sword", "mithril_hoe",
+  "copper_ore", "copper_ingot", "coal", "flint", "sulfur", "salt",
+  "ruby", "sapphire", "emerald", "diamond", "pearl", "honey", "beeswax", "flower",
+  "copper_block", "coal_block", "bedrock_block", "cactus_block", "leaves_block",
+  "diamond_block", "emerald_block", "ruby_block", "sapphire_block", "magma_block",
+  "honey_block", "mushroom_block", "path_block", "flower_block", "pumpkin_block", "melon_block",
+  // 拡張分（食事・種・作物）
+  "egg", "raw_meat", "mushroom", "apple", "berry", "fish",
+  "cookie", "grilled_meat", "grilled_fish", "omelette", "baked_potato", "stew",
+  "onion_seed", "soybean_seed", "cucumber_seed", "eggplant_seed",
+  "sweet_potato_seed", "pepper_seed", "grape_seed", "turnip_seed",
+  "onion", "soybean", "cucumber", "eggplant", "sweet_potato", "pepper", "grape", "turnip",
+  // 拡張分（合成品・特殊・施設）
+  "rope", "stone_statue", "flower_wreath", "embroidered_cloth", "gem_ring",
+  "pearl_necklace", "honey_candy",
+  "ancient_coin", "ancient_relic", "dragon_scale", "ghost_tear", "golden_key", "star_map",
+  "workbench", "smithing_table", "furnace", "anvil", "storage_chest", "bed",
+  "torch", "campfire", "well", "loom", "cooking_pot", "flower_pot",
+  // 拡張分2
+  "sakura_log", "dark_log", "mossy_stone_block", "cracked_stone_block",
+  "sand_brick_block", "mud_brick_block", "snow_brick_block",
+  "red_block", "blue_block", "green_block", "white_block", "black_block",
+  "silk", "ceramic", "gunpowder", "milk",
+  "chili_seed", "lettuce_seed", "radish_seed", "spinach_seed",
+  "chili", "lettuce", "radish", "spinach",
+  "stir_fry", "pickles", "fruit_punch", "veggie_soup", "honey_tea", "cheese",
+  "ceramic_vase", "silk_cloth", "painting", "music_box",
+  "slime_core", "wolf_fang", "stone_fence", "iron_fence", "wooden_gate", "rug",
 ];
+
+
 
 const ITEM_ICON_ID_SET = new Set(ITEM_ICON_IDS);
 for (const item of ITEMS) {
@@ -299,7 +475,77 @@ export const RECIPES: readonly Recipe[] = [
   { id: "sofa", inputs: { cloth: 3, wood: 2 }, output: "sofa", outputCount: 1 },
   { id: "tapestry", inputs: { cloth: 2, string: 1 }, output: "tapestry", outputCount: 1 },
   { id: "piano", inputs: { wood: 5, iron_ore: 2 }, output: "piano", outputCount: 1 },
+  // 道具（ミスリル段位）
+  { id: "mithril_axe", inputs: { mithril: 3, stick: 2 }, output: "mithril_axe", outputCount: 1 },
+  { id: "mithril_pickaxe", inputs: { mithril: 3, stick: 2 }, output: "mithril_pickaxe", outputCount: 1 },
+  { id: "mithril_sword", inputs: { mithril: 2, stick: 1 }, output: "mithril_sword", outputCount: 1 },
+  { id: "mithril_hoe", inputs: { mithril: 2, stick: 2 }, output: "mithril_hoe", outputCount: 1 },
+  // ブロック（金属・宝石・自然素材）
+  { id: "copper_block", inputs: { copper_ingot: 4 }, output: "copper_block", outputCount: 1 },
+  { id: "coal_block", inputs: { coal: 4 }, output: "coal_block", outputCount: 1 },
+  { id: "diamond_block", inputs: { diamond: 4 }, output: "diamond_block", outputCount: 1 },
+  { id: "emerald_block", inputs: { emerald: 4 }, output: "emerald_block", outputCount: 1 },
+  { id: "ruby_block", inputs: { ruby: 4 }, output: "ruby_block", outputCount: 1 },
+  { id: "sapphire_block", inputs: { sapphire: 4 }, output: "sapphire_block", outputCount: 1 },
+  { id: "honey_block", inputs: { honey: 4 }, output: "honey_block", outputCount: 1 },
+  { id: "mushroom_block", inputs: { mushroom: 4 }, output: "mushroom_block", outputCount: 1 },
+  // 調理（追加分）
+  { id: "cookie", inputs: { wheat: 2, honey: 1 }, output: "cookie", outputCount: 1 },
+  { id: "grilled_meat", inputs: { raw_meat: 1 }, output: "grilled_meat", outputCount: 1 },
+  { id: "grilled_fish", inputs: { fish: 1 }, output: "grilled_fish", outputCount: 1 },
+  { id: "omelette", inputs: { egg: 2 }, output: "omelette", outputCount: 1 },
+  { id: "baked_potato", inputs: { potato: 1 }, output: "baked_potato", outputCount: 1 },
+  { id: "stew", inputs: { potato: 1, carrot: 1, raw_meat: 1 }, output: "stew", outputCount: 1 },
+  { id: "honey_candy", inputs: { honey: 2 }, output: "honey_candy", outputCount: 1 },
+  // 合成品（追加分）
+  { id: "rope", inputs: { string: 2 }, output: "rope", outputCount: 1 },
+  { id: "stone_statue", inputs: { stone: 5 }, output: "stone_statue", outputCount: 1 },
+  { id: "flower_wreath", inputs: { flower: 3, fiber: 1 }, output: "flower_wreath", outputCount: 1 },
+  { id: "embroidered_cloth", inputs: { cloth: 2, flower: 1 }, output: "embroidered_cloth", outputCount: 1 },
+  { id: "gem_ring", inputs: { gold_ingot: 1, ruby: 1 }, output: "gem_ring", outputCount: 1 },
+  { id: "pearl_necklace", inputs: { pearl: 3, string: 1 }, output: "pearl_necklace", outputCount: 1 },
+  // 施設（作業台・鍛冶台・かまど等）
+  { id: "workbench", inputs: { wood: 4 }, output: "workbench", outputCount: 1 },
+  { id: "smithing_table", inputs: { iron_ingot: 2, wood: 2 }, output: "smithing_table", outputCount: 1 },
+  { id: "furnace", inputs: { stone: 5 }, output: "furnace", outputCount: 1 },
+  { id: "anvil", inputs: { iron_ingot: 3 }, output: "anvil", outputCount: 1 },
+  { id: "storage_chest", inputs: { wood: 5 }, output: "storage_chest", outputCount: 1 },
+  { id: "bed", inputs: { cloth: 2, wood: 3 }, output: "bed", outputCount: 1 },
+  { id: "torch", inputs: { stick: 1, coal: 1 }, output: "torch", outputCount: 2 },
+  { id: "campfire", inputs: { wood: 3, coal: 1 }, output: "campfire", outputCount: 1 },
+  { id: "well", inputs: { stone: 4, wood: 2 }, output: "well", outputCount: 1 },
+  { id: "loom", inputs: { wood: 3, string: 2 }, output: "loom", outputCount: 1 },
+  { id: "cooking_pot", inputs: { iron_ingot: 1, stone: 2 }, output: "cooking_pot", outputCount: 1 },
+  { id: "flower_pot", inputs: { clay: 2 }, output: "flower_pot", outputCount: 1 },
+  // 拡張分2（ブロック・料理・合成品）
+  { id: "mossy_stone_block", inputs: { stone: 2, fiber: 1 }, output: "mossy_stone_block", outputCount: 1 },
+  { id: "sand_brick_block", inputs: { sand_block: 4 }, output: "sand_brick_block", outputCount: 1 },
+  { id: "mud_brick_block", inputs: { mud_block: 4 }, output: "mud_brick_block", outputCount: 1 },
+  { id: "snow_brick_block", inputs: { snow_block: 4 }, output: "snow_brick_block", outputCount: 1 },
+  { id: "red_block", inputs: { wool_block: 1, flower: 1 }, output: "red_block", outputCount: 1 },
+  { id: "blue_block", inputs: { wool_block: 1, sapphire: 1 }, output: "blue_block", outputCount: 1 },
+  { id: "green_block", inputs: { wool_block: 1, emerald: 1 }, output: "green_block", outputCount: 1 },
+  { id: "white_block", inputs: { wool_block: 1, salt: 1 }, output: "white_block", outputCount: 1 },
+  { id: "black_block", inputs: { wool_block: 1, coal: 1 }, output: "black_block", outputCount: 1 },
+  { id: "gunpowder", inputs: { sulfur: 1, coal: 1 }, output: "gunpowder", outputCount: 1 },
+  { id: "ceramic", inputs: { clay: 2 }, output: "ceramic", outputCount: 1 },
+  { id: "stir_fry", inputs: { cabbage: 1, pepper: 1, onion: 1 }, output: "stir_fry", outputCount: 1 },
+  { id: "pickles", inputs: { cucumber: 1, salt: 1 }, output: "pickles", outputCount: 1 },
+  { id: "fruit_punch", inputs: { apple: 1, grape: 1, berry: 1 }, output: "fruit_punch", outputCount: 1 },
+  { id: "veggie_soup", inputs: { radish: 1, spinach: 1, onion: 1 }, output: "veggie_soup", outputCount: 1 },
+  { id: "honey_tea", inputs: { honey: 1, herb: 1 }, output: "honey_tea", outputCount: 1 },
+  { id: "cheese", inputs: { milk: 2 }, output: "cheese", outputCount: 1 },
+  { id: "ceramic_vase", inputs: { ceramic: 3 }, output: "ceramic_vase", outputCount: 1 },
+  { id: "silk_cloth", inputs: { silk: 2 }, output: "silk_cloth", outputCount: 1 },
+  { id: "painting", inputs: { paper: 2, flower: 1 }, output: "painting", outputCount: 1 },
+  { id: "music_box", inputs: { wood: 3, iron_ingot: 1 }, output: "music_box", outputCount: 1 },
+  { id: "stone_fence", inputs: { stone: 3 }, output: "stone_fence", outputCount: 1 },
+  { id: "iron_fence", inputs: { iron_ingot: 2 }, output: "iron_fence", outputCount: 1 },
+  { id: "wooden_gate", inputs: { wood: 3, stick: 2 }, output: "wooden_gate", outputCount: 1 },
+  { id: "rug", inputs: { cloth: 2, string: 1 }, output: "rug", outputCount: 1 },
 ];
+
+
 
 export function recipeById(id: unknown): Recipe | null {
   return typeof id === "string" ? RECIPES.find((r) => r.id === id) ?? null : null;
@@ -356,7 +602,21 @@ export const CROPS: readonly CropDef[] = [
   { id: "rice", seedId: "rice_seed", produceId: "rice", growthMinutes: 22, produceCount: 2 },
   { id: "pumpkin", seedId: "pumpkin_seed", produceId: "pumpkin", growthMinutes: 30, produceCount: 1 },
   { id: "melon", seedId: "melon_seed", produceId: "melon", growthMinutes: 30, produceCount: 1 },
+  { id: "onion", seedId: "onion_seed", produceId: "onion", growthMinutes: 14, produceCount: 2 },
+  { id: "soybean", seedId: "soybean_seed", produceId: "soybean", growthMinutes: 16, produceCount: 3 },
+  { id: "cucumber", seedId: "cucumber_seed", produceId: "cucumber", growthMinutes: 15, produceCount: 2 },
+  { id: "eggplant", seedId: "eggplant_seed", produceId: "eggplant", growthMinutes: 20, produceCount: 2 },
+  { id: "sweet_potato", seedId: "sweet_potato_seed", produceId: "sweet_potato", growthMinutes: 18, produceCount: 2 },
+  { id: "pepper", seedId: "pepper_seed", produceId: "pepper", growthMinutes: 18, produceCount: 3 },
+  { id: "grape", seedId: "grape_seed", produceId: "grape", growthMinutes: 26, produceCount: 2 },
+  { id: "turnip", seedId: "turnip_seed", produceId: "turnip", growthMinutes: 12, produceCount: 2 },
+  { id: "chili", seedId: "chili_seed", produceId: "chili", growthMinutes: 18, produceCount: 3 },
+  { id: "lettuce", seedId: "lettuce_seed", produceId: "lettuce", growthMinutes: 12, produceCount: 2 },
+  { id: "radish", seedId: "radish_seed", produceId: "radish", growthMinutes: 16, produceCount: 2 },
+  { id: "spinach", seedId: "spinach_seed", produceId: "spinach", growthMinutes: 13, produceCount: 2 },
 ];
+
+
 
 export function cropById(id: unknown): CropDef | null {
   return typeof id === "string" ? CROPS.find((c) => c.id === id) ?? null : null;
