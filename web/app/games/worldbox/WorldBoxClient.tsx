@@ -55,7 +55,7 @@ import {
   buildCaveLayer, buildDungeonFloor, buildRuins, dungeonHpScale, lightRadiusTiles, makeInstanceSpace, parseInstanceSpace,
   type CaveLayer, type DungeonFloorData, type RuinsMap,
 } from "@/lib/worldbox/instances";
-import { structureById, structuresForChunk, type PlacedStructure } from "@/lib/worldbox/maplogic";
+import { biomeAt, structureById, structuresForChunk, type PlacedStructure } from "@/lib/worldbox/maplogic";
 import { specialObjectById } from "@/lib/worldbox/objects";
 import type { BoardPost } from "@/lib/worldbox/board";
 import { parseSave, serializeSave, type SaveSpace } from "@/lib/worldbox/save";
@@ -78,7 +78,7 @@ import {
   nudgeBobPx, nudgeRingAlpha, stickKnobRadius,
 } from "@/lib/worldbox/affordance";
 import {
-  bgmSceneFor, loadWbSoundSettings, playWbSe, saveWbSoundSettings, seForFxBurst, setWbBgmScene,
+  bgmSceneFor, footstepMaterialFor, loadWbSoundSettings, playWbSe, playWbStep, saveWbSoundSettings, seForFxBurst, setWbBgmScene,
   setWbBgmTension, stopWbBgm, tensionFor, unlockWbAudio, type WbSoundSettings,
 } from "@/lib/worldbox/sound";
 import { useGamesNav } from "../GamesShell";
@@ -3113,7 +3113,9 @@ export default function WorldBoxClient() {
         }
         if (ev.kind === "hit" || ev.kind === "death" || ev.kind === "spawn") {
           // モブ演出: 大きさに応じて粒をスケール。死亡は小さな揺れ、出現はポップも併用
-          playWbSe(seForFxBurst(ev.kind));
+          // 音はプレイヤーからの距離で減衰させる（B4）
+          const evDist = Math.max(Math.abs(ev.x + 0.5 - player.x), Math.abs(ev.y + 0.5 - player.y));
+          playWbSe(seForFxBurst(ev.kind), { distance: evDist });
           spawnMobFx(fxSys, ev.kind, ev.x + 0.5, ev.y + 0.5, { sizeTiles: ev.sizeTiles, color: ev.color });
           if (ev.kind === "death") {
             shake = startShake(shake, (ev.sizeTiles ?? 1) >= 4 ? 6 : 3, now);
@@ -3137,7 +3139,7 @@ export default function WorldBoxClient() {
           continue;
         }
         spawnBurst(fxSys, ev.kind, ev.x + 0.5, ev.y + 0.5);
-        playWbSe(seForFxBurst(ev.kind));
+        playWbSe(seForFxBurst(ev.kind), { distance: Math.max(Math.abs(ev.x + 0.5 - player.x), Math.abs(ev.y + 0.5 - player.y)) });
         if (ev.kind === "chop" || ev.kind === "mine") shake = startShake(shake, 2, now);
         else if (ev.kind === "debris" || ev.kind === "build") shake = startShake(shake, 3, now);
         if (ev.kind === "place" || ev.kind === "build") pops.set(`${ev.x},${ev.y}`, now);
@@ -3152,7 +3154,12 @@ export default function WorldBoxClient() {
             playWbSe("splash");
           } else {
             spawnBurst(fxSys, "step", player.x, player.y + 0.05);
-            playWbSe("step");
+            // 足音はバイオーム/空間で素材を変える（B4）
+            playWbStep(footstepMaterialFor({
+              biome: space === "world" ? biomeAt(MAP_SEED, Math.floor(player.x), Math.floor(player.y)) : undefined,
+              space,
+              swimming: false,
+            }));
           }
         }
       }
@@ -4575,7 +4582,7 @@ export default function WorldBoxClient() {
           type="button"
           aria-label="メニュー"
           aria-expanded={menuOpen}
-          onClick={() => setMenuOpen((v) => !v)}
+          onClick={() => { playWbSe(menuOpen ? "close" : "open"); setMenuOpen((v) => !v); }}
           style={{
             ...btn, position: "absolute", left: 10, top: 10, minHeight: 40, minWidth: 44, zIndex: 7,
             padding: "4px 10px", fontSize: 18, lineHeight: 1, background: "rgba(0,0,0,0.55)", color: "#fff",
@@ -4612,6 +4619,7 @@ export default function WorldBoxClient() {
                   type="button"
                   style={{ ...btn, background: "rgba(255,255,255,0.10)", color: "#fff" }}
                   onClick={() => {
+                    playWbSe("click");
                     a.run();
                     setMenuOpen(false);
                   }}

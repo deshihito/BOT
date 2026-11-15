@@ -248,6 +248,10 @@ export const WB_SE_MIN_INTERVAL_MS: Partial<Record<WbSeName, number>> = {
   dash: 140,
   swing: 90,
   splash: 120,
+  hit: 60,
+  kill: 150,
+  coin: 90,
+  success: 150,
 };
 
 /** fx.ts のバースト種別 → SE。演出の粒と音は同じイベントから出す。 */
@@ -263,6 +267,64 @@ export function seForFxBurst(kind: FxBurstKind): WbSeName {
       return kind;
   }
 }
+
+/** 足音の素材（B4）。バイオーム/空間から決める。 */
+export type FootstepMaterial = "grass" | "stone" | "wood" | "snow" | "sand" | "water";
+
+/**
+ * 足音の素材を決める（純粋ロジック）。
+ * 泳ぎ中は水、テント内は木の床、ロビー/洞窟/遺跡/ダンジョンは石、
+ * ワールドはバイオームで草・雪・砂・水・石に分ける。
+ */
+export function footstepMaterialFor(input: { biome?: string; space?: string; swimming?: boolean }): FootstepMaterial {
+  if (input.swimming) return "water";
+  const space = input.space ?? "world";
+  if (space === "tent") return "wood";
+  if (space === "lobby") return "stone";
+  if (space.startsWith("cave:") || space.startsWith("dungeon:") || space.startsWith("ruins:")) return "stone";
+  switch (input.biome) {
+    case "snowfield":
+    case "snow_forest":
+      return "snow";
+    case "beach":
+    case "dryland":
+      return "sand";
+    case "lake":
+    case "wetland":
+      return "water";
+    case "highland":
+      return "stone";
+    default:
+      return "grass";
+  }
+}
+
+/** 距離減衰の到達距離（タイル）。ここより遠い音は下限ゲインで聞こえる。 */
+export const SE_DISTANCE_MAX_TILES = 12;
+/** 距離減衰の下限ゲイン（遠くても完全には消さない）。 */
+export const SE_DISTANCE_MIN_GAIN = 0.15;
+
+/** 距離（タイル、チェビシェフ）からゲイン倍率を出す（純粋ロジック）。 */
+export function distanceGain(distanceTiles: number): number {
+  if (distanceTiles <= 0) return 1;
+  return Math.max(SE_DISTANCE_MIN_GAIN, 1 - distanceTiles / SE_DISTANCE_MAX_TILES);
+}
+
+/**
+ * 再生ごとの微変動（B4）。同じ SE でも毎回まったく同じ音にしないための
+ * ピッチ ±6%・音量 ±8% のゆらぎ。再生時のみ使い、ゲーム状態には使わない。
+ */
+export function seVariation(): { pitch: number; gain: number } {
+  return { pitch: 0.94 + Math.random() * 0.12, gain: 0.92 + Math.random() * 0.16 };
+}
+
+/**
+ * 同時発音の整理（B4）: この時間窓の中にこの発数を超えたら、
+ * tier 4 以下の SE（振り・足音・UI 等）は落とす。tier 1/2（撃破・命中・
+ * コイン・エラー）は常に通す。窓の外へ出た発音は数えない。
+ */
+export const SE_BURST_WINDOW_MS = 80;
+export const SE_BURST_MAX = 6;
 
 /* ================= 設定（localStorage） ================= */
 
@@ -349,6 +411,13 @@ function applySettings(): void {
 
 /* --- 合成の部品 --- */
 
+/**
+ * 現在の SE 1発分のゆらぎ（playWbSe がレシピ呼び出しの間だけ立てる）。
+ * BGM は dest を明示して呼ぶため影響を受けない。SE レシピは dest を渡さない。
+ */
+let sePitch = 1;
+let seGain = 1;
+
 function tone(opts: {
   freq: number;
   freqEnd?: number;
@@ -360,12 +429,14 @@ function tone(opts: {
 }): void {
   if (!ctx || !seBus) return;
   const t = opts.at ?? ctx.currentTime;
+  const isSe = opts.dest === undefined;
+  const pitch = isSe ? sePitch : 1;
   const osc = ctx.createOscillator();
   const g = ctx.createGain();
   osc.type = opts.type ?? "triangle";
-  osc.frequency.setValueAtTime(Math.max(20, opts.freq), t);
-  if (opts.freqEnd) osc.frequency.exponentialRampToValueAtTime(Math.max(20, opts.freqEnd), t + opts.dur);
-  const peak = opts.gain ?? 0.2;
+  osc.frequency.setValueAtTime(Math.max(20, opts.freq * pitch), t);
+  if (opts.freqEnd) osc.frequency.exponentialRampToValueAtTime(Math.max(20, opts.freqEnd * pitch), t + opts.dur);
+  const peak = (opts.gain ?? 0.2) * (isSe ? seGain : 1);
   g.gain.setValueAtTime(0.0001, t);
   g.gain.exponentialRampToValueAtTime(peak, t + 0.008);
   g.gain.exponentialRampToValueAtTime(0.0001, t + opts.dur);
@@ -397,12 +468,14 @@ function noise(opts: {
   src.buffer = noiseBuffer;
   src.loop = true;
   const filter = ctx.createBiquadFilter();
+  const isSe = opts.dest === undefined;
+  const pitch = isSe ? sePitch : 1;
   filter.type = opts.type ?? "bandpass";
   filter.Q.value = 0.9;
-  filter.frequency.setValueAtTime(opts.filterFrom ?? 1800, t);
-  if (opts.filterTo) filter.frequency.exponentialRampToValueAtTime(Math.max(30, opts.filterTo), t + opts.dur);
+  filter.frequency.setValueAtTime((opts.filterFrom ?? 1800) * pitch, t);
+  if (opts.filterTo) filter.frequency.exponentialRampToValueAtTime(Math.max(30, opts.filterTo * pitch), t + opts.dur);
   const g = ctx.createGain();
-  const peak = opts.gain ?? 0.16;
+  const peak = (opts.gain ?? 0.16) * (isSe ? seGain : 1);
   g.gain.setValueAtTime(0.0001, t);
   g.gain.exponentialRampToValueAtTime(peak, t + 0.012);
   g.gain.exponentialRampToValueAtTime(0.0001, t + opts.dur);
@@ -425,6 +498,19 @@ function pluck(freq: number, at: number, gain: number, dest: AudioNode, dur = 0.
 function tierGain(name: WbSeName, local = 1): number {
   return WB_SE_TIER_GAIN[WB_SE_TIERS[name]] * local;
 }
+
+/** 足音の素材ごとのノイズ色（B4）。草=土ぼこり、石=硬いコツッ、木=ノック、雪=柔らかいサクッ、砂=サラッ、水=チャプッ。 */
+const STEP_MATERIAL_NOISE: Record<FootstepMaterial, { dur: number; gain: number; type: BiquadFilterType; from: number; to?: number }> = {
+  grass: { dur: 0.05, gain: 1.4, type: "lowpass", from: 700 },
+  stone: { dur: 0.04, gain: 1.1, type: "bandpass", from: 1900 },
+  wood: { dur: 0.06, gain: 1.2, type: "bandpass", from: 950 },
+  snow: { dur: 0.09, gain: 1.2, type: "lowpass", from: 420 },
+  sand: { dur: 0.07, gain: 1.3, type: "bandpass", from: 1100 },
+  water: { dur: 0.1, gain: 1.2, type: "bandpass", from: 900, to: 2200 },
+};
+
+/** playWbStep が1発分だけ立てる足音の素材（既定は草）。 */
+let currentStepMaterial: FootstepMaterial = "grass";
 
 const SE_RECIPES: Record<WbSeName, (t: number) => void> = {
   // 木を打つ: 低い木の響き＋繊維のバリッというノイズ
@@ -476,9 +562,15 @@ const SE_RECIPES: Record<WbSeName, (t: number) => void> = {
     tone({ freq: 740, freqEnd: 1180, dur: 0.07, type: "sine", gain: tierGain("splash", 0.6), at: t + 0.06 });
     tone({ freq: 620, freqEnd: 990, dur: 0.07, type: "sine", gain: tierGain("splash", 0.5), at: t + 0.13 });
   },
-  // 足音: ごく小さい土ぼこりの音（tier5）
+  // 足音: 素材でノイズ色を変える（tier5）。石と木は短いノック音も重ねる。
   step: (t) => {
-    noise({ dur: 0.05, gain: tierGain("step", 1.4), at: t, type: "lowpass", filterFrom: 700 });
+    const m = STEP_MATERIAL_NOISE[currentStepMaterial];
+    noise({ dur: m.dur, gain: tierGain("step", m.gain), at: t, type: m.type, filterFrom: m.from, filterTo: m.to });
+    if (currentStepMaterial === "stone") {
+      tone({ freq: 1450, dur: 0.025, type: "square", gain: tierGain("step", 0.5), at: t });
+    } else if (currentStepMaterial === "wood") {
+      tone({ freq: 320, freqEnd: 180, dur: 0.05, type: "triangle", gain: tierGain("step", 0.9), at: t });
+    }
   },
   // ダッシュ: 風の筋
   dash: (t) => {
@@ -557,23 +649,54 @@ const SE_RECIPES: Record<WbSeName, (t: number) => void> = {
 };
 
 const lastPlayedAt = new Map<WbSeName, number>();
+/** 同時発音の整理用: 直近の SE 再生時刻（performance.now）。 */
+const recentSeTimes: number[] = [];
 
-export function playWbSe(name: WbSeName): void {
+export type WbSeOptions = {
+  /** ピッチ倍率（未指定は seVariation のゆらぎ）。 */
+  pitch?: number;
+  /** ゲイン倍率（未指定は seVariation のゆらぎ）。 */
+  gain?: number;
+  /** 音源までの距離（タイル、チェビシェフ）。遠いほど小さく聞こえる。 */
+  distance?: number;
+  /** 足音の素材（step のみ）。 */
+  material?: FootstepMaterial;
+};
+
+export function playWbSe(name: WbSeName, opts: WbSeOptions = {}): void {
   loadWbSoundSettings();
   if (!settings.se || !ctx || !seBus) return;
+  const now = performance.now();
   const minInterval = WB_SE_MIN_INTERVAL_MS[name];
   if (minInterval) {
-    const now = performance.now();
     const last = lastPlayedAt.get(name) ?? 0;
     if (now - last < minInterval) return;
     lastPlayedAt.set(name, now);
   }
+  // 同時発音の整理: 短い窓に詰め込みすぎたら tier 4 以下を落とす。
+  while (recentSeTimes.length > 0 && now - recentSeTimes[0] > SE_BURST_WINDOW_MS) recentSeTimes.shift();
+  if (recentSeTimes.length >= SE_BURST_MAX && WB_SE_TIERS[name] >= 4) return;
+  recentSeTimes.push(now);
+  const variation = seVariation();
+  const pitch = opts.pitch ?? variation.pitch;
+  const gain = (opts.gain ?? variation.gain) * distanceGain(opts.distance ?? 0);
   try {
     if (ctx.state === "suspended") void ctx.resume().catch(() => {});
+    sePitch = pitch;
+    seGain = gain;
+    if (name === "step") currentStepMaterial = opts.material ?? "grass";
     SE_RECIPES[name](ctx.currentTime + 0.01);
   } catch {
     // 音が出ない環境でもゲームは止めない
+  } finally {
+    sePitch = 1;
+    seGain = 1;
   }
+}
+
+/** 素材別足音（B4）。素材は footstepMaterialFor で決めて渡す。 */
+export function playWbStep(material: FootstepMaterial): void {
+  playWbSe("step", { material });
 }
 
 /* --- BGM シーケンサ（決定的ループ、ルックアヘッド方式） --- */
