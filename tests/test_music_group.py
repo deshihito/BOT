@@ -189,10 +189,11 @@ class SubcommandImplementationTest(Base):
         return interaction, mock
 
     def test_music_actions_are_declared(self):
-        # /vc パネルの音楽ジャンルに出る入口はこの7件（core/vc/common.py）
+        # /vc パネルの音楽ジャンルに出る入口はこの8件（core/vc/common.py。ラジオ追加で7→8）
         values = [value for _label, value in VOICE_ACTIONS_BY_GENRE['music']]
         self.assertEqual(values, ['music_panel', 'music_playlist', 'music_spatial',
-                                  'music_autoplay', 'music_queue', 'music_search', 'music_files'])
+                                  'music_autoplay', 'music_queue', 'music_search', 'music_files',
+                                  'radio_panel'])
         # 音楽 cog 側の操作一覧（MUSIC_ACTIONS）も現行の操作集合と一致する
         names = sorted(c.value for c in sio_music.VoiceCog.MUSIC_ACTIONS)
         self.assertEqual(names, sorted([

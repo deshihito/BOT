@@ -436,6 +436,7 @@ def build_general_actions(general_actions: dict, general_genres: dict) -> list[A
 VC_SHORTCUT_ACTIONS: tuple[tuple[str, str], ...] = (
     ("VC参加", "join"), ("VC退出", "leave"), ("VC状態", "status"),
     ("音楽操作パネル", "music_panel"),
+    ("ラジオ", "radio_panel"),
     # 機能数再編: 音楽パネルのサブフローを独立入口化（実体は音楽パネルと共有。
     # パネル側の正リストは core/vc/common.py の VOICE_ACTIONS_BY_GENRE）。
     ("プレイリスト管理", "music_playlist"), ("立体音響設定", "music_spatial"),

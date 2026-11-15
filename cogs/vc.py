@@ -13,6 +13,7 @@
     transcription core/vc/transcription/entry.py  TranscriptionCog
     voicechanger  core/vc/voicechanger/entry.py   VoiceChangerCog
     karaoke       core/vc/karaoke/entry.py        KaraokeCog
+    radio         core/vc/radio.py                RadioCog
 
 旧 cogs/sio_*.py の入口ファイルは廃止され、その本体（Cog の合成クラスや
 setup）は各機能フォルダの entry.py へ移設した（saito のみ実装本体
@@ -30,6 +31,7 @@ from discord.ext import commands  # noqa: F401
 #   実装: core/vc/music/（本体は entry.py が旧入口の合成クラスを持つ）
 # ============================================================
 from core.vc.music.entry import VoiceCog  # noqa: F401
+from core.vc.radio import RadioCog  # noqa: F401
 from core.vc.music.common import niconico_url_kind  # noqa: F401
 
 # ============================================================
@@ -96,6 +98,7 @@ from core.vc import saito as _saito
 from core.vc import voice_entry as _voice_entry
 from core.vc.globalvc import entry as _globalvc_entry
 from core.vc.karaoke import entry as _karaoke_entry
+from core.vc import radio as _radio
 from core.vc.music import entry as _music_entry
 from core.vc.rec import entry as _rec_entry
 from core.vc.transcription import entry as _transcription_entry
@@ -110,6 +113,7 @@ _FEATURE_SETUPS = (
     ("transcription", _transcription_entry.setup),
     ("voicechanger", _voicechanger_entry.setup),
     ("karaoke", _karaoke_entry.setup),
+    ("radio", _radio.setup),
 )
 
 
