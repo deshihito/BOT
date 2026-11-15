@@ -6,8 +6,75 @@
 import { mobById, mobsForChunk, largeMobsForChunk, mobFootprintBounds, mobOccupiesTile, type MobDef, type PlacedMob } from "./mobs";
 import { CHUNK_SIZE } from "./maplogic";
 
-/** 倒したモブが同じアンカーに再出現するまでの時間。 */
-export const MOB_RESPAWN_MS = 5 * 60 * 1000;
+/** 倒したモブが同じアンカーに再出現するまでの基本時間（15分）。 */
+export const MOB_RESPAWN_MS = 15 * 60 * 1000;
+/** 個体キーから決定的に加算する追加遅延の上限（0〜10分。同時復活の分散）。 */
+export const MOB_RESPAWN_JITTER_MS = 10 * 60 * 1000;
+
+/** 個体キー（"mobId@x,y"）から決定的に 0〜MOB_RESPAWN_JITTER_MS の追加遅延を返す。 */
+export function mobRespawnDelayMs(key: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < key.length; i++) {
+    h ^= key.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return (h >>> 0) % (MOB_RESPAWN_JITTER_MS + 1);
+}
+
+/**
+ * モブの素材スプライト（確定素材セット td16 由来、16×16）。
+ * 実体は web/public/img/worldbox/mobs/ に置く。ここに無い種は
+ * MOB_SPRITE_FALLBACK に明示したものだけが図形フォールバックで描かれる。
+ */
+export const MOB_SPRITE: Readonly<Record<string, string>> = {
+  chicken: "/img/worldbox/mobs/chicken.png",
+  rabbit: "/img/worldbox/mobs/rabbit.png",
+  frog: "/img/worldbox/mobs/frog.png",
+  crab: "/img/worldbox/mobs/crab.png",
+  bee: "/img/worldbox/mobs/bee.png",
+  slime: "/img/worldbox/mobs/slime.png",
+  cave_bat: "/img/worldbox/mobs/bat.png",
+  pig: "/img/worldbox/mobs/pig.png",
+  sheep: "/img/worldbox/mobs/sheep.png",
+  cow: "/img/worldbox/mobs/cow.png",
+  deer: "/img/worldbox/mobs/deer.png",
+  horse: "/img/worldbox/mobs/horse.png",
+  boar: "/img/worldbox/mobs/boar.png",
+  wolf: "/img/worldbox/mobs/wolf.png",
+  spider: "/img/worldbox/mobs/spider.png",
+  skeleton: "/img/worldbox/mobs/skeleton.png",
+  ghost: "/img/worldbox/mobs/ghost.png",
+  bear: "/img/worldbox/mobs/bear.png",
+  golem: "/img/worldbox/mobs/golem.png",
+  treant: "/img/worldbox/mobs/treant.png",
+  dungeon_dragon: "/img/worldbox/mobs/dragon.png",
+  sea_serpent: "/img/worldbox/mobs/serpent.png",
+  spider_queen: "/img/worldbox/mobs/spider.png",
+  giant_golem: "/img/worldbox/mobs/golem.png",
+  ancient_turtle: "/img/worldbox/mobs/turtle.png",
+  world_dragon: "/img/worldbox/mobs/dragon.png",
+};
+
+/** 素材が無い種の明示フォールバック（最小限の図形描画に落とす種）。 */
+export const MOB_SPRITE_FALLBACK: ReadonlySet<string> = new Set(["mouse", "ogre", "giant"]);
+
+/** スプライト指定の整合チェック（テスト用）: 実在モブのみ・全モブがどちらかを持つ。 */
+export function validateMobSprites(): string[] {
+  const errors: string[] = [];
+  for (const id of Object.keys(MOB_SPRITE)) {
+    if (!mobById(id)) errors.push(`sprite for unknown mob ${id}`);
+  }
+  for (const id of MOB_SPRITE_FALLBACK) {
+    if (!mobById(id)) errors.push(`fallback for unknown mob ${id}`);
+    if (MOB_SPRITE[id]) errors.push(`${id}: in both sprite and fallback`);
+  }
+  return errors;
+}
+
+/** そのモブが素材スプライトか明示フォールバックのどちらかを持つか。 */
+export function mobHasVisual(id: string): boolean {
+  return Boolean(MOB_SPRITE[id]) || MOB_SPRITE_FALLBACK.has(id);
+}
 /** 攻撃が届く距離（プレイヤーのタイルからモブ占有範囲までのチェビシェフ距離）。 */
 export const MOB_ATTACK_RANGE = 1;
 /** サーバー側の距離検証の上限（タイル行為と同じ 2。占有範囲までの距離で測る）。 */
@@ -149,6 +216,7 @@ export function applyMobAttack(
   power: number,
   now: number,
   rng: () => number,
+  mobKey?: string,
 ): MobAttackResult | { error: "mob_dead" } {
   const cur = mobHpNow(def, state, now);
   if (!cur.alive) return { error: "mob_dead" };
@@ -160,7 +228,10 @@ export function applyMobAttack(
     const n = entry.min + Math.floor(rng() * (entry.max - entry.min + 1));
     if (n > 0) gained[entry.itemId] = (gained[entry.itemId] ?? 0) + n;
   }
-  return { state: { hp: 0, deadUntil: now + MOB_RESPAWN_MS }, hp: 0, dead: true, gained };
+  // 再出現は基本15分＋個体キー決定的な追加遅延（0〜10分）で同時復活を分散する。
+  // deadUntil に加算済みの値を保存するので、mobHpNow 側は deadUntil 判定だけで一貫する。
+  const delay = mobKey ? mobRespawnDelayMs(mobKey) : 0;
+  return { state: { hp: 0, deadUntil: now + MOB_RESPAWN_MS + delay }, hp: 0, dead: true, gained };
 }
 
 /** 指定アンカー（中心タイル）における占有タイルキー一覧（"x,y"）。 */
