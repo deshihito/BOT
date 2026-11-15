@@ -219,6 +219,65 @@ test("移動: 空枠から・同枠は現状維持、不正な住所は null", (
   assert.equal(C.parseContainerSlotRef({ side: "container", index: 15 }, 15), null);
 });
 
+// ---------- S4: コンテナ保存の空間修飾キー ----------
+
+// 実モジュール（bot-api だけスタブ）を空間ごとに分けて検証する
+const s4BotApiStubUrl = dataUrl(`
+const store = new Map();
+export function isBotApiConfigured() { return true; }
+export async function kvGet(ns, key) { const v = store.get(ns + " " + key); return v === undefined ? null : v; }
+export async function kvSet(ns, key, value) { store.set(ns + " " + key, value); }
+export async function kvDelete(ns, key) { store.delete(ns + " " + key); }
+export async function kvList(ns) { const m = new Map(); for (const [k, v] of store) if (k.startsWith(ns + " ")) m.set(k.slice(ns.length + 1), v); return m; }
+export function __rawKeys() { return [...store.keys()]; }
+export function __seedRaw(ns, key, value) { store.set(ns + " " + key, value); }
+export function __clear() { store.clear(); }
+`);
+const s4BotApi = await import(s4BotApiStubUrl);
+const containersOnlineUrl = dataUrl(
+  transpile("worldbox/containers-online.ts")
+    .replaceAll('"../bot-api"', JSON.stringify(s4BotApiStubUrl))
+    .replaceAll('"./containers"', JSON.stringify(containersUrl))
+    .replaceAll('"./tiles"', JSON.stringify(tilesUrl)),
+);
+const CONLINE = await import(containersOnlineUrl);
+
+test("containers-online(S4): 同座標でも空間が違えば中身は衝突しない", async () => {
+  s4BotApi.__clear();
+  const worldState = C.emptyContainer(ME_ID, "barrel");
+  worldState.slots[0] = slot("wood", 5);
+  const caveState = C.emptyContainer(ME_ID, "barrel");
+  caveState.slots[0] = slot("stone", 7);
+  assert.equal(await CONLINE.storeContainer("world", 3, 4, worldState), true);
+  assert.equal(await CONLINE.storeContainer("cave:10,20:0", 3, 4, caveState), true);
+  assert.deepEqual(await CONLINE.loadContainer("world", 3, 4, "barrel"), worldState);
+  assert.deepEqual(await CONLINE.loadContainer("cave:10,20:0", 3, 4, "barrel"), caveState);
+  assert.deepEqual(await CONLINE.loadContainer("tent", 3, 4, "barrel"), null);
+  assert.equal(CONLINE.containerKey("world", 3, 4), "world|3,4");
+  assert.equal(CONLINE.containerKey("cave:10,20:0", 3, 4), "cave:10,20:0|3,4");
+});
+
+test("containers-online(S4): 旧形式のワールド分は読めて、書き込みで新キーへ移行する", async () => {
+  s4BotApi.__clear();
+  const legacy = C.emptyContainer(ME_ID, "barrel");
+  legacy.slots[1] = slot("wood", 2);
+  s4BotApi.__seedRaw("worldbox_containers", "3,4", C.serializeContainerState(legacy));
+  // 旧キーだけの状態でも読める
+  assert.deepEqual(await CONLINE.loadContainer("world", 3, 4, "barrel"), legacy);
+  // 他空間からは旧キーを見ない
+  assert.deepEqual(await CONLINE.loadContainer("cave:10,20:0", 3, 4, "barrel"), null);
+  // 書き込むと新キーへ移行する
+  const next = C.emptyContainer(ME_ID, "barrel");
+  next.slots[1] = slot("wood", 3);
+  assert.equal(await CONLINE.storeContainer("world", 3, 4, next), true);
+  assert.deepEqual(await CONLINE.loadContainer("world", 3, 4, "barrel"), next);
+  assert.ok(s4BotApi.__rawKeys().includes("worldbox_containers world|3,4"));
+  // 削除は新旧両方のキーを消す
+  assert.equal(await CONLINE.storeContainer("world", 3, 4, null), true);
+  assert.deepEqual(await CONLINE.loadContainer("world", 3, 4, "barrel"), null);
+  assert.equal(s4BotApi.__rawKeys().length, 0, "旧キーも残らない");
+});
+
 // ---------- API（コンテナ＋タイルの not_empty） ----------
 
 const subdomainUrl = dataUrl(transpile("subdomain.ts"));
@@ -254,8 +313,8 @@ const containersOnlineStubUrl = dataUrl(`
 import { parseContainerState, serializeContainerState } from ${JSON.stringify(containersUrl)};
 const store = (globalThis.__wbContainers ??= new Map());
 export function isContainersEnabled() { return true; }
-export async function loadContainer(x, y, itemId) { const v = store.get(x + "," + y); return v === undefined ? null : parseContainerState(v, itemId); }
-export async function storeContainer(x, y, state) { if (state === null) store.delete(x + "," + y); else store.set(x + "," + y, serializeContainerState(state)); return true; }
+export async function loadContainer(space, x, y, itemId) { const v = store.get(space + "|" + x + "," + y); return v === undefined ? null : parseContainerState(v, itemId); }
+export async function storeContainer(space, x, y, state) { if (state === null) store.delete(space + "|" + x + "," + y); else store.set(space + "|" + x + "," + y, serializeContainerState(state)); return true; }
 `);
 const nationsOnlineStubUrl = dataUrl(`
 export function isNationsEnabled() { return true; }
@@ -280,6 +339,7 @@ function routeImport(file, replacements) {
   for (const [from, to] of replacements) code = code.replaceAll(from, JSON.stringify(to));
   return import(dataUrl(code));
 }
+const userLockUrl = dataUrl(transpile("worldbox/user-lock.ts"));
 const containersRoute = await routeImport("api/worldbox/containers/route.ts", [
   ['"next/server"', nextServerStubUrl],
   ['"@/lib/auth"', authUrl],
@@ -293,6 +353,7 @@ const containersRoute = await routeImport("api/worldbox/containers/route.ts", [
   ['"@/lib/worldbox/tiles-online"', tilesOnlineStubUrl],
   ['"@/lib/worldbox/containers"', containersUrl],
   ['"@/lib/worldbox/containers-online"', containersOnlineStubUrl],
+  ['"@/lib/worldbox/user-lock"', userLockUrl],
 ]);
 const tilesRoute = await routeImport("api/worldbox/tiles/route.ts", [
   ['"next/server"', nextServerStubUrl],
@@ -310,6 +371,7 @@ const tilesRoute = await routeImport("api/worldbox/tiles/route.ts", [
   ['"@/lib/worldbox/war-online"', warsOnlineStubUrl],
   ['"@/lib/worldbox/containers"', containersUrl],
   ['"@/lib/worldbox/containers-online"', containersOnlineStubUrl],
+  ['"@/lib/worldbox/user-lock"', userLockUrl],
 ]);
 
 process.env["DISCORD_SESSION" + "_SECRET"] = "worldbox-containers-test-secret";
@@ -345,6 +407,8 @@ function findGrass() {
 }
 const GRASS = findGrass();
 const KEY = T.tileKey(GRASS.x, GRASS.y);
+// コンテナ保存のキーは空間修飾つき（S4）。タイル上書きのキーは素の "x,y" のまま。
+const CKEY = `world|${KEY}`;
 
 function resetStores() {
   globalThis.__wbContainerTiles?.clear();
@@ -415,7 +479,7 @@ test("API(containers): 出し入れが保存され、GET に反映される", as
   const movedData = await moved.json();
   assert.deepEqual(movedData.container.slots[2], { id: "wood", count: 5 });
   assert.equal(inv.countItem(movedData.profile, "wood"), 0);
-  assert.ok(globalThis.__wbContainers.has(KEY), "コンテナ状態が保存される");
+  assert.ok(globalThis.__wbContainers.has(CKEY), "コンテナ状態が保存される");
 
   const got = await containersRoute.GET(apiRequest(`${URL_C}?x=${GRASS.x}&y=${GRASS.y}`, "GET", cookie));
   assert.deepEqual((await got.json()).container.slots[2], { id: "wood", count: 5 });
@@ -486,7 +550,28 @@ test("API(tiles): 中身がある樽は掘れず、空にすると回収でき�
   assert.equal(dug.status, 200);
   assert.deepEqual((await dug.json()).gained, { barrel: 1 });
   assert.equal(globalThis.__wbContainerTiles.has(KEY), false, "上書きが消える");
-  assert.equal(globalThis.__wbContainers.has(KEY), false, "コンテナ状態も消える");
+  assert.equal(globalThis.__wbContainers.has(CKEY), false, "コンテナ状態も消える");
+});
+
+test("API(tiles, S4): 同じ樽への並行 mine_block は1件だけ成功する（二重掘りの回帰防止）", async () => {
+  resetStores();
+  seedProfile(MY_KEY, profWith([slot("barrel", 1), null, null, null, null], emptySlots(10)));
+  const cookie = sessionCookie(ME, "owner");
+  const placed = await tilesRoute.POST(apiRequest(URL_T, "POST", cookie, {
+    action: "place_block", x: GRASS.x, y: GRASS.y, itemId: "barrel",
+  }));
+  assert.equal(placed.status, 200);
+  // 二重タップ/リトライを再現して同時に掘る
+  const [first, second] = await Promise.all([
+    tilesRoute.POST(apiRequest(URL_T, "POST", cookie, { action: "mine_block", x: GRASS.x, y: GRASS.y })),
+    tilesRoute.POST(apiRequest(URL_T, "POST", cookie, { action: "mine_block", x: GRASS.x, y: GRASS.y })),
+  ]);
+  const statuses = [first.status, second.status].sort();
+  assert.deepEqual(statuses, [200, 409], "片方だけが掘れて、もう片方は失敗する");
+  const okRes = first.status === 200 ? first : second;
+  assert.deepEqual((await okRes.json()).gained, { barrel: 1 });
+  const badRes = first.status === 200 ? second : first;
+  assert.equal((await badRes.json()).error, "no_block", "掘られた後のブロックは無い");
 });
 
 // ---------- クライアント配線 ----------
@@ -507,4 +592,10 @@ test("クライアント: コンテナのタップ分岐・パネル・回収が
   const routeSrc = fs.readFileSync(path.join(rootDir, "app/api/worldbox/tiles/route.ts"), "utf8");
   assert.ok(routeSrc.includes("not_empty"), "タイルルートに not_empty 検証が無い");
   assert.ok(routeSrc.includes("loadContainer"), "タイルルートがコンテナ状態を見ていない");
+  // S4: コンテナキーは空間修飾つき、出し入れはユーザー単位ロックで直列化する
+  const containersRouteSrc = fs.readFileSync(path.join(rootDir, "app/api/worldbox/containers/route.ts"), "utf8");
+  assert.ok(containersRouteSrc.includes("withUserLock(ownerKey"), "コンテナルートがユーザー単位で直列化されていない（S4）");
+  assert.ok(containersRouteSrc.includes('loadContainer("world"'), "コンテナルートが空間つきキーを使っていない（S4）");
+  const containersOnlineSrc = fs.readFileSync(path.join(libDir, "worldbox/containers-online.ts"), "utf8");
+  assert.ok(containersOnlineSrc.includes("containerKey"), "空間修飾キー containerKey が無い（S4）");
 });

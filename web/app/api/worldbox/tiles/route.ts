@@ -15,6 +15,7 @@ import { loadWarState } from "@/lib/worldbox/war-online";
 import { canBreakOthersBlock } from "@/lib/worldbox/war";
 import { containerIsEmpty, isContainerItem } from "@/lib/worldbox/containers";
 import { loadContainer, storeContainer } from "@/lib/worldbox/containers-online";
+import { withUserLock } from "@/lib/worldbox/user-lock";
 import {
   isTilesEnabled, loadTileOverride, loadTileOverrides, storeTileOverride,
 } from "@/lib/worldbox/tiles-online";
@@ -143,86 +144,96 @@ export async function POST(request: Request) {
   const tx = typeof fields.x === "number" ? Math.floor(fields.x) : -1;
   const ty = typeof fields.y === "number" ? Math.floor(fields.y) : -1;
   const hasCoord = typeof fields.x === "number" && typeof fields.y === "number";
-  const current = hasCoord ? await loadTileOverride(tx, ty) : null;
-  const profile = await loadProfile(ownerKey);
-  const map = worldTileSource();
-  let result: TileActionResult;
-  /** 掘り出す対象が収納コンテナなら、そのアイテム ID（回収後に状態を消す）。 */
-  let minedContainerItem: string | null = null;
-  if (fields.action === "place_block") {
-    // ユニオンマーク（首都）の保護はルート側の真値で判定する
-    const nationsState = await loadNationsState();
-    const capitals = Object.values(nationsState.nations).map((n) => n.capital);
-    result = applyPlaceBlock(
-      current, profile, map, ownerKey, fields.x, fields.y, fields.itemId, Date.now(),
-      {
-        onCapital: hasCoord && capitals.some((c) => c.x === tx && c.y === ty),
-      },
-    );
-  } else if (fields.action === "mine_block") {
-    // 収納コンテナ（樽・宝箱）は中身が入っている間は回収できない
-    const blockItemId =
-      current && isOverrideActive(current, Date.now()) ? current.block?.itemId : undefined;
-    if (blockItemId && isContainerItem(blockItemId)) {
-      const state = await loadContainer(tx, ty, blockItemId);
-      if (state && !containerIsEmpty(state)) {
-        return NextResponse.json({ error: "not_empty" }, { status: 409, headers: NO_STORE });
-      }
-      minedContainerItem = blockItemId;
-    }
-    // 戦争中の他者ブロック破壊: 攻撃側の国民が、防衛側の首都の
-    // WAR_TERRITORY_RADIUS 以内にある防衛側国民のブロックだけ掘れる。
-    // ブロック所有者の国は、所属マップの所有者キーから不透明 ID を
-    // 逆引きして求める（プレゼンスに居ない所有者にも届く）。
-    let warBreakAllowed = false;
-    const activeBlock =
-      current && isOverrideActive(current, Date.now()) ? current.block : undefined;
-    if (activeBlock && activeBlock.ownerId !== presenceIdFor(ownerKey)) {
-      const [warState, nationsState] = await Promise.all([loadWarState(), loadNationsState()]);
-      const members = nationsState.members ?? {};
-      const mine = members[ownerKey];
-      let ownerNationId: string | null = null;
-      for (const [memberKey, m] of Object.entries(members)) {
-        if (presenceIdFor(memberKey) === activeBlock.ownerId) {
-          ownerNationId = m.nationId;
-          break;
+
+  // 同一タイル・同一ユーザーへの並行リクエストを直列化する（S4）。
+  // ロック無しだと二重タップ/リトライで同じブロックを2回掘って
+  // 2回分の獲得を返したり、プロフィールの lost update が起きる。
+  // タイル単位（他者との同タイル競合）とユーザー単位（自分の
+  // プロフィール RMW）の二重で直列化する。
+  return withUserLock(`tile:${tx},${ty}`, () =>
+    withUserLock(ownerKey, async () => {
+        const current = hasCoord ? await loadTileOverride(tx, ty) : null;
+        const profile = await loadProfile(ownerKey);
+        const map = worldTileSource();
+        let result: TileActionResult;
+        /** 掘り出す対象が収納コンテナなら、そのアイテム ID（回収後に状態を消す）。 */
+        let minedContainerItem: string | null = null;
+        if (fields.action === "place_block") {
+          // ユニオンマーク（首都）の保護はルート側の真値で判定する
+          const nationsState = await loadNationsState();
+          const capitals = Object.values(nationsState.nations).map((n) => n.capital);
+          result = applyPlaceBlock(
+            current, profile, map, ownerKey, fields.x, fields.y, fields.itemId, Date.now(),
+            {
+              onCapital: hasCoord && capitals.some((c) => c.x === tx && c.y === ty),
+            },
+          );
+        } else if (fields.action === "mine_block") {
+          // 収納コンテナ（樽・宝箱）は中身が入っている間は回収できない
+          const blockItemId =
+            current && isOverrideActive(current, Date.now()) ? current.block?.itemId : undefined;
+          if (blockItemId && isContainerItem(blockItemId)) {
+            const state = await loadContainer("world", tx, ty, blockItemId);
+            if (state && !containerIsEmpty(state)) {
+              return NextResponse.json({ error: "not_empty" }, { status: 409, headers: NO_STORE });
+            }
+            minedContainerItem = blockItemId;
+          }
+          // 戦争中の他者ブロック破壊: 攻撃側の国民が、防衛側の首都の
+          // WAR_TERRITORY_RADIUS 以内にある防衛側国民のブロックだけ掘れる。
+          // ブロック所有者の国は、所属マップの所有者キーから不透明 ID を
+          // 逆引きして求める（プレゼンスに居ない所有者にも届く）。
+          let warBreakAllowed = false;
+          const activeBlock =
+            current && isOverrideActive(current, Date.now()) ? current.block : undefined;
+          if (activeBlock && activeBlock.ownerId !== presenceIdFor(ownerKey)) {
+            const [warState, nationsState] = await Promise.all([loadWarState(), loadNationsState()]);
+            const members = nationsState.members ?? {};
+            const mine = members[ownerKey];
+            let ownerNationId: string | null = null;
+            for (const [memberKey, m] of Object.entries(members)) {
+              if (presenceIdFor(memberKey) === activeBlock.ownerId) {
+                ownerNationId = m.nationId;
+                break;
+              }
+            }
+            const defender = ownerNationId ? (nationsState.nations ?? {})[ownerNationId] : undefined;
+            warBreakAllowed = Boolean(
+              mine && defender &&
+              canBreakOthersBlock(warState, mine.nationId, defender.guildId, tx, ty, defender.capital),
+            );
+          }
+          result = applyMineBlock(
+            current, profile, map, ownerKey, fields.x, fields.y, Date.now(), { warBreakAllowed },
+          );
+        } else {
+          result = applyTileAction(
+            current, profile, map, ownerKey,
+            fields.action, fields.x, fields.y, fields.seedId, Date.now(),
+          );
         }
-      }
-      const defender = ownerNationId ? (nationsState.nations ?? {})[ownerNationId] : undefined;
-      warBreakAllowed = Boolean(
-        mine && defender &&
-        canBreakOthersBlock(warState, mine.nationId, defender.guildId, tx, ty, defender.capital),
-      );
-    }
-    result = applyMineBlock(
-      current, profile, map, ownerKey, fields.x, fields.y, Date.now(), { warBreakAllowed },
-    );
-  } else {
-    result = applyTileAction(
-      current, profile, map, ownerKey,
-      fields.action, fields.x, fields.y, fields.seedId, Date.now(),
-    );
-  }
-  if (!result.ok) {
-    return NextResponse.json({ error: result.error }, { status: errorStatus(result.error), headers: NO_STORE });
-  }
-  if (!(await storeTileOverride(tx, ty, result.override))) {
-    return NextResponse.json({ error: "tiles_failed" }, { status: 500, headers: NO_STORE });
-  }
-  if (!(await storeProfile(ownerKey, result.profile))) {
-    return NextResponse.json({ error: "tiles_failed" }, { status: 500, headers: NO_STORE });
-  }
-  // コンテナを回収したら中身（空）の状態も消す
-  if (minedContainerItem) await storeContainer(tx, ty, null);
-  return NextResponse.json(
-    {
-      ok: true,
-      tile: result.view,
-      override: result.override,
-      key: tileKey(tx, ty),
-      profile: result.profile,
-      gained: result.gained,
-    },
-    { headers: NO_STORE },
+        if (!result.ok) {
+          return NextResponse.json({ error: result.error }, { status: errorStatus(result.error), headers: NO_STORE });
+        }
+        if (!(await storeTileOverride(tx, ty, result.override))) {
+          return NextResponse.json({ error: "tiles_failed" }, { status: 500, headers: NO_STORE });
+        }
+        if (!(await storeProfile(ownerKey, result.profile))) {
+          return NextResponse.json({ error: "tiles_failed" }, { status: 500, headers: NO_STORE });
+        }
+        // コンテナを回収したら中身（空）の状態も消す
+        if (minedContainerItem) await storeContainer("world", tx, ty, null);
+        return NextResponse.json(
+          {
+            ok: true,
+            tile: result.view,
+            override: result.override,
+            key: tileKey(tx, ty),
+            profile: result.profile,
+            gained: result.gained,
+          },
+          { headers: NO_STORE },
+        );
+    }),
   );
 }
