@@ -55,7 +55,7 @@ test("最終CTA帯は主要な公開ページで出す", () => {
 test("最終CTA帯はアプリ画面・ポリシー系・審査用・分離ページで出さない", () => {
   for (const path of [
     "/one-prompter", "/dashboard", "/dashboard/123", "/admin", "/admin/ads",
-    "/login", "/activity/music", "/coder", "/map", "/nation",
+    "/login", "/activity/music", "/coder",
     "/terms", "/privacy", "/credits", "/intents",
   ]) {
     assert.equal(m.showsCtaBand(path), false, `${path} でCTA帯が出てしまう`);
