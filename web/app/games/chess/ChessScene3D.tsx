@@ -250,6 +250,8 @@ export default function ChessScene3D({ board, playerColor, selected, targets, la
   const rtRef = useRef<{
     pieces: Map<number, PieceRt>;
     markers: THREE.Mesh[];
+    /** markers と同じメッシュを密配列で持つ（毎フレームの走査用）。 */
+    markerList: THREE.Mesh[];
     captureRings: THREE.Mesh[];
     lastPlanes: THREE.Mesh[];
     selRing: THREE.Mesh;
@@ -300,7 +302,10 @@ export default function ChessScene3D({ board, playerColor, selected, targets, la
           (rt.checkGlow.material as THREE.MeshBasicMaterial).opacity = 0.35 + 0.25 * Math.sin(now / 200);
         }
         const pulse = 0.5 + 0.25 * Math.sin(now / 280);
-        for (const m of rt.markers) {
+        // markers は 0x88 マス番号で引く疎配列（穴あり）なので for..of では
+        // 回さない（穴が undefined になり毎フレーム例外→描画が止まる）。
+        // パルス更新は密配列 markerList だけを回す。
+        for (const m of rt.markerList) {
           if (m.visible) (m.material as THREE.MeshBasicMaterial).opacity = pulse;
         }
       },
@@ -319,7 +324,9 @@ export default function ChessScene3D({ board, playerColor, selected, targets, la
     scene.add(boardMesh);
 
     // 合法手マーカー（空きマス=円盤、取りマス=リング）。位置は向きに追従させる。
+    // markers は 0x88 マス番号の疎配列、markerList は同じ実体の密配列。
     const markers: THREE.Mesh[] = [];
+    const markerList: THREE.Mesh[] = [];
     const markerGeo = new THREE.CylinderGeometry(0.15, 0.15, 0.04, 18);
     const captureRings: THREE.Mesh[] = [];
     const ringGeo = new THREE.TorusGeometry(0.4, 0.05, 10, 32);
@@ -331,6 +338,7 @@ export default function ChessScene3D({ board, playerColor, selected, targets, la
       m.visible = false;
       scene.add(m);
       markers[i] = m;
+      markerList.push(m);
       const r = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({ color: 0xd9534f, transparent: true, opacity: 0.85 }));
       r.rotation.x = Math.PI / 2;
       r.visible = false;
@@ -371,7 +379,7 @@ export default function ChessScene3D({ board, playerColor, selected, targets, la
       hits.push(h);
     }
 
-    rtRef.current = { pieces: new Map(), markers, captureRings, lastPlanes, selRing, checkGlow, boardTopMat, scene, initialized: false };
+    rtRef.current = { pieces: new Map(), markers, markerList, captureRings, lastPlanes, selRing, checkGlow, boardTopMat, scene, initialized: false };
     detach = attachPickPointer(stage, () => hits, {
       onTap: (hit) => {
         const sq = hit?.object.userData.sq as number | undefined;

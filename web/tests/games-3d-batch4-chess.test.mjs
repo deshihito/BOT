@@ -72,6 +72,34 @@ test("3D chess: 盤の向き・選択・合法手・チェックの表現があ�
   assert.match(client, /chess-promo/, "昇格選択 UI は現行 DOM のまま");
 });
 
+test("3D chess: 疎配列（0x88 マス番号）を for..of で回さない（盤面が描画されなくなる事故の回帰）", () => {
+  // markers/captureRings/lastPlanes は 0x88 マス番号の疎配列で、for..of は
+  // 穴を undefined として返すため m.visible で毎フレーム例外になり、
+  // stage の描画が render() まで到達せず盤面が単色のまま固まった（2026-11-15）。
+  assert.doesNotMatch(scene, /for \(const \w+ of rt\.markers\)/, "markers を for..of で回さない");
+  assert.doesNotMatch(scene, /for \(const \w+ of rt\.captureRings\)/, "captureRings を for..of で回さない");
+  assert.doesNotMatch(scene, /for \(const \w+ of rt\.lastPlanes\)/, "lastPlanes を for..of で回さない");
+  assert.match(scene, /markerList\.push\(m\)/, "マーカーは密配列 markerList にも積む");
+  assert.match(scene, /for \(const m of rt\.markerList\)/, "パルス更新は密配列を回す");
+  // 疎配列の for..of が実際に例外になること（事故の再現条件）を固定する
+  const sparse = [];
+  for (let i = 0; i < 128; i++) {
+    if (i & 0x88) continue;
+    sparse[i] = { visible: true };
+  }
+  assert.throws(() => {
+    for (const m of sparse) {
+      void m.visible;
+    }
+  }, TypeError);
+});
+
+test("three-kit stage: onFrame の例外でも描画を継続する", () => {
+  const stage = read("lib", "three-kit", "stage.ts");
+  assert.match(stage, /try \{\s*options\.onFrame\?\.\(dt, elapsed\);/, "onFrame は try で守る");
+  assert.match(stage, /frameErrorLogged/, "例外は初回だけ記録する");
+});
+
 test("3D chess: ロジック層（lib/chess-*.ts）に three が混入していない", () => {
   for (const f of ["chess-game.ts", "chess-engine.ts", "chess-perft.ts"]) {
     assert.doesNotMatch(read("lib", f), /from "three"/, `lib/${f}`);
