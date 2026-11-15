@@ -19,6 +19,7 @@ import { loadProfile, storeProfile } from "@/lib/worldbox/profile-online";
 import { parseSave } from "@/lib/worldbox/save";
 import { loadWorldBoxSave } from "@/lib/worldbox/save-online";
 import { withUserLock } from "@/lib/worldbox/user-lock";
+import { bumpMetric } from "@/lib/worldbox/metrics-online";
 
 export const runtime = "nodejs";
 
@@ -253,6 +254,7 @@ export async function POST(request: Request) {
       }
       const profile = await loadProfile(ownerKey);
       await storeProfile(ownerKey, addItem(profile, found.listing.itemId, count));
+      void bumpMetric("guildShopVolume", cost, Date.now());
       const plots = state.plots.map((p) =>
         p && p.idx === found.plot.idx
           ? {

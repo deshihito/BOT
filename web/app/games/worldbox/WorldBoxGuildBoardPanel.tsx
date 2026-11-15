@@ -142,6 +142,7 @@ export default function WorldBoxGuildBoardPanel({
   onProfileChange,
   getPlayerPos,
   onClose,
+  inviteGuildId,
 }: {
   nations: NationsResponse;
   nationMsg: string;
@@ -150,6 +151,8 @@ export default function WorldBoxGuildBoardPanel({
   onProfileChange: (profile: PlayerProfile) => void;
   getPlayerPos: () => { x: number; y: number };
   onClose: () => void;
+  /** 招待リンク（?union=）で指定されたサーバー。該当行を先頭に強調する。 */
+  inviteGuildId?: string | null;
 }) {
   const [tab, setTab] = useState<"requests" | "roles" | "adventure" | "board" | "war">("requests");
   // ユニオン戦争（レイド宣言・マーク攻防・繁栄ランキング・戦績）
@@ -683,6 +686,23 @@ export default function WorldBoxGuildBoardPanel({
               <button
                 type="button"
                 style={btn}
+                onClick={() => {
+                  const url = `https://agobot.app/games/worldbox?union=${myNation.guildId}`;
+                  if (navigator.clipboard) {
+                    void navigator.clipboard.writeText(url).then(
+                      () => setMsg("招待リンクをコピーした"),
+                      () => setMsg(url),
+                    );
+                  } else {
+                    setMsg(url);
+                  }
+                }}
+              >
+                招待リンク
+              </button>
+              <button
+                type="button"
+                style={btn}
                 onClick={() => onNationAction({ action: "leave" })}
               >
                 {me.role === "king" && myNation.members <= 1 ? "解散" : "離脱"}
@@ -721,10 +741,17 @@ export default function WorldBoxGuildBoardPanel({
                 <div style={{ marginBottom: 12 }}>
                   <p style={{ margin: "0 0 6px", fontSize: 13 }}>国があるサーバー</p>
                   <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: 8 }}>
-                    {joinable.map((g) => {
+                    {[...joinable]
+                      .sort((a, b) => (a.guildId === inviteGuildId ? -1 : 0) - (b.guildId === inviteGuildId ? -1 : 0))
+                      .map((g) => {
                       const n = nations.nations.find((x) => x.guildId === g.guildId);
                       return (
-                        <li key={g.guildId} style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                        <li key={g.guildId} style={{
+                          display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap",
+                          ...(g.guildId === inviteGuildId
+                            ? { border: "1px solid #e8c85a", borderRadius: 8, padding: "4px 6px" }
+                            : {}),
+                        }}>
                           {n && (
                             <span aria-hidden style={{ width: 12, height: 12, borderRadius: 3, background: n.color, display: "inline-block" }} />
                           )}

@@ -9,11 +9,24 @@ export function isProfileEnabled(): boolean {
   return isBotApiConfigured();
 }
 
+/** 新規プレイヤーのスポーン保護（分）。 */
+export const SPAWN_PROTECT_MS = 5 * 60 * 1000;
+
 /** 保存済みプロフィールを読む。無い・読めない場合は新規プレイヤーの既定値。 */
 export async function loadProfile(ownerKey: string): Promise<PlayerProfile> {
   if (!isBotApiConfigured()) return { ...DEFAULT_PROFILE };
   try {
-    return parseProfile(await kvGet(WORLDBOX_PROFILE_NAMESPACE, ownerKey));
+    const raw = await kvGet(WORLDBOX_PROFILE_NAMESPACE, ownerKey);
+    if (raw === null || raw === undefined) {
+      // 初回: スポーン保護を刻んで保存する（新規プレイヤーだけが対象）
+      const fresh: PlayerProfile = {
+        ...parseProfile(null),
+        spawnProtectedUntil: Date.now() + SPAWN_PROTECT_MS,
+      };
+      await kvSet(WORLDBOX_PROFILE_NAMESPACE, ownerKey, serializeProfile(fresh));
+      return fresh;
+    }
+    return parseProfile(raw);
   } catch {
     return { ...DEFAULT_PROFILE };
   }

@@ -93,6 +93,8 @@ export type PlayerProfile = {
   tentTier: number;
   /** 道具の強化レベル（アイテム ID → 0..3）。 */
   enhance: Record<string, number>;
+  /** スポーン保護の終了時刻（新規プレイヤーのみ、作成時に5分）。 */
+  spawnProtectedUntil: number;
   /** 蘇生で戻される先（次回 sync でクライアントが適用し、サーバーが消す）。 */
   pendingTeleport: { space: string; x: number; y: number } | null;
 };
@@ -110,6 +112,7 @@ export const DEFAULT_PROFILE: PlayerProfile = {
   pendingTeleport: null,
   tentTier: 0,
   enhance: {},
+  spawnProtectedUntil: 0,
   coins: STARTING_COINS,
   hunger: HUNGER_MAX,
   hp: HP_MAX,
@@ -235,7 +238,7 @@ export function parseProfile(raw: unknown): PlayerProfile {
   }
   const inv = invOf({
     coins: 0, hunger: 0, hp: HP_MAX, status: [], vitalAt: 0, respawn: null, restPoint: null, lastDamageAt: 0, deaths: 0, stealActorAt: 0, stealTargetAt: 0,
-    role: "free", mastery: {}, skillAt: {}, tauntUntil: 0, reviveMark: null, pendingTeleport: null, tentTier: 0, enhance: {},
+    role: "free", mastery: {}, skillAt: {}, tauntUntil: 0, reviveMark: null, pendingTeleport: null, tentTier: 0, enhance: {}, spawnProtectedUntil: 0,
     items: data.items as Record<string, number>,
     hotbar: data.hotbar as ItemSlot[],
     storage: data.storage as ItemSlot[],
@@ -263,6 +266,7 @@ export function parseProfile(raw: unknown): PlayerProfile {
     pendingTeleport: parsePendingTeleport(data.pendingTeleport),
     tentTier: clampInt(data.tentTier, 0, 2, 0),
     enhance: parseEnhance(data.enhance),
+    spawnProtectedUntil: clampInt(data.spawnProtectedUntil, 0, Number.MAX_SAFE_INTEGER, 0),
   };
 }
 
@@ -375,6 +379,7 @@ export function serializeProfile(profile: PlayerProfile): string {
     pendingTeleport: parsePendingTeleport(profile.pendingTeleport),
     tentTier: clampInt(profile.tentTier, 0, 2, 0),
     enhance: parseEnhance(profile.enhance),
+    spawnProtectedUntil: clampInt(profile.spawnProtectedUntil, 0, Number.MAX_SAFE_INTEGER, 0),
   });
 }
 

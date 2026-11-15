@@ -48,6 +48,37 @@ from typing import Any, Awaitable, Callable, Optional
 logger = logging.getLogger(__name__)
 
 NAMESPACE = "worldbox_economy"
+#: 計測（日次経済集計）の保存先名前空間（バッチ9a）
+METRICS_NAMESPACE = "worldbox_metrics_econ"
+
+
+def apply_metric(record: Any, op: dict[str, Any], applied: int, bankroll: Optional[int]) -> dict[str, Any]:
+    """日次経済集計に1オプぶんを足す（純粋関数）。
+
+    earn は理由別に実適用額、spend も理由別。gamble はベットを
+    casino_bet、配当を casino_payout として分けて数える。
+    transfer / steal は内部移動なので数えない。
+    """
+    out: dict[str, Any] = {"earn": {}, "spend": {}, "bankroll": None}
+    if isinstance(record, dict):
+        if isinstance(record.get("bankroll"), (int, float)):
+            out["bankroll"] = int(record["bankroll"])
+        if isinstance(record.get("earn"), dict):
+            out["earn"] = {str(k): int(v) for k, v in record["earn"].items() if isinstance(v, (int, float))}
+        if isinstance(record.get("spend"), dict):
+            out["spend"] = {str(k): int(v) for k, v in record["spend"].items() if isinstance(v, (int, float))}
+    kind = op.get("kind")
+    reason = str(op.get("reason") or "unknown")
+    if kind == "earn":
+        out["earn"][reason] = out["earn"].get(reason, 0) + int(applied)
+    elif kind == "spend":
+        out["spend"][reason] = out["spend"].get(reason, 0) + int(applied)
+    elif kind == "gamble":
+        out["spend"]["casino_bet"] = out["spend"].get("casino_bet", 0) + int(op.get("amount") or 0)
+        out["earn"]["casino_payout"] = out["earn"].get("casino_payout", 0) + int(applied)
+    if bankroll is not None:
+        out["bankroll"] = int(bankroll)
+    return out
 #: 送受金の相手方として履歴に残すシステムID
 WORLDBOX_ID = "WORLD_BOX"
 #: earn の理由ホワイトリスト（Web 側 economy-bridge.ts の EARN_REASONS と同じ集合）
@@ -218,6 +249,7 @@ class WorldBoxEconomyWorker:
         insufficient_marker: Any,
         new_user_balance: Any,
         balance_reader: Optional[Callable[[str], Awaitable[int]]] = None,
+        metrics_kv: Any = None,
     ) -> None:
         self._kv = kv
         self._wallet_provider = wallet_provider
@@ -226,6 +258,7 @@ class WorldBoxEconomyWorker:
         self._insufficient_marker = insufficient_marker
         self._new_user_balance = new_user_balance
         self._balance_reader = balance_reader
+        self._metrics_kv = metrics_kv
         self._remote_down = False
         self._wallet_down = False
 
@@ -313,7 +346,35 @@ class WorldBoxEconomyWorker:
             await self._write_result(key, claimed, status="failed", error="apply_failed")
             return True
         await self._write_result(key, claimed, status="done", applied_amount=applied)
+        await self._record_metric(op, applied)
         return True
+
+    async def _record_metric(self, op: dict[str, Any], applied: int) -> None:
+        """日次経済集計（理由別 earn/spend + バンクロール）を記録する。
+
+        計測はベストエフォート: 失敗しても経済の適用は止めない。
+        """
+        if self._metrics_kv is None:
+            return
+        try:
+            from datetime import datetime, timezone
+
+            date = datetime.now(timezone.utc).date().isoformat()
+            bankroll: Optional[int] = None
+            try:
+                snap = self._economy_store.snapshot()
+                bankroll = int(snap.get("pool", 0)) + int(snap.get("treasury", 0))
+            except Exception:
+                bankroll = None
+            current = await self._metrics_kv.load_one(date)
+            if isinstance(current, str):
+                try:
+                    current = json.loads(current)
+                except (ValueError, TypeError):
+                    current = None
+            await self._metrics_kv.set(date, apply_metric(current, op, applied, bankroll))
+        except Exception:
+            logger.warning("worldbox economy: 計測の記録に失敗しました（次回再試行）")
 
     @staticmethod
     def _merged_record(raw: Any, op: dict[str, Any]) -> dict[str, Any]:
