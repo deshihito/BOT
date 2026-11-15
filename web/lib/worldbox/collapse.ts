@@ -5,7 +5,7 @@
 // 支えを失っても落ちないので、木の葉が世界中で一斉に落ちることはない。
 // 落下中ブロックは重力で落ち、地面に着くとタイルに戻る。落下中に
 // プレイヤーや敵に当たると潰してダメージを与える。
-import { AIR, isLooseBlock, isSolidBlock } from "./blocks";
+import { AIR, TORCH, isLooseBlock, isSolidBlock } from "./blocks";
 import { getTile, setTile, type World } from "./worldgen";
 
 /** 落下ブロックが当たったときのダメージ。 */
@@ -91,7 +91,8 @@ export function stepFalling(world: World, falling: FallingBlock[], dt: number, t
     const blockedByTile = isSolidBlock(getTile(world, f.x, cellBelow));
     if (blockedByTile || ny + 1 >= world.height) {
       const landY = Math.min(cellBelow - 1, world.height - 1);
-      if (landY >= 0 && getTile(world, f.x, landY) === AIR) {
+      // 着地先が空気ならそのまま、松明なら押し潰して着地する（宙に留まらせない）
+      if (landY >= 0 && (getTile(world, f.x, landY) === AIR || getTile(world, f.x, landY) === TORCH)) {
         setTile(world, f.x, landY, f.blockId);
         events.landed.push({ ...f, y: landY });
         continue;

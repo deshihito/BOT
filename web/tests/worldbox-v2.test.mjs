@@ -59,7 +59,7 @@ async function loadBundle(files, exportNames) {
 const wb = await loadBundle(
   [
     "worldbox/blocks.ts", "worldbox/items.ts", "worldbox/worldgen.ts", "worldbox/inventory.ts",
-    "worldbox/physics.ts", "worldbox/rules.ts", "worldbox/daynight.ts", "worldbox/pickups.ts",
+    "worldbox/physics.ts", "worldbox/rules.ts", "worldbox/daynight.ts", "worldbox/light.ts", "worldbox/pickups.ts",
     "worldbox/enemies.ts", "worldbox/health.ts", "worldbox/craft.ts", "worldbox/collapse.ts",
     "worldbox/save.ts", "worldbox/save-source.ts",
   ],
@@ -72,6 +72,7 @@ const wb = await loadBundle(
     "createBody", "stepPlayer", "RUN_SPEED", "STICK_DEADZONE",
     "digTile", "placeTile",
     "advancePhase", "nightAmount", "isNightPhase", "DAY_CYCLE_SEC",
+    "buildLightField", "isDarkAt", "lightLevelAt",
     "ENEMY_MAX_HP", "MAX_ENEMIES", "CONTACT_DAMAGE", "createEnemy", "trySpawnEnemy", "stepEnemy", "attackEnemy", "burnEnemiesAtDawn",
     "PLAYER_MAX_HP", "createHealth", "damagePlayer", "healPlayer", "fallDamageFor", "deathDrops",
     "RECIPES", "recipeById", "checkCraft", "applyCraft", "createFurnace", "canStartSmelt", "startSmelt", "tickFurnace", "collectSmelt", "SMELT_SECONDS",
@@ -141,17 +142,30 @@ test("昼夜: 夜の位相だけ isNightPhase が立ち、位相は循環する"
   assert.ok(wrapped >= 0 && wrapped < 0.02, `位相が循環しない ${wrapped}`);
 });
 
-test("敵: スポーンは夜だけ・上限つき・プレイヤーから離れた地表", () => {
+test("敵: スポーンは暗さで決まる（v2.2）・上限つき・プレイヤーから離れる", () => {
   const world = wb.generateWorld(11);
+  const field = wb.buildLightField(world);
   const spawn = wb.findSpawn(world);
-  const player = { x: spawn.x, y: spawn.y };
+  const player = { x: spawn.x + 0.1, y: spawn.y + 2 - 1.8 };
   const rng = wb.makeRng(123);
-  assert.equal(wb.trySpawnEnemy(world, 0.5, player, 0, rng), null, "昼にスポーンした");
-  const e = wb.trySpawnEnemy(world, 0.0, player, 0, rng);
+  // 昼: 出るとしても暗い場所（洞窟）だけ
+  for (let i = 0; i < 30; i++) {
+    const day = wb.trySpawnEnemy(world, field, 0.5, player, 0, rng);
+    if (day) {
+      assert.ok(
+        wb.isDarkAt(field, world, Math.floor(day.x + 0.45), Math.floor(day.y), 0.5),
+        "昼に明るい場所へスポーンした",
+      );
+    }
+  }
+  // 夜: スポーンし、上限と最低距離を守る
+  let e = null;
+  for (let i = 0; i < 40 && !e; i++) e = wb.trySpawnEnemy(world, field, 0.0, player, 0, rng);
   assert.ok(e, "夜なのにスポーンしない");
   assert.equal(e.hp, wb.ENEMY_MAX_HP);
-  assert.ok(Math.abs(e.x - player.x) >= 8, `プレイヤーに近すぎる x=${e.x} player=${player.x}`);
-  assert.equal(wb.trySpawnEnemy(world, 0.0, player, wb.MAX_ENEMIES, rng), null, "上限を超えてスポーンした");
+  const d = Math.hypot(e.x + 0.45 - (player.x + 0.4), e.y + 0.45 - (player.y + 0.9));
+  assert.ok(d >= 6.4, `プレイヤーに近すぎる d=${d}`);
+  assert.equal(wb.trySpawnEnemy(world, field, 0.0, player, wb.MAX_ENEMIES, rng), null, "上限を超えてスポーンした");
 });
 
 test("敵: プレイヤーへ歩き、攻撃でノックバックして倒れる", () => {
@@ -175,12 +189,14 @@ test("敵: プレイヤーへ歩き、攻撃でノックバックして倒れる
   assert.equal(wb.attackEnemy(e, 99, spawn.x), true, "倒れていない");
 });
 
-test("敵: 夜明けは燃えて消え、夜は燃えない", () => {
-  const e = wb.createEnemy(10, 10);
-  assert.deepEqual(wb.burnEnemiesAtDawn([e], 0.0, 1), []);
+test("敵: 夜明けの燃焼は空に開けた場所だけ、夜は燃えない（v2.2）", () => {
+  const world = wb.generateWorld(11);
+  const field = wb.buildLightField(world);
+  const e = wb.createEnemy(10, 10); // 地表より上 = 空に開けている
+  assert.deepEqual(wb.burnEnemiesAtDawn(world, field, [e], 0.0, 1), []);
   assert.equal(e.hp, wb.ENEMY_MAX_HP);
   let dead = [];
-  for (let i = 0; i < 10 && dead.length === 0; i++) dead = wb.burnEnemiesAtDawn([e], 0.5, 0.5);
+  for (let i = 0; i < 10 && dead.length === 0; i++) dead = wb.burnEnemiesAtDawn(world, field, [e], 0.5, 0.5);
   assert.deepEqual(dead, [e.id], "昼に燃え尽きない");
 });
 

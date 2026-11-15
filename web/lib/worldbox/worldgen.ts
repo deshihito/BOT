@@ -6,6 +6,15 @@ import { AIR, BEDROCK, COAL_ORE, COPPER_ORE, DIRT, GRASS, LEAVES, SAND, STONE, W
 export const WORLD_W = 256;
 export const WORLD_H = 64;
 
+/**
+ * 全ユーザー共通の固定ワールドシード（v2.2〜）。
+ * WORLD BOX の世界は1つだけ: 地形はこのシードから決定的に生成され、
+ * クライアントはランダムシードを一切作らない。「新しいワールド」は
+ * この固定地形のまま、プレイヤーの進行だけをリセットする扱い。
+ * （将来の共有化では世界状態とプレイヤー状態を分離する。）
+ */
+export const WORLD_SEED = 20251115;
+
 export type World = {
   seed: number;
   width: number;
@@ -115,6 +124,41 @@ export function generateWorld(seed: number): World {
       if (getTile(world, x, y) !== STONE) continue;
       if (y >= 24 && y < 44 && rng() < 0.013) vein(x, y, COAL_ORE);
       else if (y >= 40 && rng() < 0.011) vein(x, y, COPPER_ORE);
+    }
+  }
+
+  // 洞窟（v2.2）: 石の層をシード付きランダムウォークで掘り抜く。
+  // 地表から5タイル以上深い場所だけを掘り、最下層には届かせない（地表は無傷）。
+  // 鉱石に隣接する石は掘らない → 鉱脈が洞窟の壁にそのまま残る。
+  const carveCaveCell = (x: number, y: number) => {
+    if (x < 1 || x >= WORLD_W - 1 || y < 0 || y >= WORLD_H) return;
+    if (getTile(world, x, y) !== STONE) return;
+    const nearOre = [getTile(world, x + 1, y), getTile(world, x - 1, y), getTile(world, x, y + 1), getTile(world, x, y - 1)].some(
+      (n) => n === COAL_ORE || n === COPPER_ORE,
+    );
+    if (nearOre) return;
+    setTile(world, x, y, AIR);
+  };
+  const walkerCount = 22 + Math.floor(rng() * 8);
+  for (let i = 0; i < walkerCount; i++) {
+    let cx = 4 + Math.floor(rng() * (WORLD_W - 8));
+    const startSurf = surfaces[cx];
+    let cy = Math.min(WORLD_H - 8, startSurf + 7 + Math.floor(rng() * 14));
+    let dir = rng() < 0.5 ? -1 : 1;
+    const steps = 40 + Math.floor(rng() * 90);
+    for (let s = 0; s < steps; s++) {
+      carveCaveCell(cx, cy);
+      if (rng() < 0.35) carveCaveCell(cx, cy + 1);
+      if (rng() < 0.2) carveCaveCell(cx + dir, cy);
+      const r = rng();
+      if (r < 0.62) cx += dir;
+      else if (r < 0.74) cy += 1;
+      else if (r < 0.86) cy -= 1;
+      else dir = -dir;
+      // 掘削帯の中に留める（地表-5より浅く、最下層-3より深くは行かない）
+      cx = Math.max(2, Math.min(WORLD_W - 3, cx));
+      const minY = surfaces[cx] + 5;
+      cy = Math.max(minY, Math.min(WORLD_H - 4, cy));
     }
   }
 
