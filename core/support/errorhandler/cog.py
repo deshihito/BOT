@@ -4,6 +4,8 @@
 - よくある失敗（クールダウン・権限不足・DM での実行・引数の間違いなど）は日本語で短く案内する
 - 想定外のエラーは利用者にはエラー ID だけを見せ、詳しい内容（トレースバック）はログに残す
 - コマンドや cog が自分のエラーハンドラーを持っている場合は、そちらに任せて何もしない
+- 応答期限切れ（10062 Unknown interaction）は想定内として警告1行に落とす（失効した
+  インタラクションには何も返せず、トレースバックを残しても直せないため）
 """
 from __future__ import annotations
 
@@ -27,6 +29,25 @@ def new_error_id() -> str:
 
 def _permissions_text(names) -> str:
     return "、".join(permission_label(name) for name in names) or "不明"
+
+
+def _unwrap(error: Exception) -> Exception:
+    """呼び出し中に起きた例外は中身を取り出す（classify と同じ規則）。"""
+    if isinstance(error, (commands.CommandInvokeError, commands.HybridCommandError)):
+        error = error.original
+    if isinstance(error, app_commands.CommandInvokeError):
+        error = error.original
+    return error
+
+
+def is_unknown_interaction(error: Exception) -> bool:
+    """Discord の応答期限切れ（10062 Unknown interaction）かどうか。
+
+    インタラクションは作成から3秒以内に最初の応答をしないと失効し、失効後の
+    defer などは 404 (10062) になる。失効したインタラクションには何も返せない。
+    """
+    err = _unwrap(error)
+    return isinstance(err, discord.NotFound) and err.code == 10062
 
 
 def prefix_usage(command: Optional[commands.Command], prefix: str = "!") -> Optional[str]:
@@ -54,14 +75,13 @@ def classify(error: Exception, *, usage: Optional[str] = None) -> tuple[Optional
     プレフィックス（commands.*）とスラッシュ（app_commands.*）のどちらのエラーも受け付ける。
     """
     # 呼び出し中に起きた例外は中身で判断する
-    if isinstance(error, (commands.CommandInvokeError, commands.HybridCommandError)):
-        error = error.original
-    if isinstance(error, app_commands.CommandInvokeError):
-        error = error.original
+    error = _unwrap(error)
 
     # 反応しない
     if isinstance(error, (commands.CommandNotFound, app_commands.CommandNotFound)):
         return None, False
+    if is_unknown_interaction(error):
+        return None, False  # 応答期限切れには何も返せない
     if isinstance(error, commands.NotOwner):
         return None, False  # オーナー専用コマンドの存在を知らせない
 
@@ -180,6 +200,14 @@ class ErrorHandler(commands.Cog):
     # ------------------------------------------------------------ スラッシュコマンド
     async def on_app_command_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError):
         if app_has_local_handler(interaction):
+            return
+        if is_unknown_interaction(error):
+            # 応答期限切れ: 想定外エラーとして扱わず、記録だけ残す
+            command = getattr(interaction, "command", None)
+            logger.warning(
+                "スラッシュコマンド %s は応答期限切れでした（Unknown interaction、ユーザー %s）",
+                getattr(command, "qualified_name", "?"), getattr(getattr(interaction, "user", None), "id", "?"),
+            )
             return
         message, unexpected = classify(error)
         if unexpected:
