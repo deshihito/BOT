@@ -43,13 +43,22 @@ function clampIntParam(raw: string | null, min: number, max: number, fallback: n
   return Math.max(min, Math.min(max, Math.floor(n)));
 }
 
-/** サーバーが知る本人のワールド位置（プレゼンス → セーブの順）。無ければ null。 */
-async function actorWorldPosition(ownerKey: string): Promise<{ x: number; y: number } | null> {
+/**
+ * 距離検証に使う本人のワールド位置。新鮮なプレゼンス → クライアント申告 →
+ * セーブの順。プレゼンスは WS 中継中 bot_kv に届かず凍結するため、申告位置を
+ * フォールバックに使う（ハートビート自体が元々クライアント申告制）。
+ * どれも無ければ null（検証スキップ）。
+ */
+async function actorWorldPosition(
+  ownerKey: string,
+  reported?: { x: number; y: number } | null,
+): Promise<{ x: number; y: number } | null> {
   const selfId = presenceIdFor(ownerKey);
   const entries = await listPresence();
   const now = Date.now();
   const entry = entries.find((e) => e.id === selfId && e.space === "world" && now - e.ts <= 15_000);
   if (entry) return { x: entry.x, y: entry.y };
+  if (reported) return reported;
   const saved = parseSave(await loadWorldBoxSave(ownerKey));
   if (saved && saved.space === "world") return { x: saved.x, y: saved.y };
   return null;
@@ -102,10 +111,16 @@ export async function POST(request: Request) {
   } catch {
     return NextResponse.json({ error: "invalid_request" }, { status: 400, headers: NO_STORE });
   }
-  const fields = (body ?? {}) as { action?: unknown; mobId?: unknown; x?: unknown; y?: unknown };
+  const fields = (body ?? {}) as { action?: unknown; mobId?: unknown; x?: unknown; y?: unknown; px?: unknown; py?: unknown };
   if (fields.action !== "attack" || typeof fields.x !== "number" || typeof fields.y !== "number") {
     return NextResponse.json({ error: "invalid_request" }, { status: 400, headers: NO_STORE });
   }
+  const reported =
+    typeof fields.px === "number" && typeof fields.py === "number" &&
+    Number.isFinite(fields.px) && Number.isFinite(fields.py) &&
+    fields.px >= 0 && fields.py >= 0 && fields.px < MAP_W && fields.py < MAP_H
+      ? { x: fields.px, y: fields.py }
+      : null;
   const def = mobById(fields.mobId);
   const x = Math.floor(fields.x);
   const y = Math.floor(fields.y);
@@ -120,8 +135,8 @@ export async function POST(request: Request) {
   const ownerKey = sessionOwnerKey(session);
   const placed = { mobId: def.id, x, y, size: def.size, biome: "plains" as const };
 
-  // 隣接検証（本人の位置がサーバー側で分かる場合だけ、占有範囲までの距離）
-  const pos = await actorWorldPosition(ownerKey);
+  // 隣接検証（本人の位置が分かる場合だけ、占有範囲までの距離）
+  const pos = await actorWorldPosition(ownerKey, reported);
   if (pos) {
     const dist = mobDistance(Math.floor(pos.x), Math.floor(pos.y), placed);
     if (dist > MOB_ATTACK_MAX_DISTANCE) {

@@ -184,6 +184,7 @@ test("API ルート: 実在検証・距離検証・闘技場式ダメージ・�
   const route = fs.readFileSync(path.join(rootDir, "app/api/worldbox/mobs/route.ts"), "utf8");
   assert.ok(route.includes("mobExistsAt"), "配置の再計算による実在検証が無い");
   assert.ok(route.includes("actorWorldPosition"), "本人位置の検証が無い");
+  assert.ok(route.includes("reported"), "WS 中継時の申告位置フォールバックが無い");
   assert.ok(route.includes("MOB_ATTACK_MAX_DISTANCE"), "距離上限が無い");
   assert.ok(route.includes("playerAttack"), "闘技場式のダメージ計算を使っていない");
   assert.ok(route.includes("storeMobState"), "個体状態を保存していない");

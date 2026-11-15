@@ -715,7 +715,12 @@ export default function WorldBoxClient() {
       const res = await fetch("/api/worldbox/mobs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "attack", mobId: placed.mobId, x: placed.x, y: placed.y }),
+        body: JSON.stringify({
+          action: "attack", mobId: placed.mobId, x: placed.x, y: placed.y,
+          // サーバー側の位置の正（プレゼンス）が WS 中継中は bot_kv に届かないため、
+          // 距離検証のフォールバックとして現在位置を添える（プレゼンスが新鮮ならそちらが優先される）
+          px: playerPosRef.current.x, py: playerPosRef.current.y,
+        }),
       });
       const data = (await res.json().catch(() => ({}))) as {
         error?: string; hp?: number; dead?: boolean; profile?: PlayerProfile;
@@ -861,6 +866,8 @@ export default function WorldBoxClient() {
     /** 接触中のモブ（個体キー）と、敵対ノックバックを最後に発火した時刻。 */
     let contactMobKeyNow: string | null = null;
     let contactFiredAt = 0;
+    /** ノックバックの残り速度（タイル/秒）。接触で初速を与え、stepMove で滑らかに減衰させる（瞬間移動にしない）。 */
+    let kbVel = { x: 0, y: 0 };
     // スタミナとダッシュ（キーの2度押し / スティックの強い倒し）
     let stamina: StaminaState = createStamina();
     let tapTracker: TapTracker = createTapTracker();
@@ -1711,6 +1718,15 @@ export default function WorldBoxClient() {
       const moved = stepMove(activeMap(), player, vel, dt, activeBlocked(), { swim: space === "world" });
       player.x = moved.x;
       player.y = moved.y;
+      // ノックバック: 残り速度を当たり判定つきで適用し、約0.16秒で減衰させる
+      if (kbVel.x !== 0 || kbVel.y !== 0) {
+        const kbMoved = stepMove(activeMap(), player, kbVel, dt, activeBlocked(), { swim: space === "world" });
+        player.x = kbMoved.x;
+        player.y = kbMoved.y;
+        const decay = Math.max(0, 1 - dt / 0.16);
+        kbVel = { x: kbVel.x * decay, y: kbVel.y * decay };
+        if (Math.hypot(kbVel.x, kbVel.y) < 0.5) kbVel = { x: 0, y: 0 };
+      }
       // スタミナ増減・陸の記録・入出水の波紋・水中で力尽きたら陸へ帰還
       const inWaterNow = space === "world" && isWaterAt(effMap, player.x, player.y);
       if (space === "world" && !inWaterNow) lastLand = { x: player.x, y: player.y };
@@ -1764,14 +1780,9 @@ export default function WorldBoxClient() {
           const def = mobById(contact.placed.mobId);
           if (def?.temperament === "hostile" && (isNew || now - contactFiredAt >= 1000)) {
             contactFiredAt = now;
+            // 着地点へ瞬間移動させず、着地点までの方向に初速だけ与える（適用は移動ステップ側）
             const target = knockbackTarget({ x: contact.cx, y: contact.cy, size: contact.placed.size }, player);
-            const free = findFreeNear(activeMap(), target.x, target.y, activeBlocked(), { swim: true });
-            player.x = free.x;
-            player.y = free.y;
-            prevX = player.x;
-            prevY = player.y;
-            cam.x = player.x;
-            cam.y = player.y;
+            kbVel = { x: (target.x - player.x) / 0.16, y: (target.y - player.y) / 0.16 };
             fxEventsRef.current.push({
               kind: "hit",
               x: contact.placed.x, y: contact.placed.y,
