@@ -89,6 +89,8 @@ export type PlayerProfile = {
   tauntUntil: number;
   /** 薬師の蘇生を使った遠征（空間 ID と時刻）。1遠征1回の判定に使う。 */
   reviveMark: { space: string; at: number } | null;
+  /** テント（個人空間）の拡張段階 0..2。 */
+  tentTier: number;
   /** 蘇生で戻される先（次回 sync でクライアントが適用し、サーバーが消す）。 */
   pendingTeleport: { space: string; x: number; y: number } | null;
 };
@@ -104,6 +106,7 @@ export const DEFAULT_PROFILE: PlayerProfile = {
   tauntUntil: 0,
   reviveMark: null,
   pendingTeleport: null,
+  tentTier: 0,
   coins: STARTING_COINS,
   hunger: HUNGER_MAX,
   hp: HP_MAX,
@@ -229,7 +232,7 @@ export function parseProfile(raw: unknown): PlayerProfile {
   }
   const inv = invOf({
     coins: 0, hunger: 0, hp: HP_MAX, status: [], vitalAt: 0, respawn: null, restPoint: null, lastDamageAt: 0, deaths: 0, stealActorAt: 0, stealTargetAt: 0,
-    role: "free", mastery: {}, skillAt: {}, tauntUntil: 0, reviveMark: null, pendingTeleport: null,
+    role: "free", mastery: {}, skillAt: {}, tauntUntil: 0, reviveMark: null, pendingTeleport: null, tentTier: 0,
     items: data.items as Record<string, number>,
     hotbar: data.hotbar as ItemSlot[],
     storage: data.storage as ItemSlot[],
@@ -255,6 +258,7 @@ export function parseProfile(raw: unknown): PlayerProfile {
     tauntUntil: clampInt(data.tauntUntil, 0, Number.MAX_SAFE_INTEGER, 0),
     reviveMark: parseReviveMark(data.reviveMark),
     pendingTeleport: parsePendingTeleport(data.pendingTeleport),
+    tentTier: clampInt(data.tentTier, 0, 2, 0),
   };
 }
 
@@ -340,6 +344,7 @@ export function serializeProfile(profile: PlayerProfile): string {
     tauntUntil: clampInt(profile.tauntUntil, 0, Number.MAX_SAFE_INTEGER, 0),
     reviveMark: parseReviveMark(profile.reviveMark),
     pendingTeleport: parsePendingTeleport(profile.pendingTeleport),
+    tentTier: clampInt(profile.tentTier, 0, 2, 0),
   });
 }
 

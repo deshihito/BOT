@@ -77,6 +77,15 @@ const presenceOnlineUrl = dataUrl(
 const saveOnlineUrl = dataUrl(
   transpile("worldbox/save-online.ts").replaceAll('"../bot-api"', JSON.stringify(botApiStubUrl)),
 );
+const itemsUrl = dataUrl(transpile("worldbox/items.ts"));
+const profileUrl = dataUrl(
+  transpile("worldbox/profile.ts").replaceAll('"./items"', JSON.stringify(itemsUrl)),
+);
+const profileOnlineUrl = dataUrl(
+  transpile("worldbox/profile-online.ts")
+    .replaceAll('"../bot-api"', JSON.stringify(botApiStubUrl))
+    .replaceAll('"./profile"', JSON.stringify(profileUrl)),
+);
 const stationOnlineUrl = dataUrl(
   transpile("worldbox/station-online.ts")
     .replaceAll('"./lobby"', JSON.stringify(lobbyUrl))
@@ -84,7 +93,8 @@ const stationOnlineUrl = dataUrl(
     .replaceAll('"./tent"', JSON.stringify(tentUrl))
     .replaceAll('"./presence-online"', JSON.stringify(presenceOnlineUrl))
     .replaceAll('"./save"', JSON.stringify(saveUrl))
-    .replaceAll('"./save-online"', JSON.stringify(saveOnlineUrl)),
+    .replaceAll('"./save-online"', JSON.stringify(saveOnlineUrl))
+    .replaceAll('"./profile-online"', JSON.stringify(profileOnlineUrl)),
 );
 const stationOnline = await import(stationOnlineUrl);
 const nextServerStubUrl = dataUrl(`

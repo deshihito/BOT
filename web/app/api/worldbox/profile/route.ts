@@ -7,8 +7,9 @@ import {
 } from "@/lib/worldbox/economy";
 import { buildEconomyOp, type EconomyOp } from "@/lib/worldbox/economy-bridge";
 import {
-  enqueueEconomyOp, isEconomyEnabled, readUserBalance,
+  enqueueEconomyOp, enqueueEconomyOpOnce, isEconomyEnabled, readUserBalance,
 } from "@/lib/worldbox/economy-bridge-online";
+import { TENT_MAX_TIER, TENT_TIERS } from "@/lib/worldbox/tent";
 import { moveSlot, swapSlots, type PlayerProfile } from "@/lib/worldbox/profile";
 import { itemById } from "@/lib/worldbox/items";
 import { findPresenceOwnerKey, isPresenceEnabled } from "@/lib/worldbox/presence-online";
@@ -197,6 +198,25 @@ async function handlePost(request: Request, session: AuthedSession) {
       const itemDef = itemById(data.itemId as string);
       const unitPrice = myGenre && itemDef ? dailyPriceFor(itemDef, dayKey) : undefined;
       return saveWithCoin(buyItem(current, data.itemId, data.count, balance, unitPrice), gate.discordId);
+    }
+    case "expand_tent": {
+      // テント（個人空間）の拡張: 次の段階の価格を spend し、段階を上げる。
+      // オプ ID は決定的（tent-expand-<discordId>-<tier>）で二重課金しない。
+      const gate = coinGate();
+      if ("response" in gate) return gate.response;
+      const nextTier = current.tentTier + 1;
+      if (nextTier > TENT_MAX_TIER) return statusError("max_tier", 409);
+      const price = TENT_TIERS[nextTier].price;
+      const balance = await readUserBalance(gate.discordId);
+      if (balance === null) return statusError("economy_unavailable", 503);
+      if (balance < price) return statusError("insufficient_balance", 409);
+      const op = buildEconomyOp(
+        { kind: "spend", userKey: ownerKey, discordId: gate.discordId, amount: price, reason: "tent_expand" },
+        `tent-expand-${gate.discordId}-${nextTier}`,
+        Date.now(),
+      );
+      if (!op || !(await enqueueEconomyOpOnce(op))) return statusError("economy_failed", 503);
+      return saveAndReturn({ ok: true, profile: { ...current, tentTier: nextTier } });
     }
     case "sell": {
       const gate = coinGate();

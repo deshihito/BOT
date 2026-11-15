@@ -13,6 +13,7 @@ import {
   buildCaveLayer, buildDungeonFloor, buildRuins, makeInstanceSpace, parseInstanceSpace, ruinsCompleteOpId, weekKeyOf,
   CAVE_CHEST_RESPAWN_MS, RUINS_COMPLETE_EARN, RUINS_MAIN_CHEST_LOOT,
 } from "@/lib/worldbox/instances";
+import { activeLimitedDungeon, isEventDungeonEntrance } from "@/lib/worldbox/events";
 import { withUserLock } from "@/lib/worldbox/user-lock";
 import {
   deleteDungeonSession, dungeonGateSatisfied, dungeonSessionClosed, loadDungeonSession, loadRuinsPersonal,
@@ -77,6 +78,13 @@ export async function GET(request: Request) {
   const inst = parseInstanceSpace(space);
   if (!inst) return NextResponse.json({ error: "invalid_space" }, { status: 400, headers: NO_STORE });
   if (inst.kind === "ruins") {
+    // 期間ダンジョン（予約入口の遺跡）は開催中だけ入場データを返す
+    if (
+      isEventDungeonEntrance(inst.entranceX, inst.entranceY) &&
+      !activeLimitedDungeon(Date.now())
+    ) {
+      return NextResponse.json({ error: "event_inactive" }, { status: 409, headers: NO_STORE });
+    }
     const personal = await loadRuinsPersonal(space, sessionOwnerKey(session), weekKeyOf(Date.now()));
     return NextResponse.json(
       { chests: personal.chests, traps: personal.traps, doors: personal.doors, summons: personal.summons, completed: personal.completed },

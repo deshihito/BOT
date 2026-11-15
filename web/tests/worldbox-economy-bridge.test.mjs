@@ -341,6 +341,7 @@ const bridgeOnlineStubUrl = dataUrl(`
 const state = (globalThis.__wbBridge = { ops: [], balances: new Map(), failEnqueue: false });
 export function isEconomyEnabled() { return true; }
 export async function enqueueEconomyOp(op) { if (state.failEnqueue) return false; state.ops.push(op); return true; }
+export async function enqueueEconomyOpOnce(op) { if (state.failEnqueue) return false; if (state.ops.some((o) => o.id === op.id)) return true; state.ops.push(op); return true; }
 export async function loadMyEconomyOps() { return []; }
 export async function readUserBalance(id) { return state.balances.has(id) ? state.balances.get(id) : 0; }
 `);
@@ -371,6 +372,8 @@ export function dailyPriceFor(item) { return item.price; }
 export function shopDayKeyOf() { return "test-day"; }
 `);
 const itemsOnlyUrl = bundleModule(["worldbox/items.ts"], ["itemById"]);
+const tentStubUrl = dataUrl(`export const TENT_MAX_TIER = 2; export const TENT_TIERS = [{ w: 13, h: 10, price: 0 }, { w: 17, h: 13, price: 3000 }, { w: 22, h: 17, price: 10000 }];`);
+
 const profileRoute = await import(
   dataUrl(
     transpile("api/worldbox/profile/route.ts", rootDir + "/app")
@@ -382,6 +385,7 @@ const profileRoute = await import(
       .replaceAll('"@/lib/worldbox/presence-online"', JSON.stringify(presenceStubUrl))
       .replaceAll('"@/lib/worldbox/shops"', JSON.stringify(shopsUrl))
       .replaceAll('"@/lib/worldbox/items"', JSON.stringify(itemsOnlyUrl))
+      .replaceAll('"@/lib/worldbox/tent"', JSON.stringify(tentStubUrl))
       .replaceAll('"@/lib/worldbox/station-online"', JSON.stringify(stationStubUrl))
       .replaceAll('"@/lib/worldbox/profile-online"', JSON.stringify(profileOnlineStubUrl))
       .replaceAll('"@/lib/worldbox/profile"', JSON.stringify(profileSwapUrl))

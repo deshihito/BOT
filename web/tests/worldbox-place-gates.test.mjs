@@ -133,6 +133,11 @@ const saveUrl = dataUrl(
 const saveOnlineUrl = dataUrl(
   transpile("worldbox/save-online.ts").replaceAll('"../bot-api"', JSON.stringify(botApiStubUrl)),
 );
+const profileOnlineUrl = dataUrl(
+  transpile("worldbox/profile-online.ts")
+    .replaceAll('"../bot-api"', JSON.stringify(botApiStubUrl))
+    .replaceAll('"./profile"', JSON.stringify(profileUrl)),
+);
 const stationOnlineUrl = dataUrl(
   transpile("worldbox/station-online.ts")
     .replaceAll('"./lobby"', JSON.stringify(lobbyUrl))
@@ -140,12 +145,8 @@ const stationOnlineUrl = dataUrl(
     .replaceAll('"./tent"', JSON.stringify(tentUrl))
     .replaceAll('"./presence-online"', JSON.stringify(presenceOnlineUrl))
     .replaceAll('"./save"', JSON.stringify(saveUrl))
-    .replaceAll('"./save-online"', JSON.stringify(saveOnlineUrl)),
-);
-const profileOnlineUrl = dataUrl(
-  transpile("worldbox/profile-online.ts")
-    .replaceAll('"../bot-api"', JSON.stringify(botApiStubUrl))
-    .replaceAll('"./profile"', JSON.stringify(profileUrl)),
+    .replaceAll('"./save-online"', JSON.stringify(saveOnlineUrl))
+    .replaceAll('"./profile-online"', JSON.stringify(profileOnlineUrl)),
 );
 const boardUrl = dataUrl(transpile("worldbox/board.ts"));
 const boardOnlineUrl = dataUrl(
@@ -164,6 +165,7 @@ export class NextResponse {
 }
 `);
 const rolesUrl = dataUrl(transpile("worldbox/roles.ts").replaceAll('"./profile"', JSON.stringify(profileUrl)));
+const tentStubUrl = dataUrl(`export const TENT_MAX_TIER = 2; export const TENT_TIERS = [{ w: 13, h: 10, price: 0 }, { w: 17, h: 13, price: 3000 }, { w: 22, h: 17, price: 10000 }];`);
 const profileRoute = await import(
   dataUrl(
     transpile("api/worldbox/profile/route.ts", rootDir + "/app")
@@ -176,6 +178,7 @@ const profileRoute = await import(
       .replaceAll('"@/lib/worldbox/presence-online"', JSON.stringify(presenceOnlineUrl))
       .replaceAll('"@/lib/worldbox/shops"', JSON.stringify(shopsUrl))
       .replaceAll('"@/lib/worldbox/items"', JSON.stringify(itemsUrl))
+      .replaceAll('"@/lib/worldbox/tent"', JSON.stringify(tentStubUrl))
       .replaceAll('"@/lib/worldbox/station-online"', JSON.stringify(stationOnlineUrl))
       .replaceAll('"@/lib/worldbox/profile-online"', JSON.stringify(profileOnlineUrl))
       .replaceAll('"@/lib/worldbox/user-lock"', JSON.stringify(userLockUrl))

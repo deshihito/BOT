@@ -8,7 +8,7 @@
 // のワールド位置で、ロビーを出るとそこへ戻る（無ければ null = スポーン）。
 // v5 以前は破棄する（v5 はロビーが無く空間を持たない。v4 以前は旧マップ時代）。
 import { LOBBY_H, LOBBY_W } from "./lobby";
-import { TENT_H, TENT_W } from "./tent";
+import { TENT_MAX_H, TENT_MAX_W } from "./tent";
 import { WORLD_COORD_LIMIT } from "./mapgen";
 
 export const SAVE_VERSION = 6;
@@ -54,7 +54,7 @@ function clampToSpace(space: SaveSpace, x: number, y: number): { x: number; y: n
   // トランスパイルされるため、cave/ruins/dungeon と同じく数値を直書きする）。
   if (space === "lobby2") return { x: clampPos(x, 40), y: clampPos(y, 28) }; // LOBBY2_W/H = 40/28
   if (space === "lobby3") return { x: clampPos(x, 32), y: clampPos(y, 24) }; // LOBBY3_W/H = 32/24
-  if (space === "tent") return { x: clampPos(x, TENT_W), y: clampPos(y, TENT_H) };
+  if (space === "tent") return { x: clampPos(x, TENT_MAX_W), y: clampPos(y, TENT_MAX_H) };
   if (instanceKindOf(space) === "cave") return { x: clampPos(x, 64), y: clampPos(y, 64) }; // CAVE_W/H = 64
   if (instanceKindOf(space) === "ruins") return { x: clampPos(x, 48), y: clampPos(y, 48) }; // RUINS_W/H = 48
   if (instanceKindOf(space) === "dungeon") return { x: clampPos(x, 52), y: clampPos(y, 52) }; // DUNGEON_W/H = 52

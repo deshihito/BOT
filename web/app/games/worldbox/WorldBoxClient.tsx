@@ -50,11 +50,12 @@ import {
   buildLobby, lobbyTileAt, stationGenreNear, stationNear, type LobbyData, type LobbyObject, type LobbyStation,
 } from "@/lib/worldbox/lobby";
 import { genreById, type ShopGenreId } from "@/lib/worldbox/shops";
-import { TENT_ENTRY, TENT_EXIT, TENT_H, TENT_W, buildTent, tentTileAt } from "@/lib/worldbox/tent";
+import { TENT_MAX_TIER, TENT_TIERS, buildTent, tentEntryFor, tentExitFor, tentTileAt } from "@/lib/worldbox/tent";
 import {
   buildCaveLayer, buildDungeonFloor, buildRuins, dungeonHpScale, lightRadiusTiles, makeInstanceSpace, parseInstanceSpace,
   type CaveLayer, type DungeonFloorData, type RuinsMap,
 } from "@/lib/worldbox/instances";
+import { EVENT_DUNGEON_ENTRANCE } from "@/lib/worldbox/events";
 import { biomeAt, structureById, structuresForChunk, type PlacedStructure } from "@/lib/worldbox/maplogic";
 import { specialObjectById } from "@/lib/worldbox/objects";
 import type { BoardPost } from "@/lib/worldbox/board";
@@ -464,6 +465,30 @@ export default function WorldBoxClient() {
   /** いま接している店の品目ジャンル（鍛冶屋は "smith"）。経済パネルの品目選別に使う。 */
   const [stationGenre, setStationGenre] = useState<ShopGenreId | null>(null);
   const warpActionRef = useRef<(target: SaveSpace) => void>(() => {});
+  const instanceWarpRef = useRef<(target: string, entry: { x: number; y: number }) => void>(() => {});
+  /** 開催中イベント（期間ダンジョンの入場導線用）。 */
+  const [eventsUi, setEventsUi] = useState<{ id: string; name: string; kind: string; daysLeft: number }[]>([]);
+  useEffect(() => {
+    let alive = true;
+    const load = async () => {
+      try {
+        const res = await fetch("/api/worldbox/events", { headers: { Accept: "application/json" } });
+        if (!res.ok) return;
+        const data = (await res.json()) as { events?: { id: string; name: string; kind: string; daysLeft: number }[] };
+        if (alive) setEventsUi(data.events ?? []);
+      } catch { /* noop */ }
+    };
+    void load();
+    const timer = window.setInterval(load, 60000);
+    return () => { alive = false; window.clearInterval(timer); };
+  }, []);
+  const enterEventDungeon = () => {
+    const r = buildRuins(MAP_SEED, EVENT_DUNGEON_ENTRANCE.x, EVENT_DUNGEON_ENTRANCE.y);
+    instanceWarpRef.current(
+      makeInstanceSpace("ruins", EVENT_DUNGEON_ENTRANCE.x, EVENT_DUNGEON_ENTRANCE.y, 0),
+      { x: r.portal.x + 0.5, y: r.portal.y + 0.5 },
+    );
+  };
   /** 所属国への移動（ゲームループ側のテレポート実体）。 */
   const teleportActionRef = useRef<(x: number, y: number) => void>(() => {});
   /** 所属国へ移動: 所属の検証と移動先の決定はサーバー側が行う。 */
@@ -486,7 +511,6 @@ export default function WorldBoxClient() {
     }
   };
   const respawnActionRef = useRef<(point: { x: number; y: number }) => void>(() => {});
-  const instanceWarpRef = useRef<(target: string, entry: { x: number; y: number }) => void>(() => {});
   const bedKeyRef = useRef<string>("");
   const [casinoOpen, setCasinoOpen] = useState(false);
   const [arenaOpen, setArenaOpen] = useState(false);
@@ -1418,6 +1442,23 @@ export default function WorldBoxClient() {
   attackMobRef.current = attackMob;
   const refreshMobsRef = useRef(refreshMobs);
   refreshMobsRef.current = refreshMobs;
+  /** テント拡張の購入（サーバー側 expand_tent が正）。 */
+  const expandTent = async () => {
+    try {
+      const res = await fetch("/api/worldbox/profile", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "expand_tent" }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { profile?: PlayerProfile; error?: string };
+      if (res.ok && data.profile) {
+        setInvProfile(data.profile);
+        setTileMsg("テントが広くなった");
+      } else {
+        setTileMsg(data.error === "insufficient_balance" ? "コインが足りない" : "拡張できない");
+      }
+    } catch { /* noop */ }
+  };
   /** インベントリ整理: 任意スロット間の移動（サーバー側 moveSlot が正）。 */
   const moveItem = async (from: SlotRef, to: SlotRef) => {
     try {
@@ -1550,7 +1591,16 @@ export default function WorldBoxClient() {
     if (!ctx) return;
 
     const lobby = buildLobby();
-    const tent = buildTent();
+    let tentTierSeen = -1;
+    let tentData = buildTent(0);
+    const tentNow = () => {
+      const tier = invRef.current?.tentTier ?? 0;
+      if (tier !== tentTierSeen) {
+        tentTierSeen = tier;
+        tentData = buildTent(tier);
+      }
+      return tentData;
+    };
     /** 現在の室内空間（ロビー/テント）のデータ。ワールドでは lobby を返す（使われない）。 */
     let caveCacheKey = "";
     let caveCache: CaveLayer | null = null;
@@ -1597,7 +1647,7 @@ export default function WorldBoxClient() {
       parseInstanceSpace(space)?.kind === "dungeon"
         ? { ...def, hp: Math.max(1, Math.round(def.hp * dungeonHpScale(dungeonStateRef.current.size))) }
         : def;
-    const indoorData = (): LobbyData => caveLayerNow()?.data ?? ruinsNow()?.data ?? dungeonNow()?.data ?? (space === "tent" ? tent : lobby);
+    const indoorData = (): LobbyData => caveLayerNow()?.data ?? ruinsNow()?.data ?? dungeonNow()?.data ?? (space === "tent" ? tentNow() : lobby);
     const textures = loadTextures();
     const dungeon = loadDungeonTiles();
     const lobbySprites = loadLobbySprites();
@@ -1682,7 +1732,7 @@ export default function WorldBoxClient() {
       if (inst?.kind === "cave") return rectBounds(64, 64);
       if (inst?.kind === "ruins") return rectBounds(48, 48);
       if (inst?.kind === "dungeon") return rectBounds(52, 52);
-      return space === "lobby" ? rectBounds(LOBBY_W, LOBBY_H) : space === "tent" ? rectBounds(TENT_W, TENT_H) : worldBounds();
+      return space === "lobby" ? rectBounds(LOBBY_W, LOBBY_H) : space === "tent" ? rectBounds(tentNow().width, tentNow().height) : worldBounds();
     };
     // モブ占有を差し引いた今フレームの固体集合（モブの真上に立つ間の救済用）
     let mobFrameBlocked: ReadonlySet<string> | undefined;
@@ -2655,7 +2705,8 @@ export default function WorldBoxClient() {
           setStatusText("テント");
           setBoardOpen(false);
           setGuildBoardOpen(false);
-          placePlayer(TENT_ENTRY.x, TENT_ENTRY.y);
+          const entry = tentEntryFor(invRef.current?.tentTier ?? 0);
+          placePlayer(entry.x, entry.y);
         } else {
           space = "world";
           setSpaceUi("world");
@@ -2865,7 +2916,8 @@ export default function WorldBoxClient() {
         }
       }
       if (space === "tent") {
-        if (tx === TENT_EXIT.x && ty === TENT_EXIT.y) doWarp("world");
+        const exit = tentExitFor(invRef.current?.tentTier ?? 0);
+        if (tx === exit.x && ty === exit.y) doWarp("world");
         return;
       }
       if (tx === LOBBY_WARP_PAD.x && ty === LOBBY_WARP_PAD.y) {
@@ -3378,7 +3430,7 @@ export default function WorldBoxClient() {
           for (let tx = lx0; tx <= lx1; tx++) {
             const id = parseInstanceSpace(space)
               ? indoor.tiles[ty * indoor.width + tx] ?? 0
-              : space === "tent" ? tentTileAt(indoor.tiles, tx, ty) : lobbyTileAt(indoor.tiles, tx, ty);
+              : space === "tent" ? tentTileAt(indoor.tiles, indoor.width, indoor.height, tx, ty) : lobbyTileAt(indoor.tiles, tx, ty);
             if (id === L_VOID) continue; // 図形の外は背景のまま
             const sx = lobbyOx + tx * TILE;
             const sy = lobbyOy + ty * TILE;
@@ -4455,6 +4507,20 @@ export default function WorldBoxClient() {
       run: () => warpActionRef.current(spaceUi === "world" ? "lobby" : "world"),
     },
     {
+      id: "expand_tent",
+      label: invProfile && invProfile.tentTier < TENT_MAX_TIER
+        ? `テント拡張（${TENT_TIERS[invProfile.tentTier + 1].w}×${TENT_TIERS[invProfile.tentTier + 1].h} / ${TENT_TIERS[invProfile.tentTier + 1].price}）`
+        : "テント拡張",
+      show: spaceUi === "tent" && !!invProfile && invProfile.tentTier < TENT_MAX_TIER,
+      run: () => { void expandTent(); },
+    },
+    {
+      id: "event_dungeon",
+      label: `${eventsUi.find((e) => e.kind === "limited_dungeon")?.name ?? "期間ダンジョン"}へ行く`,
+      show: spaceUi === "world" && eventsUi.some((e) => e.kind === "limited_dungeon"),
+      run: () => enterEventDungeon(),
+    },
+    {
       id: "travel",
       label: "国へ移動",
       show: nationsUi.me !== null,
@@ -4641,6 +4707,16 @@ export default function WorldBoxClient() {
             >
               {soundSettings.se ? "効果音を切る" : "効果音を入れる"}
             </button>
+            {eventsUi.length > 0 && (
+              <div style={{ borderTop: "1px solid rgba(255,255,255,0.18)", paddingTop: 6 }}>
+                {eventsUi.map((e) => (
+                  <div key={e.id} style={{ fontSize: 12, display: "flex", gap: 6 }}>
+                    <span style={{ flex: 1 }}>{e.name}</span>
+                    <span style={{ opacity: 0.75 }}>あと{e.daysLeft}日</span>
+                  </div>
+                ))}
+              </div>
+            )}
             {invProfile && (
               <div style={{ borderTop: "1px solid rgba(255,255,255,0.18)", paddingTop: 6 }}>
                 <div style={{ fontSize: 11, opacity: 0.75, marginBottom: 4 }}>コレクション</div>
