@@ -10,8 +10,16 @@ import { parseSave } from "@/lib/worldbox/save";
 import { loadWorldBoxSave, storeWorldBoxSave } from "@/lib/worldbox/save-online";
 import { serializeSave } from "@/lib/worldbox/save";
 import {
-  buildCaveLayer, parseInstanceSpace, CAVE_CHEST_RESPAWN_MS,
+  buildCaveLayer, buildRuins, parseInstanceSpace, weekKeyOf,
+  CAVE_CHEST_RESPAWN_MS, RUINS_COMPLETE_EARN, RUINS_MAIN_CHEST_LOOT,
 } from "@/lib/worldbox/instances";
+import {
+  loadRuinsPersonal, storeRuinsPersonal,
+} from "@/lib/worldbox/instances-online";
+import { buildEconomyOp } from "@/lib/worldbox/economy-bridge";
+import { enqueueEconomyOp, isEconomyEnabled } from "@/lib/worldbox/economy-bridge-online";
+import { applyPoison } from "@/lib/worldbox/vitals";
+import { removeItem } from "@/lib/worldbox/profile";
 import { isInstancesEnabled, loadInstanceState, storeInstanceState } from "@/lib/worldbox/instances-online";
 import { rollObjectLoot, specialObjectById } from "@/lib/worldbox/objects";
 import { makeRng } from "@/lib/worldbox/rng";
@@ -62,9 +70,140 @@ export async function GET(request: Request) {
   if (!isInstancesEnabled()) return NextResponse.json({ error: "instances_unavailable" }, { status: 503, headers: NO_STORE });
   const space = new URL(request.url).searchParams.get("space") ?? "";
   const inst = parseInstanceSpace(space);
-  if (!inst || inst.kind !== "cave") return NextResponse.json({ error: "invalid_space" }, { status: 400, headers: NO_STORE });
+  if (!inst) return NextResponse.json({ error: "invalid_space" }, { status: 400, headers: NO_STORE });
+  if (inst.kind === "ruins") {
+    const personal = await loadRuinsPersonal(space, sessionOwnerKey(session), weekKeyOf(Date.now()));
+    return NextResponse.json(
+      { chests: personal.chests, traps: personal.traps, doors: personal.doors, summons: personal.summons, completed: personal.completed },
+      { headers: NO_STORE },
+    );
+  }
+  if (inst.kind !== "cave") return NextResponse.json({ error: "invalid_space" }, { status: 400, headers: NO_STORE });
   const state = await loadInstanceState(space);
   return NextResponse.json({ veins: state.veins, chest: state.chest }, { headers: NO_STORE });
+}
+
+type SessionT = NonNullable<ReturnType<typeof getRequestSession>>;
+
+/** 遺跡内アクション（個人別状態。週次リセット、主宝箱は ruins_complete）。 */
+async function handleRuins(
+  request: Request,
+  session: SessionT,
+  space: string,
+  inst: { entranceX: number; entranceY: number },
+  fields: { action?: unknown; chestIdx?: unknown; doorIdx?: unknown; trapIdx?: unknown },
+): Promise<NextResponse> {
+  const ownerKey = sessionOwnerKey(session);
+  const now = Date.now();
+  const ruins = buildRuins(MAP_SEED, inst.entranceX, inst.entranceY);
+  const personal = await loadRuinsPersonal(space, ownerKey, weekKeyOf(now));
+  const pos = await actorPos(ownerKey, space);
+  const near = (x: number, y: number) => pos !== null && Math.hypot(pos.x - (x + 0.5), pos.y - (y + 0.5)) <= REACH;
+  const profile = await loadProfile(ownerKey);
+  if (!profile) return NextResponse.json({ error: "profile_unavailable" }, { status: 503, headers: NO_STORE });
+
+  if (fields.action === "open_door") {
+    const door = ruins.doors.find((d) => d.idx === fields.doorIdx);
+    if (!door) return NextResponse.json({ error: "no_door" }, { status: 404, headers: NO_STORE });
+    if (personal.doors[String(door.idx)]) return NextResponse.json({ ok: true, already: true }, { headers: NO_STORE });
+    if (!near(door.x, door.y)) return NextResponse.json({ error: "too_far" }, { status: 409, headers: NO_STORE });
+    const afterKey = removeItem(profile, "golden_key", 1);
+    if (!afterKey) return NextResponse.json({ error: "needs_golden_key" }, { status: 409, headers: NO_STORE });
+    personal.doors[String(door.idx)] = true;
+    await storeRuinsPersonal(space, ownerKey, personal);
+    if (!(await storeProfile(ownerKey, afterKey))) {
+      return NextResponse.json({ error: "profile_unavailable" }, { status: 503, headers: NO_STORE });
+    }
+    return NextResponse.json({ ok: true, profile: afterKey, doors: personal.doors }, { headers: NO_STORE });
+  }
+
+  if (fields.action === "trap") {
+    const trap = ruins.traps.find((t) => t.idx === fields.trapIdx);
+    if (!trap) return NextResponse.json({ error: "no_trap" }, { status: 404, headers: NO_STORE });
+    if (personal.traps[String(trap.idx)]) return NextResponse.json({ ok: true, already: true }, { headers: NO_STORE });
+    if (!near(trap.x, trap.y)) return NextResponse.json({ error: "too_far" }, { status: 409, headers: NO_STORE });
+    personal.traps[String(trap.idx)] = true;
+    let next = profile;
+    let teleport: { x: number; y: number } | null = null;
+    if (trap.kind === "damage") {
+      next = { ...next, hp: Math.max(0, next.hp - 12) };
+    } else if (trap.kind === "poison") {
+      next = applyPoison(next, now);
+    } else if (trap.kind === "alarm") {
+      // 近くにスライムを2体召喚（このプレイヤー専用の個体として記録する）
+      const spots = ruins.roomCenters
+        .map((c) => ({ x: c.x + 1, y: c.y }))
+        .filter((c) => Math.hypot(c.x - trap.x, c.y - trap.y) <= 8)
+        .slice(0, 2);
+      const summonSpots = spots.length > 0 ? spots : [{ x: trap.x + 1, y: trap.y }, { x: trap.x - 1, y: trap.y }];
+      for (const spt of summonSpots) personal.summons.push({ mobId: "slime", x: spt.x, y: spt.y });
+    } else if (trap.kind === "teleport") {
+      const centers = ruins.roomCenters.filter((c) => Math.hypot(c.x - trap.x, c.y - trap.y) > 6);
+      const target = centers[Math.floor(Math.random() * centers.length)] ?? ruins.portal;
+      teleport = { x: target.x + 0.5, y: target.y + 0.5 };
+    }
+    await storeRuinsPersonal(space, ownerKey, personal);
+    if (next !== profile && !(await storeProfile(ownerKey, next))) {
+      return NextResponse.json({ error: "profile_unavailable" }, { status: 503, headers: NO_STORE });
+    }
+    return NextResponse.json(
+      { ok: true, kind: trap.kind, teleport, summons: personal.summons, profile: next },
+      { headers: NO_STORE },
+    );
+  }
+
+  if (fields.action === "open_chest") {
+    const chest = ruins.chests.find((c) => c.idx === fields.chestIdx);
+    if (!chest) return NextResponse.json({ error: "no_chest" }, { status: 404, headers: NO_STORE });
+    if (personal.chests[String(chest.idx)]) return NextResponse.json({ error: "depleted" }, { status: 409, headers: NO_STORE });
+    if (!near(chest.x, chest.y)) return NextResponse.json({ error: "too_far" }, { status: 409, headers: NO_STORE });
+    if (chest.requiresKey && ruins.doors.length > 0 && !personal.doors[String(ruins.doors[0].idx)]) {
+      return NextResponse.json({ error: "needs_golden_key" }, { status: 409, headers: NO_STORE });
+    }
+    const def = specialObjectById("ruins_chest");
+    if (!def) return NextResponse.json({ error: "no_chest" }, { status: 404, headers: NO_STORE });
+    const rng = makeRng((now ^ chest.x * 131 ^ chest.y * 17) >>> 0);
+    let gained: Record<string, number> = {};
+    let trapped = false;
+    if (chest.main) {
+      for (const entry of RUINS_MAIN_CHEST_LOOT) {
+        if (rng() >= entry.chance) continue;
+        const count = entry.min + Math.floor(rng() * (entry.max - entry.min + 1));
+        if (count > 0) gained[entry.itemId] = (gained[entry.itemId] ?? 0) + count;
+      }
+    } else {
+      const loot = rollObjectLoot(def, rng);
+      gained = loot.gained;
+      trapped = loot.trapped;
+    }
+    let next = profile;
+    for (const [id, count] of Object.entries(gained)) next = addItem(next, id, count);
+    if (trapped) next = { ...next, hp: Math.max(0, next.hp - 10) };
+    personal.chests[String(chest.idx)] = true;
+    let completedNow = false;
+    if (chest.main && !personal.completed) {
+      personal.completed = true;
+      completedNow = true;
+    }
+    await storeRuinsPersonal(space, ownerKey, personal);
+    if (!(await storeProfile(ownerKey, next))) {
+      return NextResponse.json({ error: "profile_unavailable" }, { status: 503, headers: NO_STORE });
+    }
+    if (completedNow && session.provider === "discord" && isEconomyEnabled()) {
+      const op = buildEconomyOp(
+        { kind: "earn", userKey: ownerKey, discordId: session.id, amount: RUINS_COMPLETE_EARN, reason: "ruins_complete" },
+        crypto.randomUUID(),
+        now,
+      );
+      if (op) await enqueueEconomyOp(op);
+    }
+    return NextResponse.json(
+      { ok: true, gained, trapped, completed: completedNow, profile: next, chests: personal.chests },
+      { headers: NO_STORE },
+    );
+  }
+
+  return NextResponse.json({ error: "invalid_request" }, { status: 400, headers: NO_STORE });
 }
 
 export async function POST(request: Request) {
@@ -78,10 +217,12 @@ export async function POST(request: Request) {
   } catch {
     return NextResponse.json({ error: "invalid_request" }, { status: 400, headers: NO_STORE });
   }
-  const fields = (body ?? {}) as { action?: unknown; space?: unknown; veinKey?: unknown };
+  const fields = (body ?? {}) as { action?: unknown; space?: unknown; veinKey?: unknown; chestIdx?: unknown; doorIdx?: unknown; trapIdx?: unknown };
   const space = typeof fields.space === "string" ? fields.space : "";
   const inst = parseInstanceSpace(space);
-  if (!inst || inst.kind !== "cave") return NextResponse.json({ error: "invalid_space" }, { status: 400, headers: NO_STORE });
+  if (!inst) return NextResponse.json({ error: "invalid_space" }, { status: 400, headers: NO_STORE });
+  if (inst.kind === "ruins") return handleRuins(request, session, space, inst, fields);
+  if (inst.kind !== "cave") return NextResponse.json({ error: "invalid_space" }, { status: 400, headers: NO_STORE });
   const ownerKey = sessionOwnerKey(session);
   const now = Date.now();
   const cave = buildCaveLayer(MAP_SEED, inst.entranceX, inst.entranceY, inst.layer);

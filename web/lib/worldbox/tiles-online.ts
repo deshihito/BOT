@@ -14,14 +14,31 @@ export function isTilesEnabled(): boolean {
   return isBotApiConfigured();
 }
 
-/** 保存済みの上書きをすべて読む。無い・読めない・未設定なら空。 */
-export async function loadTileOverrides(): Promise<TileOverridesMap> {
-  if (!isBotApiConfigured()) return {};
+/** 名前空間を全件スキャンする（キャッシュの実読み）。 */
+async function scanTileOverrides(): Promise<TileOverridesMap> {
   try {
     return parseTileOverrides(await kvList(WORLDBOX_TILES_NAMESPACE));
   } catch {
     return {};
   }
+}
+
+// 全件読みは名前空間が育つほど重く、クライアントは15秒間隔＋移動で
+// 繰り返し叩くため、短TTLキャッシュで kvList の頻度を落とす。
+// 書き込み（storeTileOverride）はキャッシュへも即時反映するので、
+// 自分の行為の結果は次回読みでも必ず見える。
+const OVERRIDES_CACHE_TTL_MS = 3_000;
+let overridesCache: { at: number; map: TileOverridesMap } | null = null;
+
+/** 保存済みの上書きをすべて読む（短TTLキャッシュつき）。無い・読めない・未設定なら空。 */
+export async function loadTileOverrides(): Promise<TileOverridesMap> {
+  if (!isBotApiConfigured()) return {};
+  if (overridesCache && Date.now() - overridesCache.at < OVERRIDES_CACHE_TTL_MS) {
+    return overridesCache.map;
+  }
+  const map = await scanTileOverrides();
+  overridesCache = { at: Date.now(), map };
+  return map;
 }
 
 /** 1タイルの上書きを読む。 */
@@ -44,6 +61,11 @@ export async function storeTileOverride(
   try {
     if (override === null) await kvDelete(WORLDBOX_TILES_NAMESPACE, tileKey(x, y));
     else await kvSet(WORLDBOX_TILES_NAMESPACE, tileKey(x, y), JSON.stringify(override));
+    if (overridesCache) {
+      const key = tileKey(x, y);
+      if (override === null) delete overridesCache.map[key];
+      else overridesCache.map[key] = override;
+    }
     return true;
   } catch {
     return false;
