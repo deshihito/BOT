@@ -3,8 +3,9 @@ import { getRequestSession, publicOrigin, sessionOwnerKey } from "@/lib/auth";
 import type { CoinMovement } from "@/lib/worldbox/economy";
 import { buildEconomyOp } from "@/lib/worldbox/economy-bridge";
 import {
-  enqueueEconomyOp, isEconomyEnabled, readUserBalance,
+  enqueueEconomyOpOnce, isEconomyEnabled, readUserBalance,
 } from "@/lib/worldbox/economy-bridge-online";
+import { withUserLock } from "@/lib/worldbox/user-lock";
 import { loadNationsState } from "@/lib/worldbox/nations-online";
 import { isProfileEnabled, loadProfile, storeProfile } from "@/lib/worldbox/profile-online";
 import {
@@ -52,15 +53,21 @@ function view(state: Parameters<typeof requestsForGuild>[0], guildId: string, ow
   return requestsForGuild(state, guildId).map((r) => ({ ...r, mine: r.posterKey === ownerKey }));
 }
 
-/** coin をブリッジのオプとして積む。積めたら true。 */
-async function enqueueCoin(ownerKey: string, discordId: string, coin: CoinMovement): Promise<boolean> {
+/**
+ * coin をブリッジのオプとして積む。積めたら true。
+ * オプ ID は依頼 ID から決定的に導く（escrow-/reward-/refund-<依頼ID>）+
+ * 冪等登録（enqueueEconomyOpOnce）: 依頼1件につき各オプは最大1件しか
+ * 積まれず、再試行や並行リクエストで預かり・報酬・返金が二重に
+ * 動くことはない（カジノの精算オプと同じ規則、PR #943）。
+ */
+async function enqueueCoin(ownerKey: string, discordId: string, coin: CoinMovement, opId: string): Promise<boolean> {
   const op = buildEconomyOp(
     { kind: coin.kind, userKey: ownerKey, discordId, amount: coin.amount, reason: coin.reason },
-    crypto.randomUUID(),
+    opId,
     Date.now(),
   );
   if (!op) return false;
-  return enqueueEconomyOp(op);
+  return enqueueEconomyOpOnce(op);
 }
 
 export async function GET(request: Request) {
@@ -102,7 +109,17 @@ export async function POST(request: Request) {
   if (session.provider !== "discord") return statusError("discord_required", 403);
   if (!isRequestsEnabled() || !isProfileEnabled()) return statusError("requests_unavailable", 503);
   if (!isEconomyEnabled()) return statusError("economy_unavailable", 503);
+  // 依頼の状態は全ユーザー共有の1ドキュメント（read-modify-write）。
+  // 投稿者と納品者が別人同士でも競合するため、ユーザー単位でなく
+  // 依頼全体を固定キーで直列化する（カジノ #943 と同型の対策）。
+  // これがないと 納品×2 や 納品×取消 が同時に通って報酬と返金が
+  // 両方払われうる。決定的なオプ ID と合わせて二重払いを防ぐ。
+  return withUserLock("worldbox:requests", () => handlePost(request, session));
+}
 
+type AuthedSession = NonNullable<ReturnType<typeof getRequestSession>>;
+
+async function handlePost(request: Request, session: AuthedSession) {
   let body: unknown;
   try {
     body = await request.json();
@@ -130,8 +147,9 @@ export async function POST(request: Request) {
     case "post": {
       const balance = await readUserBalance(discordId);
       if (balance === null) return statusError("economy_unavailable", 503);
+      const requestId = crypto.randomUUID();
       const result = postRequest(state, {
-        id: crypto.randomUUID(),
+        id: requestId,
         guildId,
         posterKey: ownerKey,
         posterName: session.username,
@@ -142,7 +160,7 @@ export async function POST(request: Request) {
       }, balance);
       if (!result.ok) return errorResponse(result.error);
       if (!(await storeRequestsState(result.state))) return statusError("store_failed", 503);
-      if (!(await enqueueCoin(ownerKey, discordId, result.coin))) {
+      if (!(await enqueueCoin(ownerKey, discordId, result.coin, `escrow-${requestId}`))) {
         await storeRequestsState(state);
         return statusError("economy_failed", 503);
       }
@@ -175,7 +193,7 @@ export async function POST(request: Request) {
         await storeProfile(result.request.posterKey, posterProfile);
         return statusError("store_failed", 503);
       }
-      if (!(await enqueueCoin(ownerKey, discordId, result.coin))) {
+      if (!(await enqueueCoin(ownerKey, discordId, result.coin, `reward-${data.requestId}`))) {
         await storeProfile(ownerKey, fulfillerProfile);
         await storeProfile(result.request.posterKey, posterProfile);
         await storeRequestsState(state);
@@ -195,7 +213,7 @@ export async function POST(request: Request) {
       const result = cancelRequest(state, data.requestId, ownerKey);
       if (!result.ok) return errorResponse(result.error);
       if (!(await storeRequestsState(result.state))) return statusError("store_failed", 503);
-      if (!(await enqueueCoin(ownerKey, discordId, result.coin))) {
+      if (!(await enqueueCoin(ownerKey, discordId, result.coin, `refund-${data.requestId}`))) {
         await storeRequestsState(state);
         return statusError("economy_failed", 503);
       }

@@ -24,6 +24,22 @@ export async function enqueueEconomyOp(op: EconomyOp): Promise<boolean> {
   }
 }
 
+/**
+ * 冪等なオプ登録（カジノの enqueueSettleOnce と同じ規則、PR #943）。
+ * 決定的 ID のオプ専用: 同 ID のオプが既にあれば（pending / done /
+ * failed を問わず）作り直さず true を返す。「1つの論理的な支払い =
+ * オプ1件」を保証し、再試行や並行リクエストで二重に払われない。
+ * done 済みオプを pending で上書きするとワーカーが再適用してしまう
+ * ため、存在チェックなしに enqueueEconomyOp を決定的 ID で呼んでは
+ * いけない。
+ */
+export async function enqueueEconomyOpOnce(op: EconomyOp): Promise<boolean> {
+  if (!isBotApiConfigured()) return false;
+  const existing = await findEconomyOp(op.userKey, op.id);
+  if (existing) return true;
+  return enqueueEconomyOp(op);
+}
+
 /** 自分のオプ（新しい順・最大20件）。読めなければ空配列。 */
 export async function loadMyEconomyOps(userKey: string): Promise<EconomyOp[]> {
   if (!isBotApiConfigured()) return [];

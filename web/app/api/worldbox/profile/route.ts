@@ -14,6 +14,7 @@ import { findPresenceOwnerKey, isPresenceEnabled } from "@/lib/worldbox/presence
 import { checkBuyGenre, checkBuySold } from "@/lib/worldbox/shops";
 import { loadMyLobbyShopGenre, loadMyLobbyStation } from "@/lib/worldbox/station-online";
 import { isProfileEnabled, loadProfile, storeProfile } from "@/lib/worldbox/profile-online";
+import { withUserLock } from "@/lib/worldbox/user-lock";
 
 export const runtime = "nodejs";
 
@@ -96,6 +97,16 @@ export async function POST(request: Request) {
   if (!isProfileEnabled()) {
     return NextResponse.json({ error: "profile_unavailable" }, { status: 503, headers: NO_STORE });
   }
+  // 同一ユーザーのリクエストを直列化する（カジノ #943 と同型の対策）。
+  // プロフィールの read-modify-write とコインオプの登録が並行すると、
+  // 同じ所持品の二重売却（earn 2件 = コイン生成）や二重購入
+  // （spend 2件・アイテムは1つ）が起きうる。
+  return withUserLock(sessionOwnerKey(session), () => handlePost(request, session));
+}
+
+type AuthedSession = NonNullable<ReturnType<typeof getRequestSession>>;
+
+async function handlePost(request: Request, session: AuthedSession) {
   let body: unknown;
   try {
     body = await request.json();

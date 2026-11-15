@@ -174,6 +174,7 @@ const profileOnlineUrl = dataUrl(
     .replaceAll('"../bot-api"', JSON.stringify(botApiStubUrl))
     .replaceAll('"./profile"', JSON.stringify(profileUrl)),
 );
+const userLockUrl = dataUrl(transpile("worldbox/user-lock.ts"));
 const nextServerStubUrl = dataUrl(`
 export class NextResponse {
   static json(body, init = {}) {
@@ -193,7 +194,8 @@ const arenaRoute = await import(
       .replaceAll('"@/lib/worldbox/economy-bridge"', JSON.stringify(economyUrl))
       .replaceAll('"@/lib/worldbox/economy-bridge-online"', JSON.stringify(economyOnlineUrl))
       .replaceAll('"@/lib/worldbox/profile-online"', JSON.stringify(profileOnlineUrl))
-      .replaceAll('"@/lib/worldbox/station-online"', JSON.stringify(stationOnlineUrl)),
+      .replaceAll('"@/lib/worldbox/station-online"', JSON.stringify(stationOnlineUrl))
+      .replaceAll('"@/lib/worldbox/user-lock"', JSON.stringify(userLockUrl)),
   ),
 );
 const vitalsUrl = dataUrl(
@@ -214,7 +216,8 @@ const plazaRoute = await import(
       .replaceAll('"@/lib/worldbox/station-online"', JSON.stringify(stationOnlineUrl))
       .replaceAll('"@/lib/worldbox/save"', JSON.stringify(saveUrl))
       .replaceAll('"@/lib/worldbox/save-online"', JSON.stringify(saveOnlineUrl))
-      .replaceAll('"@/lib/worldbox/vitals"', JSON.stringify(vitalsUrl)),
+      .replaceAll('"@/lib/worldbox/vitals"', JSON.stringify(vitalsUrl))
+      .replaceAll('"@/lib/worldbox/user-lock"', JSON.stringify(userLockUrl)),
   ),
 );
 
@@ -340,6 +343,66 @@ test("API(plaza): 噴水は場所検証つきで spend 10、休憩はクール�
   const rest2 = await plazaRoute.POST(apiRequest(URL_P, "POST", cookie, { action: "rest" }));
   assert.equal(rest2.status, 409);
   assert.equal((await rest2.json()).error, "rest_cooldown");
+});
+
+test("API(arena): 開始リクエストが並行しても参加費オプは1件だけ（二重開始の回帰防止）", async () => {
+  reset();
+  setPresence(29, 12);
+  const results = await Promise.all([
+    arenaRoute.POST(apiRequest(URL_A, "POST", cookie, { action: "start", tier: "slime" })),
+    arenaRoute.POST(apiRequest(URL_A, "POST", cookie, { action: "start", tier: "slime" })),
+    arenaRoute.POST(apiRequest(URL_A, "POST", cookie, { action: "start", tier: "slime" })),
+  ]);
+  assert.equal(results.filter((r) => r.status === 200).length, 1);
+  assert.equal(results.filter((r) => r.status === 409).length, 2);
+  const fees = findOps((o) => o.kind === "spend" && o.reason === "arena_entry");
+  assert.equal(fees.length, 1, "参加費の spend は1件だけ積まれる");
+});
+
+test("API(arena): 勝利手の並行リクエストでも賞金オプは決定的 ID で1件だけ（二重賞金の回帰防止）", async () => {
+  reset();
+  setPresence(29, 12);
+  const start = await arenaRoute.POST(apiRequest(URL_A, "POST", cookie, { action: "start", tier: "slime" }));
+  assert.equal(start.status, 200);
+  markOpsDone("spend", "arena_entry");
+  const feeOpId = findOps((o) => o.reason === "arena_entry")[0].id;
+  // 敵 HP を 1 にして、次の攻撃ヒットで必ず決着する状態にする
+  const key = `worldbox_arena session:${MY_KEY}`;
+  const s = JSON.parse(store.get(key));
+  s.state = "fighting";
+  s.enemyHp = 1;
+  store.set(key, JSON.stringify(s));
+  // 決着手が並行に重なっても賞金は1回だけ
+  await Promise.all([
+    arenaRoute.POST(apiRequest(URL_A, "POST", cookie, { action: "act", move: "attack" })),
+    arenaRoute.POST(apiRequest(URL_A, "POST", cookie, { action: "act", move: "attack" })),
+    arenaRoute.POST(apiRequest(URL_A, "POST", cookie, { action: "act", move: "attack" })),
+  ]);
+  for (let i = 0; i < 40; i++) {
+    const after = await (await arenaRoute.GET(apiRequest(URL_A, "GET", cookie))).json();
+    if (!after.session) break;
+    await arenaRoute.POST(apiRequest(URL_A, "POST", cookie, { action: "act", move: "attack" }));
+  }
+  const after = await (await arenaRoute.GET(apiRequest(URL_A, "GET", cookie))).json();
+  assert.equal(after.session, null, "決着してセッションは消える");
+  const prizes = findOps((o) => o.kind === "earn" && o.reason === "arena_prize");
+  assert.equal(prizes.length, 1, "賞金の earn は1件だけ積まれる");
+  assert.equal(prizes[0].id, `prize-${feeOpId}`, "賞金オプは参加費オプから決定的に導かれる");
+});
+
+test("API(plaza): 噴水の並行リクエストでも spend は1件だけ（残高検証のすり抜け防止）", async () => {
+  reset();
+  globalThis.__wbArenaUsers.set(ME, 10); // ちょうど1回分だけ残高がある
+  setPresence(28, 26);
+  const results = await Promise.all([
+    plazaRoute.POST(apiRequest(URL_P, "POST", cookie, { action: "fountain" })),
+    plazaRoute.POST(apiRequest(URL_P, "POST", cookie, { action: "fountain" })),
+    plazaRoute.POST(apiRequest(URL_P, "POST", cookie, { action: "fountain" })),
+  ]);
+  assert.equal(results.filter((r) => r.status === 200).length, 1);
+  assert.equal(results.filter((r) => r.status === 409).length, 2);
+  const spends = findOps((o) => o.kind === "spend" && o.reason === "fountain_offering");
+  assert.equal(spends.length, 1, "噴水の spend は1件だけ積まれる");
 });
 
 test("client: 闘技場パネルとチップ配線がある", () => {

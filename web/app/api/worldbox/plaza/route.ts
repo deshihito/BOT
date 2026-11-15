@@ -8,6 +8,7 @@ import {
 import { addItem } from "@/lib/worldbox/profile";
 import { loadProfile, storeProfile } from "@/lib/worldbox/profile-online";
 import { loadMyLobbyStation } from "@/lib/worldbox/station-online";
+import { withUserLock } from "@/lib/worldbox/user-lock";
 import { parseSave } from "@/lib/worldbox/save";
 import { loadWorldBoxSave } from "@/lib/worldbox/save-online";
 import { applyRest } from "@/lib/worldbox/vitals";
@@ -43,6 +44,16 @@ export async function POST(request: Request) {
   const session = getRequestSession(request);
   if (!session) return errorResponse("unauthorized", 401);
   if (session.provider !== "discord") return errorResponse("unauthorized", 403);
+  // 同一ユーザーのリクエストを直列化する（カジノ #943 と同型の対策）。
+  // 並行すると噴水は残高検証（処理中 spend の差し引き）をすり抜けて
+  // 二重に課金され、休憩はクールダウンの確認→記録が競合して
+  // 連続で通ってしまう。
+  return withUserLock(sessionOwnerKey(session), () => handlePost(request, session));
+}
+
+type AuthedSession = NonNullable<ReturnType<typeof getRequestSession>>;
+
+async function handlePost(request: Request, session: AuthedSession) {
   const ownerKey = sessionOwnerKey(session);
   const discordId = session.id;
 
