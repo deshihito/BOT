@@ -4,16 +4,25 @@
 // リンク生成だけクライアント側で行う。
 // 絞り込み（1人用／CPU対戦／オンライン）とタイトル検索、ランダム1本もここで持つ。
 // 分類は catalog の players 表示文字列から導出する。
+// ジャンル所属タイトル（catalog の genre）は通常の一覧から外し、
+// 先頭にジャンルセクション（GAME_GENRES の並び順）として区切って表示する。
 // 格下げタイトル（catalog の demoted）は通常タイトルの後ろに区切って表示する。
 // 検索・絞り込みでは通常どおりヒットする。
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { WEB_GAMES, dailyPicksFor, getWebGame, type WebGame } from "@/lib/games-catalog";
+import {
+  GAME_GENRES,
+  WEB_GAMES,
+  dailyPicksFor,
+  getWebGame,
+  type WebGame,
+} from "@/lib/games-catalog";
 import { useGamesNav } from "./GamesShell";
 
-type FilterKey = "all" | "solo" | "cpu" | "online";
+type FilterKey = "worldbox" | "all" | "solo" | "cpu" | "online";
 
 const FILTERS: { key: FilterKey; label: string }[] = [
+  { key: "worldbox", label: "WORLD BOX" },
   { key: "all", label: "すべて" },
   { key: "solo", label: "1人用" },
   { key: "cpu", label: "CPU対戦" },
@@ -21,6 +30,7 @@ const FILTERS: { key: FilterKey; label: string }[] = [
 ];
 
 function matchesFilter(game: WebGame, filter: FilterKey): boolean {
+  if (filter === "worldbox") return game.genre === "worldbox";
   if (filter === "all") return true;
   if (filter === "solo") return game.players.startsWith("1人");
   if (filter === "cpu") return game.players.includes("CPU");
@@ -194,9 +204,14 @@ export default function GamesGrid() {
     });
   }, [filter, query]);
 
+  // ジャンル所属タイトルは通常の一覧から外し、先頭のジャンルセクションに出す。
+  const genreSections = GAME_GENRES.map((genre) => ({
+    genre,
+    games: visible.filter((game) => game.genre === genre.id),
+  })).filter((section) => section.games.length > 0);
   // 格下げタイトルは通常タイトルの後ろに分離して出す（並び順はカタログ順を保つ）。
-  const primary = visible.filter((game) => !game.demoted);
-  const demoted = visible.filter((game) => game.demoted);
+  const primary = visible.filter((game) => !game.demoted && !game.genre);
+  const demoted = visible.filter((game) => game.demoted && !game.genre);
 
   const pickRandom = () => {
     const pool = WEB_GAMES.filter((g) => g.status === "playable");
@@ -206,6 +221,20 @@ export default function GamesGrid() {
 
   return (
     <>
+      {genreSections.map(({ genre, games }) => (
+        <section key={genre.id} aria-label={genre.label} style={{ margin: "0 0 28px" }}>
+          <p className="eyebrow">GENRE</p>
+          <h2 style={{ margin: "0 0 4px" }}>{genre.label}</h2>
+          <p className="muted" style={{ margin: "0 0 14px" }}>
+            {genre.description}
+          </p>
+          <div className="games-grid">
+            {games.map((game) => (
+              <GameCard key={game.slug} game={game} prefix={prefix} />
+            ))}
+          </div>
+        </section>
+      ))}
       {daily && <DailyStrip daily={daily} prefix={prefix} />}
       <div
         style={{

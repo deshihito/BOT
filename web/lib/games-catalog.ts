@@ -25,7 +25,33 @@ export type WebGame = {
    * 検索・絞り込み・直接 URL では通常どおり辿れる。
    */
   demoted?: boolean;
+  /**
+   * ジャンルセクションへの所属（GAME_GENRES の id）。
+   * 指定したタイトルは通常の一覧から外れ、ハブ先頭のジャンルセクションに分離表示される。
+   */
+  genre?: string;
 };
+
+/**
+ * ハブ先頭に専用セクションを出すジャンル。並び順がそのまま表示順で、
+ * 先頭の WORLD BOX がハブの一番上に来る。
+ */
+export type GameGenre = {
+  /** ジャンル id（WebGame.genre と対応）。 */
+  id: string;
+  /** セクション見出しと絞り込みチップの表示名。 */
+  label: string;
+  /** セクションに出す短い説明（1行）。 */
+  description: string;
+};
+
+export const GAME_GENRES: GameGenre[] = [
+  {
+    id: "worldbox",
+    label: "WORLD BOX",
+    description: "共有ワールドを歩き、国を作り、経済で遊ぶ場所",
+  },
+];
 
 export const WEB_GAMES: WebGame[] = [
   {
@@ -907,6 +933,7 @@ export const WEB_GAMES: WebGame[] = [
     status: "playable",
     activity: true,
     players: "みんな（同時接続）",
+    genre: "worldbox",
   },
   {
     slug: "kwordle",
@@ -925,6 +952,15 @@ export function getWebGame(slug: string): WebGame | undefined {
 
 export function playableGames(): WebGame[] {
   return WEB_GAMES.filter((game) => game.status === "playable");
+}
+
+export function getGameGenre(id: string): GameGenre | undefined {
+  return GAME_GENRES.find((genre) => genre.id === id);
+}
+
+/** そのジャンルに所属するタイトル（カタログ順）。 */
+export function gamesInGenre(id: string): WebGame[] {
+  return WEB_GAMES.filter((game) => game.genre === id);
 }
 
 /** 日付キー（Asia/Tokyo の YYYY-MM-DD）。ハブの「今日のデイリー」選出の基準。 */
@@ -949,10 +985,13 @@ function dailyHash(key: string): number {
 /**
  * その日のおすすめ（日替わり選出）。JST の日付だけから決定的に選ぶため、
  * 同じ日は誰が見ても同じ顔ぶれになり、翌日には変わる。
- * デイリー帯で別枠表示するワードルと、格下げタイトルは候補から除く。
+ * デイリー帯で別枠表示するワードル、格下げタイトル、ジャンルセクションに
+ * 常設されるタイトルは候補から除く。
  */
 export function dailyPicksFor(date: Date, count = 3): WebGame[] {
-  const pool = playableGames().filter((game) => game.slug !== "wordle" && !game.demoted);
+  const pool = playableGames().filter(
+    (game) => game.slug !== "wordle" && !game.demoted && !game.genre,
+  );
   let seed = dailyHash(jstDateKey(date));
   // mulberry32: シード付き疑似乱数。選出の再現性だけが目的なので軽いもので足りる。
   const rand = (): number => {
