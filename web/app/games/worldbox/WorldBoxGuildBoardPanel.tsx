@@ -1,8 +1,10 @@
 "use client";
 // AGO WORLD BOX のギルドボードパネル（ロビー中央広場のギルドボード専用）。
-// タブは3つ: 「依頼」（ユニオン内のアイテム依頼: 投稿・納品・取消）と
+// タブは5つ: 「依頼」（ユニオン内のアイテム依頼: 投稿・納品・取消）と
 // 「役職」（国 = Discord サーバーへの建国・参加・離脱と自分の役職）と
-// 「冒険役職」（剣士/守護/斥候/採掘者/薬師の選択と熟練ランク表示）。
+// 「冒険役職」（剣士/守護/斥候/採掘者/薬師の選択と熟練ランク表示）と
+// 「掲示」（ユニオンチャットと Discord 連携設定）と
+// 「戦争」（レイド宣言・マーク攻防・繁栄ランキング・戦績）。
 // 役職まわりの home はここ: ≡ メニューには置かない。
 // コインの正は AGO コイン本体: 依頼の預かり・報酬・返金は API 側が
 // 経済ブリッジのオプとして積む（このパネルは結果を表示するだけ）。
@@ -32,6 +34,56 @@ const REQUEST_ERROR_LABEL: Record<string, string> = {
   store_failed: "保存に失敗しました",
   unauthorized: "ログインが必要です",
   discord_required: "Discord ログインが必要です",
+};
+
+const WAR_ERROR_LABEL: Record<string, string> = {
+  not_in_nation: "国に所属していません",
+  not_at_guild_board: "ギルドボードの前で操作してください",
+  forbidden_role: "王か大臣だけができます",
+  same_nation: "自国にはできません",
+  already_at_war: "戦争中です",
+  declare_cooldown: "まだ宣言できません",
+  nation_not_found: "国が見つかりません",
+  not_at_war: "戦争中ではありません",
+  not_attacker: "攻撃側ではありません",
+  not_defender: "防衛側ではありません",
+  too_far: "首都の近くで操作してください",
+  too_soon: "まだできません",
+  mark_full: "マークは無傷です",
+  position_unknown: "位置が分かりません",
+  wars_unavailable: "いま使えません",
+  unauthorized: "ログインが必要です",
+};
+
+type WarView = {
+  id: string;
+  attackerId: string;
+  defenderId: string;
+  attackerName: string;
+  defenderName: string;
+  declaredAt: number;
+  endsAt: number;
+  markHp: number;
+  markMax: number;
+  status: "active" | "closed";
+  outcome: "attacker_win" | "expired" | null;
+  endedAt: number | null;
+};
+
+type WarHistoryEntry = {
+  id: string;
+  attackerName: string;
+  defenderName: string;
+  outcome: "attacker_win" | "expired";
+  endedAt: number;
+};
+
+type WarData = {
+  wars: WarView[];
+  history: WarHistoryEntry[];
+  ranking: { id: string; name: string; color: string; members: number; prosperity: number; rank: number }[];
+  me: { nationId: string; role: NationRole } | null;
+  loggedIn: boolean;
 };
 
 type RequestView = GuildRequest & { mine: boolean };
@@ -99,7 +151,41 @@ export default function WorldBoxGuildBoardPanel({
   getPlayerPos: () => { x: number; y: number };
   onClose: () => void;
 }) {
-  const [tab, setTab] = useState<"requests" | "roles" | "adventure" | "board">("requests");
+  const [tab, setTab] = useState<"requests" | "roles" | "adventure" | "board" | "war">("requests");
+  // ユニオン戦争（レイド宣言・マーク攻防・繁栄ランキング・戦績）
+  const [warData, setWarData] = useState<WarData | null>(null);
+  const [warTarget, setWarTarget] = useState("");
+  const refreshWar = useCallback(async () => {
+    try {
+      const res = await fetch("/api/worldbox/war", { headers: { Accept: "application/json" } });
+      if (res.ok) setWarData((await res.json()) as WarData);
+    } catch { /* 読めなくてもパネルは開いたままにする */ }
+  }, []);
+  useEffect(() => {
+    if (tab === "war") void refreshWar();
+  }, [tab, refreshWar]);
+  const warAct = async (body: Record<string, unknown>) => {
+    setMsg("");
+    setBusy(true);
+    try {
+      const res = await fetch("/api/worldbox/war", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const json = (await res.json().catch(() => ({}))) as { war?: WarView; destroyed?: boolean; error?: string };
+      if (!res.ok) {
+        setMsg(WAR_ERROR_LABEL[json.error as string] ?? "失敗しました");
+        return;
+      }
+      if (json.destroyed) setMsg("マークを破壊した");
+      await refreshWar();
+    } catch {
+      setMsg("失敗しました");
+    } finally {
+      setBusy(false);
+    }
+  };
   // ユニオン掲示（チャット）と Discord 連携設定
   const [unionMsgs, setUnionMsgs] = useState<{ name: string; text: string; at: number }[]>([]);
   const [unionRole, setUnionRole] = useState<string>("");
@@ -199,6 +285,14 @@ export default function WorldBoxGuildBoardPanel({
     .filter((n) => !myGuildIds.has(n.guildId))
     .sort((a, b) => b.prosperity - a.prosperity);
   const pos = getPlayerPos();
+  const myWar = warData?.wars.find(
+    (w) => w.status === "active" && warData.me !== null &&
+      (w.attackerId === warData.me.nationId || w.defenderId === warData.me.nationId),
+  ) ?? null;
+  const iAmAttacker = myWar !== null && warData?.me?.nationId === myWar.attackerId;
+  const warTargets = nations.nations.filter((n) => n.id !== warData?.me?.nationId);
+  const canDeclare = warData?.me !== null && warData?.me !== undefined &&
+    (warData.me.role === "king" || warData.me.role === "minister") && myWar === null;
 
   return (
     <div style={root} role="dialog" aria-label="ギルドボード">
@@ -236,6 +330,14 @@ export default function WorldBoxGuildBoardPanel({
           onClick={() => setTab("board")}
         >
           掲示
+        </button>
+        <button
+          type="button"
+          style={{ ...tabBtn, ...(tab === "war" ? tabOn : {}) }}
+          aria-pressed={tab === "war"}
+          onClick={() => setTab("war")}
+        >
+          戦争
         </button>
         <button type="button" style={tabBtn} onClick={onClose}>
           閉じる
@@ -461,6 +563,110 @@ export default function WorldBoxGuildBoardPanel({
             </div>
           )}
           {msg && <div style={{ fontSize: 13, marginTop: 6 }}>{msg}</div>}
+        </div>
+      )}
+
+      {tab === "war" && (
+        <div style={{ marginTop: 10 }}>
+          {warData === null ? (
+            <p style={{ margin: 0, fontSize: 13, opacity: 0.75 }}>読み込み中…</p>
+          ) : !warData.loggedIn ? (
+            <p style={{ margin: 0, fontSize: 13, opacity: 0.75 }}>ログインが必要</p>
+          ) : (
+            <div>
+              {myWar ? (
+                <div style={{ marginBottom: 12 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                    <strong style={{ fontSize: 14 }}>{myWar.attackerName} → {myWar.defenderName}</strong>
+                    <span style={{ fontSize: 12, opacity: 0.75 }}>
+                      {new Date(myWar.endsAt).toLocaleString([], { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })}まで
+                    </span>
+                  </div>
+                  <div style={{ marginTop: 8, height: 10, borderRadius: 5, background: "rgba(255,255,255,0.12)", overflow: "hidden" }}>
+                    <div style={{ width: `${Math.round((myWar.markHp / myWar.markMax) * 100)}%`, height: "100%", background: "#e5484d" }} />
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+                    <span style={{ fontSize: 13 }}>マーク {myWar.markHp}/{myWar.markMax}</span>
+                    <span style={{ flex: 1 }} />
+                    {iAmAttacker ? (
+                      <button
+                        type="button"
+                        style={btn}
+                        disabled={busy}
+                        onClick={() => void warAct({ action: "attack_mark", warId: myWar.id, px: pos.x, py: pos.y })}
+                      >
+                        攻撃する
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        style={btn}
+                        disabled={busy}
+                        onClick={() => void warAct({ action: "repair_mark", warId: myWar.id, px: pos.x, py: pos.y })}
+                      >
+                        修復する
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <p style={{ margin: "0 0 12px", fontSize: 13, opacity: 0.75 }}>戦争中ではない</p>
+              )}
+              {canDeclare && warTargets.length > 0 && (
+                <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
+                  <select
+                    aria-label="相手の国"
+                    value={warTarget}
+                    onChange={(e) => setWarTarget(e.target.value)}
+                    style={{ ...input, flex: 1, minWidth: 140 }}
+                  >
+                    <option value="">相手の国</option>
+                    {warTargets.map((n) => (
+                      <option key={n.id} value={n.id} style={{ color: "#000" }}>
+                        {n.name}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    style={btn}
+                    disabled={busy || !warTarget}
+                    onClick={() => void warAct({ action: "declare", targetId: warTarget })}
+                  >
+                    宣言する
+                  </button>
+                </div>
+              )}
+              <p style={{ margin: "0 0 6px", fontSize: 13 }}>繁栄ランキング</p>
+              {warData.ranking.length === 0 ? (
+                <p style={{ margin: 0, fontSize: 13, opacity: 0.75 }}>まだ国はありません</p>
+              ) : (
+                <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: 8 }}>
+                  {warData.ranking.map((r) => (
+                    <li key={r.id} style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                      <span style={{ fontSize: 13, width: 18 }}>{r.rank}</span>
+                      <span aria-hidden style={{ width: 12, height: 12, borderRadius: 3, background: r.color, display: "inline-block" }} />
+                      <strong>{r.name}</strong>
+                      <span style={{ fontSize: 13, opacity: 0.75 }}>{r.members}人 ・ 繁栄度 {r.prosperity}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {warData.history.length > 0 && (
+                <div style={{ marginTop: 12 }}>
+                  <p style={{ margin: "0 0 6px", fontSize: 13 }}>戦績</p>
+                  <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: 6 }}>
+                    {warData.history.slice(0, 5).map((h) => (
+                      <li key={h.id} style={{ fontSize: 13 }}>
+                        {h.attackerName} → {h.defenderName} ・ {h.outcome === "attacker_win" ? "攻め落とした" : "引き分け"}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {msg && <p role="status" style={{ margin: "10px 0 0", fontSize: 13 }}>{msg}</p>}
+            </div>
+          )}
         </div>
       )}
 
