@@ -95,7 +95,7 @@ function assertIconFile(item) {
 
 test("アイコン: 道具は全種アイコンつき", () => {
   const tools = inv.ITEMS.filter((i) => i.category === "tool");
-  assert.equal(tools.length, 12);
+  assert.equal(tools.length, 16);
   for (const item of tools) assertIconFile(item);
 });
 
