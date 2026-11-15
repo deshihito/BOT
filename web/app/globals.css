@@ -451,6 +451,14 @@ body:has(.wb-shell) > main { max-width:none; min-height:0; margin:0; padding:0; 
 .games-shell[data-activity-root]:has(.wb-shell) { max-width:none; margin:0; padding:0; }
 .games-shell[data-activity-root]:has(.wb-shell) > .games-embedded-bar { display:none; }
 .wb-shell { height:100svh; background:#0b0e14; color:#f2f2f2; }
+/* --- WORLD BOX 感覚面 B2: アフォーダンス（押下感） ---
+   .wb-shell 内だけに効かせる（独立シェル外のボタンには触らない）。
+   ボタンは押した瞬間だけ少し縮む。施設チップは出現時にポップし、
+   無効操作のピルは小刻みに揺れる（文言ではなく動きで伝える）。 */
+.wb-shell button { transition: transform 80ms ease-out; }
+.wb-shell button:active { transform: scale(0.96); }
+@keyframes wb-chip-pop { from { transform: translateX(-50%) scale(0.92); opacity: 0; } to { transform: translateX(-50%) scale(1); opacity: 1; } }
+@keyframes wb-deny-shake { 0%, 100% { transform: translateX(-50%); } 20% { transform: translateX(calc(-50% - 4px)); } 40% { transform: translateX(calc(-50% + 4px)); } 60% { transform: translateX(calc(-50% - 3px)); } 80% { transform: translateX(calc(-50% + 2px)); } }
 /* --- WEB ゲーム（/games） --- */
 .games-shell[data-activity-root] { max-width:880px; margin:0 auto; padding:18px 16px 48px; }
 .games-embedded-bar { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:14px; padding-bottom:10px; border-bottom:1px solid var(--line); font-size:14px; }
