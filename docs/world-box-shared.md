@@ -101,6 +101,7 @@ AGO WORLD BOX（web/app/games/worldbox）に関わる作業をする Muse は、
 - 地形タイルはリポジトリ `Assets/` のダンジョン素材を転用中（web/public/img/worldbox/）。
 - モブ描画は素材スプライトが正（2026-11-15、ユーザー指摘で図形描画から置換）: combat.ts の MOB_SPRITE（45種→42ファイル、実体 web/public/img/worldbox/mobs/*.png、16×16、確定素材セット td16 由来でバイト一致）。素材が無い mouse / ogre / giant の3種だけ MOB_SPRITE_FALLBACK として最小限の図形描画を残す。図形描画を主に戻さない。
 - モブの沸き抑制（2026-11-15）: mobsForChunk は種横断で間引く（チャンク合計上限 MOB_CHUNK_CAP=4、アンカー間最短距離 MOB_MIN_ANCHOR_DISTANCE=5 チェビシェフ）。スポーン基準点（原点タイル、無制限マップ化後の初期スポーン抽選の中心）から半径 MOB_SPAWN_EXCLUSION_RADIUS=6 以内には置かない（mobsForChunk / largeMobsForChunk 共通）。再出現は MOB_RESPAWN_MS=15分＋個体キー決定的な追加遅延0〜10分。
+- モブの行動パターン（2026-11-16）: 行動は web/lib/worldbox/mob-behavior.ts の純粋ロジック（状態機械 idle→wander→alert→chase→windup→strike→recover、逃走・リーシュ帰還）が正で、クライアントは動きと演出だけを持つ。**新しいダメージ経路は作らない**（ダメージは接触→vitals の既存経路のみ。突進/跳躍は本体が接触するモーションにし、範囲系も着地時に本体が来るか見た目だけの投射物にする）。全種に locomotion（walk/hop/flutter/swim/slither/crawl）を割り当て、描画は1枚絵の変形（bob/傾き/squash/揺れ）で表現する。敵対・provoked の中立はパターン表（MOB_PATTERNS、予兆→攻撃→硬直、クールダウン付き）を持つ。ボス級 = size>=4 の敵対＋トレントで、3つ以上のパターン＋豪華演出（出現/死亡の大型バーストとシェイク、予兆マーカー、ワールドドラゴンは HP30% 未満で怒り: 赤オーラ＋間隔短縮）。
 
 ## 作業の進め方（衝突防止）
 

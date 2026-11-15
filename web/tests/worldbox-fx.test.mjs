@@ -308,7 +308,7 @@ test("fx2: クライアント配線（空振り・天候・時間帯・モブイ
   assert.ok(drainAt >= 0 && burstAt > drainAt, "whiff 判定が成功バーストより前");
   // モブイベントは spawnMobFx 経由（ループ側で受ける器）
   assert.match(client, /spawnMobFx\(fxSys, ev\.kind/, "モブイベントを spawnMobFx で出す");
-  assert.match(client, /ev\.kind === "death"\) shake = startShake/, "死亡時は小さな揺れ");
+  assert.match(client, /ev\.kind === "death"\) \{\s+shake = startShake/, "死亡時は揺れ（ボス級は大きい）");
   // 天候と時間帯を環境粒に使う
   assert.match(client, /weatherAt\(nowSec\)/, "天候は決定的サイクルから取る");
   assert.match(client, /weatherAmbientKind\(/, "環境粒の種類に天候を反映する");

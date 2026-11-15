@@ -18,6 +18,7 @@ import { pickRandomSpawn } from "@/lib/worldbox/spawn";
 import { DASH_SPEED, PLAYER_RADIUS, SWIM_DASH_SPEED, SWIM_SPEED, WALK_SPEED, circleHitsSolid, findFreeNear, isWaterAt, stepMove } from "@/lib/worldbox/move";
 import { isNightPhase, nightAmount, phaseAtTime } from "@/lib/worldbox/daynight";
 import { mobById, mobOccupiesTile, type PlacedMob } from "@/lib/worldbox/mobs";
+import { PATTERN_DEF, createBehaviorState, isBossMob, locomotionFor, locomotionPose, stepMobBehavior, type BehaviorEvent, type MobBehaviorState, type MobPatternId } from "@/lib/worldbox/mob-behavior";
 import {
   MOB_ATTACK_RANGE, MOB_RESPAWN_MS, MOB_SPRITE, MOB_SPRITE_FALLBACK, attackTarget, knockbackTarget, mobBlockedTiles, mobDistance, mobFootprintTiles,
   mobHpNow, mobKeyOf, mobRespawnDelayMs, visibleMobs, type MobState,
@@ -1225,8 +1226,15 @@ export default function WorldBoxClient() {
       ax: number; ay: number; wx: number; wy: number;
       tx: number; ty: number; nextThink: number; phase: number; face: 1 | -1;
       flashAt: number; kx: number; ky: number; seenAt: number; fleeUntil: number;
+      behavior: MobBehaviorState; provokedUntil: number; lastSpeed: number;
     };
     const mobRenders = new Map<string, MobRender>();
+    /** パターンの予兆マーカー（地面描画）と投射物・糸跡（見た目のみ、ダメージ経路は持たない）。 */
+    type MobTelegraph = { pattern: MobPatternId; x: number; y: number; tx: number; ty: number; dirX: number; dirY: number; from: number; until: number; size: number };
+    const mobTelegraphs: MobTelegraph[] = [];
+    type MobProjectile = { pattern: MobPatternId; x: number; y: number; tx: number; ty: number; from: number; until: number; color: string };
+    const mobProjectiles: MobProjectile[] = [];
+    const mobWebs: { x: number; y: number; until: number }[] = [];
     let mobCacheKey = "";
     let mobCache: PlacedMob[] = [];
     let lastAttackAt = 0;
@@ -2314,7 +2322,10 @@ export default function WorldBoxClient() {
           // モブ演出: 大きさに応じて粒をスケール。死亡は小さな揺れ、出現はポップも併用
           playWbSe(seForFxBurst(ev.kind));
           spawnMobFx(fxSys, ev.kind, ev.x + 0.5, ev.y + 0.5, { sizeTiles: ev.sizeTiles, color: ev.color });
-          if (ev.kind === "death") shake = startShake(shake, 3, now);
+          if (ev.kind === "death") {
+            shake = startShake(shake, (ev.sizeTiles ?? 1) >= 4 ? 6 : 3, now);
+            if ((ev.sizeTiles ?? 1) >= 4) spawnMobFx(fxSys, "hit", ev.x + 0.5, ev.y + 0.5, { sizeTiles: ev.sizeTiles, color: ev.color });
+          }
           if (ev.kind === "spawn") pops.set(`${ev.x},${ev.y}`, now);
           if (ev.kind === "hit") {
             // 被弾した個体は白フラッシュ＋ノックバック。敵対でなければ逃げる
@@ -2327,7 +2338,7 @@ export default function WorldBoxClient() {
               r.kx += (dx / len) * TILE * 0.20;
               r.ky += (dy / len) * TILE * 0.20;
               const mdef = mobById(mkey.split("@")[0]);
-              if (mdef && mdef.temperament !== "hostile") r.fleeUntil = now + 900;
+              if (mdef && mdef.temperament !== "hostile") { r.fleeUntil = now + 900; r.provokedUntil = now + 6000; }
             }
           }
           continue;
@@ -2619,8 +2630,10 @@ export default function WorldBoxClient() {
         const def = mobById(placed.mobId);
         if (!def) return;
         const sizePx = TILE * Math.max(1, placed.size) * 0.94;
-        const bob = walkBob(r.phase) * TILE * 0.045;
-        const cxp = toScreenX(r.wx) + r.kx;
+        const loco = locomotionFor(def.id);
+        const pose = locomotionPose(loco, r.phase, r.lastSpeed > 0.05);
+        const bob = pose.bob * TILE;
+        const cxp = toScreenX(r.wx) + r.kx + pose.sway * TILE;
         const baseY = toScreenY(r.wy) + r.ky;
         const cy = baseY - bob;
         const flash = now - r.flashAt < 130;
@@ -2634,11 +2647,27 @@ export default function WorldBoxClient() {
           ctx.scale(pop, pop);
           ctx.translate(-cxp, -baseY);
         }
+        // locomotion の傾き・つぶれ＋windup の沈み込み（予兆の読みやすさ）
+        const windupSquash = r.behavior.mode === "windup" ? 0.84 : 1;
+        if (pose.tilt !== 0 || pose.squashY !== 1 || windupSquash !== 1) {
+          ctx.translate(cxp, baseY);
+          ctx.rotate(pose.tilt * r.face);
+          ctx.scale(1, pose.squashY * windupSquash);
+          ctx.translate(-cxp, -baseY);
+        }
         // 影
         ctx.fillStyle = "rgba(20,26,20,0.25)";
         ctx.beginPath();
         ctx.ellipse(cxp, baseY + sizePx * 0.02, sizePx * 0.34, sizePx * 0.12, 0, 0, Math.PI * 2);
         ctx.fill();
+        if (r.behavior.enraged) {
+          // 怒り状態: 赤いオーラ（脈動）
+          const pulse = 0.16 + 0.08 * Math.sin(now * 0.012);
+          ctx.fillStyle = `rgba(226,72,58,${pulse.toFixed(3)})`;
+          ctx.beginPath();
+          ctx.ellipse(cxp, cy, sizePx * 0.55, sizePx * 0.45, 0, 0, Math.PI * 2);
+          ctx.fill();
+        }
         // 本体: 素材スプライト（16×16、ピクセル固定・足元基準・向き反転）
         const spriteSrc = MOB_SPRITE[def.id];
         const img = spriteSrc ? mobSprites[def.id] : undefined;
@@ -2724,53 +2753,141 @@ export default function WorldBoxClient() {
               ax: placed.x, ay: placed.y, wx: placed.x + 0.5, wy: placed.y + 0.5,
               tx: placed.x + 0.5, ty: placed.y + 0.5, nextThink: 0,
               phase: Math.random() * 6, face: 1, flashAt: 0, kx: 0, ky: 0, seenAt: now, fleeUntil: 0,
+              behavior: createBehaviorState(placed.x + 0.5, placed.y + 0.5), provokedUntil: 0, lastSpeed: 0,
             };
             mobRenders.set(key, r);
             fxEventsRef.current.push({ kind: "spawn", x: placed.x, y: placed.y, sizeTiles: placed.size, color: MOB_FX_COLOR[def.id] });
-          }
-          // 思考: うろつき / 敵対は接近 / 被弾直後の非敵対は逃げる
-          if (now >= r.nextThink) {
-            r.nextThink = now + 1400 + Math.random() * 1800;
-            const fleeing = now < r.fleeUntil;
-            const distP = Math.hypot(player.x - r.wx, player.y - r.wy);
-            if (fleeing) {
-              const dx = r.wx - player.x;
-              const dy = r.wy - player.y;
-              const len = Math.hypot(dx, dy) || 1;
-              r.tx = placed.x + 0.5 + (dx / len) * 2;
-              r.ty = placed.y + 0.5 + (dy / len) * 2;
-            } else if (def.temperament === "hostile" && distP < 5 && placed.size < 4) {
-              r.tx = player.x;
-              r.ty = player.y;
-            } else if (placed.size < 4) {
-              const ang = Math.random() * Math.PI * 2;
-              const rad = Math.random() * 1.3;
-              r.tx = placed.x + 0.5 + Math.cos(ang) * rad;
-              r.ty = placed.y + 0.5 + Math.sin(ang) * rad;
-            } else {
-              r.tx = placed.x + 0.5;
-              r.ty = placed.y + 0.5;
+            if (isBossMob(def)) {
+              // ボス級の出現は豪華に: 追加バースト＋揺れ
+              fxEventsRef.current.push({ kind: "hit", x: placed.x, y: placed.y, sizeTiles: placed.size, color: MOB_FX_COLOR[def.id] });
+              shake = startShake(shake, 4, now);
             }
           }
-          const fleeing = now < r.fleeUntil;
-          const chasing = def.temperament === "hostile" && Math.hypot(player.x - r.wx, player.y - r.wy) < 5;
-          const speed = fleeing ? 1.7 : chasing ? 1.12 : 0.55;
+          // 思考: mob-behavior の状態機械（うろつき/追跡/予兆→攻撃→硬直/逃走/帰還）。
+          // ダメージは接触経路のみで、ここは動きと演出イベントだけを出す。
+          const bout = stepMobBehavior(r.behavior, {
+            def, now,
+            pos: { x: r.wx, y: r.wy },
+            anchor: { x: placed.x + 0.5, y: placed.y + 0.5 },
+            player: { x: player.x, y: player.y },
+            fleeing: now < r.fleeUntil,
+            provoked: now < r.provokedUntil,
+            hpFrac: hpNow.hp / def.hp,
+            rng: Math.random,
+          });
+          r.behavior = bout.state;
+          for (const ev of bout.events as BehaviorEvent[]) {
+            const pat = ev.pattern;
+            if (!pat) {
+              // 怒り: 赤いバースト＋揺れ
+              fxEventsRef.current.push({ kind: "hit", x: placed.x, y: placed.y, sizeTiles: placed.size, color: "#e2483a" });
+              shake = startShake(shake, 4, now);
+              continue;
+            }
+            const pd = PATTERN_DEF[pat];
+            if (ev.kind === "telegraph") {
+              mobTelegraphs.push({ pattern: pat, x: r.wx, y: r.wy, tx: r.behavior.tx, ty: r.behavior.ty, dirX: ev.dirX, dirY: ev.dirY, from: now, until: r.behavior.until, size: placed.size });
+            } else if (ev.kind === "strike") {
+              if (pd.kind === "projectile") {
+                mobProjectiles.push({ pattern: pat, x: r.wx, y: r.wy, tx: r.behavior.tx, ty: r.behavior.ty, from: now, until: now + 380, color: MOB_FX_COLOR[def.id] ?? "#ffffff" });
+              } else if (pd.kind === "burst") {
+                fxEventsRef.current.push({ kind: pat === "roar" || pat === "gust" || pat === "leaf_burst" ? "spawn" : "hit", x: placed.x, y: placed.y, sizeTiles: placed.size, color: pat === "breath_cone" ? "#e07c3c" : MOB_FX_COLOR[def.id] });
+                if (pat === "slam" || pat === "club_slam" || pat === "slam_big" || pat === "tail_sweep" || pat === "roar") shake = startShake(shake, isBossMob(def) ? 5 : 3, now);
+              }
+            }
+          }
+          if (bout.teleport) {
+            fxEventsRef.current.push({ kind: "spawn", x: placed.x, y: placed.y, sizeTiles: placed.size, color: MOB_FX_COLOR[def.id] });
+            r.wx = bout.teleport.x; r.wy = bout.teleport.y;
+          }
+          r.tx = bout.target.x; r.ty = bout.target.y;
+          const speed = bout.speed;
           const dx = r.tx - r.wx;
           const dy = r.ty - r.wy;
           const distT = Math.hypot(dx, dy);
-          // 敵対はプレイヤーに重ならない（手前で止まる）
-          const stopAt = chasing && !fleeing ? 0.85 : 0.05;
-          if (distT > stopAt) {
-            const step = Math.min(distT - (chasing && !fleeing ? stopAt : 0), speed * dt);
+          // 追跡中はプレイヤーに重ならない（手前で止まる）。strike の突進は止まらない
+          const stopAt = r.behavior.mode === "chase" ? 0.85 : 0.03;
+          r.lastSpeed = 0;
+          if (distT > stopAt && speed > 0) {
+            const step = Math.min(distT - stopAt, speed * dt);
             r.wx += (dx / distT) * step;
             r.wy += (dy / distT) * step;
             r.phase = advanceWalkPhase(r.phase, speed, dt);
+            r.lastSpeed = speed;
             if (dx < -0.02) r.face = -1;
             else if (dx > 0.02) r.face = 1;
           }
           r.kx *= Math.exp(-9 * dt);
           r.ky *= Math.exp(-9 * dt);
           mobDrawQueue.push({ placed, r, hpFrac: hpNow.hp / def.hp });
+        }
+      }
+
+      // ---- モブの予兆マーカー・投射物・糸跡（地面レイヤー、見た目のみ） ----
+      if (space === "world" || parseInstanceSpace(space)) {
+        for (let i = mobTelegraphs.length - 1; i >= 0; i--) {
+          const t = mobTelegraphs[i];
+          if (now > t.until) { mobTelegraphs.splice(i, 1); continue; }
+          const pd = PATTERN_DEF[t.pattern];
+          const total = Math.max(1, t.until - t.from);
+          const frac = Math.min(1, (now - t.from) / total);
+          const alpha = 0.16 + 0.20 * frac + 0.05 * Math.sin(now * 0.03);
+          ctx.fillStyle = `rgba(255,64,40,${alpha.toFixed(3)})`;
+          ctx.strokeStyle = `rgba(255,90,60,${(alpha + 0.25).toFixed(3)})`;
+          ctx.lineWidth = 2;
+          const gx = pd.kind === "dash" || pd.kind === "teleport" || pd.kind === "projectile" ? t.tx : t.x;
+          const gy = pd.kind === "dash" || pd.kind === "teleport" || pd.kind === "projectile" ? t.ty : t.y;
+          if (pd.telegraph === "circle") {
+            ctx.beginPath();
+            ctx.ellipse(toScreenX(gx), toScreenY(gy), pd.radius * TILE * (0.4 + 0.6 * frac), pd.radius * TILE * 0.45 * (0.4 + 0.6 * frac), 0, 0, Math.PI * 2);
+            ctx.fill(); ctx.stroke();
+          } else if (pd.telegraph === "ring") {
+            ctx.beginPath();
+            ctx.ellipse(toScreenX(t.x), toScreenY(t.y), pd.radius * TILE * frac, pd.radius * TILE * 0.45 * frac, 0, 0, Math.PI * 2);
+            ctx.stroke();
+          } else if (pd.telegraph === "line") {
+            const ex = t.x + t.dirX * pd.radius;
+            const ey = t.y + t.dirY * pd.radius;
+            ctx.lineWidth = Math.max(6, TILE * 0.5 * (0.5 + t.size * 0.2));
+            ctx.beginPath();
+            ctx.moveTo(toScreenX(t.x), toScreenY(t.y));
+            ctx.lineTo(toScreenX(ex), toScreenY(ey));
+            ctx.stroke();
+            ctx.lineWidth = 2;
+          } else if (pd.telegraph === "cone") {
+            const ang = Math.atan2(t.dirY, t.dirX);
+            ctx.beginPath();
+            ctx.moveTo(toScreenX(t.x), toScreenY(t.y));
+            ctx.arc(toScreenX(t.x), toScreenY(t.y), pd.radius * TILE, ang - 0.6, ang + 0.6);
+            ctx.closePath();
+            ctx.fill();
+          }
+        }
+        for (let i = mobWebs.length - 1; i >= 0; i--) {
+          const w = mobWebs[i];
+          if (now > w.until) { mobWebs.splice(i, 1); continue; }
+          const sx = toScreenX(w.x); const sy = toScreenY(w.y);
+          ctx.strokeStyle = "rgba(240,240,235,0.55)";
+          ctx.lineWidth = 1.5;
+          for (const [dx, dy] of [[-0.4, -0.2], [0.4, -0.2], [-0.4, 0.2], [0.4, 0.2], [0, -0.35], [0, 0.35]] as const) {
+            ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(sx + dx * TILE, sy + dy * TILE); ctx.stroke();
+          }
+        }
+        for (let i = mobProjectiles.length - 1; i >= 0; i--) {
+          const pr = mobProjectiles[i];
+          if (now > pr.until) {
+            mobProjectiles.splice(i, 1);
+            if (pr.pattern === "web_shot") mobWebs.push({ x: pr.tx, y: pr.ty, until: now + 2600 });
+            continue;
+          }
+          const f = Math.min(1, (now - pr.from) / Math.max(1, pr.until - pr.from));
+          const arc = pr.pattern === "rock_throw" ? Math.sin(f * Math.PI) * TILE * 1.1 : 0;
+          const sx = toScreenX(pr.x + (pr.tx - pr.x) * f);
+          const sy = toScreenY(pr.y + (pr.ty - pr.y) * f) - arc;
+          ctx.fillStyle = pr.pattern === "web_shot" ? "rgba(240,240,235,0.9)" : pr.color;
+          ctx.beginPath();
+          ctx.arc(sx, sy, Math.max(3, TILE * 0.14), 0, Math.PI * 2);
+          ctx.fill();
         }
       }
 
