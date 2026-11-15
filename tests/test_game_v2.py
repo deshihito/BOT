@@ -46,7 +46,8 @@ class Round4RegistrationTest(unittest.TestCase):
     NEW_R5 = ["cipher", "wirecut", "liardice", "mendou", "yotsuba"]
 
     def test_total_47_games(self):
-        self.assertEqual(len(GAME_ORDER), 48)
+        # 旧ダンジョン廃止（WORLD BOX へ統合）で 48 → 47
+        self.assertEqual(len(GAME_ORDER), 47)
         for game in self.NEW + self.NEW_R5:
             self.assertIn(game, GAME_ORDER)
             self.assertIn(game, GAME_GUIDES)
@@ -58,7 +59,7 @@ class Round4RegistrationTest(unittest.TestCase):
         party = [g for g in GAME_ORDER if GAME_GENRE_BY_GAME[g] == "party"]
         self.assertEqual(len(party), 30)
         pages = game_select_pages()
-        self.assertEqual(sum(len(p) for p in pages), 48)
+        self.assertEqual(sum(len(p) for p in pages), 47)
         self.assertTrue(all(len(p) <= 25 for p in pages))
         party_pages = game_select_pages("party")
         self.assertEqual([len(p) for p in party_pages], [25, 5])

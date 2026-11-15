@@ -199,7 +199,12 @@ class Wave2PublicSourceTest(unittest.TestCase):
             src = self.read(rel)
             # ルートコマンドの defer は公開（ephemeral 指定なし）であること
             self.assertIn("await interaction.response.defer(thinking=True)", src, rel)
-            self.assertIn("await interaction.followup.send(view=as_panel_v2(view))", src, rel)
+            # パネルは followup で公開送信されること。/vc は応答期限切れ時の
+            # フォールバック（PR #889）のため panel 変数経由でもよい。
+            self.assertTrue(
+                "await interaction.followup.send(view=as_panel_v2(view))" in src
+                or "await interaction.followup.send(view=panel)" in src,
+                rel)
 
     def test_panels_have_owner_checks(self):
         for rel in ("core/general/panel.py", "core/vc/hub.py", "core/game/game/cog.py", "core/help/help/cog.py"):
