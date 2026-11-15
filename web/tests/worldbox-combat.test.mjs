@@ -53,7 +53,7 @@ const combatUrl = bundleModule(
     "mobById", "MOBS",
     "mobKeyOf", "parseMobKey", "parseMobState", "parseMobStates", "mobHpNow",
     "visibleMobs", "mobExistsAt", "mobDistance", "applyMobAttack", "MOB_RESPAWN_MS",
-    "playerAttack",
+    "attackTarget", "playerAttack",
   ],
 );
 const bundled = await import(combatUrl);
@@ -162,6 +162,24 @@ test("mobDistance: 占有範囲までのチェビシェフ距離", () => {
   assert.equal(combat.mobDistance(105, 100, bear), 4);
 });
 
+test("attackTarget: 照準でなく範囲で当たる（タップがモブから外れても範囲内なら当たる）", () => {
+  const slime = { mobId: "slime", x: 101, y: 100, size: 1 };
+  // プレイヤー (100,100)、モブは右隣 (101,100)。タップはモブの上のマス (101,99) でも当たる
+  assert.equal(combat.attackTarget(100, 100, 101, 99, [slime]), slime);
+  // タップが自分のマスでも、範囲内のモブに当たる
+  assert.equal(combat.attackTarget(100, 100, 100, 100, [slime]), slime);
+  // 範囲外（2マス先）のモブには当たらない
+  const far = { mobId: "slime", x: 102, y: 100, size: 1 };
+  assert.equal(combat.attackTarget(100, 100, 102, 100, [far]), null);
+  // 複数いる場合はタップを含む個体を優先する
+  const a = { mobId: "slime", x: 101, y: 100, size: 1 };
+  const b = { mobId: "chicken", x: 99, y: 100, size: 1 };
+  assert.equal(combat.attackTarget(100, 100, 99, 100, [a, b]), b);
+  // 大型は占有範囲で判定する（中心から離れた占有マスでも範囲内）
+  const bear = { mobId: "bear", x: 103, y: 100, size: 3 }; // 占有 102..104
+  assert.equal(combat.attackTarget(101, 100, 100, 100, [bear]), bear);
+});
+
 test("API ルート: 実在検証・距離検証・闘技場式ダメージ・状態保存が配線されている", () => {
   const route = fs.readFileSync(path.join(rootDir, "app/api/worldbox/mobs/route.ts"), "utf8");
   assert.ok(route.includes("mobExistsAt"), "配置の再計算による実在検証が無い");
@@ -179,6 +197,8 @@ test("クライアント: モブ描画・タップ攻撃・モーションが配
   assert.ok(client.includes("visibleMobs"), "決定的配置を描画に使っていない");
   assert.ok(client.includes("drawMob"), "モブ描画が無い");
   assert.ok(client.includes("handleMobTap"), "タップ攻撃が無い");
+  assert.ok(client.includes("attackTarget"), "剣の範囲方式ターゲットを使っていない");
+  assert.ok(client.includes('selDef?.tool === "sword"'), "剣選択時の自由振り分岐が無い");
   assert.ok(client.includes('"/api/worldbox/mobs"'), "攻撃 API を呼んでいない");
   assert.ok(client.includes("refreshMobs"), "個体状態の取得が無い");
   // モーション: スイング・被弾フラッシュ・ノックバック・出現ポップ・HP バー
