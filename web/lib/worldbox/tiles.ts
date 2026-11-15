@@ -30,6 +30,8 @@ export type PlacedBlock = {
   itemId: string;
   /** 設置者の不透明 ID。 */
   ownerId: string;
+  /** 戦争時の破壊ダメージ累積（耐久に達すると壊れる。通常は無い）。 */
+  dmg?: number;
 };
 
 /**
@@ -165,6 +167,8 @@ export type TileActionResult =
       view: TileView;
       /** 得たアイテム（収穫・伐採・採掘）。 */
       gained: Record<string, number>;
+      /** 戦争時の破壊途中経過（残り耐久）。壊し切った場合は付かない。 */
+      warDmg?: { hpLeft: number };
     }
   | { ok: false; error: string };
 
@@ -388,6 +392,7 @@ export function applyMineBlock(
   xRaw: unknown,
   yRaw: unknown,
   now: number,
+  warDamage = 0,
 ): TileActionResult {
   const tile = checkedTile(xRaw, yRaw);
   if (!tile) return { ok: false, error: "invalid_tile" };
@@ -397,9 +402,43 @@ export function applyMineBlock(
   const block = active?.block;
   if (!active || !block) return { ok: false, error: "no_block" };
   const selfId = presenceIdFor(ownerKey);
-  if (block.ownerId !== selfId) return { ok: false, error: "not_owner" };
   const def = itemById(block.itemId);
   if (!def) return { ok: false, error: "no_block" };
+  if (block.ownerId !== selfId) {
+    // 戦争中だけ他者ブロックを削れる（耐久に達したら破壊、所有検証はルート側）
+    if (warDamage <= 0) return { ok: false, error: "not_owner" };
+    const tool = blockMineTool(def);
+    if (tool && !hasTool(profile, tool)) return { ok: false, error: "tool_required" };
+    const dmg = (block.dmg ?? 0) + warDamage;
+    const durability = Math.max(1, def.durability ?? 50);
+    if (dmg < durability) {
+      const next: TileOverride = { ...active, block: { ...block, dmg } };
+      const overrides: TileOverridesMap = { [key]: active };
+      return {
+        ok: true,
+        override: next,
+        profile,
+        view: viewAfter(map, overrides, key, next, x, y, now, ownerKey),
+        gained: {},
+        warDmg: { hpLeft: durability - dmg },
+      };
+    }
+    // 壊し切った: ブロックは戦利品として回収する
+    const rest: TileOverride = { ...active, ownerId: selfId };
+    delete rest.block;
+    const empty =
+      rest.tile === undefined && rest.farmland !== true && rest.crop === undefined &&
+      rest.stump !== true && rest.until === undefined;
+    const next = empty ? null : rest;
+    const overrides: TileOverridesMap = { [key]: active };
+    return {
+      ok: true,
+      override: next,
+      profile: addItem(profile, def.id, 1),
+      view: viewAfter(map, overrides, key, next, x, y, now, ownerKey),
+      gained: { [def.id]: 1 },
+    };
+  }
   const tool = blockMineTool(def);
   if (tool && !hasTool(profile, tool)) return { ok: false, error: "tool_required" };
   const rest: TileOverride = { ...active, ownerId: selfId };
@@ -435,7 +474,8 @@ function parsePlacedBlock(raw: unknown): PlacedBlock | null {
   const def = itemById(v.itemId);
   if (!def || (def.category !== "block" && def.facility !== true)) return null;
   if (typeof v.ownerId !== "string" || v.ownerId.length === 0) return null;
-  return { itemId: def.id, ownerId: v.ownerId };
+  const dmg = typeof v.dmg === "number" && Number.isFinite(v.dmg) && v.dmg > 0 ? Math.floor(v.dmg) : undefined;
+  return { itemId: def.id, ownerId: v.ownerId, ...(dmg ? { dmg } : {}) };
 }
 
 /** bot_kv の1値から上書きを復元する。壊れていれば null。 */

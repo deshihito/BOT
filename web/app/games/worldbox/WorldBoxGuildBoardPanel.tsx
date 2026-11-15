@@ -126,6 +126,40 @@ export default function WorldBoxGuildBoardPanel({
   useEffect(() => {
     if (tab === "board") void refreshUnion();
   }, [tab, refreshUnion]);
+  // 戦争状態（役職タブのランキング・戦争欄用）
+  const [warData, setWarData] = useState<{
+    wars: { id: string; attacker: string; defender: string; expiresAt: number }[];
+    marks: Record<string, { hp: number; max: number; repairing: boolean }>;
+    myGuildId: string | null; myRole: string | null;
+  } | null>(null);
+  const [warTarget, setWarTarget] = useState("");
+  const refreshWarPanel = useCallback(async () => {
+    try {
+      const res = await fetch("/api/worldbox/war", { headers: { Accept: "application/json" } });
+      if (res.ok) setWarData((await res.json()) as typeof warData);
+    } catch { /* noop */ }
+  }, []);
+  useEffect(() => {
+    if (tab === "roles") void refreshWarPanel();
+  }, [tab, refreshWarPanel]);
+  const declareWar = async () => {
+    if (!warTarget) return;
+    setBusy(true);
+    try {
+      const res = await fetch("/api/worldbox/war", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "declare", targetGuildId: warTarget }),
+      });
+      const json = (await res.json().catch(() => ({}))) as { error?: string };
+      setMsg(res.ok ? "戦争を宣言した" : json.error === "cooldown" ? "再宣言はまだできない" : json.error === "already_at_war" ? "すでに戦争中" : "宣言できない");
+      if (res.ok) void refreshWarPanel();
+    } catch {
+      setMsg("宣言できない");
+    } finally {
+      setBusy(false);
+    }
+  };
   const saveUnionChannel = async () => {
     setBusy(true);
     try {
@@ -558,6 +592,74 @@ export default function WorldBoxGuildBoardPanel({
               ) : null}
               {!nations.loggedIn && (
                 <p style={{ margin: "10px 0 0", fontSize: 13, opacity: 0.75 }}>建国・参加はログイン後</p>
+              )}
+            </div>
+          )}
+          {/* 繁栄ランキング（名前はテキストのみ、メンションにしない） */}
+          {nations.nations.length > 0 && (
+            <div style={{ marginTop: 14 }}>
+              <strong style={{ fontSize: 13 }}>繁栄ランキング</strong>
+              <ol style={{ margin: "6px 0 0", paddingLeft: 20, fontSize: 13 }}>
+                {[...nations.nations]
+                  .sort((a, b) => b.prosperity - a.prosperity)
+                  .map((n) => (
+                    <li key={n.id} style={{ marginBottom: 2 }}>
+                      <span aria-hidden style={{ display: "inline-block", width: 9, height: 9, borderRadius: 2, background: n.color, marginRight: 6 }} />
+                      {n.name}
+                      <span style={{ opacity: 0.75 }}> — 繁栄 {n.prosperity} / 国民 {n.members}人</span>
+                    </li>
+                  ))}
+              </ol>
+            </div>
+          )}
+          {/* 戦争 */}
+          {me && warData && (
+            <div style={{ marginTop: 14 }}>
+              <strong style={{ fontSize: 13 }}>戦争</strong>
+              {warData.myGuildId && warData.marks[warData.myGuildId] && (
+                <div style={{ fontSize: 13, marginTop: 4 }}>
+                  自国マーク HP {warData.marks[warData.myGuildId].hp} / {warData.marks[warData.myGuildId].max}
+                  {warData.marks[warData.myGuildId].repairing ? "（修復中）" : ""}
+                </div>
+              )}
+              {warData.wars.length === 0 ? (
+                <div style={{ fontSize: 13, opacity: 0.75, marginTop: 4 }}>戦争なし</div>
+              ) : (
+                warData.wars.map((w) => {
+                  const atk = nations.nations.find((n) => n.id === w.attacker);
+                  const def = nations.nations.find((n) => n.id === w.defender);
+                  const enemyId = w.attacker === warData.myGuildId ? w.defender : w.attacker;
+                  const enemyMark = warData.marks[enemyId];
+                  return (
+                    <div key={w.id} style={{ fontSize: 13, marginTop: 4 }}>
+                      {atk?.name ?? "?"} × {def?.name ?? "?"}
+                      <span style={{ opacity: 0.75 }}>
+                        （{new Date(w.expiresAt).toLocaleDateString()} まで
+                        {enemyMark ? ` / 相手マーク HP ${enemyMark.hp}` : ""}）
+                      </span>
+                    </div>
+                  );
+                })
+              )}
+              {warData.myRole === "king" && (
+                <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap", alignItems: "center" }}>
+                  <select
+                    value={warTarget}
+                    onChange={(e) => setWarTarget(e.target.value)}
+                    style={{ ...input, minHeight: 34 }}
+                    aria-label="宣言先"
+                  >
+                    <option value="">宣言先…</option>
+                    {nations.nations
+                      .filter((n) => n.id !== warData.myGuildId)
+                      .map((n) => (
+                        <option key={n.id} value={n.id}>{n.name}</option>
+                      ))}
+                  </select>
+                  <button type="button" style={btn} disabled={busy || !warTarget} onClick={() => { void declareWar(); }}>
+                    戦争宣言
+                  </button>
+                </div>
               )}
             </div>
           )}

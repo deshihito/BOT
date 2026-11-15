@@ -883,6 +883,47 @@ export default function WorldBoxClient() {
     const timer = window.setInterval(() => { void load(); }, 3000);
     return () => { disposed = true; window.clearInterval(timer); };
   }, [spaceUi, chatChannel]);
+  /** 戦争状態（宣言・マーク HP）。サーバーが正、ここは表示と導線用。 */
+  type WarViewClient = {
+    wars: { id: string; attacker: string; defender: string; expiresAt: number }[];
+    marks: Record<string, { hp: number; max: number; repairing: boolean }>;
+    myGuildId: string | null;
+    myRole: string | null;
+  };
+  const [warUi, setWarUi] = useState<WarViewClient>({ wars: [], marks: {}, myGuildId: null, myRole: null });
+  const warRef = useRef(warUi);
+  warRef.current = warUi;
+  const refreshWar = async () => {
+    try {
+      const res = await fetch("/api/worldbox/war", { headers: { Accept: "application/json" } });
+      if (!res.ok) return;
+      const data = (await res.json()) as WarViewClient;
+      setWarUi({ wars: data.wars ?? [], marks: data.marks ?? {}, myGuildId: data.myGuildId ?? null, myRole: data.myRole ?? null });
+    } catch { /* noop */ }
+  };
+  const refreshWarRef = useRef(refreshWar);
+  refreshWarRef.current = refreshWar;
+  useEffect(() => {
+    void refreshWar();
+    const timer = window.setInterval(() => { void refreshWarRef.current(); }, 10000);
+    return () => window.clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const attackMark = async (guildId: string) => {
+    try {
+      const res = await fetch("/api/worldbox/war", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "attack_mark", guildId }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { hp?: number; destroyed?: boolean; error?: string };
+      void refreshWar();
+      if (res.ok) setTileMsg(data.destroyed ? "マーク破壊！レイド成立" : `マーク あと ${data.hp ?? "?"}`);
+      else setTileMsg(data.error === "too_far" ? TILE_ERROR_LABEL.too_far : "攻撃できない");
+    } catch { /* noop */ }
+  };
+  const attackMarkRef = useRef(attackMark);
+  attackMarkRef.current = attackMark;
   const sendChat = async () => {
     const text = chatText.trim();
     if (!text) return;
@@ -1087,7 +1128,9 @@ export default function WorldBoxClient() {
       });
       const data = (await res.json().catch(() => ({}))) as {
         error?: string; key?: string; override?: TileOverridesMap[string] | null; profile?: PlayerProfile;
+        warDmg?: { hpLeft: number };
       };
+      if (res.ok && data.warDmg) setTileMsg(`あと ${data.warDmg.hpLeft}`);
       if (!res.ok) {
         setTileMsg(TILE_ERROR_LABEL[data.error ?? ""] ?? "できませんでした");
         // 失敗は空振りで返す（風切りだけ・成功の粒は出さない）
@@ -2018,6 +2061,22 @@ export default function WorldBoxClient() {
       return false;
     };
     const handleTileTap = (t: { x: number; y: number }): boolean => {
+      // 戦争相手の首都（マーク）をタップしたらマーク攻撃（距離はサーバー検証）
+      {
+        const war = warRef.current;
+        const enemy = nationsRef.current.nations.find((n) => n.capital.x === t.x && n.capital.y === t.y);
+        if (
+          enemy && war.myGuildId && enemy.id !== war.myGuildId &&
+          war.wars.some(
+            (w) =>
+              (w.attacker === war.myGuildId && w.defender === enemy.id) ||
+              (w.attacker === enemy.id && w.defender === war.myGuildId),
+          )
+        ) {
+          void attackMarkRef.current(enemy.id);
+          return true;
+        }
+      }
       const prof = invRef.current;
       if (!prof) return false;
       const slot = prof.hotbar[selSlotRef.current] ?? null;

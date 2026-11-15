@@ -11,6 +11,8 @@ import {
   type TileActionResult, type TileOverridesMap,
 } from "@/lib/worldbox/tiles";
 import { loadNationsState } from "@/lib/worldbox/nations-online";
+import { activeWarBetween, warMineDamage } from "@/lib/worldbox/war";
+import { loadWarState } from "@/lib/worldbox/war-online";
 import { containerIsEmpty, isContainerItem } from "@/lib/worldbox/containers";
 import { loadContainer, storeContainer } from "@/lib/worldbox/containers-online";
 import {
@@ -168,7 +170,33 @@ export async function POST(request: Request) {
       }
       minedContainerItem = blockItemId;
     }
-    result = applyMineBlock(current, profile, map, ownerKey, fields.x, fields.y, Date.now());
+    // 戦争中だけ、相手ユニオンのブロックを耐久つきで削れる
+    let warDamage = 0;
+    const blockOwnerId =
+      current && isOverrideActive(current, Date.now()) ? current.block?.ownerId : undefined;
+    if (blockOwnerId && blockOwnerId !== presenceIdFor(ownerKey) && profile) {
+      const nationsState = await loadNationsState();
+      const myGuild = nationsState.members[ownerKey]?.nationId;
+      if (myGuild) {
+        let ownerGuild: string | null = null;
+        for (const [memberKey, membership] of Object.entries(nationsState.members)) {
+          if (presenceIdFor(memberKey) === blockOwnerId) { ownerGuild = membership.nationId; break; }
+        }
+        if (ownerGuild && ownerGuild !== myGuild) {
+          const warState = await loadWarState();
+          if (activeWarBetween(warState, myGuild, ownerGuild, Date.now())) {
+            let tier = 0;
+            for (const [itemId, count] of Object.entries(profile.items)) {
+              if (count <= 0) continue;
+              const m = /^(wooden|stone|iron|mithril)_pickaxe$/.exec(itemId);
+              if (m) tier = Math.max(tier, { wooden: 1, stone: 2, iron: 3, mithril: 4 }[m[1]] ?? 0);
+            }
+            warDamage = warMineDamage(tier);
+          }
+        }
+      }
+    }
+    result = applyMineBlock(current, profile, map, ownerKey, fields.x, fields.y, Date.now(), warDamage);
   } else {
     result = applyTileAction(
       current, profile, map, ownerKey,
@@ -194,6 +222,7 @@ export async function POST(request: Request) {
       key: tileKey(tx, ty),
       profile: result.profile,
       gained: result.gained,
+      ...(result.warDmg ? { warDmg: result.warDmg } : {}),
     },
     { headers: NO_STORE },
   );
