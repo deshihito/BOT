@@ -556,6 +556,33 @@ test("API(casino): セブンスロットは先払いして回し切ると集計�
   assert.equal(settles[0].amount, 100);
 });
 
+test("API(casino): 精算は並行 GET が重なっても1回だけ（二重精算の回帰防止）", async () => {
+  globalThis.__wbCasinoUsers.set(ME, 10000);
+  clearSession();
+  setPresence(40.5, 28.5, "lobby");
+  const start = await casinoRoute.POST(apiRequest(URL_C, "POST", cookie, { action: "double_start", bet: 100 }));
+  assert.equal(start.status, 200);
+  markPendingSpendsDone();
+  // バースト済みにして精算待ちの状態を作る
+  const key = `worldbox_casino session:${MY_KEY}`;
+  const session = JSON.parse(globalThis.__wbCasinoStore.get(key));
+  session.busted = true;
+  globalThis.__wbCasinoStore.set(key, JSON.stringify(session));
+  // パネルの3秒ポーリングが重なった想定で GET を並行に叩く
+  const results = await Promise.all([
+    casinoRoute.GET(apiRequest(URL_C, "GET", cookie)),
+    casinoRoute.GET(apiRequest(URL_C, "GET", cookie)),
+    casinoRoute.GET(apiRequest(URL_C, "GET", cookie)),
+  ]);
+  for (const r of results) assert.equal(r.status, 200);
+  const settles = findOps(
+    (o) => o.kind === "gamble" && o.reason === "casino_double" && o.id === `settle-${session.prepayOpId}`,
+  );
+  assert.equal(settles.length, 1, "精算オプは決定的 ID で1件だけ積まれる");
+  const after = await (await casinoRoute.GET(apiRequest(URL_C, "GET", cookie))).json();
+  assert.equal(after.session, null);
+});
+
 // ---------- クライアント配線 ----------
 
 test("casino: クライアントはステーションチップからパネルを開き、パネルは API を使う", () => {
