@@ -206,6 +206,7 @@ export class NextResponse {
 `);
 const stationStubUrl = dataUrl(`
 export async function loadMyLobbyStation() { return globalThis.__wbStationValue ?? "shop"; }
+export async function loadMyLobbyShopGenre() { return globalThis.__wbShopGenre ?? "farm"; }
 `);
 const economyRoute = await import(
   dataUrl(
@@ -360,6 +361,7 @@ export function isPresenceEnabled() { return true; }
 export async function findPresenceOwnerKey(id) { return map.has(id) ? map.get(id) : null; }
 `);
 const profileSwapUrl = bundleModule(["worldbox/items.ts", "worldbox/profile.ts"], ["swapSlots", "moveSlot"]);
+const shopsUrl = bundleModule(["worldbox/items.ts", "worldbox/shops.ts"], ["checkBuyGenre"]);
 const profileRoute = await import(
   dataUrl(
     transpile("api/worldbox/profile/route.ts", rootDir + "/app")
@@ -369,6 +371,7 @@ const profileRoute = await import(
       .replaceAll('"@/lib/worldbox/economy-bridge"', JSON.stringify(economyUrl))
       .replaceAll('"@/lib/worldbox/economy"', JSON.stringify(profileEcoUrl))
       .replaceAll('"@/lib/worldbox/presence-online"', JSON.stringify(presenceStubUrl))
+      .replaceAll('"@/lib/worldbox/shops"', JSON.stringify(shopsUrl))
       .replaceAll('"@/lib/worldbox/station-online"', JSON.stringify(stationStubUrl))
       .replaceAll('"@/lib/worldbox/profile-online"', JSON.stringify(profileOnlineStubUrl))
       .replaceAll('"@/lib/worldbox/profile"', JSON.stringify(profileSwapUrl)),
