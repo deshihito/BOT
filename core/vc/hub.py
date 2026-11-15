@@ -35,6 +35,7 @@ class VoiceHub(commands.Cog):
         app_commands.Choice(name="VC参加", value="join"), app_commands.Choice(name="VC退出", value="leave"),
         app_commands.Choice(name="VC状態", value="status"),
         app_commands.Choice(name="音楽操作パネル", value="music_panel"),
+        app_commands.Choice(name="ラジオ", value="radio_panel"),
         *[app_commands.Choice(name=f"録音: {label}", value=f"record_{value}") for label, value in
           (("開始", "start"), ("停止", "stop"), ("状態", "status"), ("音程解析", "pitch"))],
         *[app_commands.Choice(name=f"やまびこ: {label}", value=f"echo_{value}") for label, value in
@@ -316,6 +317,11 @@ class VoiceHub(commands.Cog):
             cog = await self._cog(interaction, "music")
             if cog:
                 await cog._panel_impl(Responder(interaction))
+            return
+        if value == "radio_panel":
+            cog = await self._cog(interaction, "radio")
+            if cog:
+                await cog._radio_panel_impl(Responder(interaction))
             return
         if value == "music_search":
             # 選択式検索（_search_impl / SearchView）はキーワードが要るため、
