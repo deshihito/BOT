@@ -543,6 +543,21 @@ class TestQueueBehavior(WorkerCase):
         self.assertEqual(await self.worker.poll_once(), 0)
         self.assertEqual(self.record(op["id"])["status"], "pending")
 
+    async def test_wallet_provider_raising_is_absorbed(self):
+        # wallet 取得が例外を投げる実装でも poll_once は落とさない
+        # （例外が外に出ると tasks.loop ごと止まり、経済処理が無言で死ぬ）
+        def boom():
+            raise RuntimeError("WalletCog not loaded")
+
+        self.worker._wallet_provider = boom
+        op = self.add_op()
+        self.assertEqual(await self.worker.poll_once(), 0)
+        self.assertEqual(self.record(op["id"])["status"], "pending")
+        self.worker._wallet_provider = lambda: self.wallet
+        self.wallet.balances[ME] = 1000
+        self.assertEqual(await self.worker.poll_once(), 1)
+        self.assertEqual(self.record(op["id"])["status"], "done")
+
     async def test_batch_is_bounded(self):
         self.wallet.balances[ME] = 10_000_000
         for _ in range(wb.MAX_BATCH + 3):

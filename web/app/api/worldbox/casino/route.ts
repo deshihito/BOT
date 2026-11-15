@@ -49,6 +49,31 @@ export const runtime = "nodejs";
 
 const NO_STORE = { "Cache-Control": "no-store, max-age=0" };
 
+// 同一ユーザーのカジノリクエストを直列化する（プロセス内ロック）。
+// パネルは GET を3秒間隔でポーリングし、各 GET/POST がセッションの
+// 精算（tryFinishSession）を走らせるため、並行リクエストが同じ
+// セッションを二重に精算しうる（精算オプが2件積まれて二重に払われる）。
+// 精算オプの決定的 ID（settle-<先払いオプID>）と合わせて
+// 「1セッション = 精算オプ1件」を保証する。
+const userLocks = new Map<string, Promise<void>>();
+
+async function withUserLock<T>(userKey: string, fn: () => Promise<T>): Promise<T> {
+  const prev = userLocks.get(userKey) ?? Promise.resolve();
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  const tail = prev.then(() => gate);
+  userLocks.set(userKey, tail);
+  await prev.catch(() => undefined);
+  try {
+    return await fn();
+  } finally {
+    release();
+    if (userLocks.get(userKey) === tail) userLocks.delete(userKey);
+  }
+}
+
+type AuthedSession = NonNullable<ReturnType<typeof casinoSession>["session"]>;
+
 function sameOrigin(request: Request) {
   const origin = request.headers.get("origin");
   return !origin || origin === publicOrigin(request);
@@ -103,17 +128,36 @@ async function enqueue(userKey: string, discordId: string, input: {
   reason: string;
   payout?: number;
   prepaid?: boolean;
+  id?: string;
 }): Promise<EconomyOp | null> {
   const op = buildEconomyOp(
     {
       kind: input.kind, userKey, discordId, amount: input.amount, reason: input.reason,
       payout: input.payout, prepaid: input.prepaid,
     },
-    crypto.randomUUID(),
+    input.id ?? crypto.randomUUID(),
     Date.now(),
   );
   if (!op) return null;
   return (await enqueueEconomyOp(op)) ? op : null;
+}
+
+/**
+ * 精算オプの冪等な登録。決定的 ID で積み、同 ID のオプが既にあれば
+ * （pending / done / failed を問わず）作り直さない。セッションの
+ * 後片付けが再試行されても精算は1回だけになる。
+ */
+async function enqueueSettleOnce(ctx: Ctx, id: string, input: {
+  kind: "spend" | "gamble";
+  amount: number;
+  reason: string;
+  payout?: number;
+  prepaid?: boolean;
+}): Promise<boolean> {
+  const existing = await findEconomyOp(ctx.userKey, id);
+  if (existing) return true;
+  const op = await enqueue(ctx.userKey, ctx.discordId, { ...input, id });
+  return op !== null;
 }
 
 type Ctx = { userKey: string; discordId: string };
@@ -122,7 +166,7 @@ type Ctx = { userKey: string; discordId: string };
 async function settleSlot7(ctx: Ctx, session: Extract<CasinoSession, { kind: "slot7" }>): Promise<boolean> {
   const prepayTotal = session.bet * session.total;
   const netReturn = session.pendingReward - session.pendingPenalty + session.remaining * session.bet;
-  const settle = await enqueue(ctx.userKey, ctx.discordId, {
+  const settle = await enqueueSettleOnce(ctx, `settle-${session.prepayOpId}`, {
     kind: "gamble",
     amount: prepayTotal,
     reason: CASINO_SESSION_REASONS.slot7Settle,
@@ -131,7 +175,7 @@ async function settleSlot7(ctx: Ctx, session: Extract<CasinoSession, { kind: "sl
   });
   if (!settle) return false;
   if (netReturn < 0) {
-    await enqueue(ctx.userKey, ctx.discordId, {
+    await enqueueSettleOnce(ctx, `penalty-${session.prepayOpId}`, {
       kind: "spend", amount: -netReturn, reason: CASINO_SESSION_REASONS.slot7Penalty,
     });
   }
@@ -145,14 +189,14 @@ async function settleDouble(
   session: Extract<CasinoSession, { kind: "double" }>,
   payout: number,
 ): Promise<boolean> {
-  const op = await enqueue(ctx.userKey, ctx.discordId, {
+  const ok = await enqueueSettleOnce(ctx, `settle-${session.prepayOpId}`, {
     kind: "gamble",
     amount: session.bet,
     reason: CASINO_SESSION_REASONS.doubleSettle,
     payout,
     prepaid: true,
   });
-  if (!op) return false;
+  if (!ok) return false;
   await clearCasinoSession(ctx.userKey);
   return true;
 }
@@ -162,14 +206,14 @@ async function settleBlackjack(ctx: Ctx, session: Extract<CasinoSession, { kind:
   const bj = session.bj;
   if (bj.phase !== "settled" || !bj.result) return false;
   const payout = bj.bet + bj.result.delta;
-  const op = await enqueue(ctx.userKey, ctx.discordId, {
+  const ok = await enqueueSettleOnce(ctx, `settle-${session.spendOpIds[0]}`, {
     kind: "gamble",
     amount: bj.bet,
     reason: CASINO_SESSION_REASONS.blackjackSettle,
     payout,
     prepaid: true,
   });
-  if (!op) return false;
+  if (!ok) return false;
   await clearCasinoSession(ctx.userKey);
   return true;
 }
@@ -224,11 +268,11 @@ async function expireSessionIfNeeded(ctx: Ctx, session: CasinoSession | null): P
   }
   // プレイ中のブラックジャックは払った分だけ返金する。
   const paid = session.bet * session.spendOpIds.length;
-  const op = await enqueue(ctx.userKey, ctx.discordId, {
+  const ok = await enqueueSettleOnce(ctx, `refund-${session.spendOpIds[0]}`, {
     kind: "gamble", amount: paid, reason: CASINO_SESSION_REASONS.blackjackSettle, payout: paid, prepaid: true,
   });
-  if (op) await clearCasinoSession(ctx.userKey);
-  return op ? null : session;
+  if (ok) await clearCasinoSession(ctx.userKey);
+  return ok ? null : session;
 }
 
 async function loadSessionFor(ctx: Ctx): Promise<CasinoSession | null> {
@@ -243,6 +287,10 @@ function sessionJson(session: CasinoSession | null) {
 export async function GET(request: Request) {
   const { session, status } = casinoSession(request);
   if (!session) return errorResponse(status === 401 ? "unauthorized" : "discord_required", status);
+  return withUserLock(sessionOwnerKey(session), () => handleGet(session));
+}
+
+async function handleGet(session: AuthedSession) {
   if (!isEconomyEnabled()) return errorResponse("economy_unavailable", 503);
   const ctx: Ctx = { userKey: sessionOwnerKey(session), discordId: session.id };
   const [balance, ops, machine, activeSession, userState] = await Promise.all([
@@ -271,6 +319,10 @@ export async function POST(request: Request) {
   if (!sameOrigin(request)) return errorResponse("forbidden", 403);
   const { session, status } = casinoSession(request);
   if (!session) return errorResponse(status === 401 ? "unauthorized" : "discord_required", status);
+  return withUserLock(sessionOwnerKey(session), () => handlePost(request, session));
+}
+
+async function handlePost(request: Request, session: AuthedSession) {
   if (!isEconomyEnabled()) return errorResponse("economy_unavailable", 503);
   let body: unknown;
   try {

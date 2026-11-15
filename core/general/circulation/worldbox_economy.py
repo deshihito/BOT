@@ -63,12 +63,13 @@ AMOUNT_MAX = 1_000_000
 #: gamble の配当上限（Web 側 GAMBLE_PAYOUT_MAX と同じ値）
 PAYOUT_MAX = 300_000_000
 REASON_MAX = 40
-#: ポーリング間隔（秒。bg_cutout の 30 秒に合わせる）
-POLL_SECONDS = 30.0
+#: ポーリング間隔（秒）。カジノは対話的な遊びなので短く回す
+#: （30 秒時代はプレイの速さに処理が追いつかず pending が滞留した）
+POLL_SECONDS = 5.0
 #: 1回のポーリングで処理する上限
-MAX_BATCH = 25
+MAX_BATCH = 100
 #: claim がこの秒数を超えたら放棄されたものとして再処理可にする
-CLAIM_STALE_SECONDS = 300.0
+CLAIM_STALE_SECONDS = 90.0
 #: transfer_coins RPC が使えないことを示すエラーコード（WalletCog.pay と同じ判定）
 RPC_FALLBACK_CODES = frozenset({"RPC_NOT_ALLOWED", "42883"})
 
@@ -226,6 +227,7 @@ class WorldBoxEconomyWorker:
         self._new_user_balance = new_user_balance
         self._balance_reader = balance_reader
         self._remote_down = False
+        self._wallet_down = False
 
     def _marker(self) -> Any:
         marker = self._insufficient_marker
@@ -252,9 +254,21 @@ class WorldBoxEconomyWorker:
             self._remote_down = False
         if not isinstance(records, dict) or not records:
             return 0
-        wallet = self._wallet_provider()
+        # wallet が未読込だと例外が飛ぶ実装もある。ここで例外を外へ出すと
+        # tasks.loop ごと止まって経済処理が無言で死ぬため、kv 読み取りと
+        # 同じく「今回は見送り + 遷移時に1行だけ警告」で吸収する。
+        try:
+            wallet = self._wallet_provider()
+        except Exception:
+            wallet = None
         if wallet is None:
+            if not self._wallet_down:
+                logger.warning("worldbox economy: WalletCog が使えません（次回再試行）")
+            self._wallet_down = True
             return 0
+        if self._wallet_down:
+            logger.info("worldbox economy: WalletCog への接続が回復しました")
+            self._wallet_down = False
         handled = 0
         for key, raw in select_pending(records, _now_ms()):
             try:
