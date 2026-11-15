@@ -28,7 +28,13 @@ import {
 import type { BoardPost } from "@/lib/worldbox/board";
 import { parseSave, serializeSave, type SaveSpace } from "@/lib/worldbox/save";
 import { chooseInitialSave } from "@/lib/worldbox/save-source";
-import { loadDungeonTiles, loadLobbySprites, loadTextures } from "@/lib/worldbox/textures";
+import {
+  actionForTile, cropStage, isOverrideActive, tileKey, tileView,
+  type TileActionKind, type TileOverridesMap,
+} from "@/lib/worldbox/tiles";
+import { CROPS, itemById } from "@/lib/worldbox/items";
+import { countItem, type PlayerProfile } from "@/lib/worldbox/profile";
+import { loadDungeonTiles, loadFarmSprites, loadLobbySprites, loadTextures } from "@/lib/worldbox/textures";
 import { useGamesNav } from "../GamesShell";
 import WorldBoxEconomyPanel from "./WorldBoxEconomyPanel";
 
@@ -120,6 +126,20 @@ const NATION_ERROR_LABEL: Record<string, string> = {
   invalid_type: "建物の種類が不正です",
   on_capital: "首都には建てられません",
   on_spawn: "スポーン広場には建てられません",
+};
+
+/** タイル行為の失敗ラベル（断片のみ）。 */
+const TILE_ERROR_LABEL: Record<string, string> = {
+  tool_required: "道具が必要",
+  tile_blocked: "そこではできない",
+  not_owner: "他人の作物",
+  not_ready: "まだ育っていない",
+  no_crop: "作物がない",
+  unknown_seed: "種が不正",
+  not_enough_items: "種が足りない",
+  too_far: "遠すぎる",
+  unauthorized: "ログインが必要",
+  tiles_unavailable: "いま使えない",
 };
 
 /** 建物側の文言（not_owner は国家側と意味が違うため上書きする）。 */
@@ -335,12 +355,103 @@ export default function WorldBoxClient() {
   };
   buildActionRef.current = buildAction;
 
+  // インベントリ（ホットバー/ストレージ）とタイル上書き（伐採・畑・作物）
+  const [invProfile, setInvProfile] = useState<PlayerProfile | null>(null);
+  const invRef = useRef<PlayerProfile | null>(null);
+  invRef.current = invProfile;
+  const [selSlot, setSelSlot] = useState(0);
+  const selSlotRef = useRef(0);
+  selSlotRef.current = selSlot;
+  const [storageOpen, setStorageOpen] = useState(false);
+  const [seedPicker, setSeedPicker] = useState<{ x: number; y: number } | null>(null);
+  const [tileMsg, setTileMsg] = useState("");
+  const tilesRef = useRef<TileOverridesMap>({});
+  const tilesVersionRef = useRef(0);
+
+  const refreshInv = async () => {
+    try {
+      const res = await fetch("/api/worldbox/profile", { headers: { Accept: "application/json" } });
+      if (!res.ok) return;
+      const data = (await res.json()) as { profile?: PlayerProfile };
+      if (data.profile) setInvProfile(data.profile);
+    } catch { /* 読めなくても歩き続けられる */ }
+  };
+  const refreshTiles = async () => {
+    try {
+      const px = Math.floor(playerPosRef.current.x);
+      const py = Math.floor(playerPosRef.current.y);
+      const x0 = Math.max(0, Math.min(MAP_W - 128, px - 64));
+      const y0 = Math.max(0, Math.min(MAP_H - 128, py - 64));
+      const res = await fetch(
+        `/api/worldbox/tiles?x0=${x0}&y0=${y0}&x1=${x0 + 127}&y1=${y0 + 127}`,
+        { headers: { Accept: "application/json" } },
+      );
+      if (!res.ok) return;
+      const data = (await res.json()) as { overrides?: TileOverridesMap };
+      const next: TileOverridesMap = { ...tilesRef.current };
+      for (const key of Object.keys(next)) {
+        const m = /^(-?\d+),(-?\d+)$/.exec(key);
+        if (!m) continue;
+        const x = Number(m[1]);
+        const y = Number(m[2]);
+        if (x >= x0 && x <= x0 + 127 && y >= y0 && y <= y0 + 127) delete next[key];
+      }
+      Object.assign(next, data.overrides ?? {});
+      tilesRef.current = next;
+      tilesVersionRef.current += 1;
+    } catch { /* 読めなくても歩き続けられる */ }
+  };
+  const postTileAction = async (action: TileActionKind, x: number, y: number, seedId?: string) => {
+    setTileMsg("");
+    try {
+      const res = await fetch("/api/worldbox/tiles", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, x, y, ...(seedId ? { seedId } : {}) }),
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        error?: string; key?: string; override?: TileOverridesMap[string] | null; profile?: PlayerProfile;
+      };
+      if (!res.ok) {
+        setTileMsg(TILE_ERROR_LABEL[data.error ?? ""] ?? "できませんでした");
+        return;
+      }
+      if (data.key) {
+        const next = { ...tilesRef.current };
+        if (data.override) next[data.key] = data.override;
+        else delete next[data.key];
+        tilesRef.current = next;
+        tilesVersionRef.current += 1;
+      }
+      if (data.profile) setInvProfile(data.profile);
+    } catch {
+      setTileMsg("できませんでした");
+    }
+  };
+  const postTileActionRef = useRef(postTileAction);
+  postTileActionRef.current = postTileAction;
+  const swapStorage = async (storageIndex: number) => {
+    try {
+      const res = await fetch("/api/worldbox/profile", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "swap", hotbarIndex: selSlot, storageIndex }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { profile?: PlayerProfile };
+      if (res.ok && data.profile) setInvProfile(data.profile);
+    } catch { /* noop */ }
+  };
+
   useEffect(() => {
     void refreshNations();
     void refreshBuildings();
+    void refreshInv();
+    void refreshTiles();
     const timer = window.setInterval(() => {
       void refreshNations();
       void refreshBuildings();
+      void refreshInv();
+      void refreshTiles();
     }, 15000);
     return () => window.clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -357,8 +468,29 @@ export default function WorldBoxClient() {
     const textures = loadTextures();
     const dungeon = loadDungeonTiles();
     const lobbySprites = loadLobbySprites();
+    const farmSprites = loadFarmSprites();
     const avatar = new Image();
     avatar.src = "/img/nomal.png";
+
+    // 実効マップ: 生成地形へタイル上書き（伐採・採掘の地形置き換え）を
+    // 適用したもの。移動・描画・建築可否はこちらを見る。
+    const effTiles = new Uint8Array(map.tiles);
+    const effMap: TopDownMap = { seed: map.seed, width: map.width, height: map.height, tiles: effTiles };
+    let effVersion = -1;
+    const syncEffMap = () => {
+      if (effVersion === tilesVersionRef.current) return;
+      effVersion = tilesVersionRef.current;
+      effTiles.set(map.tiles);
+      const now = Date.now();
+      for (const [key, ov] of Object.entries(tilesRef.current)) {
+        if (!isOverrideActive(ov, now) || ov.tile === undefined) continue;
+        const m = /^(-?\d+),(-?\d+)$/.exec(key);
+        if (!m) continue;
+        const x = Number(m[1]);
+        const y = Number(m[2]);
+        if (x >= 0 && y >= 0 && x < MAP_W && y < MAP_H) effTiles[y * MAP_W + x] = ov.tile;
+      }
+    };
 
     const spawn = mapSpawn(map);
     const player: PlayerState = { x: spawn.x, y: spawn.y, vx: 0, vy: 0, face: 1, phase: 0 };
@@ -366,7 +498,7 @@ export default function WorldBoxClient() {
     // 空間（ワールド / ロビー）。ロビーでは建物・国家・ミニマップは扱わない。
     let space: SaveSpace = "world";
     let worldReturn: { x: number; y: number } | null = null;
-    const activeMap = (): TopDownMap => (space === "lobby" ? lobby.moveMap : map);
+    const activeMap = (): TopDownMap => (space === "lobby" ? lobby.moveMap : effMap);
     const activeBlocked = (): ReadonlySet<string> | undefined =>
       space === "lobby" ? lobby.blocked : blockedRef.current;
     const keys = new Set<string>();
@@ -496,6 +628,28 @@ export default function WorldBoxClient() {
         y: Math.floor(cam.y + (p.y - p.h / 2) / TILE),
       };
     };
+    /** 道具タップ: 選択中の道具/種と隣接タイルの状態で行為が決まる。 */
+    const handleTileTap = (t: { x: number; y: number }): boolean => {
+      const prof = invRef.current;
+      if (!prof) return false;
+      const px = Math.floor(player.x);
+      const py = Math.floor(player.y);
+      if (Math.max(Math.abs(t.x - px), Math.abs(t.y - py)) > 1) return false;
+      const view = tileView(map, tilesRef.current, t.x, t.y, Date.now(), null);
+      const slot = prof.hotbar[selSlotRef.current] ?? null;
+      const selItem = slot ? itemById(slot.id) : null;
+      const act = actionForTile(view, {
+        tool: selItem?.tool,
+        seedId: selItem && selItem.category === "seed" ? selItem.id : undefined,
+      });
+      if (!act) return false;
+      if (act.action === "plant-picker") {
+        setSeedPicker({ x: t.x, y: t.y });
+        return true;
+      }
+      void postTileActionRef.current(act.action, t.x, t.y, act.seedId);
+      return true;
+    };
     const onPointerDown = (e: PointerEvent) => {
       if (buildRef.current.active && space === "world") {
         // 建築モードではタップそのものが確定（スティックは無効）
@@ -506,6 +660,7 @@ export default function WorldBoxClient() {
         }
         return;
       }
+      if (space === "world" && handleTileTap(toTile(e))) return;
       const p = canvasPos(e);
       if (p.x > p.w * 0.62) return; // スティックは左寄りだけ
       joy.active = true;
@@ -755,7 +910,7 @@ export default function WorldBoxClient() {
       }
       if (nationsRef.current.nations.some((n) => n.capital.x === tx && n.capital.y === ty)) return false;
       if (isSpawnPlazaTile(map, tx, ty)) return false;
-      const t = mapTileAt(map, tx, ty);
+      const t = mapTileAt(effMap, tx, ty);
       if (t !== T_GRASS && t !== T_DIRT && t !== T_SAND) return false;
       if (data.buildings.some((v) => v.x === tx && v.y === ty)) return false;
       if (data.buildings.filter((v) => v.mine).length >= USER_BUILDING_CAP) return false;
@@ -766,6 +921,7 @@ export default function WorldBoxClient() {
     let lastTileKey = "";
     let lastStation: LobbyStation | null = null;
     const placePlayer = (x: number, y: number) => {
+      syncEffMap();
       const free = findFreeNear(activeMap(), x, y, activeBlocked());
       player.x = free.x;
       player.y = free.y;
@@ -859,6 +1015,7 @@ export default function WorldBoxClient() {
       const vel = { x: ix * WALK_SPEED, y: iy * WALK_SPEED };
       const prevX = player.x;
       const prevY = player.y;
+      syncEffMap();
       const moved = stepMove(activeMap(), player, vel, dt, activeBlocked());
       player.x = moved.x;
       player.y = moved.y;
@@ -929,7 +1086,7 @@ export default function WorldBoxClient() {
       ctx.imageSmoothingEnabled = false;
       for (let ty = ty0; ty <= ty1; ty++) {
         for (let tx = tx0; tx <= tx1; tx++) {
-          const id = mapTileAt(map, tx, ty);
+          const id = mapTileAt(effMap, tx, ty);
           const sx = toScreenX(tx);
           const sy = toScreenY(ty);
           const dungeonKey = TILE_DUNGEON[id];
@@ -938,6 +1095,32 @@ export default function WorldBoxClient() {
           else {
             ctx.fillStyle = TILE_FALLBACK[id] ?? "#57a639";
             ctx.fillRect(sx, sy, TILE + 1, TILE + 1);
+          }
+        }
+      }
+
+      // タイル上書きの重ね描き（畑・切り株・作物の成長段階）
+      for (let ty = ty0; ty <= ty1; ty++) {
+        for (let tx = tx0; tx <= tx1; tx++) {
+          const ov = tilesRef.current[tileKey(tx, ty)];
+          if (!isOverrideActive(ov, nowMs)) continue;
+          const sx = toScreenX(tx);
+          const sy = toScreenY(ty);
+          if (ov!.farmland) {
+            const img = farmSprites.farmland;
+            if (texReady(img)) ctx.drawImage(img, sx, sy, TILE + 1, TILE + 1);
+            else {
+              ctx.fillStyle = "#8a5a2b";
+              ctx.fillRect(sx, sy, TILE + 1, TILE + 1);
+            }
+          }
+          if (ov!.stump) {
+            const img = farmSprites.stump;
+            if (texReady(img)) ctx.drawImage(img, sx, sy, TILE, TILE);
+          }
+          if (ov!.crop) {
+            const img = farmSprites[`crop${cropStage(ov!.crop, nowMs)}`];
+            if (texReady(img)) ctx.drawImage(img, sx, sy, TILE, TILE);
           }
         }
       }
@@ -1231,7 +1414,6 @@ export default function WorldBoxClient() {
       </nav>
       <div className="page-heading compact-heading">
         <h1>AGO WORLD BOX</h1>
-        <p className="muted">見下ろしの共有ワールド。みんなで同じ世界を歩く。</p>
       </div>
 
       <p className="classic-status" role="status">
@@ -1336,7 +1518,133 @@ export default function WorldBoxClient() {
             </button>
           </div>
         )}
+        {spaceUi === "world" && invProfile && (
+          <div
+            style={{
+              position: "absolute", left: "50%", bottom: 10, transform: "translateX(-50%)",
+              display: "flex", gap: 6, alignItems: "stretch", padding: 6, borderRadius: 10,
+              background: "rgba(0,0,0,0.6)", zIndex: 4, maxWidth: "calc(100% - 16px)",
+            }}
+          >
+            {invProfile.hotbar.map((slot, i) => (
+              <button
+                key={i}
+                type="button"
+                aria-pressed={selSlot === i}
+                aria-label={slot ? (itemById(slot.id)?.name ?? slot.id) : "空き枠"}
+                onClick={() => setSelSlot(i)}
+                style={{
+                  ...btn, minHeight: 46, minWidth: 54, padding: "2px 4px", fontSize: 11, lineHeight: 1.25,
+                  color: "#fff", background: "rgba(255,255,255,0.08)",
+                  ...(selSlot === i
+                    ? { background: "rgba(255,210,62,0.30)", borderColor: "rgba(255,210,62,0.85)" }
+                    : {}),
+                }}
+              >
+                {slot ? (
+                  <>
+                    {itemById(slot.id)?.name ?? slot.id}
+                    <br />×{slot.count}
+                  </>
+                ) : (
+                  "―"
+                )}
+              </button>
+            ))}
+            <button
+              type="button"
+              style={{ ...btn, minHeight: 46, padding: "2px 10px", fontSize: 12, color: "#fff", background: "rgba(255,255,255,0.08)" }}
+              onClick={() => setStorageOpen((v) => !v)}
+              aria-expanded={storageOpen}
+            >
+              ストレージ
+            </button>
+          </div>
+        )}
+        {tileMsg && (
+          <div
+            role="status"
+            style={{
+              position: "absolute", left: "50%", bottom: 68, transform: "translateX(-50%)",
+              padding: "4px 12px", borderRadius: 10, background: "rgba(0,0,0,0.6)",
+              color: "#fff", fontSize: 13, whiteSpace: "nowrap", zIndex: 4,
+            }}
+          >
+            {tileMsg}
+          </div>
+        )}
       </div>
+
+      {storageOpen && invProfile && (
+        <div
+          style={{
+            maxWidth: 640, margin: "12px auto 0", padding: 14, borderRadius: 12,
+            border: "1px solid rgba(255,255,255,0.18)", background: "rgba(255,255,255,0.04)", textAlign: "left",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <strong>ストレージ</strong>
+            <span style={{ flex: 1 }} />
+            <button type="button" style={btn} onClick={() => setStorageOpen(false)}>
+              閉じる
+            </button>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 6, marginTop: 10 }}>
+            {invProfile.storage.map((slot, i) => (
+              <button
+                key={i}
+                type="button"
+                style={{ ...btn, minHeight: 44, padding: "2px 4px", fontSize: 11, lineHeight: 1.25 }}
+                onClick={() => void swapStorage(i)}
+              >
+                {slot ? (
+                  <>
+                    {itemById(slot.id)?.name ?? slot.id}
+                    <br />×{slot.count}
+                  </>
+                ) : (
+                  "―"
+                )}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {seedPicker && invProfile && (
+        <div
+          style={{
+            maxWidth: 640, margin: "12px auto 0", padding: 14, borderRadius: 12,
+            border: "1px solid rgba(255,255,255,0.18)", background: "rgba(255,255,255,0.04)", textAlign: "left",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <strong>種</strong>
+            <span style={{ flex: 1 }} />
+            <button type="button" style={btn} onClick={() => setSeedPicker(null)}>
+              閉じる
+            </button>
+          </div>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 10 }}>
+            {CROPS.filter((c) => countItem(invProfile, c.seedId) > 0).map((c) => (
+              <button
+                key={c.id}
+                type="button"
+                style={btn}
+                onClick={() => {
+                  void postTileAction("plant", seedPicker.x, seedPicker.y, c.seedId);
+                  setSeedPicker(null);
+                }}
+              >
+                {itemById(c.seedId)?.name ?? c.seedId} ×{countItem(invProfile, c.seedId)}
+              </button>
+            ))}
+            {CROPS.every((c) => countItem(invProfile, c.seedId) === 0) && (
+              <p className="muted" style={{ margin: 0, fontSize: 13 }}>種がない</p>
+            )}
+          </div>
+        </div>
+      )}
 
       {boardOpen && spaceUi === "lobby" && (
         <div
@@ -1578,14 +1886,6 @@ export default function WorldBoxClient() {
       )}
 
       {showEconomy && <WorldBoxEconomyPanel />}
-
-      <p className="muted" style={{ textAlign: "center", fontSize: 13, maxWidth: 860, margin: "14px auto 0" }}>
-        PC: WASD・矢印キーで移動。タッチ: 画面左側のスティックで移動。
-        水・木・岩には入れません。歩いた場所は保存され、みんなと同じ世界にいます。
-        ログインすると、好きな場所に家・畑・塔を建てられます。建てた建物は、所属する国の繁栄度にも数えられます。
-        スポーン広場のワープパッドか ≡ メニューからロビーへ行けます。ロビーを出ると、入る前にいた場所へ戻ります。
-        経済パネルでは、働いてコインを稼ぎ、買い物・合成・steal ができます。
-      </p>
     </div>
   );
 }

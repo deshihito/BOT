@@ -8,7 +8,7 @@ import { buildEconomyOp, type EconomyOp } from "@/lib/worldbox/economy-bridge";
 import {
   enqueueEconomyOp, isEconomyEnabled, readUserBalance,
 } from "@/lib/worldbox/economy-bridge-online";
-import type { PlayerProfile } from "@/lib/worldbox/profile";
+import { swapSlots, type PlayerProfile } from "@/lib/worldbox/profile";
 import { findPresenceOwnerKey, isPresenceEnabled } from "@/lib/worldbox/presence-online";
 import { isProfileEnabled, loadProfile, storeProfile } from "@/lib/worldbox/profile-online";
 
@@ -98,6 +98,7 @@ export async function POST(request: Request) {
   }
   const data = (body ?? {}) as {
     action?: unknown; itemId?: unknown; count?: unknown; recipeId?: unknown; targetId?: unknown;
+    hotbarIndex?: unknown; storageIndex?: unknown;
   };
   const ownerKey = sessionOwnerKey(session);
   const current = await loadProfile(ownerKey);
@@ -156,6 +157,12 @@ export async function POST(request: Request) {
       const gate = coinGate();
       if ("response" in gate) return gate.response;
       return saveWithCoin(sellItem(current, data.itemId, data.count), gate.discordId);
+    }
+    case "swap": {
+      // ホットバー⇔ストレージの枠入れ替え（コインは動かない）
+      const swapped = swapSlots(current, data.hotbarIndex, data.storageIndex);
+      if (!swapped) return errorResponse("invalid_action");
+      return saveAndReturn({ ok: true, profile: swapped });
     }
     case "eat": {
       const result = eatItem(current, data.itemId);

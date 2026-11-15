@@ -232,7 +232,7 @@ export default function WorldBoxEconomyPanel() {
 
       {tab === "bag" && (
         <div style={{ marginTop: 6 }}>
-          {owned.length === 0 && <p className="muted">かばんは空です。ショップで買うか、合成で作りましょう。</p>}
+          {owned.length === 0 && <p className="muted">かばんは空です</p>}
           {owned.map((item) => (
             <div key={item.id} style={row}>
               <strong>{item.name}</strong>

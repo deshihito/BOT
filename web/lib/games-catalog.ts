@@ -928,8 +928,7 @@ export const WEB_GAMES: WebGame[] = [
   {
     slug: "worldbox",
     title: "AGO WORLD BOX",
-    description:
-      "見下ろし型の共有ワールド。全員が同じ一つの世界を同時に歩き回り、すれ違う人と出会えます。歩いた場所は保存され、次も同じ場所から。国が育っていく世界の土台です。",
+    description: "見下ろし型の共有ワールド",
     status: "playable",
     activity: true,
     players: "みんな（同時接続）",

@@ -86,3 +86,19 @@ export function loadLobbySprites(): Record<string, HTMLImageElement> {
   for (const [k, v] of Object.entries(LOBBY_SPRITE_SRC)) { const img = new Image(); img.src = v; out[k] = img; }
   return out;
 }
+
+// 農業スプライト（64×64）。生成: ~/workspace/ago-world-box/make_farm_sprites.py
+// farmland は全面タイル、stump / crop_stage0..2 は透明背景の重ね描き用。
+export const FARM_SPRITE_SRC: Record<string, string> = {
+  farmland: "/img/worldbox/farm/farmland.png",
+  stump: "/img/worldbox/farm/stump.png",
+  crop0: "/img/worldbox/farm/crop_stage0.png",
+  crop1: "/img/worldbox/farm/crop_stage1.png",
+  crop2: "/img/worldbox/farm/crop_stage2.png",
+};
+
+export function loadFarmSprites(): Record<string, HTMLImageElement> {
+  const out: Record<string, HTMLImageElement> = {};
+  for (const [k, v] of Object.entries(FARM_SPRITE_SRC)) { const img = new Image(); img.src = v; out[k] = img; }
+  return out;
+}
