@@ -204,13 +204,17 @@ export class NextResponse {
   }
 }
 `);
+const stationStubUrl = dataUrl(`
+export async function loadMyLobbyStation() { return globalThis.__wbStationValue ?? "shop"; }
+`);
 const economyRoute = await import(
   dataUrl(
     transpile("api/worldbox/economy/route.ts", rootDir + "/app")
       .replaceAll('"next/server"', JSON.stringify(nextServerStubUrl))
       .replaceAll('"@/lib/auth"', JSON.stringify(authUrl))
       .replaceAll('"@/lib/worldbox/economy-bridge"', JSON.stringify(economyUrl))
-      .replaceAll('"@/lib/worldbox/economy-bridge-online"', JSON.stringify(economyOnlineUrl)),
+      .replaceAll('"@/lib/worldbox/economy-bridge-online"', JSON.stringify(economyOnlineUrl))
+      .replaceAll('"@/lib/worldbox/station-online"', JSON.stringify(stationStubUrl)),
   ),
 );
 
@@ -264,6 +268,7 @@ test("API(economy): GET は残高（users の読み取り）と自分のオプ�
 });
 
 test("API(economy): POST transfer は pending オプを積み、残高は動かさない", async () => {
+  globalThis.__wbStationValue = "bank"; // 銀行の前にいる
   const cookie = sessionCookie(ME, "eco-user");
   const res = await economyRoute.POST(apiRequest(URL_E, "POST", cookie, { action: "transfer", toDiscordId: OTHER, amount: 700 }));
   assert.equal(res.status, 200);
@@ -364,6 +369,7 @@ const profileRoute = await import(
       .replaceAll('"@/lib/worldbox/economy-bridge"', JSON.stringify(economyUrl))
       .replaceAll('"@/lib/worldbox/economy"', JSON.stringify(profileEcoUrl))
       .replaceAll('"@/lib/worldbox/presence-online"', JSON.stringify(presenceStubUrl))
+      .replaceAll('"@/lib/worldbox/station-online"', JSON.stringify(stationStubUrl))
       .replaceAll('"@/lib/worldbox/profile-online"', JSON.stringify(profileOnlineStubUrl))
       .replaceAll('"@/lib/worldbox/profile"', JSON.stringify(profileSwapUrl)),
   ),
@@ -375,6 +381,7 @@ function resetBridgeState() {
   globalThis.__wbBridge.failEnqueue = false;
   globalThis.__wbProfiles.clear();
   globalThis.__wbPresence.clear();
+  globalThis.__wbStationValue = "shop"; // 既定はショップの前
 }
 
 test("API(profile): buy は spend オプを積み、アイテムだけが増える", async () => {

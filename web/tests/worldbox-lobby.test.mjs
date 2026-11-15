@@ -370,13 +370,17 @@ const presenceRoute = await import(
       .replaceAll('"@/lib/worldbox/presence"', JSON.stringify(presenceUrl)),
   ),
 );
+const stationStubUrl = dataUrl(`
+export async function loadMyLobbyStation() { return "board"; }
+`);
 const boardRoute = await import(
   dataUrl(
     transpile("api/worldbox/board/route.ts", rootDir + "/app")
       .replaceAll('"next/server"', JSON.stringify(nextServerStubUrl))
       .replaceAll('"@/lib/auth"', JSON.stringify(authUrl))
       .replaceAll('"@/lib/worldbox/board"', JSON.stringify(boardUrl))
-      .replaceAll('"@/lib/worldbox/board-online"', JSON.stringify(boardOnlineUrl)),
+      .replaceAll('"@/lib/worldbox/board-online"', JSON.stringify(boardOnlineUrl))
+      .replaceAll('"@/lib/worldbox/station-online"', JSON.stringify(stationStubUrl)),
   ),
 );
 const gateRoute = await import(
@@ -474,13 +478,14 @@ test("クライアント: 入場ゲート（未ログインではワールドを
   assert.ok(!client.includes("ゲスト"), "ゲスト表記が残っている");
 });
 
-test("クライアント: ハンバーガーはデータ駆動のアクションリスト（ワープ・クラフト・設定トグル）", () => {
+test("クライアント: ハンバーガーはデータ駆動のアクションリスト（ワープ・設定トグル）", () => {
   const client = fs.readFileSync(path.join(rootDir, "app/games/worldbox/WorldBoxClient.tsx"), "utf8");
   assert.ok(client.includes("menuActions"), "アクションリストが無い");
   assert.ok(client.includes('id: "warp"'), "ワープのアクションが無い");
-  assert.ok(client.includes('id: "craft"'), "クラフトのアクションが無い");
   assert.ok(client.includes('id: "map"'), "マップ切替のアクションが無い");
-  assert.ok(client.includes("作れるものはまだない"), "クラフトパネルの空状態が無い");
+  // 合成は経済パネルの合成タブ（作業台の前だけ）に一本化。空のクラフト器は置かない
+  assert.ok(!client.includes('id: "craft"'), "空のクラフトアクションが残っている");
+  assert.ok(!client.includes("作れるものはまだない"), "空のクラフトパネルが残っている");
 });
 
 test("クライアント: ハンバーガーメニューと空間ワープがある", () => {
