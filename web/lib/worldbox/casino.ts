@@ -9,8 +9,8 @@
 // 負けは還流）で原子的に適用する。抽選はサーバー側でのみ行う。
 import type { LobbyObject } from "./lobby";
 
-export type CasinoGame = "slot" | "roulette";
-export type CasinoMachine = CasinoGame;
+export type CasinoGame = "slot" | "roulette" | "dice";
+export type CasinoMachine = "slot" | "roulette";
 
 /** ベットの選択肢（コイン）。既存カジノ系の最低額（10）に揃えた刻み。 */
 export const CASINO_BET_TIERS: readonly number[] = [10, 100, 1000];
@@ -152,4 +152,21 @@ export function casinoMachineNear(
 export const CASINO_REASON: Record<CasinoGame, string> = {
   slot: "casino_slot",
   roulette: "casino_roulette",
+  dice: "casino_dice",
 };
+
+/** セッション型ゲームの理由コード（先払い spend / 精算 gamble）。 */
+export const CASINO_SESSION_REASONS = {
+  slot7Prepay: "casino_slot7_prepay",
+  slot7Settle: "casino_slot7",
+  slot7Penalty: "casino_slot7_penalty",
+  doubleBet: "casino_double_bet",
+  doubleSettle: "casino_double",
+  blackjackBet: "casino_blackjack_bet",
+  blackjackSettle: "casino_blackjack",
+} as const;
+
+/** カジノ関係の spend オプか（処理中ベットの実質残高計算に使う）。 */
+export function isCasinoSpendReason(reason: string): boolean {
+  return reason.startsWith("casino_");
+}

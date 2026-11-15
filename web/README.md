@@ -43,7 +43,9 @@ Discord Developer PortalのOAuth2 Redirect URIには`DISCORD_REDIRECT_URI`を登
 
 デプロイはPi上で`deploy/deploy-web.sh`を実行します。コマンドデータの再生成、`web/`のビルド、`/srv/supabase-data/agobot-web/releases/`へのリリース組み立て、`current`シンボリックリンクの切り替えとサービス再起動までを一括で行います（過去のリリースは3つまで保持）。
 
-通常は自動デプロイが有効で、手動実行は不要です。systemdタイマー`agobot-web-deploy.timer`（5分間隔）が`deploy/web-autodeploy.sh`を呼び、Bot本体のチェックアウトが新しいコミットへ進んでいたら`deploy-web.sh`を実行します。反映済みコミットは`/srv/supabase-data/agobot-web/deployed-head`に記録され、ビルドに失敗したコミットは`failed-head`に記録して次のコミットまで再試行しません。ログは`/srv/supabase-data/agobot-web/autodeploy.log`です。タイマーの導入は次のとおりです（初回は、現在のリリースがビルド済みのコミットを反映済みとして記録しておくと無駄な再ビルドが起きません）。
+通常は自動デプロイが有効で、手動実行は不要です。systemdタイマー`agobot-web-deploy.timer`（5分間隔）が`deploy/web-autodeploy.sh`を呼び、Bot本体のチェックアウトが新しいコミットへ進んでいたら`deploy-web.sh`を実行します。反映済みコミットは`/srv/supabase-data/agobot-web/deployed-head`に記録され、ビルドに失敗したコミットは`failed-head`に記録して次のコミットまで再試行しません。ログは`/srv/supabase-data/agobot-web/autodeploy.log`です。
+
+ビルド状態は`deploy-web.sh`が`deploy/write_build_status.py`経由で`/srv/supabase-data/agobot-web/build-status.json`に書き出します（状態・対象コミット・含まれるPR番号とタイトル・開始/完了時刻）。実行中のWebは`GET /api/build-status`でこれを読み、ビルド中は全ページ上部の帯に対象PR番号を表示し、`/status`の「Webデプロイ」欄にも状態を出します。読み取りパスは環境変数`AGOBOT_BUILD_STATUS_PATH`で上書きできます。タイマーの導入は次のとおりです（初回は、現在のリリースがビルド済みのコミットを反映済みとして記録しておくと無駄な再ビルドが起きません）。
 
 ```bash
 sudo cp deploy/agobot-web-deploy.service.example /etc/systemd/system/agobot-web-deploy.service

@@ -29,6 +29,10 @@ export interface EconomyOp {
    * ワーカーはベットを引き落としてから、ベット分＋バンクロールで
    * 確保できた利益分を上限にこの額まで払う（Plan A）。 */
   payout?: number;
+  /** gamble のベットが spend オプで先払い済みか（セッション型カジノ）。
+   * true のときワーカーはベットを引き落とさず、配当の払いと負けの
+   * 還流だけを行う。 */
+  prepaid?: boolean;
   status: EconomyOpStatus;
   /** 失敗コード（failed のみ）。 */
   error?: string;
@@ -57,6 +61,10 @@ export const EARN_REASONS: ReadonlySet<string> = new Set([
 export const GAMBLE_REASONS: ReadonlySet<string> = new Set([
   "casino_slot",
   "casino_roulette",
+  "casino_dice",
+  "casino_slot7",
+  "casino_blackjack",
+  "casino_double",
 ]);
 
 /** gamble の配当上限（ベット最大 1,000,000 × スロット最大倍率 300）。 */
@@ -102,6 +110,7 @@ export interface BuildEconomyOpInput {
   toDiscordId?: unknown;
   fromDiscordId?: unknown;
   payout?: unknown;
+  prepaid?: unknown;
 }
 
 /**
@@ -144,6 +153,7 @@ export function buildEconomyOp(input: BuildEconomyOpInput, id: string, now: numb
     const payout = validateGamblePayout(input.payout);
     if (payout === null) return null;
     op.payout = payout;
+    if (input.prepaid === true) op.prepaid = true;
   }
   return op;
 }
@@ -201,6 +211,7 @@ export function parseEconomyOp(raw: unknown): EconomyOp | null {
     const payout = validateGamblePayout(value.payout);
     if (payout === null) return null;
     op.payout = payout;
+    if (value.prepaid === true) op.prepaid = true;
   }
   if (typeof value.error === "string" && value.error.length > 0) op.error = value.error;
   if (typeof value.appliedAmount === "number" && Number.isInteger(value.appliedAmount) && value.appliedAmount >= 0) {

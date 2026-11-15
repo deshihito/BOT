@@ -11,6 +11,13 @@ p { margin:0; }
 button,textarea { font:inherit; }
 code { padding:1px 6px; border:1px solid var(--line); border-radius:5px; background:var(--soft); font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.92em; }
 header { position:relative; z-index:20; border-bottom:1px solid var(--line); background:#fff; }
+.build-banner { position:relative; z-index:19; border-bottom:1px solid var(--line); background:var(--note); }
+.build-banner-inner { display:flex; align-items:center; gap:10px; max-width:880px; margin:0 auto; padding:7px 20px; }
+.build-banner-dot { flex:0 0 auto; width:9px; height:9px; border-radius:50%; background:#e8590c; animation:build-banner-pulse 1.2s ease-in-out infinite; }
+@keyframes build-banner-pulse { 0%,100% { opacity:1; } 50% { opacity:.35; } }
+@media (prefers-reduced-motion: reduce) { .build-banner-dot { animation:none; } }
+.build-banner-text { font-size:13px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.build-banner-title { margin-left:10px; color:var(--muted); font-weight:400; }
 header nav { display:flex; align-items:center; gap:22px; max-width:880px; min-height:58px; margin:0 auto; padding:9px 20px; }
 .brand { display:flex; align-items:center; gap:7px; color:var(--text); font-size:17px; font-weight:800; letter-spacing:.04em; white-space:nowrap; }
 .brand img { width:30px; height:30px; }
@@ -225,6 +232,7 @@ summary.faq-q::-webkit-details-marker { display:none; }
    サイト共通クロームを隠し、埋め込み先いっぱいに表示する。 */
 body:has([data-activity-root]) > header,
 body:has([data-activity-root]) > footer,
+body:has([data-activity-root]) > .build-banner,
 body:has([data-activity-root]) > .final-cta-band,
 body:has([data-activity-root]) > .mobile-cta-bar { display:none; }
 body:has([data-activity-root]) > main { max-width:none; min-height:100svh; margin:0; padding:0; }

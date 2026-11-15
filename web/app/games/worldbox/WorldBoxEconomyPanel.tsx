@@ -1,5 +1,6 @@
 "use client";
 // AGO WORLD BOX の経済パネル（かばん・ショップ・合成・steal・労働・銀行）。
+// 売買・合成・送金は場所制約つき: それぞれの施設の前にいる間だけタブが出る。
 // Discord ボット側の経済機能（items / workshop craft / circulation steal）の
 // 規則をそのまま使い、かばん・空腹度は /api/worldbox/profile が正とする。
 // コインの正は AGO コイン本体: 残高と移動履歴は経済ブリッジ
@@ -7,6 +8,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { EconomyOp } from "@/lib/worldbox/economy-bridge";
 import { ITEMS, RECIPES, itemById, sellPrice } from "@/lib/worldbox/items";
+import type { LobbyStation } from "@/lib/worldbox/lobby";
 import type { PlayerProfile } from "@/lib/worldbox/profile";
 import type { SaveSpace } from "@/lib/worldbox/save";
 
@@ -30,6 +32,9 @@ const ERROR_LABEL: Record<string, string> = {
   invalid_recipient: "相手のIDが不正です",
   self_transfer: "自分には送れません",
   invalid_amount: "金額が不正です",
+  not_at_shop: "ショップの前にいません",
+  not_at_workbench: "作業台の前にいません",
+  not_at_bank: "銀行の前にいません",
 };
 
 const OP_KIND_LABEL: Record<EconomyOp["kind"], string> = {
@@ -80,9 +85,14 @@ function ItemIcon({ id, size = 24 }: { id: string; size?: number }) {
   );
 }
 
-export default function WorldBoxEconomyPanel({ space }: { space: SaveSpace }) {
-  // ショップ（売買）はロビー空間でのみ開く。ワールドではタブ自体を出さない。
+export default function WorldBoxEconomyPanel({ space, station, onClose }: { space: SaveSpace; station: LobbyStation | null; onClose: () => void }) {
+  // 行動の場所制約: 売買はショップの前、合成は作業台（鍛冶屋）の前、
+  // 送金は銀行の前でのみ。いる場所に対応するタブだけを出す（サーバー側
+  // でもプレゼンスで検証されるため、ここは表示の一致が役割）。
   const inLobby = space === "lobby";
+  const atShop = inLobby && station === "shop";
+  const atWorkbench = inLobby && station === "smith";
+  const atBank = inLobby && station === "bank";
   const [profile, setProfile] = useState<PlayerProfile | null>(null);
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [tab, setTab] = useState<Tab>("bag");
@@ -200,21 +210,33 @@ export default function WorldBoxEconomyPanel({ space }: { space: SaveSpace }) {
     }
   };
 
-  if (loadState === "loading") return <div style={panel}>読み込み中…</div>;
-  if (loadState === "guest") {
-    return (
-      <div style={panel}>
-        経済機能（かばん・ショップ・合成・steal）を使うにはログインが必要です。
+  const closeBtn = (
+    <button type="button" style={btn} onClick={onClose}>
+      閉じる
+    </button>
+  );
+  const panelHead = (text: string) => (
+    <div style={panel}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <span>{text}</span>
+        <span style={{ flex: 1 }} />
+        {closeBtn}
       </div>
-    );
+    </div>
+  );
+  if (loadState === "loading") return panelHead("読み込み中…");
+  if (loadState === "guest") {
+    return panelHead("経済機能（かばん・ショップ・合成・steal）を使うにはログインが必要です。");
   }
   if (loadState === "unavailable" || !profile) {
-    return <div style={panel}>いまは経済機能を使えません。</div>;
+    return panelHead("いまは経済機能を使えません。");
   }
 
   const owned = ITEMS.filter((item) => (profile.items[item.id] ?? 0) > 0);
-  // ワールドでショップタブを開いたままにしない（ロビーへ移動すると使える）
-  const activeTab: Tab = tab === "shop" && !inLobby ? "bag" : tab;
+  // 施設の前にいないタブを開いたままにしない（その施設へ行くと使える）
+  const tabAllowed = (t: Tab): boolean =>
+    t === "shop" ? atShop : t === "craft" ? atWorkbench : t === "bank" ? atBank : true;
+  const activeTab: Tab = tabAllowed(tab) ? tab : "bag";
   const tabBtn = (t: Tab, label: string) => (
     <button
       type="button"
@@ -247,14 +269,15 @@ export default function WorldBoxEconomyPanel({ space }: { space: SaveSpace }) {
         >
           労働する
         </button>
+        {closeBtn}
       </div>
 
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12 }}>
         {tabBtn("bag", "かばん")}
-        {inLobby && tabBtn("shop", "ショップ")}
-        {tabBtn("craft", "合成")}
+        {atShop && tabBtn("shop", "ショップ")}
+        {atWorkbench && tabBtn("craft", "合成")}
         {tabBtn("steal", "steal")}
-        {tabBtn("bank", "銀行")}
+        {atBank && tabBtn("bank", "銀行")}
       </div>
       {activeTab === "bag" && (
         <div style={{ marginTop: 6 }}>
@@ -272,7 +295,7 @@ export default function WorldBoxEconomyPanel({ space }: { space: SaveSpace }) {
                   食べる（+{item.hunger}）
                 </button>
               )}
-              {inLobby && (
+              {atShop && (
                 <button type="button" style={btn} disabled={busy}
                   onClick={() => void act({ action: "sell", itemId: item.id }, () => `${item.name}を売った（代金 ${sellPrice(item)} コインは処理中）`)}>
                   売る（{sellPrice(item)}）
@@ -283,7 +306,7 @@ export default function WorldBoxEconomyPanel({ space }: { space: SaveSpace }) {
         </div>
       )}
 
-      {activeTab === "shop" && inLobby && (
+      {activeTab === "shop" && atShop && (
         <div style={{ marginTop: 6 }}>
           {ITEMS.map((item) => (
             <div key={item.id} style={row}>

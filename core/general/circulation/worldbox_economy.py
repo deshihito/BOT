@@ -22,7 +22,9 @@ Web は残高を直接触らない。Web が bot_kv の名前空間 ``worldbox_e
   pay_house でバンクロールから確保できた分だけ払い（Plan A、
   Discord 側ギャンブルと同じ決済）、負け（payout = 0）のベットは
   add_loss で還流する（70% プール / 30% 国庫）。実際に払った総額を
-  appliedAmount に記録する。
+  appliedAmount に記録する。prepaid = true のときはベットが spend
+  オプで先払い済みなので引き落としを省き、配当の払いと負けの還流
+  だけを行う（セッション型カジノの精算）。
 
 冪等性: status が "pending" のものだけを拾い、適用前に claim
 （トークン + 時刻）を書き込んで再読込で自分の claim か確認してから
@@ -51,7 +53,10 @@ WORLDBOX_ID = "WORLD_BOX"
 #: earn の理由ホワイトリスト（Web 側 economy-bridge.ts の EARN_REASONS と同じ集合）
 EARN_REASONS = frozenset({"harvest", "guild_shop_sale", "arena_prize", "shop_sale", "work"})
 #: gamble の理由ホワイトリスト（Web 側 economy-bridge.ts の GAMBLE_REASONS と同じ集合）
-GAMBLE_REASONS = frozenset({"casino_slot", "casino_roulette"})
+GAMBLE_REASONS = frozenset({
+    "casino_slot", "casino_roulette", "casino_dice",
+    "casino_slot7", "casino_blackjack", "casino_double",
+})
 OP_KINDS = frozenset({"spend", "earn", "transfer", "steal", "gamble"})
 AMOUNT_MIN = 1
 AMOUNT_MAX = 1_000_000
@@ -141,6 +146,8 @@ def parse_op(raw: Any) -> Optional[dict[str, Any]]:
         if not 0 <= payout <= PAYOUT_MAX:
             return None
         op["payout"] = payout
+        if value.get("prepaid") is True:
+            op["prepaid"] = True
     return op
 
 
@@ -362,18 +369,26 @@ class WorldBoxEconomyWorker:
         user = op["discordId"]
         bet = op["amount"]
         payout = op["payout"]
-        debit = await wallet._change_balance(user, -bet, require_funds=True)
-        if debit is self._marker():
-            raise _OpFailed("insufficient_funds")
-        if debit is None:
-            raise _OpFailed("balance_update_failed")
-        await self._record_history(user, WORLDBOX_ID, bet, op["reason"])
+        prepaid = op.get("prepaid") is True
+        if not prepaid:
+            debit = await wallet._change_balance(user, -bet, require_funds=True)
+            if debit is self._marker():
+                raise _OpFailed("insufficient_funds")
+            if debit is None:
+                raise _OpFailed("balance_update_failed")
+            await self._record_history(user, WORLDBOX_ID, bet, op["reason"])
         if payout <= 0:
             try:
                 self._economy_store.add_loss(bet)
             except Exception:
                 logger.exception("worldbox economy: gamble の還流に失敗（id=%s）", op["id"])
             return 0
+        if prepaid and payout < bet:
+            # 先払い精算の部分返し: 戻らなかった分は負けとして還流する。
+            try:
+                self._economy_store.add_loss(bet - payout)
+            except Exception:
+                logger.exception("worldbox economy: gamble の還流に失敗（id=%s）", op["id"])
         profit = max(0, payout - bet)
         breakdown: Any = None
         house_paid = 0
@@ -397,12 +412,13 @@ class WorldBoxEconomyWorker:
                     self._economy_store.refund_house(breakdown)
                 except Exception:
                     logger.exception("worldbox economy: refund_house に失敗（id=%s）", op["id"])
-            refund = await wallet._change_balance(user, bet)
-            if refund is None:
-                logger.critical(
-                    "worldbox economy: gamble のベット返金に失敗しました（user=%s bet=%s）",
-                    user, bet,
-                )
+            if not prepaid:
+                refund = await wallet._change_balance(user, bet)
+                if refund is None:
+                    logger.critical(
+                        "worldbox economy: gamble のベット返金に失敗しました（user=%s bet=%s）",
+                        user, bet,
+                    )
             raise _OpFailed("credit_failed")
         await self._record_history(WORLDBOX_ID, user, credit_amount, op["reason"])
         return credit_amount
