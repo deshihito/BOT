@@ -415,3 +415,21 @@ test("クライアント: 見下ろし＋プレゼンス配線があり、横ス
   const textures = fs.readFileSync(path.join(libDir, "worldbox/textures.ts"), "utf8");
   assert.ok(textures.includes("water:"), "水テクスチャが無い");
 });
+
+test("クライアント: 地面タイルはダンジョン流用 PNG（grass/dirt/tree/rock）を使う", () => {
+  const client = fs.readFileSync(path.join(rootDir, "app/games/worldbox/WorldBoxClient.tsx"), "utf8");
+  assert.ok(client.includes("loadDungeonTiles"), "ダンジョンタイルを読み込んでいない");
+  assert.ok(client.includes("imageSmoothingEnabled = false"), "ピクセルアートの補間を切っていない");
+  assert.ok(!client.includes("textures.leaves"), "木タイルに旧キャノピー合成が残っている");
+  const textures = fs.readFileSync(path.join(libDir, "worldbox/textures.ts"), "utf8");
+  for (const name of ["grass", "dirt", "tree", "rock"]) {
+    assert.ok(textures.includes(`/img/worldbox/${name}.png`), `テクスチャ定義に ${name} が無い`);
+    const file = path.join(rootDir, "public/img/worldbox", `${name}.png`);
+    assert.ok(fs.existsSync(file), `流用タイルが無い: ${name}.png`);
+    const buf = fs.readFileSync(file);
+    // PNG 署名 + IHDR の幅・高さ（16〜23バイト目、ビッグエンディアン）
+    assert.deepEqual([...buf.subarray(0, 8)], [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], `${name}.png が PNG でない`);
+    assert.equal(buf.readUInt32BE(16), 64, `${name}.png の幅が 64 でない`);
+    assert.equal(buf.readUInt32BE(20), 64, `${name}.png の高さが 64 でない`);
+  }
+});
