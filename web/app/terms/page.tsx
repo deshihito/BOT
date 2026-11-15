@@ -1,3 +1,5 @@
+import Breadcrumbs from "../Breadcrumbs";
+
 export const metadata = {
   title: "利用規約",
   description: "AGOBOTの利用規約です。ご利用の前にご確認ください。",
@@ -7,6 +9,7 @@ export const metadata = {
 export default function TermsPage() {
   return (
     <article className="legal-page">
+      <Breadcrumbs items={[{ label: "利用規約" }]} />
       <h1>利用規約</h1>
       <p className="draft-note"><strong>利用規約</strong><br />運営者名、問い合わせ先、準拠法・管轄について。</p>
       <p>この利用規約（以下「本規約」）は、<strong>[Luna]</strong>（以下「運営者」）が提供するDiscord Bot「AGOBOT」および関連サポートウェブサイト（以下あわせて「本サービス」）の利用条件を定めるものです。利用者は、本サービスを利用することで本規約に同意したものとします。</p>

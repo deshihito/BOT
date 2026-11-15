@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { SUPPORT_SERVER_URL } from "@/lib/site";
+import Breadcrumbs from "../Breadcrumbs";
 
 export const metadata: Metadata = {
   title: "運営者情報",
@@ -12,6 +13,7 @@ export const metadata: Metadata = {
 export default function AboutPage() {
   return (
     <article className="legal-page">
+      <Breadcrumbs items={[{ label: "運営者情報" }]} />
       <h1>運営者情報</h1>
 
       <h2>サービス概要</h2>

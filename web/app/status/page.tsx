@@ -15,9 +15,10 @@ import { isActivelyBuilding, prUrl } from "@/lib/build-status";
 import { loadBuildStatus } from "@/lib/build-status-server";
 import { InviteCtaBlock } from "../InviteCta";
 import { InteractiveHoursChart, InteractiveSeriesChart, InteractiveUptime } from "./StatusCharts";
+import Breadcrumbs from "../Breadcrumbs";
 
 export const metadata = {
-  title: "サービスステータス",
+  title: "ステータス",
   description: "AGOBOTの稼働状況（導入サーバー数・メンバー数・応答速度・稼働時間）を表示します。",
   alternates: { canonical: "/status" },
 };
@@ -128,7 +129,8 @@ export default async function StatusPage() {
 
   return (
     <section className="status-page">
-      <h1>サービスステータス</h1>
+      <Breadcrumbs items={[{ label: "ステータス" }]} />
+      <h1>ステータス</h1>
       <p className="muted">AGOBOT の稼働状況です。Bot が5分ごとに書き出す情報を表示しています。</p>
       {snapshot === null ? (
         <div className="simple-panel">
