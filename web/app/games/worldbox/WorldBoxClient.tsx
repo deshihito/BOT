@@ -30,6 +30,7 @@ import { parseSave, serializeSave, type SaveSpace } from "@/lib/worldbox/save";
 import { chooseInitialSave } from "@/lib/worldbox/save-source";
 import { loadDungeonTiles, loadLobbySprites, loadTextures } from "@/lib/worldbox/textures";
 import { useGamesNav } from "../GamesShell";
+import WorldBoxEconomyPanel from "./WorldBoxEconomyPanel";
 
 const SAVE_KEY = "ago-worldbox-save-v6";
 /** 1タイルの表示サイズ（CSS px）。 */
@@ -162,6 +163,9 @@ export default function WorldBoxClient() {
   const playerPosRef = useRef({ x: MAP_W / 2 + 0.5, y: MAP_H / 2 + 0.5 });
   const [nationsUi, setNationsUi] = useState<NationsResponse>(EMPTY_NATIONS);
   const [showNations, setShowNations] = useState(false);
+  const [showEconomy, setShowEconomy] = useState(false);
+  // 座標表示（タイル単位の整数。ループが毎フレーム書く playerPosRef から拾う）
+  const [coords, setCoords] = useState({ x: Math.floor(MAP_W / 2), y: Math.floor(MAP_H / 2) });
   const [nationMsg, setNationMsg] = useState("");
   // 建築モード（描画・入力ループは ref、パネルは state で見る）
   const [buildMode, setBuildMode] = useState(false);
@@ -184,6 +188,18 @@ export default function WorldBoxClient() {
   // 建物レイヤー（描画ループは ref、パネルは state で同じデータを見る）
   const buildingsRef = useRef<BuildingsData>(EMPTY_BUILDINGS);
   const [buildingsUi, setBuildingsUi] = useState<BuildingsData>(EMPTY_BUILDINGS);
+
+  // 座標表示の更新（250ms 間隔・タイルが変わったときだけ再描画）
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      const next = {
+        x: Math.floor(playerPosRef.current.x),
+        y: Math.floor(playerPosRef.current.y),
+      };
+      setCoords((prev) => (prev.x === next.x && prev.y === next.y ? prev : next));
+    }, 250);
+    return () => window.clearInterval(timer);
+  }, []);
 
   // 入場ゲート（Discord ログイン必須。許可されるまでワールドは描画しない）
   const [gate, setGate] = useState<"checking" | "ok" | "denied">("checking");
@@ -1153,6 +1169,12 @@ export default function WorldBoxClient() {
       show: spaceUi === "world",
       run: () => setShowNations((v) => !v),
     },
+    {
+      id: "economy",
+      label: showEconomy ? "経済を閉じる" : "経済",
+      show: true,
+      run: () => setShowEconomy((v) => !v),
+    },
     { id: "close", label: "閉じる", show: true, run: () => {} },
   ];
 
@@ -1215,6 +1237,7 @@ export default function WorldBoxClient() {
       <p className="classic-status" role="status">
         {statusText}
         {othersCount > 0 ? ` ・ いま ${othersCount} 人が歩いている` : ""}
+        {` ・ 座標 X ${coords.x} / Y ${coords.y}`}
       </p>
 
       <div style={{ position: "relative", maxWidth: 960, margin: "0 auto", touchAction: "none" }}>
@@ -1395,6 +1418,9 @@ export default function WorldBoxClient() {
         <button type="button" style={btn} onClick={() => setShowNations((v) => !v)} aria-pressed={showNations}>
           国{showNations ? "を閉じる" : ""}
         </button>
+        <button type="button" style={btn} onClick={() => setShowEconomy((v) => !v)} aria-pressed={showEconomy}>
+          経済{showEconomy ? "を閉じる" : ""}
+        </button>
       </div>
 
       {showNations && (
@@ -1551,11 +1577,14 @@ export default function WorldBoxClient() {
         </div>
       )}
 
+      {showEconomy && <WorldBoxEconomyPanel />}
+
       <p className="muted" style={{ textAlign: "center", fontSize: 13, maxWidth: 860, margin: "14px auto 0" }}>
         PC: WASD・矢印キーで移動。タッチ: 画面左側のスティックで移動。
         水・木・岩には入れません。歩いた場所は保存され、みんなと同じ世界にいます。
         ログインすると、好きな場所に家・畑・塔を建てられます。建てた建物は、所属する国の繁栄度にも数えられます。
         スポーン広場のワープパッドか ≡ メニューからロビーへ行けます。ロビーを出ると、入る前にいた場所へ戻ります。
+        経済パネルでは、働いてコインを稼ぎ、買い物・合成・steal ができます。
       </p>
     </div>
   );
