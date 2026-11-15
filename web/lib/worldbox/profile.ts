@@ -14,6 +14,15 @@ import { itemById } from "./items";
 
 /** 空腹度の上限（仕様書 3.3: 0〜100）。 */
 export const HUNGER_MAX = 100;
+/** プレイヤー HP の上限。 */
+export const HP_MAX = 100;
+
+/** 状態異常の種類。poison は時間で HP が減り、解毒で消える。 */
+export type StatusKind = "poison";
+/** 状態異常1件（終了時刻つき）。 */
+export type StatusEffect = { kind: StatusKind; until: number };
+/** ワールド座標のリスポーン候補（タイル単位の浮動小数）。 */
+export type RespawnPoint = { x: number; y: number };
 /** 旧ローカル残高の初期値（互換のためだけに残す。実残高はブリッジ側）。 */
 export const STARTING_COINS = 100;
 
@@ -31,6 +40,20 @@ export type PlayerProfile = {
   /** 廃止: 旧ローカル残高。読み込み互換のためだけに保持し、使わない。 */
   coins: number;
   hunger: number;
+  /** プレイヤー HP（0〜HP_MAX）。0 で死亡し、死亡処理は vitals.ts。 */
+  hp: number;
+  /** 状態異常（毒など）。 */
+  status: StatusEffect[];
+  /** バイタル（空腹・毒・飢え）を最後に精算した時刻（epoch ms）。0 は未精算。 */
+  vitalAt: number;
+  /** ベッドで設定したリスポーン点（ワールド座標）。無ければ null。 */
+  respawn: RespawnPoint | null;
+  /** 最後に休憩した地点（ワールド座標）。無ければ null。 */
+  restPoint: RespawnPoint | null;
+  /** 最後にモブからダメージを受けた時刻（epoch ms）。接触ダメージの間隔管理。 */
+  lastDamageAt: number;
+  /** 累計の死亡回数。 */
+  deaths: number;
   /** 集計ビュー: 全アイテムID → 総所持数（スロット＋あふれ分）。 */
   items: Record<string, number>;
   /** ホットバー（すぐ使う手持ち、HOTBAR_SLOTS 枠）。 */
@@ -50,6 +73,13 @@ function emptySlots(size: number): ItemSlot[] {
 export const DEFAULT_PROFILE: PlayerProfile = {
   coins: STARTING_COINS,
   hunger: HUNGER_MAX,
+  hp: HP_MAX,
+  status: [],
+  vitalAt: 0,
+  respawn: null,
+  restPoint: null,
+  lastDamageAt: 0,
+  deaths: 0,
   items: {},
   hotbar: emptySlots(HOTBAR_SLOTS),
   storage: emptySlots(STORAGE_SLOTS),
@@ -165,7 +195,7 @@ export function parseProfile(raw: unknown): PlayerProfile {
     return { ...DEFAULT_PROFILE, items: {}, hotbar: emptySlots(HOTBAR_SLOTS), storage: emptySlots(STORAGE_SLOTS) };
   }
   const inv = invOf({
-    coins: 0, hunger: 0, stealActorAt: 0, stealTargetAt: 0,
+    coins: 0, hunger: 0, hp: HP_MAX, status: [], vitalAt: 0, respawn: null, restPoint: null, lastDamageAt: 0, deaths: 0, stealActorAt: 0, stealTargetAt: 0,
     items: data.items as Record<string, number>,
     hotbar: data.hotbar as ItemSlot[],
     storage: data.storage as ItemSlot[],
@@ -173,6 +203,13 @@ export function parseProfile(raw: unknown): PlayerProfile {
   return {
     coins: clampInt(data.coins, 0, Number.MAX_SAFE_INTEGER, DEFAULT_PROFILE.coins),
     hunger: clampInt(data.hunger, 0, HUNGER_MAX, DEFAULT_PROFILE.hunger),
+    hp: clampInt(data.hp, 0, HP_MAX, HP_MAX),
+    status: parseStatus(data.status),
+    vitalAt: clampInt(data.vitalAt, 0, Number.MAX_SAFE_INTEGER, 0),
+    respawn: parsePoint(data.respawn),
+    restPoint: parsePoint(data.restPoint),
+    lastDamageAt: clampInt(data.lastDamageAt, 0, Number.MAX_SAFE_INTEGER, 0),
+    deaths: clampInt(data.deaths, 0, Number.MAX_SAFE_INTEGER, 0),
     items: inv.items,
     hotbar: inv.hotbar,
     storage: inv.storage,
@@ -181,11 +218,42 @@ export function parseProfile(raw: unknown): PlayerProfile {
   };
 }
 
+function parseStatus(raw: unknown): StatusEffect[] {
+  if (!Array.isArray(raw)) return [];
+  const out: StatusEffect[] = [];
+  for (const v of raw) {
+    if (!v || typeof v !== "object" || Array.isArray(v)) continue;
+    const e = v as { kind?: unknown; until?: unknown };
+    if (e.kind !== "poison") continue;
+    if (typeof e.until !== "number" || !Number.isFinite(e.until) || e.until <= 0) continue;
+    out.push({ kind: "poison", until: Math.floor(e.until) });
+  }
+  return out.slice(0, 4);
+}
+
+function parsePoint(raw: unknown): RespawnPoint | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const v = raw as { x?: unknown; y?: unknown };
+  if (typeof v.x !== "number" || typeof v.y !== "number") return null;
+  if (!Number.isFinite(v.x) || !Number.isFinite(v.y)) return null;
+  return {
+    x: Math.max(-1_000_000, Math.min(1_000_000, v.x)),
+    y: Math.max(-1_000_000, Math.min(1_000_000, v.y)),
+  };
+}
+
 export function serializeProfile(profile: PlayerProfile): string {
   const inv = invOf(profile);
   return JSON.stringify({
     coins: clampInt(profile.coins, 0, Number.MAX_SAFE_INTEGER, 0),
     hunger: clampInt(profile.hunger, 0, HUNGER_MAX, 0),
+    hp: clampInt(profile.hp, 0, HP_MAX, HP_MAX),
+    status: parseStatus(profile.status),
+    vitalAt: clampInt(profile.vitalAt, 0, Number.MAX_SAFE_INTEGER, 0),
+    respawn: parsePoint(profile.respawn),
+    restPoint: parsePoint(profile.restPoint),
+    lastDamageAt: clampInt(profile.lastDamageAt, 0, Number.MAX_SAFE_INTEGER, 0),
+    deaths: clampInt(profile.deaths, 0, Number.MAX_SAFE_INTEGER, 0),
     items: inv.items,
     hotbar: inv.hotbar,
     storage: inv.storage,
