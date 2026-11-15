@@ -47,13 +47,17 @@ jobs:
   python-tests:
     name: python-tests
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: pip
+  - name: Install system audio deps
+  # ラジオ・録音テストが実バイナリを必要とする（本番 Pi には導入済み）
+  run: |
+  sudo apt-get update
+  sudo apt-get install -y ffmpeg libopus0
       - name: Install and test
         run: |
           pip install -r requirements.txt pytest
