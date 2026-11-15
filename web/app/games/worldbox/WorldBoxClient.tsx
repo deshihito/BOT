@@ -1678,6 +1678,12 @@ export default function WorldBoxClient() {
     const presenceNow = () => Date.now() + clockOffsetMs;
     /** ポーリングで連続して見えなかった回数（1回の欠落では消さない）。 */
     const missedPolls = new Map<string, number>();
+    /** WS 経由で最後に見た時刻（REST の間引きで見えなくても欠落に数えないため）。 */
+    const wsSeenAt = new Map<string, number>();
+    /** ダンジョンでは別パーティの者は見せない（ポーリングと WS で同じ規則）。 */
+    const isOtherPartyInDungeon = (entry: PresenceEntry) =>
+      parseInstanceSpace(space)?.kind === "dungeon" &&
+      !!entry.party && !!myPartyKeyRef.current && entry.party !== myPartyKeyRef.current;
     /** 受信したエントリを他プレイヤーのトラックへ反映する（ポーリングと WS で共用）。 */
     const applyPresenceEntry = (entry: PresenceEntry, now: number) => {
       const cur = others.get(entry.id);
@@ -1705,7 +1711,7 @@ export default function WorldBoxClient() {
     const sendWsHeartbeat = () => {
       if (!rtSocket || rtSocket.readyState !== WebSocket.OPEN) return;
       try {
-        rtSocket.send(JSON.stringify({ t: "hb", x: player.x, y: player.y, vx: player.vx, vy: player.vy, face: player.face, space, party: myPartyKeyRef.current || undefined }));
+        rtSocket.send(JSON.stringify({ t: "hb", x: player.x, y: player.y, vx: player.vx, vy: player.vy, face: player.face, space, party: myPartyKeyRef.current || undefined, role: invRef.current?.role ?? "free", rank: invRef.current ? masteryRankOf(invRef.current, invRef.current.role) : 1 }));
       } catch { /* noop */ }
     };
     /** 中継への接続（トークン取得→接続→受信→再接続）。失敗してもポーリングが続く。 */
@@ -1749,12 +1755,16 @@ export default function WorldBoxClient() {
           const now = presenceNow();
           if (msg.t === "snap") {
             for (const entry of msg.players ?? []) {
+              if (isOtherPartyInDungeon(entry)) continue;
               missedPolls.delete(entry.id);
+              wsSeenAt.set(entry.id, Date.now());
               applyPresenceEntry(entry, now);
             }
             setOthersCount(others.size);
           } else if (msg.t === "up" && msg.p) {
+            if (isOtherPartyInDungeon(msg.p)) return;
             missedPolls.delete(msg.p.id);
+            wsSeenAt.set(msg.p.id, Date.now());
             applyPresenceEntry(msg.p, now);
             setOthersCount(others.size);
           } else if (msg.t === "bye" && msg.id) {
@@ -1824,16 +1834,16 @@ export default function WorldBoxClient() {
         const now = presenceNow();
         const seen = new Set<string>();
         for (const entry of body.players ?? []) {
-          if (
-            parseInstanceSpace(space)?.kind === "dungeon" &&
-            entry.party && myPartyKeyRef.current && entry.party !== myPartyKeyRef.current
-          ) continue;
+          if (isOtherPartyInDungeon(entry)) continue;
           seen.add(entry.id);
           missedPolls.delete(entry.id);
           applyPresenceEntry(entry, now);
         }
         for (const id of [...others.keys()]) {
           if (seen.has(id)) continue;
+          // WS 経由で最近見えている者は、REST の間引き（ワールド48タイル外）で
+          // 見えなくても欠落に数えない。数えると遠くの他者が消えては戻るチラつきになる。
+          if (Date.now() - (wsSeenAt.get(id) ?? 0) < 2500) continue;
           const missed = (missedPolls.get(id) ?? 0) + 1;
           if (missed >= 2) {
             others.delete(id);
