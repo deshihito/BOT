@@ -30,5 +30,6 @@ test("大きなマップにもマーカーを描く（首都・建物・他プ�
 test("左上の ≡ メニューから開ける（ボタン行には統合済み）", () => {
   assert.match(client, /id: "mapview"/);
   assert.match(client, /label: mapView \? "マップを閉じる" : "マップを見る"/);
-  assert.match(client, /黄色い丸 = あなた/);
+  // 共有ノートの方針: 画面内に説明文を置かない（凡例も置かない）
+  assert.ok(!client.includes("黄色い丸 = あなた"), "マップの凡例（説明文）が残っている");
 });

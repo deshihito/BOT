@@ -213,5 +213,6 @@ test("ショップはロビー空間でのみ開く（クライアントが空�
   const panel = fs.readFileSync(path.join(rootDir, "app/games/worldbox/WorldBoxEconomyPanel.tsx"), "utf8");
   assert.match(panel, /space === "lobby"/);
   assert.match(panel, /inLobby && tabBtn\("shop"/);
-  assert.match(panel, /ショップ（売買）はロビーでのみ利用できます/);
+  // 共有ノートの方針: 画面内に説明文を置かない（制限の案内文も置かない）
+  assert.ok(!panel.includes("ショップ（売買）はロビーでのみ利用できます"), "説明文が残っている");
 });
