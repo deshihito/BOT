@@ -2,7 +2,9 @@
 // AGO WORLD BOX（見下ろし型・共有ワールド）。
 // 世界は固定シードから生成される 1024×1024 の1枚マップで、全員が同じ場所を歩く。
 // 移動は8方向フリー（スティック＋WASD）、他プレイヤーはプレゼンス API 経由で
-// アバター＋名前つきで表示される（同時接続）。セーブは自分の位置だけ（v5）。
+// アバター＋名前つきで表示される（同時接続）。セーブは空間＋位置（v6）。
+// ロビーは別空間（図形の和集合のホール＋ショップ翼2階）で、ワープパッドと
+// ≡ メニューで行き来する。ロビーの描画はピクセル固定（整数座標・補間オフ）。
 // ゲームループと描画は canvas + refs で回し、React state は HUD 表示だけに使う。
 // 純粋ロジックは lib/worldbox/ に分離（生成・移動・プレゼンス・保存）。
 import Link from "next/link";
@@ -17,13 +19,19 @@ import { advanceWalkPhase, damp, moveLean, walkBob, walkSquashY } from "@/lib/wo
 import { SNAP_DISTANCE, predictPosition, type PresenceEntry } from "@/lib/worldbox/presence";
 import type { NationRole, NationView, NationsResponse } from "@/lib/worldbox/nations";
 import { USER_BUILDING_CAP, isSpawnPlazaTile, type BuildingType, type BuildingView } from "@/lib/worldbox/buildings";
-import { parseSave, serializeSave } from "@/lib/worldbox/save";
+import {
+  L_PLAZA, L_SAND, L_VOID,
+  LOBBY_ENTRY, LOBBY_FLOOR_FALLBACK, LOBBY_FLOOR_SPRITE, LOBBY_STAIRS_DOWN, LOBBY_STAIRS_UP,
+  LOBBY_DOWN_LANDING, LOBBY_UP_LANDING, LOBBY_WARP_PAD, WORLD_WARP_PAD,
+  buildLobby, lobbyTileAt, stationNear, type LobbyObject, type LobbyStation,
+} from "@/lib/worldbox/lobby";
+import type { BoardPost } from "@/lib/worldbox/board";
+import { parseSave, serializeSave, type SaveSpace } from "@/lib/worldbox/save";
 import { chooseInitialSave } from "@/lib/worldbox/save-source";
-import { loadDungeonTiles, loadTextures } from "@/lib/worldbox/textures";
+import { loadDungeonTiles, loadLobbySprites, loadTextures } from "@/lib/worldbox/textures";
 import { useGamesNav } from "../GamesShell";
-import WorldBoxEconomyPanel from "./WorldBoxEconomyPanel";
 
-const SAVE_KEY = "ago-worldbox-save-v5";
+const SAVE_KEY = "ago-worldbox-save-v6";
 /** 1タイルの表示サイズ（CSS px）。 */
 const TILE = 44;
 /** アバターの表示幅（タイル比）。 */
@@ -95,9 +103,12 @@ const BUILD_TOOL_LABEL: Record<BuildTool, string> = { house: "家", farm: "畑",
 
 const NATION_ERROR_LABEL: Record<string, string> = {
   already_in_nation: "既に国に所属しています",
-  name_taken: "その国名は使われています",
+  nation_exists: "そのサーバーの国は既にあります",
   no_free_tile: "首都を置ける空き地がありません",
-  invalid_name: "国名は1〜16文字です",
+  not_owner: "建国はサーバーのオーナーのみです",
+  not_member: "そのサーバーのメンバーではありません",
+  guilds_scope_required: "サーバー情報の取得に再ログインが必要です",
+  guilds_unavailable: "サーバー情報を取得できませんでした",
   nation_not_found: "国が見つかりません",
   not_in_nation: "国に所属していません",
   king_must_transfer_or_disband: "国民がいる間、王は離脱できません",
@@ -106,16 +117,36 @@ const NATION_ERROR_LABEL: Record<string, string> = {
   cap_reached: "建築上限に達しています",
   forbidden: "その権限がありません",
   invalid_type: "建物の種類が不正です",
-  not_owner: "自分の建物だけ取り壊せます",
   on_capital: "首都には建てられません",
   on_spawn: "スポーン広場には建てられません",
 };
 
-const EMPTY_NATIONS: NationsResponse = { nations: [], me: null, playerNations: {}, loggedIn: false };
+/** 建物側の文言（not_owner は国家側と意味が違うため上書きする）。 */
+const BUILDING_ERROR_LABEL: Record<string, string> = {
+  ...NATION_ERROR_LABEL,
+  not_owner: "自分の建物だけ取り壊せます",
+};
+
+const EMPTY_NATIONS: NationsResponse = {
+  nations: [], me: null, playerNations: {}, loggedIn: false, myGuilds: [], guildsScopeRequired: false,
+};
 
 /** 建物データ（建物は個人所有で、国家データとは別 API から取る）。 */
 type BuildingsData = { buildings: BuildingView[]; loggedIn: boolean };
 const EMPTY_BUILDINGS: BuildingsData = { buildings: [], loggedIn: false };
+
+/** 足元に平置きで描くロビースプライト（上に立てるもの）。 */
+const FLAT_LOBBY_SPRITES = new Set(["warp_pad", "stairs", "tapestry"]);
+
+/** ステーションの名前札（近づくと下部チップに出る）。 */
+const STATION_LABEL: Record<LobbyStation, string> = {
+  board: "掲示板",
+  shop: "ショップ",
+  bank: "銀行",
+  casino: "カジノ",
+  arena: "闘技場",
+  smith: "鍛冶屋",
+};
 
 export default function WorldBoxClient() {
   const { prefix } = useGamesNav();
@@ -131,8 +162,6 @@ export default function WorldBoxClient() {
   const playerPosRef = useRef({ x: MAP_W / 2 + 0.5, y: MAP_H / 2 + 0.5 });
   const [nationsUi, setNationsUi] = useState<NationsResponse>(EMPTY_NATIONS);
   const [showNations, setShowNations] = useState(false);
-  const [showEconomy, setShowEconomy] = useState(false);
-  const [nationName, setNationName] = useState("");
   const [nationMsg, setNationMsg] = useState("");
   // 建築モード（描画・入力ループは ref、パネルは state で見る）
   const [buildMode, setBuildMode] = useState(false);
@@ -155,6 +184,74 @@ export default function WorldBoxClient() {
   // 建物レイヤー（描画ループは ref、パネルは state で同じデータを見る）
   const buildingsRef = useRef<BuildingsData>(EMPTY_BUILDINGS);
   const [buildingsUi, setBuildingsUi] = useState<BuildingsData>(EMPTY_BUILDINGS);
+
+  // 入場ゲート（Discord ログイン必須。許可されるまでワールドは描画しない）
+  const [gate, setGate] = useState<"checking" | "ok" | "denied">("checking");
+  const gateOk = gate === "ok";
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/worldbox/gate", { headers: { Accept: "application/json" } });
+        const data = res.ok ? ((await res.json()) as { allowed?: boolean }) : { allowed: false };
+        if (!cancelled) setGate(data.allowed ? "ok" : "denied");
+      } catch {
+        if (!cancelled) setGate("denied");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  const [craftOpen, setCraftOpen] = useState(false);
+
+  // 空間（ワールド / ロビー）とハンバーガーメニュー、ステーション、掲示板
+  const [spaceUi, setSpaceUi] = useState<SaveSpace>("world");
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [stationUi, setStationUi] = useState<LobbyStation | null>(null);
+  const warpActionRef = useRef<(target: SaveSpace) => void>(() => {});
+  const [boardOpen, setBoardOpen] = useState(false);
+  const [boardPosts, setBoardPosts] = useState<BoardPost[]>([]);
+  const [boardLoggedIn, setBoardLoggedIn] = useState(false);
+  const [boardText, setBoardText] = useState("");
+  const [boardMsg, setBoardMsg] = useState("");
+  const refreshBoard = async () => {
+    try {
+      const res = await fetch("/api/worldbox/board", { headers: { Accept: "application/json" } });
+      if (!res.ok) return;
+      const data = (await res.json()) as { posts?: BoardPost[]; loggedIn?: boolean };
+      setBoardPosts(data.posts ?? []);
+      setBoardLoggedIn(!!data.loggedIn);
+    } catch { /* 掲示板が読めなくても歩き続けられる */ }
+  };
+  const postBoard = async () => {
+    const text = boardText.trim();
+    if (!text) return;
+    setBoardMsg("");
+    try {
+      const res = await fetch("/api/worldbox/board", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { posts?: BoardPost[]; error?: string };
+      if (!res.ok) {
+        setBoardMsg(data.error === "unauthorized" ? "投稿はログイン後" : "投稿できませんでした");
+        return;
+      }
+      setBoardText("");
+      if (data.posts) setBoardPosts(data.posts);
+    } catch {
+      setBoardMsg("投稿できませんでした");
+    }
+  };
+  useEffect(() => {
+    if (!boardOpen) return;
+    void refreshBoard();
+    const timer = window.setInterval(() => void refreshBoard(), 10000);
+    return () => window.clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [boardOpen]);
 
   const applyNationsData = (data: NationsResponse) => {
     nationsRef.current = data;
@@ -193,7 +290,6 @@ export default function WorldBoxClient() {
         setNationMsg(NATION_ERROR_LABEL[data.error ?? ""] ?? "失敗しました");
         return;
       }
-      setNationName("");
       await refreshNations();
     } catch {
       setNationMsg("失敗しました");
@@ -209,7 +305,7 @@ export default function WorldBoxClient() {
       });
       const data = (await res.json().catch(() => ({}))) as { error?: string };
       if (!res.ok) {
-        setNationMsg(NATION_ERROR_LABEL[data.error ?? ""] ?? "失敗しました");
+        setNationMsg(BUILDING_ERROR_LABEL[data.error ?? ""] ?? "失敗しました");
         return;
       }
       await refreshBuildings();
@@ -241,14 +337,22 @@ export default function WorldBoxClient() {
     if (!ctx) return;
 
     const map: TopDownMap = generateMap(MAP_SEED);
+    const lobby = buildLobby();
     const textures = loadTextures();
     const dungeon = loadDungeonTiles();
+    const lobbySprites = loadLobbySprites();
     const avatar = new Image();
     avatar.src = "/img/nomal.png";
 
     const spawn = mapSpawn(map);
     const player: PlayerState = { x: spawn.x, y: spawn.y, vx: 0, vy: 0, face: 1, phase: 0 };
     const cam = { x: player.x, y: player.y };
+    // 空間（ワールド / ロビー）。ロビーでは建物・国家・ミニマップは扱わない。
+    let space: SaveSpace = "world";
+    let worldReturn: { x: number; y: number } | null = null;
+    const activeMap = (): TopDownMap => (space === "lobby" ? lobby.moveMap : map);
+    const activeBlocked = (): ReadonlySet<string> | undefined =>
+      space === "lobby" ? lobby.blocked : blockedRef.current;
     const keys = new Set<string>();
     const joy = { active: false, pointerId: -1, baseX: 0, baseY: 0, dx: 0, dy: 0 };
     const others = new Map<string, OtherRender>();
@@ -257,10 +361,11 @@ export default function WorldBoxClient() {
     let lastSaved = { x: player.x, y: player.y, at: 0 };
     let lastMinimapAt = 0;
 
-    // ---- 保存（位置のみ） ----
+    // ---- 保存（空間＋位置＋ワールド帰還点） ----
+    const currentSave = () => serializeSave({ space, x: player.x, y: player.y, worldReturn });
     const saveLocal = () => {
       try {
-        localStorage.setItem(SAVE_KEY, serializeSave({ x: player.x, y: player.y }));
+        localStorage.setItem(SAVE_KEY, currentSave());
       } catch { /* noop */ }
     };
     const saveOnline = (keepalive = false) => {
@@ -268,7 +373,7 @@ export default function WorldBoxClient() {
       fetch("/api/worldbox/save", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ save: serializeSave({ x: player.x, y: player.y }) }),
+        body: JSON.stringify({ save: currentSave() }),
         keepalive,
       }).catch(() => { /* 保存できなくても遊び続けられる */ });
     };
@@ -280,11 +385,11 @@ export default function WorldBoxClient() {
 
     // ---- 初期位置の読み込み（オンライン優先、無ければローカル、どちらも無ければ中央） ----
     (async () => {
-      let local: { x: number; y: number } | null = null;
+      let local: ReturnType<typeof parseSave> = null;
       try {
         local = parseSave(localStorage.getItem(SAVE_KEY));
       } catch { /* noop */ }
-      let online: { x: number; y: number } | null = null;
+      let online: ReturnType<typeof parseSave> = null;
       try {
         const res = await fetch("/api/worldbox/save", { headers: { Accept: "application/json" } });
         if (res.ok) {
@@ -296,29 +401,32 @@ export default function WorldBoxClient() {
       if (disposed) return;
       const choice = chooseInitialSave(online, local, loggedIn);
       if (choice.state) {
-        const free = findFreeNear(map, choice.state.x, choice.state.y, blockedRef.current);
+        space = choice.state.space;
+        worldReturn = choice.state.worldReturn;
+        const free = findFreeNear(activeMap(), choice.state.x, choice.state.y, activeBlocked());
         player.x = free.x;
         player.y = free.y;
         cam.x = free.x;
         cam.y = free.y;
+        setSpaceUi(space);
       }
       if (choice.pushLocalToOnline) saveNow();
       else lastSaved = { x: player.x, y: player.y, at: performance.now() };
-      setStatusText(loggedIn ? "共有ワールド" : "共有ワールド（ゲスト）");
+      setStatusText(space === "lobby" ? "ロビー" : "共有ワールド");
     })();
 
-    // ---- プレゼンス ----
+    // ---- プレゼンス（空間ごとに分ける。他空間の者は受け取らない） ----
     const sendHeartbeat = () => {
       if (!loggedIn) return;
       fetch("/api/worldbox/presence", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: "", x: player.x, y: player.y, vx: player.vx, vy: player.vy, face: player.face }),
+        body: JSON.stringify({ name: "", x: player.x, y: player.y, vx: player.vx, vy: player.vy, face: player.face, space }),
       }).catch(() => { /* noop */ });
     };
     const pollOthers = async () => {
       try {
-        const res = await fetch("/api/worldbox/presence", { headers: { Accept: "application/json" } });
+        const res = await fetch(`/api/worldbox/presence?space=${space}`, { headers: { Accept: "application/json" } });
         if (!res.ok) return;
         const body = (await res.json()) as { players?: PresenceEntry[] };
         if (disposed) return;
@@ -327,7 +435,7 @@ export default function WorldBoxClient() {
           seen.add(entry.id);
           const cur = others.get(entry.id);
           if (!cur) {
-            const p = predictPosition(entry, Date.now(), map);
+            const p = predictPosition(entry, Date.now(), activeMap());
             others.set(entry.id, { entry, rx: p.x, ry: p.y, phase: 0 });
           } else {
             cur.entry = entry;
@@ -349,6 +457,8 @@ export default function WorldBoxClient() {
 
     // ---- 入力 ----
     const onKeyDown = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement | null)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA") return; // 掲示板の入力中は歩かない
       const k = e.key.toLowerCase();
       if (["arrowup", "arrowdown", "arrowleft", "arrowright", " "].includes(k)) e.preventDefault();
       keys.add(k);
@@ -371,7 +481,7 @@ export default function WorldBoxClient() {
       };
     };
     const onPointerDown = (e: PointerEvent) => {
-      if (buildRef.current.active) {
+      if (buildRef.current.active && space === "world") {
         // 建築モードではタップそのものが確定（スティックは無効）
         const t = toTile(e);
         hoverTile = t;
@@ -391,7 +501,7 @@ export default function WorldBoxClient() {
       canvas.setPointerCapture(e.pointerId);
     };
     const onPointerMove = (e: PointerEvent) => {
-      if (buildRef.current.active) {
+      if (buildRef.current.active && space === "world") {
         hoverTile = toTile(e);
         return;
       }
@@ -636,6 +746,76 @@ export default function WorldBoxClient() {
       return true;
     };
 
+    // ---- 空間移動（ワープパッド・階段・ハンバーガーメニュー） ----
+    let lastTileKey = "";
+    let lastStation: LobbyStation | null = null;
+    const placePlayer = (x: number, y: number) => {
+      const free = findFreeNear(activeMap(), x, y, activeBlocked());
+      player.x = free.x;
+      player.y = free.y;
+      player.vx = 0;
+      player.vy = 0;
+      cam.x = free.x;
+      cam.y = free.y;
+      others.clear();
+      setOthersCount(0);
+      lastTileKey = `${space}:${Math.floor(free.x)},${Math.floor(free.y)}`;
+      saveNow();
+      sendHeartbeat();
+    };
+    const doWarp = (target: SaveSpace) => {
+      if (target === space) return;
+      if (target === "lobby") {
+        worldReturn = { x: player.x, y: player.y };
+        space = "lobby";
+        setSpaceUi("lobby");
+        setStatusText("ロビー");
+        if (buildRef.current.active) {
+          buildRef.current.active = false;
+          setBuildMode(false);
+        }
+        setBoardOpen(false);
+        placePlayer(LOBBY_ENTRY.x, LOBBY_ENTRY.y);
+      } else {
+        space = "world";
+        setSpaceUi("world");
+        setStatusText("共有ワールド");
+        lastStation = null;
+        setStationUi(null);
+        const dest = worldReturn ?? spawn;
+        placePlayer(dest.x, dest.y);
+      }
+      void pollOthers();
+    };
+    warpActionRef.current = doWarp;
+    /** タイルへ「踏み込んだ」ときだけ発火する（着地したタイルでは再発火しない）。 */
+    const checkTileTriggers = () => {
+      const tx = Math.floor(player.x);
+      const ty = Math.floor(player.y);
+      const key = `${space}:${tx},${ty}`;
+      if (lastTileKey === "") {
+        lastTileKey = key;
+        return;
+      }
+      if (key === lastTileKey) return;
+      lastTileKey = key;
+      if (space === "world") {
+        if (tx === WORLD_WARP_PAD.x && ty === WORLD_WARP_PAD.y) doWarp("lobby");
+        return;
+      }
+      if (tx === LOBBY_WARP_PAD.x && ty === LOBBY_WARP_PAD.y) {
+        doWarp("world");
+        return;
+      }
+      if (LOBBY_STAIRS_UP.some((t) => t.x === tx && t.y === ty)) {
+        placePlayer(LOBBY_UP_LANDING.x, LOBBY_UP_LANDING.y);
+        return;
+      }
+      if (LOBBY_STAIRS_DOWN.some((t) => t.x === tx && t.y === ty)) {
+        placePlayer(LOBBY_DOWN_LANDING.x, LOBBY_DOWN_LANDING.y);
+      }
+    };
+
     // ---- メインループ ----
     let raf = 0;
     let lastT = performance.now();
@@ -663,9 +843,17 @@ export default function WorldBoxClient() {
       const vel = { x: ix * WALK_SPEED, y: iy * WALK_SPEED };
       const prevX = player.x;
       const prevY = player.y;
-      const moved = stepMove(map, player, vel, dt, blockedRef.current);
+      const moved = stepMove(activeMap(), player, vel, dt, activeBlocked());
       player.x = moved.x;
       player.y = moved.y;
+      checkTileTriggers();
+      if (space === "lobby") {
+        const st = stationNear(lobby.objects, Math.floor(player.x), Math.floor(player.y));
+        if (st !== lastStation) {
+          lastStation = st;
+          setStationUi(st);
+        }
+      }
       player.vx = (player.x - prevX) / dt;
       player.vy = (player.y - prevY) / dt;
       const speed = Math.hypot(player.vx, player.vy);
@@ -685,7 +873,7 @@ export default function WorldBoxClient() {
       // 他プレイヤーの描画位置（デッドレコニング予測へ寄せる）
       const nowMs = Date.now();
       for (const o of others.values()) {
-        const target = predictPosition(o.entry, nowMs, map);
+        const target = predictPosition(o.entry, nowMs, activeMap());
         const dist = Math.hypot(target.x - o.rx, target.y - o.ry);
         if (dist > SNAP_DISTANCE) {
           o.rx = target.x;
@@ -712,6 +900,11 @@ export default function WorldBoxClient() {
       ctx.clearRect(0, 0, cw, ch);
       const toScreenX = (wx: number) => (wx - cam.x) * TILE + cw / 2;
       const toScreenY = (wy: number) => (wy - cam.y) * TILE + ch / 2;
+      // ロビー描画用: カメラを整数ピクセルへスナップした原点（ピクセル固定）
+      let lobbyOx = 0;
+      let lobbyOy = 0;
+      let drawLobbySprite: (o: LobbyObject) => void = () => {};
+      if (space === "world") {
       const tx0 = Math.max(0, Math.floor(cam.x - cw / TILE / 2 - 1));
       const tx1 = Math.min(MAP_W - 1, Math.ceil(cam.x + cw / TILE / 2 + 1));
       const ty0 = Math.max(0, Math.floor(cam.y - ch / TILE / 2 - 1));
@@ -754,6 +947,57 @@ export default function WorldBoxClient() {
         if (csx < -TILE * 2 || csy < -TILE * 2 || csx > cw + TILE * 2 || csy > ch + TILE * 2) continue;
         drawCapital(ctx, csx, csy, n);
       }
+      } else {
+        // ---- ロビー描画（ピクセル固定: 整数原点・整数座標・補間オフ） ----
+        ctx.fillStyle = "#14121c";
+        ctx.fillRect(0, 0, cw, ch);
+        lobbyOx = Math.round(cw / 2 - cam.x * TILE);
+        lobbyOy = Math.round(ch / 2 - cam.y * TILE);
+        drawLobbySprite = (o: LobbyObject) => {
+          const img = lobbySprites[o.sprite];
+          const sx = lobbyOx + o.x * TILE;
+          const sy = lobbyOy + o.y * TILE;
+          ctx.imageSmoothingEnabled = false;
+          if (texReady(img)) ctx.drawImage(img, sx, sy, o.w * TILE, o.h * TILE);
+          else {
+            ctx.fillStyle = "rgba(130,130,140,0.85)";
+            ctx.fillRect(sx, sy, o.w * TILE, o.h * TILE);
+          }
+          ctx.imageSmoothingEnabled = true;
+        };
+        const lx0 = Math.max(0, Math.floor(cam.x - cw / TILE / 2 - 1));
+        const lx1 = Math.min(lobby.width - 1, Math.ceil(cam.x + cw / TILE / 2 + 1));
+        const ly0 = Math.max(0, Math.floor(cam.y - ch / TILE / 2 - 1));
+        const ly1 = Math.min(lobby.height - 1, Math.ceil(cam.y + ch / TILE / 2 + 1));
+        ctx.imageSmoothingEnabled = false;
+        for (let ty = ly0; ty <= ly1; ty++) {
+          for (let tx = lx0; tx <= lx1; tx++) {
+            const id = lobbyTileAt(lobby.tiles, tx, ty);
+            if (id === L_VOID) continue; // 図形の外は背景のまま
+            const sx = lobbyOx + tx * TILE;
+            const sy = lobbyOy + ty * TILE;
+            const key = LOBBY_FLOOR_SPRITE[id];
+            const img = key ? lobbySprites[key] : textures[TILE_TEXTURE[T_SAND]];
+            if (texReady(img)) ctx.drawImage(img, sx, sy, TILE, TILE);
+            else {
+              ctx.fillStyle = LOBBY_FLOOR_FALLBACK[id] ?? "#888888";
+              ctx.fillRect(sx, sy, TILE, TILE);
+            }
+            if (id === L_PLAZA) {
+              // 広場は大理石より一段明るくする
+              ctx.fillStyle = "rgba(255,255,255,0.10)";
+              ctx.fillRect(sx, sy, TILE, TILE);
+            }
+          }
+        }
+        // 平置きオブジェクト（ワープパッド・階段・タペストリー）は足元レイヤー
+        for (const o of lobby.objects) {
+          if (!FLAT_LOBBY_SPRITES.has(o.sprite)) continue;
+          if (o.x + o.w < lx0 || o.x > lx1 || o.y + o.h < ly0 || o.y > ly1) continue;
+          drawLobbySprite(o);
+        }
+        ctx.imageSmoothingEnabled = true;
+      }
 
       // プレイヤー群（y 順で奥行き感）
       const drawList: { y: number; draw: () => void }[] = [];
@@ -762,26 +1006,55 @@ export default function WorldBoxClient() {
         drawList.push({
           y: o.ry,
           draw: () =>
-            drawAvatar(ctx, toScreenX(o.rx), toScreenY(o.ry), o.entry.face, o.phase, Math.min(1, Math.hypot(o.entry.vx, o.entry.vy) / WALK_SPEED), o.entry.name || null, nationColor),
+            drawAvatar(
+              ctx,
+              space === "lobby" ? Math.round(lobbyOx + o.rx * TILE) : toScreenX(o.rx),
+              space === "lobby" ? Math.round(lobbyOy + o.ry * TILE) : toScreenY(o.ry),
+              o.entry.face, o.phase, Math.min(1, Math.hypot(o.entry.vx, o.entry.vy) / WALK_SPEED), o.entry.name || null, nationColor,
+            ),
         });
       }
-      for (const b of buildingsRef.current.buildings) {
-        const color = nationsRef.current.playerNations[b.ownerId]?.color ?? "#888888";
-        drawList.push({
-          y: b.y + 1,
-          draw: () => drawBuilding(ctx, toScreenX(b.x), toScreenY(b.y), b.type, color),
-        });
+      if (space === "world") {
+        for (const b of buildingsRef.current.buildings) {
+          const color = nationsRef.current.playerNations[b.ownerId]?.color ?? "#888888";
+          drawList.push({
+            y: b.y + 1,
+            draw: () => drawBuilding(ctx, toScreenX(b.x), toScreenY(b.y), b.type, color),
+          });
+        }
+      }
+      if (space === "lobby") {
+        for (const o of lobby.objects) {
+          if (FLAT_LOBBY_SPRITES.has(o.sprite)) continue;
+          const sx = lobbyOx + o.x * TILE;
+          const sy = lobbyOy + o.y * TILE;
+          if (sx < -TILE * 4 || sy < -TILE * 4 || sx > cw + TILE * 4 || sy > ch + TILE * 4) continue;
+          drawList.push({ y: o.y + o.h, draw: () => drawLobbySprite(o) });
+        }
+        // 店員NPC（あごむに。静止・当たり判定なし）
+        for (const n of lobby.npcs) {
+          drawList.push({
+            y: n.y + 1,
+            draw: () => drawAvatar(ctx, Math.round(lobbyOx + (n.x + 0.5) * TILE), Math.round(lobbyOy + (n.y + 1) * TILE), 1, 0, 0, null),
+          });
+        }
       }
       drawList.push({
         y: player.y,
-        draw: () => drawAvatar(ctx, toScreenX(player.x), toScreenY(player.y), player.face, player.phase, speedRatio, null),
+        draw: () =>
+          drawAvatar(
+            ctx,
+            space === "lobby" ? Math.round(lobbyOx + player.x * TILE) : toScreenX(player.x),
+            space === "lobby" ? Math.round(lobbyOy + player.y * TILE) : toScreenY(player.y),
+            player.face, player.phase, speedRatio, null,
+          ),
       });
       drawList.sort((a, b) => a.y - b.y);
       for (const d of drawList) d.draw();
 
-      // 昼夜の薄い色づけ（共有時計）
+      // 昼夜の薄い色づけ（共有時計。ロビーは屋内なので付けない）
       const night = nightAmount(phaseAtTime(nowMs / 1000));
-      if (night > 0.01) {
+      if (space === "world" && night > 0.01) {
         ctx.fillStyle = `rgba(9,13,42,${(night * 0.36).toFixed(3)})`;
         ctx.fillRect(0, 0, cw, ch);
       }
@@ -798,8 +1071,8 @@ export default function WorldBoxClient() {
         ctx.fill();
       }
 
-      // ミニマップ（約5Hz）
-      if (showMapRef.current && now - lastMinimapAt > 200) {
+      // ミニマップ（約5Hz。ロビーでは出さない）
+      if (space === "world" && showMapRef.current && now - lastMinimapAt > 200) {
         lastMinimapAt = now;
         const mm = minimapRef.current;
         const mctx = mm?.getContext("2d");
@@ -847,14 +1120,76 @@ export default function WorldBoxClient() {
       saveNow(true);
       leavePresence();
     };
+    // ゲートを通過するまでは canvas が無く、ここは空振りする。通過後に起動する。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [gateOk]);
 
   const btn: React.CSSProperties = {
     minHeight: 40, padding: "6px 14px", borderRadius: 10, cursor: "pointer",
     border: "1px solid rgba(255,255,255,0.25)", background: "rgba(255,255,255,0.06)", color: "inherit",
     touchAction: "manipulation", userSelect: "none", WebkitUserSelect: "none", WebkitTouchCallout: "none",
   };
+
+  // ハンバーガーはアクションの集約場所。項目はデータ駆動のリストで持ち、
+  // アクションの追加はここへ1件足すだけで済む。
+  type MenuAction = { id: string; label: string; show: boolean; run: () => void };
+  const menuActions: MenuAction[] = [
+    {
+      id: "warp",
+      label: spaceUi === "world" ? "ロビーへ行く" : "ワールドへ戻る",
+      show: true,
+      run: () => warpActionRef.current(spaceUi === "world" ? "lobby" : "world"),
+    },
+    { id: "craft", label: "クラフト", show: true, run: () => setCraftOpen(true) },
+    {
+      id: "map",
+      label: showMap ? "マップを隠す" : "マップを出す",
+      show: spaceUi === "world",
+      run: () => setShowMap((v) => !v),
+    },
+    {
+      id: "nations",
+      label: showNations ? "国を閉じる" : "国",
+      show: spaceUi === "world",
+      run: () => setShowNations((v) => !v),
+    },
+    { id: "close", label: "閉じる", show: true, run: () => {} },
+  ];
+
+  // 入場ゲート: Discord ログインが確認できるまではワールドを描画しない。
+  if (!gateOk) {
+    return (
+      <div>
+        <nav className="breadcrumbs" aria-label="パンくず">
+          <Link href={`${prefix}/games`}>ゲーム</Link>
+          <span> / </span>
+          <span>AGO WORLD BOX</span>
+        </nav>
+        <div className="page-heading compact-heading">
+          <h1>AGO WORLD BOX</h1>
+        </div>
+        {gate === "checking" ? (
+          <p className="classic-status" role="status">
+            読み込み中…
+          </p>
+        ) : (
+          <div style={{ textAlign: "center", marginTop: 24 }}>
+            <p className="classic-status" role="status">
+              ログインが必要
+            </p>
+            <a
+              href="/api/auth/discord/authorize?next=/games/worldbox"
+              style={{
+                ...btn, textDecoration: "none", display: "inline-flex", alignItems: "center", marginTop: 12,
+              }}
+            >
+              Discordでログイン
+            </a>
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div
@@ -893,7 +1228,63 @@ export default function WorldBoxClient() {
             touchAction: "none", userSelect: "none", WebkitUserSelect: "none", WebkitTouchCallout: "none", WebkitTapHighlightColor: "transparent",
           }}
         />
-        {showMap && (
+        <button
+          type="button"
+          aria-label="メニュー"
+          aria-expanded={menuOpen}
+          onClick={() => setMenuOpen((v) => !v)}
+          style={{
+            ...btn, position: "absolute", left: 10, top: 10, minHeight: 40, minWidth: 44,
+            padding: "4px 10px", fontSize: 18, lineHeight: 1, background: "rgba(0,0,0,0.55)", color: "#fff",
+          }}
+        >
+          ≡
+        </button>
+        {menuOpen && (
+          <div
+            style={{
+              position: "absolute", left: 10, top: 58, display: "grid", gap: 6, padding: 8,
+              borderRadius: 10, background: "rgba(0,0,0,0.72)", color: "#fff", zIndex: 5,
+            }}
+          >
+            {menuActions
+              .filter((a) => a.show)
+              .map((a) => (
+                <button
+                  key={a.id}
+                  type="button"
+                  style={{ ...btn, background: "rgba(255,255,255,0.10)", color: "#fff" }}
+                  onClick={() => {
+                    a.run();
+                    setMenuOpen(false);
+                  }}
+                >
+                  {a.label}
+                </button>
+              ))}
+          </div>
+        )}
+        {spaceUi === "lobby" && stationUi && (
+          <div
+            style={{
+              position: "absolute", left: "50%", bottom: 10, transform: "translateX(-50%)",
+              display: "flex", gap: 8, alignItems: "center", padding: "6px 8px 6px 14px",
+              borderRadius: 10, background: "rgba(0,0,0,0.6)", color: "#fff", fontSize: 13, whiteSpace: "nowrap",
+            }}
+          >
+            <span>{STATION_LABEL[stationUi]}</span>
+            {stationUi === "board" && (
+              <button
+                type="button"
+                style={{ ...btn, minHeight: 32, padding: "2px 10px" }}
+                onClick={() => setBoardOpen((v) => !v)}
+              >
+                {boardOpen ? "閉じる" : "開く"}
+              </button>
+            )}
+          </div>
+        )}
+        {showMap && spaceUi === "world" && (
           <canvas
             ref={minimapRef}
             width={MINIMAP_SIZE}
@@ -924,15 +1315,85 @@ export default function WorldBoxClient() {
         )}
       </div>
 
+      {boardOpen && spaceUi === "lobby" && (
+        <div
+          style={{
+            maxWidth: 640, margin: "12px auto 0", padding: 14, borderRadius: 12,
+            border: "1px solid rgba(255,255,255,0.18)", background: "rgba(255,255,255,0.04)", textAlign: "left",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <strong>グローバル掲示板</strong>
+            <span style={{ flex: 1 }} />
+            <button type="button" style={btn} onClick={() => setBoardOpen(false)}>
+              閉じる
+            </button>
+          </div>
+          {boardPosts.length === 0 ? (
+            <p className="muted" style={{ margin: "10px 0 0", fontSize: 13 }}>まだ投稿はありません</p>
+          ) : (
+            <ul style={{ listStyle: "none", margin: "10px 0 0", padding: 0, display: "grid", gap: 8, maxHeight: 260, overflowY: "auto" }}>
+              {boardPosts.map((p, i) => (
+                <li key={`${p.at}-${i}`} style={{ fontSize: 13 }}>
+                  <strong>{p.name}</strong>{" "}
+                  <span className="muted">
+                    {new Date(p.at).toLocaleString("ja-JP", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+                  </span>
+                  <div>{p.text}</div>
+                </li>
+              ))}
+            </ul>
+          )}
+          {boardLoggedIn ? (
+            <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+              <input
+                value={boardText}
+                onChange={(e) => setBoardText(e.target.value)}
+                maxLength={120}
+                placeholder="投稿（120文字まで）"
+                style={{
+                  flex: 1, minHeight: 40, padding: "6px 10px", borderRadius: 10,
+                  border: "1px solid rgba(255,255,255,0.25)", background: "rgba(255,255,255,0.06)", color: "inherit",
+                }}
+              />
+              <button type="button" style={btn} onClick={() => void postBoard()}>
+                投稿
+              </button>
+            </div>
+          ) : (
+            <p className="muted" style={{ margin: "10px 0 0", fontSize: 13 }}>投稿はログイン後</p>
+          )}
+          {boardMsg && (
+            <p role="status" style={{ margin: "10px 0 0" }}>{boardMsg}</p>
+          )}
+        </div>
+      )}
+
+      {craftOpen && (
+        <div
+          style={{
+            maxWidth: 640, margin: "12px auto 0", padding: 14, borderRadius: 12,
+            border: "1px solid rgba(255,255,255,0.18)", background: "rgba(255,255,255,0.04)", textAlign: "left",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <strong>クラフト</strong>
+            <span style={{ flex: 1 }} />
+            <button type="button" style={btn} onClick={() => setCraftOpen(false)}>
+              閉じる
+            </button>
+          </div>
+          {/* 作れるものの一覧はアイテム基盤フェーズでここに並ぶ（今は器だけ） */}
+          <p className="muted" style={{ margin: "10px 0 0", fontSize: 13 }}>作れるものはまだない</p>
+        </div>
+      )}
+
       <div style={{ display: "flex", gap: 8, justifyContent: "center", marginTop: 14, flexWrap: "wrap" }}>
         <button type="button" style={btn} onClick={() => setShowMap((v) => !v)} aria-pressed={showMap}>
           マップ{showMap ? "を隠す" : "を出す"}
         </button>
         <button type="button" style={btn} onClick={() => setShowNations((v) => !v)} aria-pressed={showNations}>
           国{showNations ? "を閉じる" : ""}
-        </button>
-        <button type="button" style={btn} onClick={() => setShowEconomy((v) => !v)} aria-pressed={showEconomy}>
-          経済{showEconomy ? "を閉じる" : ""}
         </button>
       </div>
 
@@ -946,6 +1407,12 @@ export default function WorldBoxClient() {
           {(() => {
             const me = nationsUi.me;
             const myNation = me ? nationsUi.nations.find((n) => n.id === me.nationId) ?? null : null;
+            const foundable = nationsUi.myGuilds.filter((g) => g.owner && !g.hasNation);
+            const joinable = nationsUi.myGuilds.filter((g) => g.hasNation);
+            const myGuildIds = new Set(nationsUi.myGuilds.map((g) => g.guildId));
+            const others = [...nationsUi.nations]
+              .filter((n) => !myGuildIds.has(n.guildId))
+              .sort((a, b) => b.prosperity - a.prosperity);
             if (me && myNation) {
               return (
                 <div>
@@ -969,46 +1436,73 @@ export default function WorldBoxClient() {
             }
             return (
               <div>
-                {nationsUi.loggedIn && (
-                  <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
-                    <input
-                      value={nationName}
-                      onChange={(e) => setNationName(e.target.value)}
-                      maxLength={24}
-                      placeholder="国名"
-                      aria-label="国名"
-                      style={{
-                        flex: 1, minHeight: 40, padding: "6px 10px", borderRadius: 10,
-                        border: "1px solid rgba(255,255,255,0.25)", background: "rgba(255,255,255,0.06)", color: "inherit",
-                      }}
-                    />
-                    <button
-                      type="button"
-                      style={btn}
-                      disabled={!nationName.trim()}
-                      onClick={() => void nationAction({ action: "found", name: nationName })}
+                {nationsUi.loggedIn && nationsUi.guildsScopeRequired && (
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 12 }}>
+                    <span className="muted" style={{ fontSize: 13 }}>サーバー一覧の取得に再ログインが必要</span>
+                    <a
+                      href="/api/auth/discord/authorize?next=/games/worldbox"
+                      style={{ ...btn, textDecoration: "none", display: "inline-flex", alignItems: "center" }}
                     >
-                      建国
-                    </button>
+                      Discordで再ログイン
+                    </a>
                   </div>
                 )}
-                {nationsUi.nations.length === 0 ? (
+                {nationsUi.loggedIn && !nationsUi.guildsScopeRequired && foundable.length > 0 && (
+                  <div style={{ marginBottom: 12 }}>
+                    <p style={{ margin: "0 0 6px", fontSize: 13 }}>建国できるサーバー</p>
+                    <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: 8 }}>
+                      {foundable.map((g) => (
+                        <li key={g.guildId} style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                          <strong>{g.name}</strong>
+                          <span style={{ flex: 1 }} />
+                          <button type="button" style={btn} onClick={() => void nationAction({ action: "found", guildId: g.guildId })}>
+                            建国
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {nationsUi.loggedIn && !nationsUi.guildsScopeRequired && joinable.length > 0 && (
+                  <div style={{ marginBottom: 12 }}>
+                    <p style={{ margin: "0 0 6px", fontSize: 13 }}>国があるサーバー</p>
+                    <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: 8 }}>
+                      {joinable.map((g) => {
+                        const n = nationsUi.nations.find((x) => x.guildId === g.guildId);
+                        return (
+                          <li key={g.guildId} style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                            {n && (
+                              <span aria-hidden style={{ width: 12, height: 12, borderRadius: 3, background: n.color, display: "inline-block" }} />
+                            )}
+                            <strong>{g.name}</strong>
+                            <span className="muted">{ROLE_LABEL[g.myRole]}{n ? ` ・ ${n.members}人` : ""}</span>
+                            <span style={{ flex: 1 }} />
+                            <button type="button" style={btn} onClick={() => void nationAction({ action: "join", guildId: g.guildId })}>
+                              参加
+                            </button>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </div>
+                )}
+                {others.length === 0 && joinable.length === 0 ? (
                   <p className="muted" style={{ margin: 0 }}>まだ国はありません</p>
-                ) : (
+                ) : others.length > 0 ? (
                   <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: 8 }}>
-                    {[...nationsUi.nations].sort((a, b) => b.prosperity - a.prosperity).map((n) => {
+                    {others.map((n) => {
                       const dist = Math.round(Math.hypot(
                         n.capital.x + 0.5 - playerPosRef.current.x,
                         n.capital.y + 0.5 - playerPosRef.current.y,
                       ));
                       return (
-                        <li key={n.id} style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                        <li key={n.id} style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", opacity: 0.55 }}>
                           <span aria-hidden style={{ width: 12, height: 12, borderRadius: 3, background: n.color, display: "inline-block" }} />
                           <strong>{n.name}</strong>
                           <span className="muted">{n.members}人 ・ 繁栄度 {n.prosperity} ・ {dist}タイル</span>
                           <span style={{ flex: 1 }} />
                           {nationsUi.loggedIn && (
-                            <button type="button" style={btn} onClick={() => void nationAction({ action: "join", nationId: n.id })}>
+                            <button type="button" style={btn} disabled>
                               参加
                             </button>
                           )}
@@ -1016,7 +1510,7 @@ export default function WorldBoxClient() {
                       );
                     })}
                   </ul>
-                )}
+                ) : null}
                 {!nationsUi.loggedIn && (
                   <p className="muted" style={{ margin: "10px 0 0", fontSize: 13 }}>建国・参加はログイン後</p>
                 )}
@@ -1057,13 +1551,11 @@ export default function WorldBoxClient() {
         </div>
       )}
 
-      {showEconomy && <WorldBoxEconomyPanel />}
-
       <p className="muted" style={{ textAlign: "center", fontSize: 13, maxWidth: 860, margin: "14px auto 0" }}>
         PC: WASD・矢印キーで移動。タッチ: 画面左側のスティックで移動。
         水・木・岩には入れません。歩いた場所は保存され、みんなと同じ世界にいます。
         ログインすると、好きな場所に家・畑・塔を建てられます。建てた建物は、所属する国の繁栄度にも数えられます。
-        経済パネルでは、働いてコインを稼ぎ、買い物・合成・steal ができます。
+        スポーン広場のワープパッドか ≡ メニューからロビーへ行けます。ロビーを出ると、入る前にいた場所へ戻ります。
       </p>
     </div>
   );
