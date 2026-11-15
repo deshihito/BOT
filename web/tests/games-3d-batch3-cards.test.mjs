@@ -2,7 +2,8 @@
 // batch2-cards のスタイルに倣い、以下を担保する:
 // - シーンは dynamic import (ssr:false) で遅延読み込みされ、three はシーン側だけ
 // - シーンは three-kit の createCard / createStage / attachPickPointer を使う
-// - <button> 数が現行（drawpoker 0 / texas 3 / hearts 4）から増えていないこと
+// - <button> 数が現行（drawpoker 0 / texas 3 / hearts 1）から増えていないこと
+//   （hearts はジェスチャ移行 第8バッチで 4→1。「もう一度」chrome のみ）
 // - ロジック（lib/*.ts）へ three が混入していないこと
 // - drawpoker: 個別カードピック（pickId にカード index）・捨て札の視覚状態・
 //   suggestHolds との初期選択同期が存在すること
@@ -23,7 +24,7 @@ const countButtons = (dir) => {
 
 const BATCH = [
   { dir: "texas", client: "TexasClient.tsx", scene: "TexasScene3D.tsx", buttons: 3, chip: true },
-  { dir: "hearts", client: "HeartsClient.tsx", scene: "HeartsScene3D.tsx", buttons: 4, chip: false },
+  { dir: "hearts", client: "HeartsClient.tsx", scene: "HeartsScene3D.tsx", buttons: 1, chip: false },
 ];
 
 for (const g of BATCH) {
