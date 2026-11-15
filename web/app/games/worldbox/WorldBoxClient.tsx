@@ -17,7 +17,7 @@ import { DASH_SPEED, SWIM_DASH_SPEED, SWIM_SPEED, WALK_SPEED, findFreeNear, isWa
 import { isNightPhase, nightAmount, phaseAtTime } from "@/lib/worldbox/daynight";
 import { mobById, mobOccupiesTile, type PlacedMob } from "@/lib/worldbox/mobs";
 import {
-  MOB_ATTACK_RANGE, MOB_RESPAWN_MS, attackTarget, knockbackTarget, mobBlockedTiles, mobDistance, mobFootprintTiles,
+  MOB_ATTACK_RANGE, MOB_RESPAWN_MS, knockbackTarget, mobBlockedTiles, mobDistance, mobFootprintTiles,
   mobHpNow, mobKeyOf, visibleMobs, type MobState,
 } from "@/lib/worldbox/combat";
 import { advanceWalkPhase, attackSwingAngle, damp, moveLean, stepBeatIndex, walkBob, walkSquashY } from "@/lib/worldbox/anim";
@@ -911,14 +911,39 @@ export default function WorldBoxClient() {
         localStorage.setItem(SAVE_KEY, currentSave());
       } catch { /* noop */ }
     };
-    const saveOnline = (keepalive = false) => {
-      if (!loggedIn) return;
+    // オンライン保存は最大で3秒に1回へ間引く（1タイル動くごとの全量PUTが
+    // 移動中のラグの主因だった）。間引き中の最新状態はタイマーで追いつく。
+    // keepalive（退室・ページ離脱）だけは即時送信する。
+    let lastOnlineSaveAt = 0;
+    let onlineSaveTimer: number | null = null;
+    const sendOnlineSave = (keepalive = false) => {
+      lastOnlineSaveAt = performance.now();
       fetch("/api/worldbox/save", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ save: currentSave() }),
         keepalive,
       }).catch(() => { /* 保存できなくても遊び続けられる */ });
+    };
+    const saveOnline = (keepalive = false) => {
+      if (!loggedIn) return;
+      if (keepalive) {
+        if (onlineSaveTimer !== null) {
+          window.clearTimeout(onlineSaveTimer);
+          onlineSaveTimer = null;
+        }
+        sendOnlineSave(true);
+        return;
+      }
+      const wait = 3000 - (performance.now() - lastOnlineSaveAt);
+      if (wait <= 0) {
+        sendOnlineSave();
+      } else if (onlineSaveTimer === null) {
+        onlineSaveTimer = window.setTimeout(() => {
+          onlineSaveTimer = null;
+          if (loggedIn) sendOnlineSave();
+        }, wait);
+      }
     };
     const saveNow = (keepalive = false) => {
       saveLocal();
@@ -1074,38 +1099,6 @@ export default function WorldBoxClient() {
       const nowMs = Date.now();
       const px = Math.floor(player.x);
       const py = Math.floor(player.y);
-      const selSlotItem = invRef.current.hotbar[selSlotRef.current] ?? null;
-      const selDef = selSlotItem ? itemById(selSlotItem.id) : null;
-      // 剣は照準方式でなく範囲方式: 振ること自体は常に応答し、範囲内のモブに当たる。
-      // 狙いはタップ方向へ向け、対象は attackTarget が「タップを含む個体→近い個体」で選ぶ。
-      if (selDef?.tool === "sword") {
-        if (t.x !== px || t.y !== py) player.face = t.x + 0.5 >= player.x ? 1 : -1;
-        swing = { startedAt: performance.now(), itemId: selDef.id, face: player.face, whiff: false };
-        const candidates: { mobId: string; x: number; y: number; size: number; placed: PlacedMob }[] = [];
-        for (const placed of mobCache) {
-          const def = mobById(placed.mobId);
-          if (!def) continue;
-          const key = mobKeyOf(placed);
-          if (!mobHpNow(def, mobStatesRef.current[key] ?? null, nowMs).alive) continue;
-          const r = mobRenders.get(key);
-          candidates.push({
-            mobId: placed.mobId,
-            x: r ? Math.floor(r.wx) : placed.x,
-            y: r ? Math.floor(r.wy) : placed.y,
-            size: placed.size,
-            placed,
-          });
-        }
-        const target = attackTarget(px, py, t.x, t.y, candidates);
-        if (target) {
-          if (nowMs - lastAttackAt >= 350) {
-            lastAttackAt = nowMs;
-            void attackMobRef.current(target.placed);
-          }
-          return true;
-        }
-        return false; // 空振り（スイングは出した。タイル行為は通常どおり続く）
-      }
       for (const placed of mobCache) {
         const def = mobById(placed.mobId);
         if (!def) continue;
@@ -1159,9 +1152,8 @@ export default function WorldBoxClient() {
         blockId: selItem && (selItem.category === "block" || selItem.facility) ? selItem.id : undefined,
       });
       if (!act) {
-        // 隣接タップで何も起きない場合は理由を出す（素材は置けない・その地形には置けない等）。
-        // 剣の空振りは通常の応答なので理由は出さない
-        if (selItem && selItem.tool !== "sword") setTileMsg(TILE_ERROR_LABEL.tile_blocked);
+        // 隣接タップで何も起きない場合は理由を出す（素材は置けない・その地形には置けない等）
+        if (selItem) setTileMsg(TILE_ERROR_LABEL.tile_blocked);
         return false;
       }
       if (act.action === "plant-picker") {
@@ -1264,7 +1256,8 @@ export default function WorldBoxClient() {
 
     // ---- サイズ追従 ----
     const resize = () => {
-      const dpr = Math.min(2, window.devicePixelRatio || 1);
+      // 解像度は最大1.5倍に抑える（2倍だとモバイルで毎フレームの描画画素数が重い）
+      const dpr = Math.min(1.5, window.devicePixelRatio || 1);
       const rect = canvas.getBoundingClientRect();
       canvas.width = Math.max(1, Math.round(rect.width * dpr));
       canvas.height = Math.max(1, Math.round(rect.height * dpr));
@@ -1791,7 +1784,7 @@ export default function WorldBoxClient() {
       // ---- 描画 ----
       const cw = canvas.clientWidth;
       const ch = canvas.clientHeight;
-      const dpr = Math.min(2, window.devicePixelRatio || 1);
+      const dpr = Math.min(1.5, window.devicePixelRatio || 1);
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.clearRect(0, 0, cw, ch);
       // 画面の揺れ（ワールドのみ。ロビーはピクセル固定のため揺らさない）
@@ -1809,11 +1802,17 @@ export default function WorldBoxClient() {
       const ty1 = Math.min(MAP_H - 1, Math.ceil(cam.y + ch / TILE / 2 + 1));
       // 流用タイルはピクセルアートなので補間を切ってクッキリ描く（アバター側は後で戻す）
       ctx.imageSmoothingEnabled = false;
+      // 地形は整数ピクセルへスナップして描く。小数座標のままだとタイルごとに
+      // 毎フレーム再サンプルされて重く、滲んで見える（ピクセル固定の原則どおり）。
+      const tileOriginX = Math.round(toScreenX(tx0));
+      const tileOriginY = Math.round(toScreenY(ty0));
+      const tileSx = (tx: number) => tileOriginX + (tx - tx0) * TILE;
+      const tileSy = (ty: number) => tileOriginY + (ty - ty0) * TILE;
       for (let ty = ty0; ty <= ty1; ty++) {
         for (let tx = tx0; tx <= tx1; tx++) {
           const id = mapTileAt(effMap, tx, ty);
-          const sx = toScreenX(tx);
-          const sy = toScreenY(ty);
+          const sx = tileSx(tx);
+          const sy = tileSy(ty);
           const dungeonKey = TILE_DUNGEON[id];
           const baseTex = dungeonKey ? dungeon[dungeonKey] : textures[TILE_TEXTURE[id]];
           if (texReady(baseTex)) ctx.drawImage(baseTex, sx, sy, TILE + 1, TILE + 1);
@@ -1824,13 +1823,13 @@ export default function WorldBoxClient() {
         }
       }
 
-      // タイル上書きの重ね描き（畑・切り株・作物の成長段階）
+      // タイル上書きの重ね描き（畑・切り株・作物の成長段階）。地形と同じスナップ座標で重ねる
       for (let ty = ty0; ty <= ty1; ty++) {
         for (let tx = tx0; tx <= tx1; tx++) {
           const ov = tilesRef.current[tileKey(tx, ty)];
           if (!isOverrideActive(ov, nowMs)) continue;
-          const sx = toScreenX(tx);
-          const sy = toScreenY(ty);
+          const sx = tileSx(tx);
+          const sy = tileSy(ty);
           if (ov!.farmland) {
             const img = farmSprites.farmland;
             if (texReady(img)) ctx.drawImage(img, sx, sy, TILE + 1, TILE + 1);
@@ -2491,6 +2490,7 @@ export default function WorldBoxClient() {
     return () => {
       disposed = true;
       cancelAnimationFrame(raf);
+      if (onlineSaveTimer !== null) window.clearTimeout(onlineSaveTimer);
       window.clearInterval(heartbeatTimer);
       window.clearInterval(pollTimer);
       window.removeEventListener("keydown", onKeyDown);
