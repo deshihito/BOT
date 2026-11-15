@@ -4,7 +4,7 @@
 // Bot 本体のワーカーが dict として読み、結果を同じキーへ書き戻す）。
 // 残高の読み取りは Bot API の許可テーブル users への select のみで、
 // Web から残高を書き換える経路はここにも存在しない。
-import { isBotApiConfigured, kvList, kvSet, tableSelect } from "../bot-api";
+import { isBotApiConfigured, kvGet, kvList, kvSet, tableSelect } from "../bot-api";
 import {
   WORLDBOX_ECONOMY_NAMESPACE, parseEconomyOp, recentEconomyOps, type EconomyOp,
 } from "./economy-bridge";
@@ -37,6 +37,19 @@ export async function loadMyEconomyOps(userKey: string): Promise<EconomyOp[]> {
     return recentEconomyOps(ops, userKey);
   } catch {
     return [];
+  }
+}
+
+/** 自分のオプを ID で1件引く（セッション先払いの状態確認用）。無ければ null。 */
+export async function findEconomyOp(userKey: string, opId: string): Promise<EconomyOp | null> {
+  if (!isBotApiConfigured()) return null;
+  try {
+    const raw = await kvGet(WORLDBOX_ECONOMY_NAMESPACE, opId);
+    if (raw === null) return null;
+    const op = parseEconomyOp(raw);
+    return op && op.userKey === userKey ? op : null;
+  } catch {
+    return null;
   }
 }
 

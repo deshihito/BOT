@@ -209,7 +209,7 @@ test("クライアント配線: 経済パネルと API がつながっている"
 
 test("売買・合成・送金は施設の前でのみ開く（クライアントがステーションを渡し、パネルと API が制限する）", () => {
   const client = fs.readFileSync(path.join(rootDir, "app/games/worldbox/WorldBoxClient.tsx"), "utf8");
-  assert.match(client, /<WorldBoxEconomyPanel space=\{spaceUi\} station=\{stationUi\} \/>/);
+  assert.match(client, /<WorldBoxEconomyPanel space=\{spaceUi\} station=\{stationUi\} onClose=\{\(\) => setShowEconomy\(false\)\} \/>/);
   const panel = fs.readFileSync(path.join(rootDir, "app/games/worldbox/WorldBoxEconomyPanel.tsx"), "utf8");
   assert.match(panel, /space === "lobby"/);
   // タブは「ロビーにいる」だけでは出ない。対応する施設の前にいる時だけ
