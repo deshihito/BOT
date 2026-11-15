@@ -1,8 +1,13 @@
 import { NextResponse } from "next/server";
 import { getRequestSession, publicOrigin, sessionOwnerKey } from "@/lib/auth";
 import {
-  buyItem, craftItem, doWork, eatItem, resolveSteal, sellItem, type EconomyError,
+  buyItem, craftItem, doWork, eatItem, resolveSteal, sellItem,
+  type CoinMovement, type EconomyError,
 } from "@/lib/worldbox/economy";
+import { buildEconomyOp, type EconomyOp } from "@/lib/worldbox/economy-bridge";
+import {
+  enqueueEconomyOp, isEconomyEnabled, readUserBalance,
+} from "@/lib/worldbox/economy-bridge-online";
 import type { PlayerProfile } from "@/lib/worldbox/profile";
 import { findPresenceOwnerKey, isPresenceEnabled } from "@/lib/worldbox/presence-online";
 import { isProfileEnabled, loadProfile, storeProfile } from "@/lib/worldbox/profile-online";
@@ -10,15 +15,18 @@ import { isProfileEnabled, loadProfile, storeProfile } from "@/lib/worldbox/prof
 export const runtime = "nodejs";
 
 // AGO WORLD BOX の経済（プロフィール＋かばん＋ショップ＋合成＋steal＋労働）。
-// Discord ボット側の経済機能（items / workshop craft / circulation steal）の
-// 規則をワールドボックスに持ち込んだもの。すべてログイン必須。
+// 状態遷移の規則は lib/worldbox/economy（ボット側経済機能の写し）。
+// コインの正は AGO コイン本体: このルートは残高を書き換えず、遷移が
+// 返した coin を経済ブリッジ（bot_kv worldbox_economy）のオプとして
+// 積むだけ（案B）。実際の移動は Bot 本体のワーカーが適用する。
 // GET: 自分のプロフィール
 // POST { action: "buy" | "sell", itemId, count? }: ショップ売買
 // POST { action: "eat", itemId }: かばんの食事を食べて空腹度を回復
 // POST { action: "craft", recipeId }: 合成
-// POST { action: "work" }: 労働（空腹度を消費して所持金を得る）
+// POST { action: "work" }: 労働（空腹度を消費し、報酬は earn オプ）
 // POST { action: "steal", targetId }: いま歩いている相手から steal
-// 保存先は bot_kv（名前空間 worldbox_profiles、キー = 所有者キー）。
+// プロフィールの保存先は bot_kv（名前空間 worldbox_profiles、
+// キー = 所有者キー）。コインが動くアクションは Discord ログイン必須。
 // Bot API 未設定なら 503。
 
 const NO_STORE = { "Cache-Control": "no-store, max-age=0" };
@@ -33,6 +41,30 @@ function sameOrigin(request: Request) {
 function errorResponse(error: string) {
   const status = BAD_REQUEST_ERRORS.has(error) ? 400 : 409;
   return NextResponse.json({ error }, { status, headers: NO_STORE });
+}
+
+function statusError(error: string, status: number) {
+  return NextResponse.json({ error }, { status, headers: NO_STORE });
+}
+
+/** コインの本人キーは Discord ユーザーID。Discord セッション以外は null。 */
+function discordIdOf(session: { provider: string; id: string }): string | null {
+  return session.provider === "discord" ? session.id : null;
+}
+
+/** coin をブリッジのオプとして積む。積めたら true。 */
+async function enqueueCoin(
+  ownerKey: string,
+  discordId: string,
+  coin: CoinMovement,
+): Promise<boolean> {
+  const op = buildEconomyOp(
+    { kind: coin.kind, userKey: ownerKey, discordId, amount: coin.amount, reason: coin.reason },
+    crypto.randomUUID(),
+    Date.now(),
+  );
+  if (!op) return false;
+  return enqueueEconomyOp(op);
 }
 
 export async function GET(request: Request) {
@@ -81,11 +113,50 @@ export async function POST(request: Request) {
     return NextResponse.json({ profile: result.profile, ...extra }, { headers: NO_STORE });
   };
 
+  /**
+   * コインが動く遷移の保存: プロフィールを先に保存し、続けてオプを積む。
+   * オプを積めなければプロフィールを元へ戻して 503（コインだけ動いて
+   * アイテムが付かない／その逆の事故を避ける）。
+   */
+  const saveWithCoin = async (
+    result:
+      | { ok: true; profile: PlayerProfile; coin?: CoinMovement }
+      | { ok: false; error: EconomyError },
+    discordId: string,
+    extra: Record<string, unknown> = {},
+  ) => {
+    if (!result.ok) return errorResponse(result.error);
+    if (!(await storeProfile(ownerKey, result.profile))) {
+      return NextResponse.json({ error: "store_failed" }, { status: 503, headers: NO_STORE });
+    }
+    if (result.coin && !(await enqueueCoin(ownerKey, discordId, result.coin))) {
+      await storeProfile(ownerKey, current);
+      return statusError("economy_failed", 503);
+    }
+    return NextResponse.json({ profile: result.profile, ...extra }, { headers: NO_STORE });
+  };
+
+  /** コインが動くアクションの前段: Discord セッションとブリッジ有効性。 */
+  const coinGate = (): { discordId: string } | { response: NextResponse } => {
+    const discordId = discordIdOf(session);
+    if (!discordId) return { response: statusError("discord_required", 403) };
+    if (!isEconomyEnabled()) return { response: statusError("economy_unavailable", 503) };
+    return { discordId };
+  };
+
   switch (data.action) {
-    case "buy":
-      return saveAndReturn(buyItem(current, data.itemId, data.count));
-    case "sell":
-      return saveAndReturn(sellItem(current, data.itemId, data.count));
+    case "buy": {
+      const gate = coinGate();
+      if ("response" in gate) return gate.response;
+      const balance = await readUserBalance(gate.discordId);
+      if (balance === null) return statusError("economy_unavailable", 503);
+      return saveWithCoin(buyItem(current, data.itemId, data.count, balance), gate.discordId);
+    }
+    case "sell": {
+      const gate = coinGate();
+      if ("response" in gate) return gate.response;
+      return saveWithCoin(sellItem(current, data.itemId, data.count), gate.discordId);
+    }
     case "eat": {
       const result = eatItem(current, data.itemId);
       return saveAndReturn(result, result.ok ? { itemName: result.item.name } : {});
@@ -96,22 +167,66 @@ export async function POST(request: Request) {
         ? { craftedId: result.recipe.output, rareId: result.rare?.id ?? null }
         : {});
     }
-    case "work":
-      return saveAndReturn(doWork(current));
+    case "work": {
+      const gate = coinGate();
+      if ("response" in gate) return gate.response;
+      return saveWithCoin(doWork(current), gate.discordId);
+    }
     case "steal": {
+      const gate = coinGate();
+      if ("response" in gate) return gate.response;
       if (typeof data.targetId !== "string" || !isPresenceEnabled()) {
         return errorResponse("invalid_action");
       }
       const targetKey = await findPresenceOwnerKey(data.targetId);
       if (!targetKey) return errorResponse("target_protected");
       if (targetKey === ownerKey) return errorResponse("self_target");
+      // 奪い元は Discord ユーザーでなければブリッジで移せない（保護扱い）
+      const victimId = targetKey.startsWith("discord:") ? targetKey.slice("discord:".length) : null;
+      if (!victimId) return errorResponse("target_protected");
       const target = await loadProfile(targetKey);
-      const result = resolveSteal(current, target, Date.now());
+      const [actorCoins, targetCoins] = await Promise.all([
+        readUserBalance(gate.discordId),
+        readUserBalance(victimId),
+      ]);
+      if (actorCoins === null || targetCoins === null) {
+        return statusError("economy_unavailable", 503);
+      }
+      const result = resolveSteal(current, target, Date.now(), Math.random, { actorCoins, targetCoins });
       if (!result.ok) return errorResponse(result.error);
       if (!(await storeProfile(ownerKey, result.actor))) {
         return NextResponse.json({ error: "store_failed" }, { status: 503, headers: NO_STORE });
       }
-      await storeProfile(targetKey, result.target);
+      if (!(await storeProfile(targetKey, result.target))) {
+        await storeProfile(ownerKey, current);
+        return NextResponse.json({ error: "store_failed" }, { status: 503, headers: NO_STORE });
+      }
+      // コインの移動: 成功は steal オプ（被害者→実行者）、失敗は罰金の spend オプ
+      let op: EconomyOp | null = null;
+      if (result.success) {
+        op = buildEconomyOp(
+          {
+            kind: "steal", userKey: ownerKey, discordId: gate.discordId,
+            amount: result.amount, reason: "steal", fromDiscordId: victimId,
+          },
+          crypto.randomUUID(),
+          Date.now(),
+        );
+      } else if (result.coin) {
+        op = buildEconomyOp(
+          {
+            kind: result.coin.kind, userKey: ownerKey, discordId: gate.discordId,
+            amount: result.coin.amount, reason: result.coin.reason,
+          },
+          crypto.randomUUID(),
+          Date.now(),
+        );
+      }
+      if (op && !(await enqueueEconomyOp(op))) {
+        await storeProfile(ownerKey, current);
+        await storeProfile(targetKey, target);
+        return statusError("economy_failed", 503);
+      }
       return NextResponse.json(
         { profile: result.actor, success: result.success, amount: result.amount },
         { headers: NO_STORE },
