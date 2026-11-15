@@ -8,6 +8,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { EconomyOp } from "@/lib/worldbox/economy-bridge";
 import { ITEMS, RECIPES, itemById, sellPrice } from "@/lib/worldbox/items";
 import type { PlayerProfile } from "@/lib/worldbox/profile";
+import type { SaveSpace } from "@/lib/worldbox/save";
 
 type Tab = "bag" | "shop" | "craft" | "steal" | "bank";
 type LoadState = "loading" | "ready" | "guest" | "unavailable";
@@ -57,7 +58,9 @@ const row: React.CSSProperties = {
   padding: "7px 0", borderBottom: "1px solid rgba(255,255,255,0.08)",
 };
 
-export default function WorldBoxEconomyPanel() {
+export default function WorldBoxEconomyPanel({ space }: { space: SaveSpace }) {
+  // ショップ（売買）はロビー空間でのみ開く。ワールドではタブ自体を出さない。
+  const inLobby = space === "lobby";
   const [profile, setProfile] = useState<PlayerProfile | null>(null);
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [tab, setTab] = useState<Tab>("bag");
@@ -188,12 +191,14 @@ export default function WorldBoxEconomyPanel() {
   }
 
   const owned = ITEMS.filter((item) => (profile.items[item.id] ?? 0) > 0);
+  // ワールドでショップタブを開いたままにしない（ロビーへ移動すると使える）
+  const activeTab: Tab = tab === "shop" && !inLobby ? "bag" : tab;
   const tabBtn = (t: Tab, label: string) => (
     <button
       type="button"
-      style={{ ...btn, ...(tab === t ? { background: "rgba(255,210,62,0.18)", borderColor: "rgba(255,210,62,0.55)" } : {}) }}
+      style={{ ...btn, ...(activeTab === t ? { background: "rgba(255,210,62,0.18)", borderColor: "rgba(255,210,62,0.55)" } : {}) }}
       onClick={() => setTab(t)}
-      aria-pressed={tab === t}
+      aria-pressed={activeTab === t}
     >
       {label}
     </button>
@@ -224,13 +229,18 @@ export default function WorldBoxEconomyPanel() {
 
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12 }}>
         {tabBtn("bag", "かばん")}
-        {tabBtn("shop", "ショップ")}
+        {inLobby && tabBtn("shop", "ショップ")}
         {tabBtn("craft", "合成")}
         {tabBtn("steal", "steal")}
         {tabBtn("bank", "銀行")}
       </div>
+      {!inLobby && (
+        <p className="muted" style={{ margin: "8px 0 0", fontSize: 12 }}>
+          ショップ（売買）はロビーでのみ利用できます。
+        </p>
+      )}
 
-      {tab === "bag" && (
+      {activeTab === "bag" && (
         <div style={{ marginTop: 6 }}>
           {owned.length === 0 && <p className="muted">かばんは空です。ショップで買うか、合成で作りましょう。</p>}
           {owned.map((item) => (
@@ -245,16 +255,18 @@ export default function WorldBoxEconomyPanel() {
                   食べる（+{item.hunger}）
                 </button>
               )}
-              <button type="button" style={btn} disabled={busy}
-                onClick={() => void act({ action: "sell", itemId: item.id }, () => `${item.name}を売った（代金 ${sellPrice(item)} コインは処理中）`)}>
-                売る（{sellPrice(item)}）
-              </button>
+              {inLobby && (
+                <button type="button" style={btn} disabled={busy}
+                  onClick={() => void act({ action: "sell", itemId: item.id }, () => `${item.name}を売った（代金 ${sellPrice(item)} コインは処理中）`)}>
+                  売る（{sellPrice(item)}）
+                </button>
+              )}
             </div>
           ))}
         </div>
       )}
 
-      {tab === "shop" && (
+      {activeTab === "shop" && inLobby && (
         <div style={{ marginTop: 6 }}>
           {ITEMS.map((item) => (
             <div key={item.id} style={row}>
@@ -272,7 +284,7 @@ export default function WorldBoxEconomyPanel() {
         </div>
       )}
 
-      {tab === "craft" && (
+      {activeTab === "craft" && (
         <div style={{ marginTop: 6 }}>
           {RECIPES.map((recipe) => {
             const output = itemById(recipe.output);
@@ -298,7 +310,7 @@ export default function WorldBoxEconomyPanel() {
         </div>
       )}
 
-      {tab === "steal" && (
+      {activeTab === "steal" && (
         <div style={{ marginTop: 6 }}>
           <p className="muted" style={{ margin: "4px 0" }}>
             いま歩いている相手からコインを盗みます。成功率40%、失敗すると罰金20コイン。
@@ -326,7 +338,7 @@ export default function WorldBoxEconomyPanel() {
         </div>
       )}
 
-      {tab === "bank" && (
+      {activeTab === "bank" && (
         <div style={{ marginTop: 6 }}>
           <div style={row}>
             <strong>送金</strong>
