@@ -59,7 +59,7 @@ const invUrl = bundleModule(
 const inv = await import(invUrl);
 
 const tilesUrl = bundleModule(
-  ["worldbox/rng.ts", "worldbox/mapgen.ts", "worldbox/items.ts", "worldbox/profile.ts", "worldbox/presence.ts", "worldbox/tiles.ts"],
+  ["worldbox/rng.ts", "worldbox/mapgen.ts", "worldbox/items.ts", "worldbox/profile.ts", "worldbox/presence.ts", "worldbox/seasons.ts", "worldbox/tiles.ts"],
   [
     "worldTileSource", "mapTileAt", "T_GRASS", "T_TREE", "T_ROCK", "T_DIRT", "T_SNOW", "T_SNOW_TREE",
     "parseProfile", "addItem", "countItem",
@@ -243,7 +243,7 @@ test("タイル: 伐採は素手でもでき（収量1）、斧があると収�
   );
 });
 
-test("タイル: 採掘はツルハシが要り、岩が土になり石材が得られる（再生しない）", () => {
+test("タイル: 採掘はツルハシが要り、岩が土になり石材が得られ、岩は再成長する", () => {
   assert.equal(
     T.applyTileAction(null, withItems({}), map, ME_KEY, "mine", rockAt.x, rockAt.y, undefined, NOW).error,
     "tool_required",
@@ -251,13 +251,16 @@ test("タイル: 採掘はツルハシが要り、岩が土になり石材が得
   const ok = T.applyTileAction(null, withItems({ wooden_pickaxe: 1 }), map, ME_KEY, "mine", rockAt.x, rockAt.y, undefined, NOW);
   assert.equal(ok.ok, true);
   assert.equal(ok.override.tile, T.T_DIRT);
-  assert.equal(ok.override.until, undefined);
+  assert.equal(ok.override.until, NOW + 3 * 3600 * 1000, "岩の再成長タイマー（3時間）");
   assert.equal(inv.countItem(ok.profile, "stone"), 2);
   // 土になった場所は掘れない
   assert.equal(
     T.applyTileAction(ok.override, ok.profile, map, ME_KEY, "mine", rockAt.x, rockAt.y, undefined, NOW).error,
     "tile_blocked",
   );
+  // 再成長が終わればまた岩として掘れる
+  const regrown = T.applyTileAction(ok.override, ok.profile, map, ME_KEY, "mine", rockAt.x, rockAt.y, undefined, NOW + 3 * 3600 * 1000 + 1);
+  assert.equal(regrown.ok, true);
 });
 
 test("タイル: 耕す→植える→育つ→所有者だけが収穫できる", () => {
@@ -291,7 +294,8 @@ test("タイル: 耕す→植える→育つ→所有者だけが収穫できる
   const planted = T.applyTileAction(tilled.override, farmer, map, ME_KEY, "plant", grassAt.x, grassAt.y, "wheat_seed", NOW);
   assert.equal(planted.ok, true);
   assert.equal(planted.override.crop.cropId, "wheat");
-  assert.equal(planted.override.crop.readyAt, NOW + 10 * 60_000);
+  // NOW は秋: 小麦（適季=春）の反対の季節なので ×1.4 で遅く育つ
+  assert.equal(planted.override.crop.readyAt, NOW + Math.round(10 * 60_000 * 1.4));
   assert.equal(inv.countItem(planted.profile, "wheat_seed"), 1, "種を1つ消費する");
   // 育つ前は収穫できない
   assert.equal(

@@ -10,9 +10,12 @@ import {
 } from "./mapgen";
 import { addItem, countItem, removeItem, type PlayerProfile } from "./profile";
 import { presenceIdFor } from "./presence";
+import { seasonGrowthMult } from "./seasons";
 
 /** 伐採した木が再生するまでの時間（6時間）。 */
 export const TREE_REGROW_MS = 6 * 3600 * 1000;
+/** 掘った岩が戻るまでの時間（資源の再成長）。 */
+export const ROCK_REGROW_MS = 3 * 3600 * 1000;
 /** 伐採・採掘の収穫数。伐採は素手でもでき、斧があると収量が2倍になる。 */
 export const CHOP_WOOD_COUNT = 2;
 export const CHOP_WOOD_BAREHAND = 1;
@@ -253,7 +256,8 @@ export function applyTileAction(
     case "mine": {
       if (eff !== T_ROCK) return { ok: false, error: "tile_blocked" };
       if (!hasTool(profile, "pickaxe")) return { ok: false, error: "tool_required" };
-      const next: TileOverride = { tile: T_DIRT, ownerId: selfId };
+      // 掘った岩は一定時間で戻る（資源の再成長。until を過ぎれば地形どおり岩になる）
+      const next: TileOverride = { tile: T_DIRT, ownerId: selfId, until: now + ROCK_REGROW_MS };
       return done(next, addItem(profile, "stone", MINE_STONE_COUNT), { stone: MINE_STONE_COUNT });
     }
     case "till": {
@@ -282,7 +286,7 @@ export function applyTileAction(
         crop: {
           cropId: cropDef.id,
           plantedAt: now,
-          readyAt: now + cropDef.growthMinutes * 60_000,
+          readyAt: now + Math.round(cropDef.growthMinutes * 60_000 * seasonGrowthMult(cropDef.season, now)),
         },
         ownerId: selfId,
       };
@@ -354,7 +358,8 @@ export function applyPlaceBlock(
   if (active?.block) return { ok: false, error: "tile_blocked" };
   if (active?.crop) return { ok: false, error: "tile_blocked" };
   if (active?.farmland) return { ok: false, error: "tile_blocked" };
-  if (active?.until !== undefined) return { ok: false, error: "tile_blocked" }; // 木の再生待ち
+  if (active?.stump) return { ok: false, error: "tile_blocked" }; // 木の再生待ち（切り株）
+  // 岩の再生待ちの土は設置できる（下地として保持され、until は引き継ぐ）
   const eff = active?.tile !== undefined ? active.tile : mapTileAt(map, x, y);
   if (!PLACEABLE_TERRAIN.has(eff)) return { ok: false, error: "tile_blocked" };
   const removed = removeItem(profile, held.id, 1);

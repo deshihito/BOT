@@ -745,38 +745,40 @@ export type CropDef = {
   produceId: string;
   /** 植えてから収穫できるまでの分数。 */
   growthMinutes: number;
+  /** 適季（この季節は速く育つ。反対の季節は遅い）。 */
+  season?: "spring" | "summer" | "autumn" | "winter";
   /** 1株からの収穫数。 */
   produceCount: number;
 };
 
 export const CROPS: readonly CropDef[] = [
-  { id: "wheat", seedId: "wheat_seed", produceId: "wheat", growthMinutes: 10, produceCount: 2 },
-  { id: "carrot", seedId: "carrot_seed", produceId: "carrot", growthMinutes: 12, produceCount: 2 },
-  { id: "potato", seedId: "potato_seed", produceId: "potato", growthMinutes: 15, produceCount: 2 },
-  { id: "cabbage", seedId: "cabbage_seed", produceId: "cabbage", growthMinutes: 16, produceCount: 2 },
-  { id: "strawberry", seedId: "strawberry_seed", produceId: "strawberry", growthMinutes: 14, produceCount: 3 },
-  { id: "tomato", seedId: "tomato_seed", produceId: "tomato", growthMinutes: 20, produceCount: 2 },
-  { id: "corn", seedId: "corn_seed", produceId: "corn", growthMinutes: 18, produceCount: 2 },
-  { id: "rice", seedId: "rice_seed", produceId: "rice", growthMinutes: 22, produceCount: 2 },
-  { id: "pumpkin", seedId: "pumpkin_seed", produceId: "pumpkin", growthMinutes: 30, produceCount: 1 },
-  { id: "melon", seedId: "melon_seed", produceId: "melon", growthMinutes: 30, produceCount: 1 },
-  { id: "onion", seedId: "onion_seed", produceId: "onion", growthMinutes: 14, produceCount: 2 },
-  { id: "soybean", seedId: "soybean_seed", produceId: "soybean", growthMinutes: 16, produceCount: 3 },
-  { id: "cucumber", seedId: "cucumber_seed", produceId: "cucumber", growthMinutes: 15, produceCount: 2 },
-  { id: "eggplant", seedId: "eggplant_seed", produceId: "eggplant", growthMinutes: 20, produceCount: 2 },
-  { id: "sweet_potato", seedId: "sweet_potato_seed", produceId: "sweet_potato", growthMinutes: 18, produceCount: 2 },
-  { id: "pepper", seedId: "pepper_seed", produceId: "pepper", growthMinutes: 18, produceCount: 3 },
-  { id: "grape", seedId: "grape_seed", produceId: "grape", growthMinutes: 26, produceCount: 2 },
-  { id: "turnip", seedId: "turnip_seed", produceId: "turnip", growthMinutes: 12, produceCount: 2 },
-  { id: "chili", seedId: "chili_seed", produceId: "chili", growthMinutes: 18, produceCount: 3 },
-  { id: "lettuce", seedId: "lettuce_seed", produceId: "lettuce", growthMinutes: 12, produceCount: 2 },
-  { id: "radish", seedId: "radish_seed", produceId: "radish", growthMinutes: 16, produceCount: 2 },
-  { id: "spinach", seedId: "spinach_seed", produceId: "spinach", growthMinutes: 13, produceCount: 2 },
+  { id: "wheat", seedId: "wheat_seed", produceId: "wheat", growthMinutes: 10, produceCount: 2, season: "spring" },
+  { id: "carrot", seedId: "carrot_seed", produceId: "carrot", growthMinutes: 12, produceCount: 2, season: "autumn" },
+  { id: "potato", seedId: "potato_seed", produceId: "potato", growthMinutes: 15, produceCount: 2, season: "autumn" },
+  { id: "cabbage", seedId: "cabbage_seed", produceId: "cabbage", growthMinutes: 16, produceCount: 2, season: "winter" },
+  { id: "strawberry", seedId: "strawberry_seed", produceId: "strawberry", growthMinutes: 14, produceCount: 3, season: "spring" },
+  { id: "tomato", seedId: "tomato_seed", produceId: "tomato", growthMinutes: 20, produceCount: 2, season: "summer" },
+  { id: "corn", seedId: "corn_seed", produceId: "corn", growthMinutes: 18, produceCount: 2, season: "summer" },
+  { id: "rice", seedId: "rice_seed", produceId: "rice", growthMinutes: 22, produceCount: 2, season: "summer" },
+  { id: "pumpkin", seedId: "pumpkin_seed", produceId: "pumpkin", growthMinutes: 30, produceCount: 1, season: "autumn" },
+  { id: "melon", seedId: "melon_seed", produceId: "melon", growthMinutes: 30, produceCount: 1, season: "summer" },
+  { id: "onion", seedId: "onion_seed", produceId: "onion", growthMinutes: 14, produceCount: 2, season: "spring" },
+  { id: "soybean", seedId: "soybean_seed", produceId: "soybean", growthMinutes: 16, produceCount: 3, season: "summer" },
+  { id: "cucumber", seedId: "cucumber_seed", produceId: "cucumber", growthMinutes: 15, produceCount: 2, season: "summer" },
+  { id: "eggplant", seedId: "eggplant_seed", produceId: "eggplant", growthMinutes: 20, produceCount: 2, season: "summer" },
+  { id: "sweet_potato", seedId: "sweet_potato_seed", produceId: "sweet_potato", growthMinutes: 18, produceCount: 2, season: "autumn" },
+  { id: "pepper", seedId: "pepper_seed", produceId: "pepper", growthMinutes: 18, produceCount: 3, season: "summer" },
+  { id: "grape", seedId: "grape_seed", produceId: "grape", growthMinutes: 26, produceCount: 2, season: "autumn" },
+  { id: "turnip", seedId: "turnip_seed", produceId: "turnip", growthMinutes: 12, produceCount: 2, season: "autumn" },
+  { id: "chili", seedId: "chili_seed", produceId: "chili", growthMinutes: 18, produceCount: 3, season: "summer" },
+  { id: "lettuce", seedId: "lettuce_seed", produceId: "lettuce", growthMinutes: 12, produceCount: 2, season: "spring" },
+  { id: "radish", seedId: "radish_seed", produceId: "radish", growthMinutes: 16, produceCount: 2, season: "winter" },
+  { id: "spinach", seedId: "spinach_seed", produceId: "spinach", growthMinutes: 13, produceCount: 2, season: "winter" },
   // 母数拡充 第2弾
-  { id: "daikon", seedId: "daikon_seed", produceId: "daikon", growthMinutes: 18, produceCount: 2 },
-  { id: "apple", seedId: "apple_seed", produceId: "apple", growthMinutes: 28, produceCount: 2 },
-  { id: "peach", seedId: "peach_seed", produceId: "peach", growthMinutes: 30, produceCount: 2 },
-  { id: "cotton", seedId: "cotton_seed", produceId: "cotton", growthMinutes: 24, produceCount: 3 },
+  { id: "daikon", seedId: "daikon_seed", produceId: "daikon", growthMinutes: 18, produceCount: 2, season: "winter" },
+  { id: "apple", seedId: "apple_seed", produceId: "apple", growthMinutes: 28, produceCount: 2, season: "autumn" },
+  { id: "peach", seedId: "peach_seed", produceId: "peach", growthMinutes: 30, produceCount: 2, season: "summer" },
+  { id: "cotton", seedId: "cotton_seed", produceId: "cotton", growthMinutes: 24, produceCount: 3, season: "autumn" },
 ];
 
 

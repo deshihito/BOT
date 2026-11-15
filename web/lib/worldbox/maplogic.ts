@@ -17,7 +17,8 @@ export { CHUNK_SIZE };
 // ---------------------------------------------------------------- バイオーム
 export type BiomeId =
   | "lake" | "beach" | "plains" | "forest" | "dense_forest"
-  | "dryland" | "wetland" | "highland" | "snowfield" | "snow_forest";
+  | "dryland" | "wetland" | "highland" | "snowfield" | "snow_forest"
+  | "cave_deep" | "ruins_belt";
 
 export type BiomeDef = {
   id: BiomeId;
@@ -37,7 +38,18 @@ export const BIOMES: readonly BiomeDef[] = [
   { id: "highland", name: "岩場", resources: ["stone", "copper_ore", "iron_ore", "coal", "flint"] },
   { id: "snowfield", name: "雪原", resources: ["feather", "raw_meat"] },
   { id: "snow_forest", name: "雪の森", resources: ["wood", "raw_meat", "feather"] },
+  { id: "cave_deep", name: "洞窟", resources: ["coal", "copper_ore", "iron_ore", "gold_ore"] },
+  { id: "ruins_belt", name: "遺跡帯", resources: ["stone", "ancient_coin", "flint"] },
 ];
+
+/** インスタンス空間のバイオーム（洞窟・遺跡・ダンジョン）。対象外は null。 */
+export function biomeForInstanceSpace(space: unknown): BiomeId | null {
+  if (typeof space !== "string") return null;
+  if (/^cave:-?\d+,-?\d+:\d+$/.test(space)) return "cave_deep";
+  if (/^dungeon:-?\d+,-?\d+:\d+$/.test(space)) return "cave_deep";
+  if (/^ruins:-?\d+,-?\d+:\d+$/.test(space)) return "ruins_belt";
+  return null;
+}
 
 const BIOME_BY_ID = new Map(BIOMES.map((b) => [b.id, b]));
 export function biomeById(id: unknown): BiomeDef | null {

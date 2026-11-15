@@ -56,6 +56,7 @@ import {
   type CaveLayer, type DungeonFloorData, type RuinsMap,
 } from "@/lib/worldbox/instances";
 import { EVENT_DUNGEON_ENTRANCE } from "@/lib/worldbox/events";
+import { SEASON_NAMES, seasonDaysLeft, seasonOf } from "@/lib/worldbox/seasons";
 import { biomeAt, structureById, structuresForChunk, type PlacedStructure } from "@/lib/worldbox/maplogic";
 import { specialObjectById } from "@/lib/worldbox/objects";
 import type { BoardPost } from "@/lib/worldbox/board";
@@ -4715,6 +4716,12 @@ export default function WorldBoxClient() {
             >
               {soundSettings.se ? "効果音を切る" : "効果音を入れる"}
             </button>
+            <div style={{ borderTop: "1px solid rgba(255,255,255,0.18)", paddingTop: 6 }}>
+              <div style={{ fontSize: 12, display: "flex", gap: 6 }}>
+                <span style={{ flex: 1 }}>{SEASON_NAMES[seasonOf(Date.now())]}</span>
+                <span style={{ opacity: 0.75 }}>あと{seasonDaysLeft(Date.now())}日</span>
+              </div>
+            </div>
             {eventsUi.length > 0 && (
               <div style={{ borderTop: "1px solid rgba(255,255,255,0.18)", paddingTop: 6 }}>
                 {eventsUi.map((e) => (
