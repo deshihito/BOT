@@ -522,7 +522,10 @@ export function playWbSe(name: WbSeName): void {
 
 /* --- BGM シーケンサ（決定的ループ、ルックアヘッド方式） --- */
 
+/** 再生すべき場面（希望）。AudioContext が無くても保持する。 */
 let currentScene: WbBgmScene | null = null;
+/** シーケンサが実際に鳴らしている場面。場面切替の判定はこっちで見る。 */
+let playingScene: WbBgmScene | null = null;
 let bgmTimer: ReturnType<typeof setInterval> | null = null;
 let bgmStep = 0;
 let bgmNextStepAt = 0;
@@ -548,9 +551,10 @@ function scheduleStep(track: WbBgmTrack, step: number, at: number): void {
 
 function startBgm(scene: WbBgmScene): void {
   if (!ctx || !bgmBus) return;
-  if (bgmTimer && currentScene === scene) return;
+  if (bgmTimer && playingScene === scene) return;
   stopBgmTimer();
   currentScene = scene;
+  playingScene = scene;
   const track = BGM_TRACKS[scene];
   bgmBus.gain.setTargetAtTime(BGM_VOLUME, ctx.currentTime, 0.3);
   bgmStep = 0;
@@ -571,6 +575,7 @@ function stopBgmTimer(): void {
     clearInterval(bgmTimer);
     bgmTimer = null;
   }
+  playingScene = null;
 }
 
 export function stopWbBgm(): void {
