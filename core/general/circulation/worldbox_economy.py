@@ -51,7 +51,7 @@ NAMESPACE = "worldbox_economy"
 #: 送受金の相手方として履歴に残すシステムID
 WORLDBOX_ID = "WORLD_BOX"
 #: earn の理由ホワイトリスト（Web 側 economy-bridge.ts の EARN_REASONS と同じ集合）
-EARN_REASONS = frozenset({"harvest", "guild_shop_sale", "arena_prize", "shop_sale", "work"})
+EARN_REASONS = frozenset({"harvest", "guild_shop_sale", "arena_prize", "shop_sale", "work", "guild_request_reward", "guild_request_refund"})
 #: gamble の理由ホワイトリスト（Web 側 economy-bridge.ts の GAMBLE_REASONS と同じ集合）
 GAMBLE_REASONS = frozenset({
     "casino_slot", "casino_roulette", "casino_dice",

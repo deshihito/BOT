@@ -27,7 +27,7 @@ import {
   staminaGaugeVisible, stepStamina, type StaminaState, type StaminaUse, type TapTracker,
 } from "@/lib/worldbox/stamina";
 import { createRemoteTrack, stepRemoteTrack, updateRemoteTrack, type RemoteTrack } from "@/lib/worldbox/remote";
-import type { NationRole, NationView, NationsResponse } from "@/lib/worldbox/nations";
+import type { NationView, NationsResponse } from "@/lib/worldbox/nations";
 import { USER_BUILDING_CAP, isSpawnPlazaTile, type BuildingType, type BuildingView } from "@/lib/worldbox/buildings";
 import {
   L_PLAZA, L_SAND, L_VOID,
@@ -49,6 +49,7 @@ import { isStickTouch, stickBase, stickVector } from "@/lib/worldbox/stick";
 import { useGamesNav } from "../GamesShell";
 import WorldBoxCasinoPanel from "./WorldBoxCasinoPanel";
 import WorldBoxEconomyPanel from "./WorldBoxEconomyPanel";
+import WorldBoxGuildBoardPanel from "./WorldBoxGuildBoardPanel";
 
 const SAVE_KEY = "ago-worldbox-save-v6";
 /** 1タイルの表示サイズ（CSS px）。 */
@@ -118,7 +119,6 @@ function texReady(img: HTMLImageElement | undefined): img is HTMLImageElement {
   return !!img && img.complete && img.naturalWidth > 0;
 }
 
-const ROLE_LABEL: Record<NationRole, string> = { king: "王", minister: "大臣", citizen: "国民" };
 
 /** 建築ツール（建物3種＋取り壊し）。 */
 type BuildTool = BuildingType | "demolish";
@@ -236,6 +236,7 @@ const FLAT_LOBBY_SPRITES = new Set(["warp_pad", "stairs", "tapestry"]);
 /** ステーションの名前札（近づくと下部チップに出る）。 */
 const STATION_LABEL: Record<LobbyStation, string> = {
   board: "掲示板",
+  guild: "ギルドボード",
   shop: "ショップ",
   bank: "銀行",
   casino: "カジノ",
@@ -354,6 +355,7 @@ export default function WorldBoxClient() {
   const warpActionRef = useRef<(target: SaveSpace) => void>(() => {});
   const [casinoOpen, setCasinoOpen] = useState(false);
   const [boardOpen, setBoardOpen] = useState(false);
+  const [guildBoardOpen, setGuildBoardOpen] = useState(false);
   const [boardPosts, setBoardPosts] = useState<BoardPost[]>([]);
   const [boardLoggedIn, setBoardLoggedIn] = useState(false);
   const [boardText, setBoardText] = useState("");
@@ -494,6 +496,7 @@ export default function WorldBoxClient() {
       setMapView(false);
       setCasinoOpen(false);
       setBoardOpen(false);
+      setGuildBoardOpen(false);
       setStorageOpen(false);
       setHeldSlot(null);
       setSeedPicker(null);
@@ -1229,6 +1232,7 @@ export default function WorldBoxClient() {
           setBuildMode(false);
         }
         setBoardOpen(false);
+        setGuildBoardOpen(false);
         placePlayer(LOBBY_ENTRY.x, LOBBY_ENTRY.y);
       } else {
         space = "world";
@@ -1936,7 +1940,7 @@ export default function WorldBoxClient() {
     },
     {
       id: "nations",
-      label: showNations ? "国を閉じる" : "国",
+      label: showNations ? "建築を閉じる" : "建築",
       show: spaceUi === "world",
       run: () => setShowNations((v) => !v),
     },
@@ -1956,35 +1960,38 @@ export default function WorldBoxClient() {
   ];
 
   // 入場ゲート: Discord ログインが確認できるまではワールドを描画しない。
+  // ゲートも独立シェル（100svh・中央寄せ）で完結させる。
   if (!gateOk) {
     return (
-      <div>
-        <nav className="breadcrumbs" aria-label="パンくず">
-          <Link href={`${prefix}/games`}>ゲーム</Link>
-          <span> / </span>
-          <span>AGO WORLD BOX</span>
-        </nav>
-        <div className="page-heading compact-heading">
-          <h1>AGO WORLD BOX</h1>
-        </div>
+      <div
+        className="wb-shell"
+        style={{
+          display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+          gap: 14, padding: 20, boxSizing: "border-box", textAlign: "center",
+        }}
+      >
+        <h1 style={{ fontSize: 28, margin: 0 }}>AGO WORLD BOX</h1>
         {gate === "checking" ? (
-          <p className="classic-status" role="status">
+          <p role="status" style={{ margin: 0 }}>
             読み込み中…
           </p>
         ) : (
-          <div style={{ textAlign: "center", marginTop: 24 }}>
-            <p className="classic-status" role="status">
+          <>
+            <p role="status" style={{ margin: 0 }}>
               ログインが必要
             </p>
             <a
               href="/api/auth/discord/authorize?next=/games/worldbox"
               style={{
-                ...btn, textDecoration: "none", display: "inline-flex", alignItems: "center", marginTop: 12,
+                ...btn, textDecoration: "none", display: "inline-flex", alignItems: "center",
               }}
             >
               Discordでログイン
             </a>
-          </div>
+            <Link href={`${prefix}/games`} style={{ color: "#9fd8e8", fontSize: 13 }}>
+              ゲーム一覧へ
+            </Link>
+          </>
         )}
       </div>
     );
@@ -1992,8 +1999,10 @@ export default function WorldBoxClient() {
 
   return (
     <div
+      className="wb-shell"
       onContextMenu={(e) => e.preventDefault()}
       style={{
+        display: "flex", flexDirection: "column",
         WebkitTouchCallout: "none",
         WebkitUserSelect: "none",
         MozUserSelect: "none",
@@ -2001,27 +2010,12 @@ export default function WorldBoxClient() {
         userSelect: "none",
       }}
     >
-      <nav className="breadcrumbs" aria-label="パンくず">
-        <Link href={`${prefix}/games`}>ゲーム</Link>
-        <span> / </span>
-        <span>AGO WORLD BOX</span>
-      </nav>
-      <div className="page-heading compact-heading">
-        <h1>AGO WORLD BOX</h1>
-      </div>
-
-      <p className="classic-status" role="status">
-        {statusText}
-        {othersCount > 0 ? ` ・ いま ${othersCount} 人が歩いている` : ""}
-        {` ・ 座標 X ${coords.x} / Y ${coords.y}`}
-      </p>
-
       <div
         ref={stageRef}
         style={{
-          position: "relative", margin: "0 auto", touchAction: "none",
-          maxWidth: isFullscreen ? undefined : 960,
-          ...(isFullscreen ? { width: "100%", height: "100%", background: "#0b0e14" } : {}),
+          position: "relative", touchAction: "none",
+          width: "100%", flex: "1 1 auto", minHeight: 0,
+          ...(isFullscreen ? { height: "100%", background: "#0b0e14" } : {}),
         }}
       >
         <canvas
@@ -2029,11 +2023,24 @@ export default function WorldBoxClient() {
           onContextMenu={(e) => e.preventDefault()}
           aria-label="AGO WORLD BOX の見下ろしマップ。スティックか WASD で歩けます"
           style={{
-            width: "100%", height: isFullscreen ? "100%" : "min(62vh, 560px)", minHeight: isFullscreen ? 0 : 340, display: "block",
-            borderRadius: isFullscreen ? 0 : 16, border: "2px solid rgba(255,255,255,0.15)",
+            width: "100%", height: "100%", display: "block",
             touchAction: "none", userSelect: "none", WebkitUserSelect: "none", WebkitTouchCallout: "none", WebkitTapHighlightColor: "transparent",
           }}
         />
+        <div
+          role="status"
+          style={{
+            position: "absolute", top: 10, left: "50%", transform: "translateX(-50%)",
+            padding: "4px 12px", borderRadius: 10, background: "rgba(0,0,0,0.55)", color: "#fff",
+            fontSize: 12, lineHeight: 1.5, whiteSpace: "nowrap", pointerEvents: "none", zIndex: 4,
+            maxWidth: "calc(100% - 176px)", boxSizing: "border-box",
+            overflow: "hidden", textOverflow: "ellipsis",
+          }}
+        >
+          {statusText}
+          {othersCount > 0 ? ` ・ いま ${othersCount} 人が歩いている` : ""}
+          {` ・ 座標 X ${coords.x} / Y ${coords.y}`}
+        </div>
         <button
           type="button"
           aria-label="メニュー"
@@ -2082,6 +2089,15 @@ export default function WorldBoxClient() {
                   {a.label}
                 </button>
               ))}
+            <Link
+              href={`${prefix}/games`}
+              style={{
+                ...btn, background: "rgba(255,255,255,0.10)", color: "#fff",
+                textDecoration: "none", textAlign: "center",
+              }}
+            >
+              ゲーム一覧へ
+            </Link>
           </div>
         )}
         {spaceUi === "lobby" && stationUi && (
@@ -2109,6 +2125,15 @@ export default function WorldBoxClient() {
                 onClick={() => setCasinoOpen((v) => !v)}
               >
                 {casinoOpen ? "閉じる" : "遊ぶ"}
+              </button>
+            )}
+            {stationUi === "guild" && (
+              <button
+                type="button"
+                style={{ ...btn, minHeight: 32, padding: "2px 10px" }}
+                onClick={() => setGuildBoardOpen((v) => !v)}
+              >
+                {guildBoardOpen ? "閉じる" : "開く"}
               </button>
             )}
           </div>
@@ -2341,125 +2366,12 @@ export default function WorldBoxClient() {
       {showNations && (
         <div style={panelOverlay}>
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
-            <strong>国</strong>
+            <strong>建築</strong>
             <span style={{ flex: 1 }} />
             <button type="button" style={btn} onClick={() => setShowNations(false)}>
               閉じる
             </button>
           </div>
-          {(() => {
-            const me = nationsUi.me;
-            const myNation = me ? nationsUi.nations.find((n) => n.id === me.nationId) ?? null : null;
-            const foundable = nationsUi.myGuilds.filter((g) => g.owner && !g.hasNation);
-            const joinable = nationsUi.myGuilds.filter((g) => g.hasNation);
-            const myGuildIds = new Set(nationsUi.myGuilds.map((g) => g.guildId));
-            const others = [...nationsUi.nations]
-              .filter((n) => !myGuildIds.has(n.guildId))
-              .sort((a, b) => b.prosperity - a.prosperity);
-            if (me && myNation) {
-              return (
-                <div>
-                  <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-                    <span aria-hidden style={{ width: 12, height: 12, borderRadius: 3, background: myNation.color, display: "inline-block" }} />
-                    <strong>{myNation.name}</strong>
-                    <span>{ROLE_LABEL[me.role]}</span>
-                    <span className="muted">国民 {myNation.members}人</span>
-                    <span className="muted">繁栄度 {myNation.prosperity}</span>
-                    <span style={{ flex: 1 }} />
-                    <button
-                      type="button"
-                      style={btn}
-                      onClick={() => void nationAction({ action: "leave" })}
-                    >
-                      {me.role === "king" && myNation.members <= 1 ? "解散" : "離脱"}
-                    </button>
-                  </div>
-                </div>
-              );
-            }
-            return (
-              <div>
-                {nationsUi.loggedIn && nationsUi.guildsScopeRequired && (
-                  <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 12 }}>
-                    <span className="muted" style={{ fontSize: 13 }}>サーバー一覧の取得に再ログインが必要</span>
-                    <a
-                      href="/api/auth/discord/authorize?next=/games/worldbox"
-                      style={{ ...btn, textDecoration: "none", display: "inline-flex", alignItems: "center" }}
-                    >
-                      Discordで再ログイン
-                    </a>
-                  </div>
-                )}
-                {nationsUi.loggedIn && !nationsUi.guildsScopeRequired && foundable.length > 0 && (
-                  <div style={{ marginBottom: 12 }}>
-                    <p style={{ margin: "0 0 6px", fontSize: 13 }}>建国できるサーバー</p>
-                    <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: 8 }}>
-                      {foundable.map((g) => (
-                        <li key={g.guildId} style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-                          <strong>{g.name}</strong>
-                          <span style={{ flex: 1 }} />
-                          <button type="button" style={btn} onClick={() => void nationAction({ action: "found", guildId: g.guildId })}>
-                            建国
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-                {nationsUi.loggedIn && !nationsUi.guildsScopeRequired && joinable.length > 0 && (
-                  <div style={{ marginBottom: 12 }}>
-                    <p style={{ margin: "0 0 6px", fontSize: 13 }}>国があるサーバー</p>
-                    <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: 8 }}>
-                      {joinable.map((g) => {
-                        const n = nationsUi.nations.find((x) => x.guildId === g.guildId);
-                        return (
-                          <li key={g.guildId} style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-                            {n && (
-                              <span aria-hidden style={{ width: 12, height: 12, borderRadius: 3, background: n.color, display: "inline-block" }} />
-                            )}
-                            <strong>{g.name}</strong>
-                            <span className="muted">{ROLE_LABEL[g.myRole]}{n ? ` ・ ${n.members}人` : ""}</span>
-                            <span style={{ flex: 1 }} />
-                            <button type="button" style={btn} onClick={() => void nationAction({ action: "join", guildId: g.guildId })}>
-                              参加
-                            </button>
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  </div>
-                )}
-                {others.length === 0 && joinable.length === 0 ? (
-                  <p className="muted" style={{ margin: 0 }}>まだ国はありません</p>
-                ) : others.length > 0 ? (
-                  <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: 8 }}>
-                    {others.map((n) => {
-                      const dist = Math.round(Math.hypot(
-                        n.capital.x + 0.5 - playerPosRef.current.x,
-                        n.capital.y + 0.5 - playerPosRef.current.y,
-                      ));
-                      return (
-                        <li key={n.id} style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", opacity: 0.55 }}>
-                          <span aria-hidden style={{ width: 12, height: 12, borderRadius: 3, background: n.color, display: "inline-block" }} />
-                          <strong>{n.name}</strong>
-                          <span className="muted">{n.members}人 ・ 繁栄度 {n.prosperity} ・ {dist}タイル</span>
-                          <span style={{ flex: 1 }} />
-                          {nationsUi.loggedIn && (
-                            <button type="button" style={btn} disabled>
-                              参加
-                            </button>
-                          )}
-                        </li>
-                      );
-                    })}
-                  </ul>
-                ) : null}
-                {!nationsUi.loggedIn && (
-                  <p className="muted" style={{ margin: "10px 0 0", fontSize: 13 }}>建国・参加はログイン後</p>
-                )}
-              </div>
-            );
-          })()}
           {buildingsUi.loggedIn && (
             <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginTop: 12 }}>
               <span className="muted" style={{ fontSize: 13 }}>建築</span>
@@ -2488,15 +2400,23 @@ export default function WorldBoxClient() {
               )}
             </div>
           )}
-          {nationMsg && (
-            <p role="status" style={{ margin: "10px 0 0" }}>{nationMsg}</p>
-          )}
         </div>
       )}
 
       {showEconomy && <WorldBoxEconomyPanel space={spaceUi} station={stationUi} onClose={() => setShowEconomy(false)} />}
       {casinoOpen && spaceUi === "lobby" && (
         <WorldBoxCasinoPanel onClose={() => setCasinoOpen(false)} />
+      )}
+      {guildBoardOpen && spaceUi === "lobby" && (
+        <WorldBoxGuildBoardPanel
+          nations={nationsUi}
+          nationMsg={nationMsg}
+          onNationAction={(body) => void nationAction(body)}
+          profile={invProfile}
+          onProfileChange={setInvProfile}
+          getPlayerPos={() => playerPosRef.current}
+          onClose={() => setGuildBoardOpen(false)}
+        />
       )}
       </div>
     </div>
