@@ -1,7 +1,8 @@
 // AGO WORLD BOX パネルの開閉の検証:
-// - 全パネルにパネル内の「閉じる」がある（特に国・経済は ≡ メニューだけに頼らない）
+// - 全パネルにパネル内の「閉じる」がある（特に経済は ≡ メニューだけに頼らない）
 // - ≡ ボタンとメニューがパネルより手前に出る（パネルに覆われて開閉不能にならない）
 // - Esc でも全部閉じられる
+// - 旧「建築」パネル（showNations）はプレハブ建物の廃止に伴い撤去済み
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -24,11 +25,9 @@ function near(src, marker, needle, limit = 1200) {
   return src.slice(i, i + limit).includes(needle);
 }
 
-test("国パネル: パネル内に閉じるボタンがある", () => {
-  assert.ok(
-    near(client, "{showNations && (", "onClick={() => setShowNations(false)}"),
-    "国パネル内に setShowNations(false) の閉じるボタンが無い",
-  );
+test("旧建築パネル: showNations パネルは撤去済み（中身はプレハブ建物だけだった）", () => {
+  assert.ok(!client.includes("showNations"), "旧建築パネルが残っている");
+  assert.ok(!client.includes("setShowNations"), "旧建築パネルの状態が残っている");
 });
 
 test("経済パネル: onClose を受け取り全状態に閉じるボタンがある", () => {
@@ -49,7 +48,6 @@ test("≡ メニューはパネルより手前に出る（開閉の一本化ル�
 });
 
 test("Esc で開いているパネルとメニューを全部閉じる", () => {
-  assert.ok(near(client, 'e.key !== "Escape"', "setShowNations(false)", 600));
   assert.ok(near(client, 'e.key !== "Escape"', "setShowEconomy(false)", 600));
   assert.ok(near(client, 'e.key !== "Escape"', "setMenuOpen(false)", 600));
 });
