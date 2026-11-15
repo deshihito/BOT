@@ -39,6 +39,7 @@ from core.game.clan import clan as clan_core
 from core.general.user_names import cached_display_name
 from core.game.gacha import gacha as gacha_core
 from core.general.circulation import economy_pool as economy_core
+from core.general.circulation import worldbox_chat as worldbox_chat_core
 from core.general.circulation import worldbox_economy as worldbox_economy_core
 from core.support.storage import KVStore
 from core.general.items import items as items_core
@@ -436,6 +437,12 @@ class CirculationCog(commands.Cog):
             new_user_balance=lambda: wallet_module.NEW_USER_BALANCE,
             balance_reader=self._balance,
         )
+        # AGO WORLD BOX のユニオンチャット → Discord チャンネル連携:
+        # Web が送信箱に積んだ投稿を連携先チャンネルへ流す
+        self.worldbox_chat = worldbox_chat_core.WorldBoxChatWorker(
+            kv=KVStore(worldbox_chat_core.NAMESPACE),
+            channel_sender=self._send_worldbox_chat,
+        )
 
     def _item_store(self) -> items_core.ItemStore:
         """ItemStore は ItemsCog のものを共有する（二重化すると所持が割れる）。"""
@@ -451,12 +458,16 @@ class CirculationCog(commands.Cog):
             self.flush_loop.start()
         if not self.worldbox_economy_loop.is_running():
             self.worldbox_economy_loop.start()
+        if not self.worldbox_chat_loop.is_running():
+            self.worldbox_chat_loop.start()
 
     async def cog_unload(self) -> None:
         if self.flush_loop.is_running():
             self.flush_loop.cancel()
         if self.worldbox_economy_loop.is_running():
             self.worldbox_economy_loop.cancel()
+        if self.worldbox_chat_loop.is_running():
+            self.worldbox_chat_loop.cancel()
         self.mining_store.flush()
         self.lottery_store.flush()
         self.steal_store.flush()
@@ -486,6 +497,34 @@ class CirculationCog(commands.Cog):
 
     @worldbox_economy_loop.before_loop
     async def _before_worldbox_economy_loop(self) -> None:
+        await self.bot.wait_until_ready()
+
+    async def _send_worldbox_chat(self, channel_id: str, name: str, text: str) -> bool:
+        """連携先チャンネルへ投稿する。メンションは一切許可しない。"""
+        try:
+            channel = self.bot.get_channel(int(channel_id))
+            if channel is None:
+                channel = await self.bot.fetch_channel(int(channel_id))
+        except Exception:
+            return False
+        if channel is None or not hasattr(channel, "send"):
+            return False
+        try:
+            await channel.send(
+                f"**{name}**（WORLD BOX ユニオン）: {text}",
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
+            return True
+        except Exception:
+            return False
+
+    @tasks.loop(seconds=worldbox_chat_core.POLL_SECONDS)
+    async def worldbox_chat_loop(self) -> None:
+        # 失敗は poll_once の中で吸収される（接続エラーは警告1行）
+        await self.worldbox_chat.poll_once()
+
+    @worldbox_chat_loop.before_loop
+    async def _before_worldbox_chat_loop(self) -> None:
         await self.bot.wait_until_ready()
 
     # ------------------------------------------------------------------ 共通

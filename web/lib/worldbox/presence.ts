@@ -158,6 +158,29 @@ export function selectVisiblePlayers(
     .slice(0, limit);
 }
 
+/** 近傍限定の間引き半径（タイル）。ワールドのスケール対策（バッチ6）。 */
+export const PRESENCE_NEAR_RADIUS = 48;
+
+/**
+ * ワールド空間では自分の近傍だけを返す（スケール時の帯域と描画の節約）。
+ * 自分のエントリが無い（未ログイン等）場合は間引かず従来どおり。
+ * 近い順に並べ、上限を超えたら近いものから残す。
+ */
+export function thinPresenceNear(
+  entries: PresenceEntry[],
+  self: PresenceEntry | null,
+  radius: number = PRESENCE_NEAR_RADIUS,
+  limit: number = PRESENCE_MAX_PLAYERS,
+): PresenceEntry[] {
+  if (!self) return entries.slice(0, limit);
+  return entries
+    .map((e) => ({ e, d: Math.hypot(e.x - self.x, e.y - self.y) }))
+    .filter(({ d }) => d <= radius)
+    .sort((a, b) => a.d - b.d || b.e.ts - a.e.ts)
+    .slice(0, limit)
+    .map(({ e }) => e);
+}
+
 /**
  * デッドレコニング: 最終ハートビート位置を速度で外挿する。
  * 外挿は EXTRAPOLATE_CAP_SEC で頭打ちにし、空間の範囲内に丸める。
