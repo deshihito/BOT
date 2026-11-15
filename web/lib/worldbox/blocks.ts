@@ -27,18 +27,23 @@ export type BlockDef = {
   hardness: number;
   /** ホットバーに出して設置できるか。 */
   placeable: boolean;
+  /**
+   * 緩いブロックか（v2 の崩落対象）。草・土・砂・葉は緩く、下が空くと落ちる。
+   * 石・鉱石・原木・岩盤は構造材で、支えを失っても落ちない。
+   */
+  loose: boolean;
 };
 
 export const BLOCKS: Record<number, BlockDef> = {
-  [GRASS]: { id: GRASS, name: "草ブロック", color: "#57a639", colorDark: "#8a5a2b", solid: true, hardness: 0.45, placeable: true },
-  [DIRT]: { id: DIRT, name: "土", color: "#8a5a2b", colorDark: "#6f4520", solid: true, hardness: 0.4, placeable: true },
-  [STONE]: { id: STONE, name: "石", color: "#8d8d93", colorDark: "#6e6e73", solid: true, hardness: 1.1, placeable: true },
-  [WOOD]: { id: WOOD, name: "原木", color: "#7a5230", colorDark: "#5d3d22", solid: true, hardness: 0.8, placeable: true },
-  [LEAVES]: { id: LEAVES, name: "葉っぱ", color: "#3e7d2c", colorDark: "#2f6121", solid: true, hardness: 0.15, placeable: true },
-  [SAND]: { id: SAND, name: "砂", color: "#ddd29a", colorDark: "#c4b87f", solid: true, hardness: 0.35, placeable: true },
-  [COAL_ORE]: { id: COAL_ORE, name: "石炭鉱石", color: "#8d8d93", colorDark: "#55555a", solid: true, hardness: 1.4, placeable: true },
-  [COPPER_ORE]: { id: COPPER_ORE, name: "銅鉱石", color: "#8d8d93", colorDark: "#7a4a33", solid: true, hardness: 1.6, placeable: true },
-  [BEDROCK]: { id: BEDROCK, name: "岩盤", color: "#3a3a40", colorDark: "#26262b", solid: true, hardness: Infinity, placeable: false },
+  [GRASS]: { id: GRASS, name: "草ブロック", color: "#57a639", colorDark: "#8a5a2b", solid: true, hardness: 0.45, placeable: true, loose: true },
+  [DIRT]: { id: DIRT, name: "土", color: "#8a5a2b", colorDark: "#6f4520", solid: true, hardness: 0.4, placeable: true, loose: true },
+  [STONE]: { id: STONE, name: "石", color: "#8d8d93", colorDark: "#6e6e73", solid: true, hardness: 1.1, placeable: true, loose: false },
+  [WOOD]: { id: WOOD, name: "原木", color: "#7a5230", colorDark: "#5d3d22", solid: true, hardness: 0.8, placeable: true, loose: false },
+  [LEAVES]: { id: LEAVES, name: "葉っぱ", color: "#3e7d2c", colorDark: "#2f6121", solid: true, hardness: 0.15, placeable: true, loose: true },
+  [SAND]: { id: SAND, name: "砂", color: "#ddd29a", colorDark: "#c4b87f", solid: true, hardness: 0.35, placeable: true, loose: true },
+  [COAL_ORE]: { id: COAL_ORE, name: "石炭鉱石", color: "#8d8d93", colorDark: "#55555a", solid: true, hardness: 1.4, placeable: true, loose: false },
+  [COPPER_ORE]: { id: COPPER_ORE, name: "銅鉱石", color: "#8d8d93", colorDark: "#7a4a33", solid: true, hardness: 1.6, placeable: true, loose: false },
+  [BEDROCK]: { id: BEDROCK, name: "岩盤", color: "#3a3a40", colorDark: "#26262b", solid: true, hardness: Infinity, placeable: false, loose: false },
 };
 
 /** ホットバーに並べる設置可能ブロック（表示順）。 */
@@ -66,4 +71,9 @@ export function hardnessOf(id: number): number {
 /** 掘ったときに手に入るブロック（v1 では掘ったブロックそのもの）。 */
 export function dropOf(id: number): number {
   return BLOCKS[id] ? id : AIR;
+}
+
+/** 緩いブロックか（下が空くと崩落する）。空気・未定義は false。 */
+export function isLooseBlock(id: number): boolean {
+  return BLOCKS[id]?.loose ?? false;
 }
