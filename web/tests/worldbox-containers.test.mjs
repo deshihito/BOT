@@ -355,6 +355,11 @@ const containersRoute = await routeImport("api/worldbox/containers/route.ts", [
   ['"@/lib/worldbox/containers-online"', containersOnlineStubUrl],
   ['"@/lib/worldbox/user-lock"', userLockUrl],
 ]);
+const machinesUrl = bundleModule(["worldbox/items.ts", "worldbox/machines.ts"], ["isMachineItem", "machineBufferCount"]);
+const machinesOnlineStubUrl = dataUrl(`
+export async function loadMachine() { return null; }
+export async function deleteMachine() {}
+`);
 const tilesRoute = await routeImport("api/worldbox/tiles/route.ts", [
   ['"next/server"', nextServerStubUrl],
   ['"@/lib/auth"', authUrl],
@@ -371,6 +376,8 @@ const tilesRoute = await routeImport("api/worldbox/tiles/route.ts", [
   ['"@/lib/worldbox/war-online"', warsOnlineStubUrl],
   ['"@/lib/worldbox/containers"', containersUrl],
   ['"@/lib/worldbox/containers-online"', containersOnlineStubUrl],
+  ['"@/lib/worldbox/machines"', machinesUrl],
+  ['"@/lib/worldbox/machines-online"', machinesOnlineStubUrl],
   ['"@/lib/worldbox/user-lock"', userLockUrl],
 ]);
 

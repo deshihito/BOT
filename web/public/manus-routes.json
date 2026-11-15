@@ -12,8 +12,6 @@
     { "path": "/games/:id", "title": "ゲームのルール" },
     { "path": "/jinrou/roles", "title": "人狼 役職図鑑" },
     { "path": "/jinrou/roles/:id", "title": "人狼 役職" },
-    { "path": "/map", "title": "マップ" },
-    { "path": "/nation", "title": "国づくり" },
     { "path": "/ranking", "title": "リーダーボード" },
     { "path": "/terms", "title": "利用規約" },
     { "path": "/privacy", "title": "プライバシーポリシー" }

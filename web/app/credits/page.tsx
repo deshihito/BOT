@@ -1,6 +1,7 @@
 import { VOICEVOX_CHARACTERS, VOICEVOX_CREDITS_AS_OF } from "@/lib/voicevox-credits";
 import { FONT_CREDITS, FONT_LICENSES_URL } from "@/lib/font-credits";
 import { AUDIO_DATA_CREDITS } from "@/lib/audio-credits";
+import Breadcrumbs from "../Breadcrumbs";
 
 export const metadata = {
   title: "クレジット",
@@ -12,6 +13,7 @@ export default function CreditsPage() {
   const styleCount = VOICEVOX_CHARACTERS.reduce((sum, c) => sum + c.styles.length, 0);
   return (
     <article className="legal-page">
+      <Breadcrumbs items={[{ label: "クレジット" }]} />
       <h1>クレジット</h1>
       <p>
         AGOBOTの読み上げ機能は、音声合成ソフトウェア<strong>VOICEVOX</strong>のキャラクターボイスを使用しています。

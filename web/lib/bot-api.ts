@@ -1,5 +1,4 @@
 // BOT自前API（/v1/query）への薄いクライアント（サーバー専用。BOT_API_KEYをクライアントへ出さない）
-// 国づくりマップ（lib/nation.ts）と同じ接続・資格情報を再利用する。
 // 大きな整数（DiscordのID等）は dashboard-core の番兵文字列で受け渡し、精度を落とさない。
 import { parseJsonPreservingInts, stringifyWithInts } from "./dashboard-core";
 

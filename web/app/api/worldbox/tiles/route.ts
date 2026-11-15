@@ -14,6 +14,8 @@ import { loadNationsState } from "@/lib/worldbox/nations-online";
 import { loadWarState } from "@/lib/worldbox/war-online";
 import { canBreakOthersBlock } from "@/lib/worldbox/war";
 import { containerIsEmpty, isContainerItem } from "@/lib/worldbox/containers";
+import { isMachineItem, machineBufferCount } from "@/lib/worldbox/machines";
+import { deleteMachine, loadMachine } from "@/lib/worldbox/machines-online";
 import { loadContainer, storeContainer } from "@/lib/worldbox/containers-online";
 import { withUserLock } from "@/lib/worldbox/user-lock";
 import {
@@ -158,6 +160,8 @@ export async function POST(request: Request) {
         let result: TileActionResult;
         /** 掘り出す対象が収納コンテナなら、そのアイテム ID（回収後に状態を消す）。 */
         let minedContainerItem: string | null = null;
+        /** 掘り出す対象が装置なら true（回収後に状態を消す）。 */
+        let minedMachine = false;
         if (fields.action === "place_block") {
           // ユニオンマーク（首都）の保護はルート側の真値で判定する
           const nationsState = await loadNationsState();
@@ -178,6 +182,14 @@ export async function POST(request: Request) {
               return NextResponse.json({ error: "not_empty" }, { status: 409, headers: NO_STORE });
             }
             minedContainerItem = blockItemId;
+          }
+          // 装置（自動収穫機）はバッファに作物が残っている間は回収できない
+          if (blockItemId && isMachineItem(blockItemId)) {
+            const machineState = await loadMachine(tx, ty);
+            if (machineState && machineBufferCount(machineState) > 0) {
+              return NextResponse.json({ error: "not_empty" }, { status: 409, headers: NO_STORE });
+            }
+            minedMachine = true;
           }
           // 戦争中の他者ブロック破壊: 攻撃側の国民が、防衛側の首都の
           // WAR_TERRITORY_RADIUS 以内にある防衛側国民のブロックだけ掘れる。
@@ -223,6 +235,8 @@ export async function POST(request: Request) {
         }
         // コンテナを回収したら中身（空）の状態も消す
         if (minedContainerItem) await storeContainer("world", tx, ty, null);
+        // 装置を回収したら状態も消す
+        if (minedMachine) await deleteMachine(tx, ty);
         return NextResponse.json(
           {
             ok: true,

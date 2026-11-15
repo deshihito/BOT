@@ -283,6 +283,7 @@ export const ITEMS: readonly ItemDef[] = [
   { id: "well", name: "井戸", desc: "水を汲む施設", category: "furniture", price: 150, facility: true },
   { id: "loom", name: "織り機", desc: "布を織る機械", category: "furniture", price: 110, facility: true },
   { id: "cooking_pot", name: "調理鍋", desc: "煮込み料理の鍋", category: "furniture", price: 95, facility: true },
+  { id: "auto_harvester", name: "自動収穫機", desc: "隣の畑が育ったら収穫する機械", category: "furniture", price: 800, facility: true },
   { id: "flower_pot", name: "植木鉢", desc: "花を植える鉢", category: "furniture", price: 25, facility: true },
   // ---- ブロック（追加分2: 木種・石種・色ブロック） -----------------------
   { id: "sakura_log", name: "桜の原木", desc: "置ける原木", category: "block", price: 14, durability: 25 },
@@ -463,7 +464,7 @@ export const ITEM_ICON_IDS: readonly string[] = [
   "pearl_necklace", "honey_candy",
   "ancient_coin", "ancient_relic", "dragon_scale", "ghost_tear", "golden_key", "dungeon_key", "star_map",
   "workbench", "smithing_table", "furnace", "anvil", "storage_chest", "bed",
-  "torch", "campfire", "well", "loom", "cooking_pot", "flower_pot",
+  "torch", "campfire", "well", "loom", "cooking_pot", "flower_pot", "auto_harvester",
   // 拡張分2
   "sakura_log", "dark_log", "mossy_stone_block", "cracked_stone_block",
   "sand_brick_block", "mud_brick_block", "snow_brick_block",
@@ -622,6 +623,7 @@ export const RECIPES: readonly Recipe[] = [
   { id: "well", inputs: { stone: 4, wood: 2 }, output: "well", outputCount: 1 },
   { id: "loom", inputs: { wood: 3, string: 2 }, output: "loom", outputCount: 1 },
   { id: "cooking_pot", inputs: { iron_ingot: 1, stone: 2 }, output: "cooking_pot", outputCount: 1 },
+  { id: "auto_harvester", inputs: { iron_ingot: 3, wood: 4 }, output: "auto_harvester", outputCount: 1 },
   { id: "flower_pot", inputs: { clay: 2 }, output: "flower_pot", outputCount: 1 },
   // 拡張分2（ブロック・料理・合成品）
   { id: "mossy_stone_block", inputs: { stone: 2, fiber: 1 }, output: "mossy_stone_block", outputCount: 1 },

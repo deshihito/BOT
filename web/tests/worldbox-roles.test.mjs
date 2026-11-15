@@ -201,3 +201,12 @@ test("mob states keep instance-prefixed keys (batch2 regression)", () => {
   assert.equal(states["slime@1,1"]?.frozenUntil, 999);
   assert.equal(states.junk, undefined);
 });
+
+test("roles: 蘇生はダンジョンセッションの dead から外す（S5）", () => {
+  // 蘇生後に dead に残っていると、mobs ルートが攻撃を弾き、全滅判定が
+  // 誤ってセッションを閉じてしまう。蘇生ルートで dead を除去する。
+  const route = fs.readFileSync(path.join(rootDir, "app/api/worldbox/roles/route.ts"), "utf8");
+  assert.match(route, /action === "revive"/);
+  assert.match(route, /storeDungeonSession/);
+  assert.match(route, /dead: ds\.dead\.filter\(\(m\) => m !== target\.ownerKey\)/);
+});

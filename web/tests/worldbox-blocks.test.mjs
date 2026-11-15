@@ -346,6 +346,12 @@ export class NextResponse {
 }
 `);
 const userLockUrl = dataUrl(transpile("worldbox/user-lock.ts"));
+// 装置のスタブ: 実ロジック（isMachineItem / machineBufferCount）と空の保存層。
+const machinesUrl = bundleModule(["worldbox/items.ts", "worldbox/machines.ts"], ["isMachineItem", "machineBufferCount"]);
+const machinesOnlineStubUrl = dataUrl(`
+export async function loadMachine() { return null; }
+export async function deleteMachine() {}
+`);
 const tilesRoute = await import(
   dataUrl(
     transpile("api/worldbox/tiles/route.ts", rootDir + "/app")
@@ -361,6 +367,8 @@ const tilesRoute = await import(
       .replaceAll('"@/lib/worldbox/tiles-online"', JSON.stringify(tilesOnlineStubUrl))
       .replaceAll('"@/lib/worldbox/containers"', JSON.stringify(containersBundleUrl))
       .replaceAll('"@/lib/worldbox/containers-online"', JSON.stringify(containersOnlineStubUrl))
+      .replaceAll('"@/lib/worldbox/machines"', JSON.stringify(machinesUrl))
+      .replaceAll('"@/lib/worldbox/machines-online"', JSON.stringify(machinesOnlineStubUrl))
       .replaceAll('"@/lib/worldbox/user-lock"', JSON.stringify(userLockUrl))
       .replaceAll('"@/lib/worldbox/nations-online"', JSON.stringify(nationsOnlineStubUrl))
       .replaceAll('"@/lib/worldbox/war"', JSON.stringify(warUrl))

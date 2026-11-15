@@ -192,6 +192,12 @@ const casinoSessionOnlineUrl = dataUrl(
     .replaceAll('"./casino-session"', JSON.stringify(casinoSessionUrl))
     .replaceAll('"./casino-games"', JSON.stringify(casinoGamesUrl)),
 );
+const casinoTournamentOnlineUrl = dataUrl(`
+globalThis.__wbCasinoTournamentScores ??= [];
+export async function recordCasinoTournamentScore(discordId, bet, payout) {
+  globalThis.__wbCasinoTournamentScores.push({ discordId, bet, payout });
+}
+`);
 const nextServerStubUrl = dataUrl(`
 export class NextResponse {
   static json(body, init = {}) {
@@ -211,6 +217,7 @@ const casinoRoute = await import(
       .replaceAll('"@/lib/worldbox/casino-games"', JSON.stringify(casinoGamesUrl))
       .replaceAll('"@/lib/worldbox/casino-session"', JSON.stringify(casinoSessionUrl))
       .replaceAll('"@/lib/worldbox/casino-session-online"', JSON.stringify(casinoSessionOnlineUrl))
+      .replaceAll('"@/lib/worldbox/casino-tournament-online"', JSON.stringify(casinoTournamentOnlineUrl))
       .replaceAll('"@/lib/worldbox/economy-bridge"', JSON.stringify(economyUrl))
       .replaceAll('"@/lib/worldbox/economy-bridge-online"', JSON.stringify(economyOnlineUrl))
       .replaceAll('"@/lib/worldbox/lobby"', JSON.stringify(lobbyUrl))
@@ -300,6 +307,19 @@ test("API(casino): スロットを回すと gamble オプが積まれ、残高�
   // 処理中ベットは実質残高から引かれる
   assert.equal(after.effectiveBalance, 10000 - 100);
   assert.equal(after.ops[0].id, data.opId);
+});
+
+test("API(casino): スロットを回すと大会スコア（ベット・配当）が記録される", async () => {
+  globalThis.__wbCasinoUsers.set(ME, 10000);
+  globalThis.__wbCasinoTournamentScores.length = 0;
+  setPresence(39.5, 20.5, "lobby");
+  const res = await casinoRoute.POST(apiRequest(URL_C, "POST", cookie, { game: "slot", bet: 100 }));
+  assert.equal(res.status, 200);
+  const data = await res.json();
+  assert.equal(globalThis.__wbCasinoTournamentScores.length, 1);
+  assert.deepEqual(globalThis.__wbCasinoTournamentScores[0], {
+    discordId: ME, bet: 100, payout: data.payout,
+  });
 });
 
 test("API(casino): ルーレットはテーブルの前で pick 必須", async () => {

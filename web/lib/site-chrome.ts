@@ -42,8 +42,6 @@ export const CTA_BAND_EXCLUDED_PATHS: readonly string[] = [
   // アクティビティ画面と独立ツール/ゲーム画面
   "/activity",
   "/coder",
-  "/map",
-  "/nation",
   // ポリシー・サイト情報（読み物として単独で完結させる）
   "/terms",
   "/privacy",
