@@ -13,6 +13,10 @@ import { loadNationsState } from "@/lib/worldbox/nations-online";
 import { loadTileOverride } from "@/lib/worldbox/tiles-online";
 import { buildCaveLayer, parseInstanceSpace, weekKeyOf } from "@/lib/worldbox/instances";
 import { loadRuinsPersonal } from "@/lib/worldbox/instances-online";
+import { listPresenceWithOwners } from "@/lib/worldbox/presence-online";
+import { addMasteryXp, GUARD_AURA_REDUCTION } from "@/lib/worldbox/roles";
+import { recordDeath } from "@/lib/worldbox/roles-online";
+import { loadMobState } from "@/lib/worldbox/mobs-online";
 import type { PlayerProfile, RespawnPoint } from "@/lib/worldbox/profile";
 import {
   applyDeath, applyMobDamage, resolveRespawnPoint, setBedRespawn, stepVitals,
@@ -72,7 +76,15 @@ async function settleDeath(
   ownerKey: string,
   profile: PlayerProfile,
   now: number,
+  name: string = "",
 ): Promise<NextResponse> {
+  // 蘇生用に死亡地点を記録する（セーブ位置が死亡時の空間・座標）
+  const savedAtDeath = parseSave(await loadWorldBoxSave(ownerKey));
+  if (savedAtDeath) {
+    await recordDeath({
+      ownerKey, name, space: savedAtDeath.space, x: savedAtDeath.x, y: savedAtDeath.y, at: now,
+    });
+  }
   const { profile: revived, dropped } = applyDeath(profile, now);
   const mark = await unionMarkOf(ownerKey);
   const { point, source } = resolveRespawnPoint(
@@ -105,7 +117,13 @@ export async function POST(request: Request) {
 
   if (data.action === "sync") {
     const { profile, died } = stepVitals(current, now);
-    if (died) return settleDeath(ownerKey, profile, now);
+    if (died) return settleDeath(ownerKey, profile, now, session.username ?? "");
+    if (profile.pendingTeleport) {
+      const teleport = profile.pendingTeleport;
+      const cleared = { ...profile, pendingTeleport: null };
+      if (!(await storeProfile(ownerKey, cleared))) return errorResponse("store_failed", 503);
+      return NextResponse.json({ profile: cleared, died: false, teleport }, { headers: NO_STORE });
+    }
     if (profile !== current && !(await storeProfile(ownerKey, profile))) {
       return errorResponse("store_failed", 503);
     }
@@ -153,8 +171,50 @@ export async function POST(request: Request) {
       const dist = mobDistance(Math.floor(pos.x), Math.floor(pos.y), { x, y, size: def.size });
       if (dist > MOB_ATTACK_MAX_DISTANCE) return errorResponse("too_far", 409);
     }
-    const result = applyMobDamage(current, def.id, def.attack, now, Math.random);
-    if (result.died) return settleDeath(ownerKey, result.profile, now);
+    // 凍結中のモブは接触ダメージを与えない
+    {
+      const keyPrefix = (inCave || inRuins) && typeof data.space === "string" ? `${data.space}|` : "";
+      const mstate = await loadMobState(`${keyPrefix}${def.id}@${x},${y}`);
+      if (mstate?.frozenUntil && mstate.frozenUntil > now) {
+        return NextResponse.json(
+          { profile: current, died: false, applied: false, poisoned: false },
+          { headers: NO_STORE },
+        );
+      }
+    }
+    // 守護の挑発・オーラ（同じ空間の新鮮なプレゼンスから解決する）
+    let attack = def.attack;
+    {
+      const spaceHere = (inCave || inRuins) && typeof data.space === "string" ? data.space : "world";
+      const owners = await listPresenceWithOwners();
+      const victimPos = pos ?? reported;
+      const guards = owners.filter((o) =>
+        o.ownerKey !== ownerKey && o.entry.space === spaceHere && o.entry.role === "guard" &&
+        victimPos !== null && Math.hypot(o.entry.x - victimPos.x, o.entry.y - victimPos.y) <= 3.5);
+      if (guards.length > 0 && victimPos) {
+        // 挑発が生きていればモブは守護に向かい、被害は無い
+        let taunted = false;
+        for (const g of guards) {
+          const gProfile = await loadProfile(g.ownerKey);
+          if (gProfile && gProfile.tauntUntil > now) { taunted = true; break; }
+        }
+        if (taunted) {
+          return NextResponse.json(
+            { profile: current, died: false, applied: false, poisoned: false, taunted: true },
+            { headers: NO_STORE },
+          );
+        }
+        attack = Math.max(1, Math.floor(def.attack * (1 - GUARD_AURA_REDUCTION)));
+        // 守った守護へ熟練（非同期で保存。失敗しても被害処理は続ける）
+        const g0 = guards[0];
+        const gProfile = await loadProfile(g0.ownerKey);
+        if (gProfile) {
+          await storeProfile(g0.ownerKey, addMasteryXp(gProfile, "guard", 2).profile).catch(() => false);
+        }
+      }
+    }
+    const result = applyMobDamage(current, def.id, attack, now, Math.random);
+    if (result.died) return settleDeath(ownerKey, result.profile, now, session.username ?? "");
     if (!(await storeProfile(ownerKey, result.profile))) return errorResponse("store_failed", 503);
     return NextResponse.json(
       { profile: result.profile, died: false, applied: result.applied, poisoned: result.poisoned },

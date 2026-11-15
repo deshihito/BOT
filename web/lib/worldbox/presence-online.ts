@@ -87,3 +87,20 @@ export async function listPresence(): Promise<PresenceEntry[]> {
     return [];
   }
 }
+
+/** 所有者キーつきで新鮮なプレゼンスを列挙する（味方への効果の解決用）。 */
+export async function listPresenceWithOwners(): Promise<{ ownerKey: string; entry: PresenceEntry }[]> {
+  if (!isBotApiConfigured()) return [];
+  try {
+    const rows = await kvList(WORLDBOX_PRESENCE_NAMESPACE);
+    const now = Date.now();
+    const out: { ownerKey: string; entry: PresenceEntry }[] = [];
+    for (const [key, raw] of rows) {
+      const entry = parsePresenceEntry(presenceIdFor(key), raw);
+      if (entry && isFreshPresence(entry, now)) out.push({ ownerKey: key, entry });
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}

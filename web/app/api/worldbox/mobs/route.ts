@@ -16,6 +16,7 @@ import {
 } from "@/lib/worldbox/combat";
 import { isMobsEnabled, loadMobState, loadMobStates, storeMobState } from "@/lib/worldbox/mobs-online";
 import { buildCaveLayer, parseInstanceSpace, weekKeyOf } from "@/lib/worldbox/instances";
+import { addMasteryXp } from "@/lib/worldbox/roles";
 import { loadRuinsPersonal, storeRuinsPersonal } from "@/lib/worldbox/instances-online";
 
 export const runtime = "nodejs";
@@ -219,7 +220,8 @@ export async function POST(request: Request) {
   const key = keyPrefix + mobKeyOf(placed);
   const state = await loadMobState(key);
   const profile = await loadProfile(ownerKey);
-  const result = applyMobAttack(def, state, playerAttack(profile.items), now, Math.random, key);
+  const attackPower = playerAttack(profile.items) * (profile.role === "blade" ? 1.25 : 1);
+  const result = applyMobAttack(def, state, attackPower, now, Math.random, key);
   if ("error" in result) {
     return NextResponse.json({ error: result.error }, { status: 409, headers: NO_STORE });
   }
@@ -233,11 +235,12 @@ export async function POST(request: Request) {
     await storeRuinsPersonal(caveSpace, ownerKey, personal);
   }
   let updatedProfile = null;
-  if (result.dead && Object.keys(result.gained).length > 0) {
+  if (result.dead && (Object.keys(result.gained).length > 0 || profile.role === "blade")) {
     let next = profile;
     for (const [itemId, count] of Object.entries(result.gained)) {
       next = addItem(next, itemId, count);
     }
+    if (profile.role === "blade") next = addMasteryXp(next, "blade", 3).profile;
     if (!(await storeProfile(ownerKey, next))) {
       return NextResponse.json({ error: "mobs_failed" }, { status: 500, headers: NO_STORE });
     }
