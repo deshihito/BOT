@@ -359,7 +359,18 @@ export async function findPresenceOwnerKey(id) { return map.has(id) ? map.get(id
 await import(presenceStubUrl); // ルートはもう presence-online を読まないため、状態だけ先に作る
 const profileSwapUrl = bundleModule(["worldbox/items.ts", "worldbox/profile.ts"], ["swapSlots", "moveSlot"]);
 const rolesUrl = bundleModule(["worldbox/items.ts", "worldbox/profile.ts", "worldbox/roles.ts"], ["addMasteryXp"]);
-const shopsUrl = bundleModule(["worldbox/items.ts", "worldbox/shops.ts"], ["checkBuyGenre", "checkBuySold"]);
+const shopsRealUrl = bundleModule(["worldbox/items.ts", "worldbox/shops.ts"], ["checkBuyGenre", "checkBuySold", "checkDailyStock", "dailyPriceFor", "shopDayKeyOf"]);
+// 日次ローテーションは日付依存なので、このブリッジテストでは中立化する
+// （日次そのものの検証は worldbox-shop-daily / worldbox-shops が担う）。
+const shopsUrl = dataUrl(`
+import * as real from ${JSON.stringify(shopsRealUrl)};
+export const checkBuyGenre = real.checkBuyGenre;
+export const checkBuySold = real.checkBuySold;
+export function checkDailyStock() { return null; }
+export function dailyPriceFor(item) { return item.price; }
+export function shopDayKeyOf() { return "test-day"; }
+`);
+const itemsOnlyUrl = bundleModule(["worldbox/items.ts"], ["itemById"]);
 const profileRoute = await import(
   dataUrl(
     transpile("api/worldbox/profile/route.ts", rootDir + "/app")
@@ -370,6 +381,7 @@ const profileRoute = await import(
       .replaceAll('"@/lib/worldbox/economy"', JSON.stringify(profileEcoUrl))
       .replaceAll('"@/lib/worldbox/presence-online"', JSON.stringify(presenceStubUrl))
       .replaceAll('"@/lib/worldbox/shops"', JSON.stringify(shopsUrl))
+      .replaceAll('"@/lib/worldbox/items"', JSON.stringify(itemsOnlyUrl))
       .replaceAll('"@/lib/worldbox/station-online"', JSON.stringify(stationStubUrl))
       .replaceAll('"@/lib/worldbox/profile-online"', JSON.stringify(profileOnlineStubUrl))
       .replaceAll('"@/lib/worldbox/profile"', JSON.stringify(profileSwapUrl))
