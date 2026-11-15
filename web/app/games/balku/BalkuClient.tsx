@@ -416,6 +416,13 @@ export default function BalkuClient() {
   const [drag, setDrag] = useState<DragState | null>(null);
   const [dropHot, setDropHot] = useState<DropZoneId | null>(null);
   const [fly, setFly] = useState<FlyState | null>(null);
+  // 束の「持ち上げ」状態（タップで持ち上げ→場の半分をタップで提出する、
+  // ポケポケ式のタップ経路。ドラッグできない環境でも公開/伏せを選べる）
+  const [bundleHeld, setBundleHeld] = useState(false);
+  // パーティクル演出（提出・購入・入札・BALKU の着地点で弾ける）
+  const [fx, setFx] = useState<{ id: number; x: number; y: number; kind: "open" | "down" | "coin" | "balku" }[]>([]);
+  const fxIdRef = useRef(0);
+  const stageRef = useRef<HTMLDivElement | null>(null);
   const [hoverCard, setHoverCard] = useState<string | null>(null);
   const [marketOpen, setMarketOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -1492,6 +1499,7 @@ export default function BalkuClient() {
   const selectProject = (card: ProjectCard) => {
     if (suppressClickRef.current) return;
     playSe("select");
+    setBundleHeld(false);
     if (selectedProjectId === card.id) {
       setSelectedProjectId(null);
       setAttachCounts({});
@@ -1543,6 +1551,23 @@ export default function BalkuClient() {
     setSelectedProjectId(null);
     setAttachCounts({});
     setTargetSeat(undefined);
+    setBundleHeld(false);
+  };
+
+  /* パーティクルを着地点で弾けさせる（提出=色付きの火花、購入/入札=
+     コイン、BALKU=赤い破片＋画面シェイク）。演出はここに集約し、
+     解決したムーブの種類ごとに endDrag から呼ぶ。 */
+  const burstAt = (x: number, y: number, kind: "open" | "down" | "coin" | "balku") => {
+    const id = ++fxIdRef.current;
+    setFx((prev) => [...prev.slice(-3), { id, x, y, kind }]);
+    setTimeout(() => setFx((prev) => prev.filter((p) => p.id !== id)), 780);
+    if (kind === "balku" && stageRef.current) {
+      stageRef.current.classList.remove("balku-shake");
+      // 同じクラスを付け直してアニメーションを再生し直す
+      void stageRef.current.offsetWidth;
+      stageRef.current.classList.add("balku-shake");
+      setTimeout(() => stageRef.current?.classList.remove("balku-shake"), 480);
+    }
   };
 
   /* --- ジェスチャの解決 ---
@@ -1588,12 +1613,42 @@ export default function BalkuClient() {
       const hit = document.elementFromPoint(x, y)?.closest?.("[data-bulk-target]");
       if (hit) return "hand"; // 対象束の特定は endDrag 側の属性で確定させる
     }
+    /* そのドラッグに関係するゾーンだけを見る。関係ないゾーン（施工
+       シート全体や手札領域など）が先に当たって本来の行き先を遮り、
+       「離しても何も起きない」事故が起きていた（2026-11-15 第2弾）。 */
+    const wanted = payload ? relevantZones(payload.source) : null;
     for (const [id, el] of zoneEls()) {
       if (!el) continue;
+      if (wanted && !wanted.includes(id)) continue;
       const r = el.getBoundingClientRect();
       if (x >= r.left - DROP_PAD && x <= r.right + DROP_PAD && y >= r.top - DROP_PAD && y <= r.bottom + DROP_PAD) return id;
     }
     return null;
+  };
+
+  /** 方向スワイプ解決: ゾーンに届かなくても、40px以上移動して
+      ゾーンの方向へ向かっていれば到達とみなす（曖昧さを受け入れる
+      判定）。ポケポケ/シャドバの「カードを放る」感触に合わせ、
+      速さではなく移動の向きで決める。提出の公開/伏せは場の左右
+      半分がゾーンなので、放る向きの左右でそのまま決まる。 */
+  const directionZone = (payload: DragPayload, startX: number, startY: number, x: number, y: number): DropZoneId | null => {
+    const dx = x - startX;
+    const dy = y - startY;
+    const dist = Math.hypot(dx, dy);
+    if (dist < 40) return null;
+    const wanted = relevantZones(payload.source);
+    let best: { zone: DropZoneId; dot: number } | null = null;
+    for (const [id, el] of zoneEls()) {
+      if (!el || !wanted.includes(id)) continue;
+      const r = el.getBoundingClientRect();
+      const cx = r.left + r.width / 2 - startX;
+      const cy = r.top + r.height / 2 - startY;
+      const cd = Math.hypot(cx, cy);
+      if (cd < 24) continue;
+      const dot = (dx * cx + dy * cy) / (dist * cd);
+      if (dot > 0.3 && (!best || dot > best.dot)) best = { zone: id, dot };
+    }
+    return best?.zone ?? null;
   };
 
   /** 近接解決: ゾーンの外で離しても、関係するゾーンの近く（DROP_NEAR px
@@ -1751,7 +1806,13 @@ export default function BalkuClient() {
     track.lastX = e.clientX;
     track.lastY = e.clientY;
     setDrag({ payload: track.payload, x: e.clientX, y: e.clientY, label: track.label });
-    setDropHot(zoneAt(e.clientX, e.clientY, track.payload));
+    // 着地予測をそのまま光らせる: 精密ヒット→近接→方向スワイプの順で、
+    // 離す前に「どこに落ちるか」が見える（公開/伏せの選択もここで見える）
+    setDropHot(
+      zoneAt(e.clientX, e.clientY, track.payload) ??
+        nearestZone(track.payload, e.clientX, e.clientY) ??
+        directionZone(track.payload, track.startX, track.startY, e.clientX, e.clientY),
+    );
   };
   const endDrag = (e: React.PointerEvent) => {
     const track = dragTrackRef.current;
@@ -1790,10 +1851,21 @@ export default function BalkuClient() {
       if (dy > 40 && vy > 0.05) zone = "hand";
     }
     if (!zone) zone = nearestZone(track.payload, e.clientX, e.clientY);
+    if (!zone) zone = directionZone(track.payload, track.startX, track.startY, e.clientX, e.clientY);
     if (!zone) zone = flickZone(track, vx, vy);
     if (zone) {
       setDrag(null);
       resolveDrop(track.payload, zone, forceTarget);
+      // 解決したムーブには着地点でパーティクルを返す（手応えの可視化）
+      if (track.payload.source === "bundle" && (zone === "submit-open" || zone === "submit-down")) {
+        burstAt(e.clientX, e.clientY, zone === "submit-open" ? "open" : "down");
+      } else if (track.payload.source === "opponent-bundle" && zone === "hand") {
+        burstAt(e.clientX, e.clientY, "balku");
+      } else if (track.payload.source === "market-material" && zone === "hand") {
+        burstAt(e.clientX, e.clientY, "coin");
+      } else if (track.payload.source === "bid-coin" && zone === "auction") {
+        burstAt(e.clientX, e.clientY, "coin");
+      }
     } else {
       // 対象外で離したら元の位置へ戻る（スナップバック）
       playSe("error");
@@ -2079,16 +2151,17 @@ export default function BalkuClient() {
 
   /* --- 施工シート ---
      企画を選んだら施工ゾーンはステージ上部に重なるシートとして開く。
-     大カード＋必要素材＋提出パッドを全サイズで出し、ステージの行は
-     増やさない。閉じるのはハンドル（タップ/上へ引く）か、同じ企画の
-     再タップ、または提出の成立。素材の付け外しはシート内と手札の
-     ドラッグ/タップ（従来経路）のまま。 */
+     大カード＋必要素材チップを全サイズで出し、ステージの行は
+     増やさない。提出先はシート内ではなく場の左右半分（ドラッグ/
+     持ち上げで出現）。閉じるのはハンドル（タップ/上へ引く）か、
+     同じ企画の再タップ、または提出の成立。 */
   const renderBuildSheet = () => {
     if (!selectedProject) return null;
     const closeBuild = () => {
       setSelectedProjectId(null);
       setAttachCounts({});
       setTargetSeat(undefined);
+      setBundleHeld(false);
     };
     return (
       <section
@@ -2102,12 +2175,19 @@ export default function BalkuClient() {
         </div>
         <div className="balku-buildsheet-body">
           <div
-            className={`balku-build-card balku-draggable${myTurn ? "" : " balku-inert"}`}
+            className={`balku-build-card balku-draggable${myTurn ? "" : " balku-inert"}${bundleHeld ? " balku-build-card-held" : ""}`}
             data-build-bundle={selectedProject.id}
             {...dragHandlers({ source: "bundle" }, selectedProject.name, myTurn)}
             tabIndex={0}
             role="button"
-            aria-label={`${selectedProject.name}の束（Enterで公開提出）`}
+            aria-label={`${selectedProject.name}の束（場へ放つと提出。場の左半分が公開、右半分が伏せ。タップで持ち上げ）`}
+            onClick={() => {
+              // タップ＝持ち上げ/置くのトグル。持ち上げ中は場の左右半分が
+              // 提出先として光り、半分をタップすれば提出できる
+              if (suppressClickRef.current || !myTurn) return;
+              playSe(bundleHeld ? "draw" : "select");
+              setBundleHeld((v) => !v);
+            }}
             onKeyDown={(e) => {
               if (e.key === "Enter") {
                 e.preventDefault();
@@ -2151,39 +2231,28 @@ export default function BalkuClient() {
                 })}
               </div>
             )}
-            {Object.entries(selectedProject.requirements).length === 0 ? (
-              <p className="balku-table-note">素材不要</p>
-            ) : (
-              <div className="balku-reqrows">
-                {Object.entries(selectedProject.requirements).map(([kindRaw, needRaw]) => {
+            {/* 必要素材は行ではなくチップで（構造で状態が分かる形にし、
+                文章の説明は捨てる＝認知負荷の削減） */}
+            <div className="balku-reqchips" aria-label="必要素材">
+              {Object.entries(selectedProject.requirements).length === 0 ? (
+                <span className="balku-req-chip balku-req-chip-ok">素材不要</span>
+              ) : (
+                Object.entries(selectedProject.requirements).map(([kindRaw, needRaw]) => {
                   const kind = kindRaw as MaterialKind;
                   const need = needRaw ?? 0;
-                  const owned = ownedCount(kind);
                   const attached = attachOf(kind);
+                  const ok = attached >= need;
                   return (
-                    <div key={kind} className="balku-reqrow">
-                      <MatFace kind={kind} premium={kind === "超伝導体"} mini />
-                      <span className="balku-reqrow-kind">{kind}</span>
-                      <span className="balku-reqrow-meta">
-                        必要 {need} / 所持 {owned} / 添付 {attached}
-                      </span>
-                      {attached >= need ? <span className="balku-badge balku-badge-ok">充足</span> : <span className="balku-badge balku-badge-bad">あと{need - attached}</span>}
-                    </div>
+                    <span key={kind} className={`balku-req-chip${ok ? " balku-req-chip-ok" : " balku-req-chip-ng"}`}>
+                      {kind} {attached}/{need}
+                    </span>
                   );
-                })}
-              </div>
-            )}
-            <p className={selectedLegal ? "balku-legal-ok" : "balku-legal-ng"}>
-              {selectedLegal
-                ? "素材条件を満たしています（正規完成）。"
-                : `素材が不足しています（不足: ${Object.entries(selectedProject.requirements)
-                    .map(([kind, need]) => {
-                      const have = attachOf(kind as MaterialKind);
-                      return have < (need ?? 0) ? `${kind} あと${(need ?? 0) - have}枚` : "";
-                    })
-                    .filter(Boolean)
-                    .join(" / ")}）。公開すると違法建築になります。`}
-            </p>
+                })
+              )}
+              <span className={`balku-legal-badge${selectedLegal ? " balku-legal-badge-ok" : " balku-legal-badge-ng"}`}>
+                {selectedLegal ? "正規完成" : "違法建築になる"}
+              </span>
+            </div>
             {needsTarget && (
               <div className="balku-targetrow" aria-label="効果の対象">
                 <span className="balku-target-hint">効果の対象:</span>
@@ -2216,52 +2285,9 @@ export default function BalkuClient() {
             )}
           </div>
         </div>
-        <div className="balku-submitpads" aria-label="提出先">
-          <div
-            ref={openPadRef}
-            data-drop="submit-open"
-            className={`balku-submitpad balku-submitpad-open${dropHot === "submit-open" ? " balku-drop-hot" : ""}${needsTarget && targetSeat === undefined ? " balku-submitpad-locked" : ""}`}
-            tabIndex={0}
-            role="button"
-            aria-label="公開で提出"
-            onClick={() => {
-              // パッドのタップ＝そのまま提出（ドラッグの着地点がタップでも
-              // 反応する。押して何も起きない面を作らない）
-              if (suppressClickRef.current) return;
-              submitSelected(true);
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" || e.key === " ") {
-                e.preventDefault();
-                submitSelected(true);
-              }
-            }}
-          >
-            公開エリア
-            <span>束を放つと表向きで提出</span>
-          </div>
-          <div
-            ref={downPadRef}
-            data-drop="submit-down"
-            className={`balku-submitpad balku-submitpad-down${dropHot === "submit-down" ? " balku-drop-hot" : ""}${needsTarget && targetSeat === undefined ? " balku-submitpad-locked" : ""}`}
-            tabIndex={0}
-            role="button"
-            aria-label="伏せて提出"
-            onClick={() => {
-              if (suppressClickRef.current) return;
-              submitSelected(false);
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" || e.key === " ") {
-                e.preventDefault();
-                submitSelected(false);
-              }
-            }}
-          >
-            伏せエリア
-            <span>束を放つと裏向きで提出</span>
-          </div>
-        </div>
+        {/* 提出先はシート内の小パッドではなく、場（中央帯）の左右半分。
+            束をドラッグ/持ち上げすると半分が光る（renderGame の場側）。 */}
+        <p className="balku-build-hint">束を場へ放つと提出（左＝公開 / 右＝伏せ）</p>
       </section>
     );
   };
@@ -2344,7 +2370,7 @@ export default function BalkuClient() {
           <span>{latestLogEntry?.id === banner.logId ? latestLogEntry.text : ""}</span>
         </div>
       )}
-      <div className="balku-table balku-table-game">
+      <div className="balku-table balku-table-game" ref={stageRef}>
         {/* BALKU-MENU-START：対戦外 chrome の退避先（ハンバーガー） */}
         <button
           type="button"
@@ -2424,7 +2450,7 @@ export default function BalkuClient() {
               <h3>進め方</h3>
               <ul className="balku-menu-rules">
                 <li>企画カードをタップし、素材をドラッグして施工ゾーンで束を作る。</li>
-                <li>束を公開／伏せのドロップ先へ放つと提出。</li>
+                <li>束を場へ放つと提出。場の左半分が公開、右半分が伏せ。</li>
                 <li>相手の伏せ束は自分の側へ引くと BALKU。違法を暴けば没収、正規なら奪われる。</li>
                 <li>調達市場はテーブル右端のタブから開く。</li>
                 <li>手番トークンを次の席へ放つとパス。</li>
@@ -2574,6 +2600,57 @@ export default function BalkuClient() {
               </div>
             )}
 
+            {/* 提出先は場の左右半分（ポケポケ式: カードを持つと行き先が
+                画面の半分単位で光る）。束のドラッグ中か、タップで
+                持ち上げ中だけ出現し、半分のどこに放っても落ちる。
+                左＝公開 / 右＝伏せ。 */}
+            {selectedProject && (drag?.payload.source === "bundle" || bundleHeld) && (
+              <div className="balku-fieldhalves" aria-label="提出先">
+                <div
+                  ref={openPadRef}
+                  data-drop="submit-open"
+                  className={`balku-fieldhalf balku-fieldhalf-open${dropHot === "submit-open" ? " balku-drop-hot" : ""}`}
+                  role="button"
+                  tabIndex={0}
+                  aria-label="公開で提出"
+                  onClick={() => {
+                    if (suppressClickRef.current) return;
+                    submitSelected(true);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      submitSelected(true);
+                    }
+                  }}
+                >
+                  <strong>公開</strong>
+                  <span>表向きで提出</span>
+                </div>
+                <div
+                  ref={downPadRef}
+                  data-drop="submit-down"
+                  className={`balku-fieldhalf balku-fieldhalf-down${dropHot === "submit-down" ? " balku-drop-hot" : ""}`}
+                  role="button"
+                  tabIndex={0}
+                  aria-label="伏せて提出"
+                  onClick={() => {
+                    if (suppressClickRef.current) return;
+                    submitSelected(false);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      submitSelected(false);
+                    }
+                  }}
+                >
+                  <strong>伏せ</strong>
+                  <span>裏向きで提出</span>
+                </div>
+              </div>
+            )}
+
           </div>
 
           <div
@@ -2636,9 +2713,8 @@ export default function BalkuClient() {
               <span className="balku-deckbar" aria-hidden="true">
                 <span className="balku-deckbar-fill" style={{ width: `${deckPct}%` }} />
               </span>
-              山札 {st.deckCount} / {st.deckInitialCount}
+              第{st.turn}ターン ・ 山札 {st.deckCount} / {st.deckInitialCount}
             </span>
-            <span className="balku-chip">第{st.turn}ターン</span>
             {myTurn && !me.eliminated ? (
               <span
                 key={`mine-${st.turn}`}
@@ -2702,9 +2778,11 @@ export default function BalkuClient() {
             </section>
           )}
 
-          <p className="balku-preview" aria-live="polite">
-            {hoverCard ?? ""}
-          </p>
+          {hoverCard && (
+            <p className="balku-preview" aria-live="polite">
+              {hoverCard}
+            </p>
+          )}
 
           <div className="balku-fan balku-fan-projects" aria-label="企画カード">
             {handProjects.map((card) => {
@@ -2823,6 +2901,15 @@ export default function BalkuClient() {
       )}
 
       </div>
+
+      {/* パーティクル層（提出・購入・入札・BALKU の着地点で弾ける） */}
+      {fx.map((p) => (
+        <div key={p.id} className={`balku-fx balku-fx-${p.kind}`} style={{ left: p.x, top: p.y }} aria-hidden="true">
+          {Array.from({ length: 14 }, (_, i) => (
+            <span key={i} style={{ "--i": i } as React.CSSProperties} />
+          ))}
+        </div>
+      ))}
 
       {drag && (
         <div
