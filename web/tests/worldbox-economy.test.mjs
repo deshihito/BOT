@@ -168,6 +168,9 @@ test("クライアント配線: 経済パネルと API がつながっている"
   const client = fs.readFileSync(path.join(rootDir, "app/games/worldbox/WorldBoxClient.tsx"), "utf8");
   assert.match(client, /WorldBoxEconomyPanel/);
   assert.match(client, /経済/);
+  assert.match(client, /座標 X/);
+  const presenceOnline = fs.readFileSync(path.join(libDir, "worldbox/presence-online.ts"), "utf8");
+  assert.match(presenceOnline, /findPresenceOwnerKey/);
   const panel = fs.readFileSync(path.join(rootDir, "app/games/worldbox/WorldBoxEconomyPanel.tsx"), "utf8");
   for (const action of ["buy", "sell", "eat", "craft", "work", "steal"]) {
     assert.ok(panel.includes(`"${action}"`) || panel.includes(action), action);
