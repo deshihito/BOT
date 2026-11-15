@@ -1,6 +1,6 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import { JINROU_ROLES } from "@/lib/jinrou-roles";
+import Breadcrumbs from "../../../Breadcrumbs";
 
 export const dynamicParams = false;
 
@@ -29,7 +29,9 @@ export default async function JinrouRolePage({ params }: { params: Promise<{ id:
   if (!role) notFound();
   return (
     <>
-      <p><Link href="/jinrou/roles">← 役職図鑑にもどる</Link></p>
+      <Breadcrumbs
+        items={[{ href: "/jinrou/roles", label: "人狼 役職図鑑" }, { label: role.name }]}
+      />
       <section className="hero">
         <img src={role.image ?? "/img/nomal.png"} alt={role.image ? role.name : ""} />
         <div>
