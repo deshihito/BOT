@@ -7,6 +7,7 @@
 // （=どの施設の前でもない）。プレゼンスが無い/古い場合は、ワープ時に
 // 保存されるセーブ（空間と入口位置）で代替する。
 import { buildLobby, stationGenreNear, stationNear, type LobbyObject, type LobbyStation } from "./lobby";
+import { buildLobby2, buildLobby3 } from "./lobby-floors";
 import type { ShopGenreId } from "./shops";
 import { buildTent } from "./tent";
 import { isPresenceEnabled, loadMyPresence } from "./presence-online";
@@ -23,6 +24,12 @@ async function loadMyIndoorPosition(
     if (presence.space === "lobby") {
       return { objects: buildLobby().objects, tx: Math.floor(presence.x), ty: Math.floor(presence.y) };
     }
+    if (presence.space === "lobby2") {
+      return { objects: buildLobby2().objects, tx: Math.floor(presence.x), ty: Math.floor(presence.y) };
+    }
+    if (presence.space === "lobby3") {
+      return { objects: buildLobby3().objects, tx: Math.floor(presence.x), ty: Math.floor(presence.y) };
+    }
     if (presence.space === "tent") {
       return { objects: buildTent().objects, tx: Math.floor(presence.x), ty: Math.floor(presence.y) };
     }
@@ -32,6 +39,12 @@ async function loadMyIndoorPosition(
   if (!saved) return null;
   if (saved.space === "lobby") {
     return { objects: buildLobby().objects, tx: Math.floor(saved.x), ty: Math.floor(saved.y) };
+  }
+  if (saved.space === "lobby2") {
+    return { objects: buildLobby2().objects, tx: Math.floor(saved.x), ty: Math.floor(saved.y) };
+  }
+  if (saved.space === "lobby3") {
+    return { objects: buildLobby3().objects, tx: Math.floor(saved.x), ty: Math.floor(saved.y) };
   }
   if (saved.space === "tent") {
     return { objects: buildTent().objects, tx: Math.floor(saved.x), ty: Math.floor(saved.y) };

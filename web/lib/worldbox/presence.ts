@@ -37,7 +37,7 @@ export type PresenceSpace = string;
 const PRESENCE_INSTANCE_SPACE_RE = /^(cave|ruins|dungeon):(-?\d+),(-?\d+):(\d+)$/;
 
 export function sanitizePresenceSpace(raw: unknown): PresenceSpace {
-  if (raw === "lobby" || raw === "tent") return raw;
+  if (raw === "lobby" || raw === "lobby2" || raw === "lobby3" || raw === "tent") return raw;
   if (typeof raw === "string" && PRESENCE_INSTANCE_SPACE_RE.test(raw)) return raw;
   return "world";
 }
