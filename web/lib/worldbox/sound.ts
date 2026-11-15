@@ -19,16 +19,17 @@ import type { FxBurstKind } from "./fx";
 export type WbBgmScene = "field-day" | "field-night" | "lobby" | "casino";
 
 /**
- * 現在の状況から BGM の場面を決める。優先順位は カジノ > ロビー > 夜 > 昼。
+ * 現在の状況から BGM の場面を決める。優先順位は カジノ > 屋内 > 夜 > 昼。
+ * 屋内（ロビーとテント内装）は時刻に左右されずロビー曲にする。
  * night は daynight.ts の nightAmount（0=昼、1=真夜中）。
  */
 export function bgmSceneFor(input: {
-  space: "world" | "lobby";
+  space: "world" | "lobby" | "tent";
   night: number;
   casinoOpen: boolean;
 }): WbBgmScene {
   if (input.casinoOpen) return "casino";
-  if (input.space === "lobby") return "lobby";
+  if (input.space !== "world") return "lobby";
   return input.night > 0.5 ? "field-night" : "field-day";
 }
 

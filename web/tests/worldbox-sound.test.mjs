@@ -93,6 +93,7 @@ test("sound: 場面選択は カジノ > ロビー > 夜 > 昼", () => {
   assert.equal(sound.bgmSceneFor({ space: "world", night: 0, casinoOpen: false }), "field-day");
   assert.equal(sound.bgmSceneFor({ space: "world", night: 0.9, casinoOpen: false }), "field-night");
   assert.equal(sound.bgmSceneFor({ space: "lobby", night: 0.9, casinoOpen: false }), "lobby");
+  assert.equal(sound.bgmSceneFor({ space: "tent", night: 0.9, casinoOpen: false }), "lobby", "テント内装は屋内としてロビー曲");
   assert.equal(sound.bgmSceneFor({ space: "lobby", night: 0, casinoOpen: true }), "casino");
   assert.equal(sound.bgmSceneFor({ space: "world", night: 0.9, casinoOpen: true }), "casino");
 });
