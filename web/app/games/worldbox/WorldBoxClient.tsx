@@ -9,13 +9,19 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { AIR, BEDROCK, BLOCKS, COAL_ORE, COPPER_ORE, DIRT, GRASS, LEAVES, SAND, STONE, TORCH, WOOD, WORKBENCH, canDigBlock, dropOf, isFullSolidBlock } from "@/lib/worldbox/blocks";
 import { generateWorld, getTile, findSpawn, WORLD_H, WORLD_SEED, WORLD_W, type World } from "@/lib/worldbox/worldgen";
-import { createBody, stepPlayer, PLAYER_H, PLAYER_W, type PlayerBody } from "@/lib/worldbox/physics";
+import { createBody, stepPlayer, PLAYER_H, PLAYER_W, RUN_SPEED, type PlayerBody } from "@/lib/worldbox/physics";
 import { crackStage, digTile, placeTile, placeTorch, pressModeFor, withinReach, type PressMode } from "@/lib/worldbox/rules";
-import { buildLightField, lightLevelAt, type LightField } from "@/lib/worldbox/light";
+import { buildLightField, skyLevelAt, type LightField } from "@/lib/worldbox/light";
+import {
+  ARM_REST_ANGLE, advanceEnemyPhase, advanceWalkPhase, airPose, attackSwingAngle, damp, digSwingAngle,
+  enemyRock, flickerNoise, flipDeathPose, landingSquashY, magnetStep, moveLean, poofPose, respawnPose,
+  springStep, stepBeatIndex, telegraphSquashY, torchFlameScale, torchLightFlicker, walkBob, walkSquashY,
+  type SpringState,
+} from "@/lib/worldbox/anim";
 import { SLOT_COUNT, addItem, canAdd, cloneInventory, countOf, createInventory, isInventoryFull, type InventoryV2, type InvSlot } from "@/lib/worldbox/inventory";
 import { attackDamageOf, canDigWith, digSecondsFor, isTool, itemDef, requiredTier, tierOfTool, COPPER_INGOT, COPPER_PICKAXE, DEEP_STONE_Y, STONE_PICKAXE, SWORD, WOODEN_PICKAXE } from "@/lib/worldbox/items";
 import { isNightPhase, nightAmount, phaseAtTime } from "@/lib/worldbox/daynight";
-import { CONTACT_DAMAGE, ENEMY_H, ENEMY_MAX_HP, ENEMY_W, SPAWN_INTERVAL_SEC, attackEnemy, burnEnemiesAtDawn, enemyTouches, rollsHeartDrop, stepEnemy, trySpawnEnemy, type Enemy } from "@/lib/worldbox/enemies";
+import { CONTACT_DAMAGE, ENEMY_H, ENEMY_MAX_HP, ENEMY_SPEED, ENEMY_W, SPAWN_INTERVAL_SEC, attackEnemy, burnEnemiesAtDawn, enemyTouches, rollsHeartDrop, stepEnemy, trySpawnEnemy, type Enemy } from "@/lib/worldbox/enemies";
 import { HEART_HEAL, PICKUP_SIZE, createPickup, pickupTouches, stepPickup, type Pickup } from "@/lib/worldbox/pickups";
 import { PLAYER_MAX_HP, createHealth, damagePlayer, deathDrops, fallDamageFor, healPlayer, isDead, type HealthState } from "@/lib/worldbox/health";
 import { RECIPES, SMELT_SECONDS, applyCraft, canStartSmelt, checkCraft, collectSmelt, createFurnace, startSmelt, tickFurnace, type Furnace } from "@/lib/worldbox/craft";
@@ -29,6 +35,10 @@ import { useGamesNav } from "../GamesShell";
 
 const SAVE_KEY = "ago-worldbox-save-v1";
 const JOY_RADIUS = 52;
+/** 敵の攻撃モーション: 溜めの秒数と、溜めに入る距離・突進の初速。 */
+const ENEMY_WINDUP_SEC = 0.3;
+const ENEMY_TELEGRAPH_RANGE = 2.0;
+const ENEMY_LUNGE_KX = 8.5;
 
 /** ブロックID → テクスチャキー（lib/worldbox/textures.ts の用意済み素材）。 */
 const TEXTURE_KEY_BY_BLOCK: Record<number, string> = {
@@ -218,8 +228,30 @@ export default function WorldBoxClient() {
   const poofsRef = useRef<{ x: number; y: number; at: number }[]>([]);
   const lightRef = useRef<LightField | null>(null);
   const lightDirtyRef = useRef(true);
-  /** ブロック破砕・回収の破片パーティクル（タイル座標、life は残り秒数）。 */
-  const particlesRef = useRef<{ x: number; y: number; vx: number; vy: number; life: number; maxLife: number; blockId: number; heart: boolean }[]>([]);
+  /** ブロック破砕・回収の破片パーティクル（タイル座標、life は残り秒数）。dust は土煙。 */
+  const particlesRef = useRef<{ x: number; y: number; vx: number; vy: number; life: number; maxLife: number; blockId: number; heart: boolean; dust: boolean }[]>([]);
+  /** 着地した瞬間の記録（描画側の潰れ・カメラの沈み・土煙のトリガー）。 */
+  const landFxRef = useRef<{ at: number; fall: number } | null>(null);
+  /** 被弾した時刻（赤フラッシュ＋揺れ用）。HP の減少をループで検知して記録する。 */
+  const hurtAtRef = useRef(0);
+  const prevHpRef = useRef(PLAYER_MAX_HP);
+  /** 攻撃が振られた時刻 / ブロックが壊れた時刻（スイングと反動用）。 */
+  const attackAtRef = useRef(0);
+  const breakAtRef = useRef(0);
+  /** 死亡ポフの発生位置と時刻 / 復活した時刻（出現フェード用）。 */
+  const deathFxRef = useRef<{ x: number; y: number; at: number } | null>(null);
+  const respawnAtRef = useRef(0);
+  /** 撃破されて倒れ込む敵の残像（フリップ＋フェード）。 */
+  const dyingRef = useRef<{ id: number; x: number; y: number; face: 1 | -1; at: number }[]>([]);
+  /** プレイヤーのアニメ状態（着地バネ・カメラ平滑化。描画側でだけ進める）。 */
+  const playerAnimRef = useRef<{
+    squash: SpringState; dip: SpringState; landAt: number;
+    camX: number; camY: number; camInit: boolean; lastDrawAt: number;
+  }>({ squash: { x: 1, v: 0 }, dip: { x: 0, v: 0 }, landAt: 0, camX: 0, camY: 0, camInit: false, lastDrawAt: 0 });
+  /** 敵ごとのアニメ状態（歩行位相・溜め/突進・被弾の凹みバネ）。 */
+  const enemyBrainRef = useRef(new Map<number, {
+    mode: "chase" | "windup" | "lunge" | "cool"; until: number; phase: number; squash: SpringState; lastHitAt: number;
+  }>());
   const hitstopUntilRef = useRef(0);
   /** 置いた直後のタイルの「ポップ」演出（キー "x,y" → 時刻）。 */
   const placedPopRef = useRef(new Map<string, number>());
@@ -373,6 +405,7 @@ export default function WorldBoxClient() {
       dirtyRef.current = true;
     }
     if (worldRef.current && bodyRef.current) ensureSafePosition(worldRef.current, bodyRef.current);
+    prevHpRef.current = healthRef.current.hp;
     syncHud();
   };
 
@@ -533,13 +566,33 @@ export default function WorldBoxClient() {
         maxLife: 0.4,
         blockId,
         heart,
+        dust: false,
       });
     }
   };
 
-  /** 敵を倒したときの処理（消滅・煙・ハートドロップ）。 */
+  /** 足元の土煙（歩行の一歩・着地の衝撃で出す、柔らかい円のパーティクル）。 */
+  const spawnDust = (cx: number, cy: number, count: number, spread: number) => {
+    for (let i = 0; i < count; i++) {
+      const life = 0.28 + Math.random() * 0.18;
+      particlesRef.current.push({
+        x: cx + (Math.random() - 0.5) * 0.5,
+        y: cy - Math.random() * 0.08,
+        vx: (Math.random() - 0.5) * 2 * spread,
+        vy: -(0.4 + Math.random() * 1.1),
+        life,
+        maxLife: life,
+        blockId: 0,
+        heart: false,
+        dust: true,
+      });
+    }
+  };
+
+  /** 敵を倒したときの処理（倒れ込み残像・煙・ハートドロップ）。 */
   const killEnemy = (e: Enemy, now: number) => {
     enemiesRef.current = enemiesRef.current.filter((o) => o.id !== e.id);
+    dyingRef.current.push({ id: e.id, x: e.x, y: e.y, face: e.face, at: now });
     poofsRef.current.push({ x: e.x, y: e.y, at: now });
     sfxKo();
     if (rollsHeartDrop(Math.random)) {
@@ -552,6 +605,9 @@ export default function WorldBoxClient() {
     const world = worldRef.current;
     const body = bodyRef.current;
     if (!world || !body) return;
+    // テレポート前に死亡位置を記録する（ポフ演出用）。復活の出現フェードもここから。
+    deathFxRef.current = { x: body.x, y: body.y, at: performance.now() };
+    respawnAtRef.current = performance.now();
     for (const drop of deathDrops(invRef.current)) {
       pickupsRef.current.push(createPickup("block", drop.blockId, drop.count, body.x + PLAYER_W / 2 - 0.25, body.y));
     }
@@ -618,6 +674,9 @@ export default function WorldBoxClient() {
       for (let s = 0; s < 2; s++) {
         stepPlayer(world, body, input, dt / 2);
         if (body.landedFall > 0) {
+          // 着地の手触り: 記録（描画の潰れ・カメラの沈み）＋衝撃の大きさで土煙
+          landFxRef.current = { at: now, fall: body.landedFall };
+          spawnDust(body.x + PLAYER_W / 2, body.y + PLAYER_H, Math.min(10, 3 + Math.floor(body.landedFall * 1.2)), 1.6);
           const dmg = fallDamageFor(body.landedFall);
           if (dmg > 0 && damagePlayer(healthRef.current, dmg, gt)) {
             sfxHit(2);
@@ -625,7 +684,14 @@ export default function WorldBoxClient() {
           }
         }
       }
-      if (input.left || input.right || (moveX !== undefined && Math.abs(moveX) > 0.2)) walkPhaseRef.current += dt * 10;
+      // 歩行位相は実速に比例して進める。拍が変わるたびに足元へ小さな土煙
+      {
+        const prevBeat = stepBeatIndex(walkPhaseRef.current);
+        walkPhaseRef.current = advanceWalkPhase(walkPhaseRef.current, body.vx, dt);
+        if (body.onGround && Math.abs(body.vx) > 0.6 && stepBeatIndex(walkPhaseRef.current) !== prevBeat) {
+          spawnDust(body.x + PLAYER_W / 2 - body.face * 0.25, body.y + PLAYER_H, 2, 0.8);
+        }
+      }
       if (body.y > WORLD_H + 4) {
         const spawn = findSpawn(world);
         body.x = spawn.x + 0.1;
@@ -660,7 +726,44 @@ export default function WorldBoxClient() {
       }
       const playerRect = { x: body.x, y: body.y, w: PLAYER_W, h: PLAYER_H };
       for (const e of [...enemiesRef.current]) {
+        // 攻撃モーションの状態機械（溜め→突進→休み）。移動そのものは stepEnemy に任せ、
+        // 溜め中は歩行を打ち消し、突進はノックバック速度 kx の初速で表現する。
+        let brain = enemyBrainRef.current.get(e.id);
+        if (!brain) {
+          brain = { mode: "chase", until: 0, phase: Math.random() * 6, squash: { x: 1, v: 0 }, lastHitAt: -1 };
+          enemyBrainRef.current.set(e.id, brain);
+        }
+        const dirP = centerX < e.x + ENEMY_W / 2 ? -1 : 1;
+        const distP = Math.abs(centerX - (e.x + ENEMY_W / 2));
+        if (brain.mode === "chase") {
+          if (e.onGround && distP < ENEMY_TELEGRAPH_RANGE && Math.abs(centerY - (e.y + ENEMY_H / 2)) < 1.6 && gt >= brain.until) {
+            brain.mode = "windup";
+            brain.until = gt + ENEMY_WINDUP_SEC;
+          }
+        } else if (brain.mode === "windup") {
+          e.kx = -dirP * ENEMY_SPEED; // 歩行分を打ち消してその場で溜める
+          if (gt >= brain.until) {
+            brain.mode = "lunge";
+            brain.until = gt + 0.22;
+            e.kx = dirP * ENEMY_LUNGE_KX;
+          }
+        } else if (brain.mode === "lunge") {
+          if (gt >= brain.until) {
+            brain.mode = "cool";
+            brain.until = gt + 0.9;
+          }
+        } else if (gt >= brain.until) {
+          brain.mode = "chase";
+        }
         stepEnemy(world, e, centerX, dt);
+        // 歩行位相（速さ比例）と被弾の凹みバネ
+        brain.phase = advanceEnemyPhase(brain.phase, e.vx, dt);
+        const hitAt = enemyHitRef.current.get(e.id) ?? -1;
+        if (hitAt !== brain.lastHitAt) {
+          brain.lastHitAt = hitAt;
+          brain.squash.v -= 7;
+        }
+        brain.squash = springStep(brain.squash, 1, 180, 13, dt);
         if (enemyTouches(e, playerRect)) {
           if (damagePlayer(healthRef.current, CONTACT_DAMAGE, gt)) {
             body.kx = (centerX < e.x + 0.45 ? -1 : 1) * 7;
@@ -671,10 +774,19 @@ export default function WorldBoxClient() {
         }
       }
 
+      // 消えた敵のアニメ状態を掃除する
+      if (enemyBrainRef.current.size > 0) {
+        const alive = new Set(enemiesRef.current.map((e) => e.id));
+        for (const id of enemyBrainRef.current.keys()) {
+          if (!alive.has(id)) enemyBrainRef.current.delete(id);
+        }
+      }
+
       // ---- 攻撃（ポインタが敵の上 or 掘るボタンで正面の敵） ----
       const tryAttack = (e: Enemy): boolean => {
         if (attackCdRef.current > 0) return true; // 攻撃扱いで掘りに行かない
         attackCdRef.current = 0.35;
+        attackAtRef.current = now;
         const dead = attackEnemy(e, attackDamageOf(toolId), centerX);
         enemyHitRef.current.set(e.id, now);
         sfxTap();
@@ -739,9 +851,10 @@ export default function WorldBoxClient() {
             if (digRef.current.progress >= 1) {
               const dugId = digTile(world, invRef.current, target.x, target.y);
               if (dugId !== null) {
-                // 破砕: 音＋破片＋ごく短いヒットストップ
+                // 破砕: 音＋破片＋ごく短いヒットストップ＋腕の反動
                 sfxHit(1);
                 hitstopUntilRef.current = now + 40;
+                breakAtRef.current = now;
                 spawnParticles(target.x + 0.5, target.y + 0.5, dugId, false, 8);
                 dirtyRef.current = true;
                 lightDirtyRef.current = true;
@@ -826,7 +939,20 @@ export default function WorldBoxClient() {
 
       // ---- 拾い物 ----
       for (const p of [...pickupsRef.current]) {
-        stepPickup(world, p, dt);
+        // 近づくと吸い寄せられる（マグネット）。範囲外は従来どおり落下して地面に止まる
+        const pcx = p.x + PICKUP_SIZE / 2;
+        const pcy = p.y + PICKUP_SIZE / 2;
+        const pDist = Math.hypot(centerX - pcx, centerY - pcy);
+        if (pDist < 1.5 && pDist > 0.001) {
+          const speed = 4 + (1.5 - pDist) * 6;
+          const moved = magnetStep(pcx, pcy, centerX, centerY, speed * dt);
+          p.x = moved.x - PICKUP_SIZE / 2;
+          p.y = moved.y - PICKUP_SIZE / 2;
+          p.vy = 0;
+          p.onGround = false;
+        } else {
+          stepPickup(world, p, dt);
+        }
         if (!pickupTouches(p, playerRect)) continue;
         if (p.kind === "heart") {
           if (healPlayer(healthRef.current, HEART_HEAL) > 0) {
@@ -861,7 +987,13 @@ export default function WorldBoxClient() {
         for (const p of particlesRef.current) {
           p.life -= dt;
           if (p.life <= 0) continue;
-          p.vy = Math.min(14, p.vy + 22 * dt);
+          if (p.dust) {
+            // 土煙は重力でなく空気抵抗で漂って消える
+            p.vx *= Math.max(0, 1 - 4 * dt);
+            p.vy *= Math.max(0, 1 - 3 * dt);
+          } else {
+            p.vy = Math.min(14, p.vy + 22 * dt);
+          }
           p.x += p.vx * dt;
           p.y += p.vy * dt;
           next.push(p);
@@ -871,6 +1003,10 @@ export default function WorldBoxClient() {
       for (const [k, at] of placedPopRef.current) {
         if (now - at > 200) placedPopRef.current.delete(k);
       }
+
+      // 被弾の検知（HP が減っていたら赤フラッシュ＋揺れのトリガーにする）
+      if (healthRef.current.hp < prevHpRef.current) hurtAtRef.current = now;
+      prevHpRef.current = healthRef.current.hp;
 
       draw(now);
 
@@ -1072,13 +1208,38 @@ export default function WorldBoxClient() {
     const viewW = vw / tilePx;
     const viewH = vh / tilePx;
 
-    // カメラ（プレイヤー中心、ワールド端でクランプ）
+    // カメラ（平滑追従＋向き方向への先読み＋着地の沈み。ワールド端でクランプ）
     const cx = body.x + PLAYER_W / 2;
     const cy = body.y + PLAYER_H / 2;
-    let camX = cx - viewW / 2;
-    let camY = cy - viewH / 2;
-    camX = viewW >= WORLD_W ? (WORLD_W - viewW) / 2 : Math.max(0, Math.min(WORLD_W - viewW, camX));
-    camY = viewH >= WORLD_H ? (WORLD_H - viewH) / 2 : Math.max(0, Math.min(WORLD_H - viewH, camY));
+    const anim = playerAnimRef.current;
+    const dtDraw = anim.lastDrawAt ? Math.min(0.05, (now - anim.lastDrawAt) / 1000) : 0.016;
+    anim.lastDrawAt = now;
+    // 着地したフレームだけ、潰れバネとカメラの沈みに初速を与える
+    const landFx = landFxRef.current;
+    if (landFx && landFx.at !== anim.landAt) {
+      anim.landAt = landFx.at;
+      anim.squash.x = Math.min(anim.squash.x, landingSquashY(landFx.fall));
+      anim.squash.v = 0;
+      anim.dip.x = Math.min(0.22, landFx.fall * 0.03);
+      anim.dip.v = 0;
+    }
+    anim.squash = springStep(anim.squash, 1, 190, 14, dtDraw);
+    anim.dip = springStep(anim.dip, 0, 130, 10, dtDraw);
+    let targetX = cx + body.face * 1.1 - viewW / 2;
+    let targetY = cy - viewH / 2;
+    targetX = viewW >= WORLD_W ? (WORLD_W - viewW) / 2 : Math.max(0, Math.min(WORLD_W - viewW, targetX));
+    targetY = viewH >= WORLD_H ? (WORLD_H - viewH) / 2 : Math.max(0, Math.min(WORLD_H - viewH, targetY));
+    if (!anim.camInit || Math.abs(targetX - anim.camX) > viewW * 1.2 || Math.abs(targetY - anim.camY) > viewH * 1.2) {
+      // 初回とテレポート直後は吸着させる（長いパンを避ける）
+      anim.camX = targetX;
+      anim.camY = targetY;
+      anim.camInit = true;
+    } else {
+      anim.camX = damp(anim.camX, targetX, 7, dtDraw);
+      anim.camY = damp(anim.camY, targetY, 9, dtDraw);
+    }
+    const camX = anim.camX;
+    const camY = anim.camY + anim.dip.x;
     camRef.current = { x: camX, y: camY };
 
     // 素材は初回描画で一度だけ読み込む（タイルテクスチャ＋公式キャラ画像）
@@ -1095,6 +1256,9 @@ export default function WorldBoxClient() {
     const [sr, sg, sb] = skyColor(dayRef.current);
     ctx.fillStyle = `rgb(${sr},${sg},${sb})`;
     ctx.fillRect(0, 0, vw, vh);
+
+    // 流れる雲（パララックス背景）
+    drawClouds(ctx, camX, camY, vw, vh, tilePx, now);
 
     // 遠景の丘（パララックス）
     drawHills(ctx, camX, camY, vw, vh, tilePx);
@@ -1114,13 +1278,13 @@ export default function WorldBoxClient() {
         // （カメラの小数オフセットや反転描画でブロック間に継ぎ目を作らない）
         const px = Math.round((tx - camX) * tilePx);
         const py = Math.round((ty - camY) * tilePx);
-        drawBlock(ctx, id, tx, ty, px, py, tilePx + 1, pop);
+        drawBlock(ctx, id, tx, ty, px, py, tilePx + 1, pop, now);
       }
     }
 
     // 落下中のブロック（動きは滑らかなまま、大きさだけ1px重ねる）
     for (const f of fallingRef.current) {
-      drawBlock(ctx, f.blockId, f.x, Math.floor(f.y), (f.x - camX) * tilePx, (f.y - camY) * tilePx, tilePx + 1);
+      drawBlock(ctx, f.blockId, f.x, Math.floor(f.y), (f.x - camX) * tilePx, (f.y - camY) * tilePx, tilePx + 1, 1, now);
     }
 
     // 拾い物
@@ -1147,7 +1311,7 @@ export default function WorldBoxClient() {
         ctx.stroke();
         ctx.restore();
       } else {
-        drawBlock(ctx, p.blockId, Math.floor(p.x), Math.floor(p.y), px, py, s);
+        drawBlock(ctx, p.blockId, Math.floor(p.x), Math.floor(p.y), px, py, s, 1, now);
         if (p.count > 1) {
           ctx.fillStyle = "#fff";
           ctx.font = `700 ${Math.max(10, tilePx * 0.34)}px sans-serif`;
@@ -1159,18 +1323,24 @@ export default function WorldBoxClient() {
 
     // 暗さ（光フィールドからタイルごとに引く。近傍平均で境目を滑らかにする）
     // キャラは暗くしない（暗がりでも自分と敵は見える、操作性優先）
+    // 松明が勝っているタイルだけ、炎のゆらぎ（±5%）を描画時に乗せる（フィールドは作り直さない）
     const field = lightRef.current;
     if (field) {
       const phase = dayRef.current;
+      const skyK = skyLevelAt(phase);
+      const tSec = now / 1000;
+      const lv = (x: number, y: number): number => {
+        if (y < 0) return skyK;
+        if (x < 0 || x >= WORLD_W || y >= WORLD_H) return 0;
+        const idx = y * WORLD_W + x;
+        const s = field.sky[idx] * skyK;
+        const t = field.torch[idx];
+        if (t <= s) return s;
+        return Math.min(1, Math.max(s, t * torchLightFlicker(tSec, (x * 31 + y * 17) % 10)));
+      };
       for (let ty = y0; ty <= y1; ty++) {
         for (let tx = x0; tx <= x1; tx++) {
-          const l =
-            (lightLevelAt(field, world, tx, ty, phase) * 2 +
-              lightLevelAt(field, world, tx - 1, ty, phase) +
-              lightLevelAt(field, world, tx + 1, ty, phase) +
-              lightLevelAt(field, world, tx, ty - 1, phase) +
-              lightLevelAt(field, world, tx, ty + 1, phase)) /
-            6;
+          const l = (lv(tx, ty) * 2 + lv(tx - 1, ty) + lv(tx + 1, ty) + lv(tx, ty - 1) + lv(tx, ty + 1)) / 6;
           const a = (1 - l) * 0.86;
           if (a > 0.02) {
             ctx.fillStyle = `rgba(5,7,26,${a.toFixed(3)})`;
@@ -1183,6 +1353,22 @@ export default function WorldBoxClient() {
     // 敵
     for (const e of enemiesRef.current) {
       drawEnemy(ctx, e, (e.x - camX) * tilePx, (e.y - camY) * tilePx, tilePx, now);
+    }
+
+    // 撃破された敵の倒れ込み（回転しながら薄くなる）
+    dyingRef.current = dyingRef.current.filter((d) => now - d.at < 320);
+    for (const d of dyingRef.current) {
+      const pose = flipDeathPose((now - d.at) / 320);
+      const img = charImgRef.current?.jinrou;
+      const size = tilePx * 1.5;
+      ctx.save();
+      ctx.translate((d.x + ENEMY_W / 2 - camX) * tilePx, (d.y + ENEMY_H / 2 - camY) * tilePx);
+      ctx.rotate(pose.rot * d.face);
+      ctx.globalAlpha = pose.alpha;
+      if (texReady(img)) {
+        ctx.drawImage(img, -size / 2, -size / 2, size, size);
+      }
+      ctx.restore();
     }
 
     // 消滅の煙
@@ -1258,7 +1444,14 @@ export default function WorldBoxClient() {
       const s = Math.max(3, tilePx * 0.22);
       ctx.save();
       ctx.globalAlpha = Math.max(0, p.life / p.maxLife);
-      if (p.heart) {
+      if (p.dust) {
+        // 土煙: 柔らかい円が少し膨らんで消える
+        const grow = 1 + (1 - p.life / p.maxLife) * 0.9;
+        ctx.fillStyle = "rgba(216,208,196,0.55)";
+        ctx.beginPath();
+        ctx.arc(px, py, s * 0.62 * grow, 0, Math.PI * 2);
+        ctx.fill();
+      } else if (p.heart) {
         ctx.fillStyle = "#e5484d";
         ctx.fillRect(px, py, s, s);
       } else {
@@ -1280,7 +1473,27 @@ export default function WorldBoxClient() {
     // プレイヤー（標準AGOキャラ）。無敵時間中は点滅させる
     const invuln = gameTimeRef.current < healthRef.current.invulnUntil;
     if (!invuln || Math.floor(now / 90) % 2 === 0) {
-      drawPlayer(ctx, (body.x - camX) * tilePx, (body.y - camY) * tilePx, tilePx, body.face, walkPhaseRef.current, body.onGround, now);
+      drawPlayer(ctx, (body.x - camX) * tilePx, (body.y - camY) * tilePx, tilePx, now);
+    }
+
+    // 死亡ポフ（倒れた場所で膨らんで消える）
+    const dfx = deathFxRef.current;
+    if (dfx && now - dfx.at < 380) {
+      const pose = poofPose((now - dfx.at) / 380);
+      const img = charImgRef.current?.ago;
+      const size = tilePx * 1.5 * pose.scale;
+      ctx.save();
+      ctx.globalAlpha = pose.alpha;
+      if (texReady(img)) {
+        ctx.drawImage(
+          img,
+          (dfx.x + PLAYER_W / 2 - camX) * tilePx - size / 2,
+          (dfx.y + PLAYER_H - camY) * tilePx - size,
+          size,
+          size,
+        );
+      }
+      ctx.restore();
     }
 
     // ジョイスティック（タッチ中だけ表示）
@@ -1305,17 +1518,30 @@ export default function WorldBoxClient() {
   const drawEnemy = (ctx: CanvasRenderingContext2D, e: Enemy, px: number, py: number, tilePx: number, now: number) => {
     const w = 0.9 * tilePx;
     const img = charImgRef.current?.jinrou;
-    const bob = Math.sin(now / 160 + e.id * 2) * tilePx * 0.03;
+    const brain = enemyBrainRef.current.get(e.id);
+    const phase = brain?.phase ?? e.id * 2;
+    const bob = -walkBob(phase) * tilePx * 0.05;
     const feetX = px + (ENEMY_W * tilePx) / 2;
     const feetY = py + ENEMY_H * tilePx;
     if (texReady(img)) {
       // 公式の人狼あごむに（/img/jinrou.png）。プレイヤーと同程度の大きさ、足元アンカー、向き反転
+      // 歩行は左右の揺れ、溜めは潰れ、突進は伸び、被弾は凹みバネで表す
       const size = tilePx * 1.5;
       const burning = !isNightPhase(dayRef.current); // 夜明けは燃焼中: 明滅させる
       const hitAgo = now - (enemyHitRef.current.get(e.id) ?? -10000);
+      const gt = gameTimeRef.current;
+      let squashY = brain?.squash.x ?? 1;
+      let stretchX = 1;
+      if (brain?.mode === "windup") {
+        squashY *= telegraphSquashY(1 - Math.max(0, brain.until - gt) / ENEMY_WINDUP_SEC);
+      } else if (brain?.mode === "lunge") {
+        stretchX = 1.15;
+        squashY *= 0.94;
+      }
       ctx.save();
       ctx.translate(feetX, feetY + bob);
-      ctx.scale(e.face, 1);
+      ctx.rotate(enemyRock(e.vx, phase));
+      ctx.scale(e.face * stretchX * (1 + (1 - squashY) * 0.7), squashY);
       if (burning) ctx.globalAlpha = 0.6 + 0.3 * Math.sin(now / 45);
       ctx.drawImage(img, -size / 2, -size, size, size);
       if (hitAgo < 150) {
@@ -1345,7 +1571,7 @@ export default function WorldBoxClient() {
     }
   };
 
-  const drawBlock = (ctx: CanvasRenderingContext2D, id: number, tx: number, ty: number, px: number, py: number, s: number, pop = 1) => {
+  const drawBlock = (ctx: CanvasRenderingContext2D, id: number, tx: number, ty: number, px: number, py: number, s: number, pop = 1, now = 0) => {
     const def = BLOCKS[id];
     if (!def) return;
     if (pop !== 1) {
@@ -1355,21 +1581,26 @@ export default function WorldBoxClient() {
       s = ns;
     }
     if (id === TORCH) {
-      // 松明: 棒＋炎。背景は塗らない（非固体）。ほのかな光は暗さオーバーレイ側で表現される
+      // 松明: 棒＋炎。背景は塗らない（非固体）。炎はタイルごとに違う位相でゆらめく
+      const seed = tx * 0.731 + ty * 1.317;
+      const fl = torchFlameScale(now / 1000, seed);
       ctx.fillStyle = "rgba(255,176,66,0.16)";
       ctx.beginPath();
       ctx.arc(px + s / 2, py + s * 0.36, s * 0.52, 0, Math.PI * 2);
       ctx.fill();
       ctx.fillStyle = "#8a5a2b";
       ctx.fillRect(px + s * 0.44, py + s * 0.42, s * 0.12, s * 0.52);
+      ctx.save();
+      ctx.globalAlpha = 0.82 + 0.18 * flickerNoise(now / 1700, seed + 2.4);
       ctx.fillStyle = "#ff9d2e";
       ctx.beginPath();
-      ctx.ellipse(px + s / 2, py + s * 0.32, s * 0.16, s * 0.24, 0, 0, Math.PI * 2);
+      ctx.ellipse(px + s / 2, py + s * 0.32, s * 0.16 * fl, s * 0.24 * fl, 0, 0, Math.PI * 2);
       ctx.fill();
       ctx.fillStyle = "#ffd76a";
       ctx.beginPath();
-      ctx.ellipse(px + s / 2, py + s * 0.38, s * 0.08, s * 0.13, 0, 0, Math.PI * 2);
+      ctx.ellipse(px + s / 2, py + s * 0.38, s * 0.08 * fl, s * 0.13 * fl, 0, 0, Math.PI * 2);
       ctx.fill();
+      ctx.restore();
       return;
     }
     if (id === WORKBENCH) {
@@ -1461,31 +1692,67 @@ export default function WorldBoxClient() {
     }
   };
 
-  /** プレイヤー: 公式あごむに画像（/img/nomal.png）を足元アンカーで描く。歩行は足元の上下＋潰れで表す。 */
-  const drawPlayer = (
-    ctx: CanvasRenderingContext2D,
-    px: number,
-    py: number,
-    tilePx: number,
-    face: 1 | -1,
-    walkPhase: number,
-    onGround: boolean,
-    now: number,
-  ) => {
+  /**
+   * プレイヤー: 公式あごむに画像（/img/nomal.png）を足元アンカーで描く。
+   * 歩行の潰れ伸び・前傾・上下動、空中の伸びと傾き、着地バネ、被弾の赤フラッシュと揺れ、
+   * 復活の出現フェード、手持ちアイテムのスイングをすべてここで重ねる（曲線は lib/worldbox/anim）。
+   */
+  const drawPlayer = (ctx: CanvasRenderingContext2D, px: number, py: number, tilePx: number, now: number) => {
+    const body = bodyRef.current;
+    if (!body) return;
     const size = tilePx * 1.5;
     const feetX = px + (PLAYER_W * tilePx) / 2;
     const feetY = py + PLAYER_H * tilePx;
-    const moving = onGround && Math.abs(Math.sin(walkPhase)) > 0.15;
-    const bob = moving ? Math.abs(Math.sin(walkPhase)) * size * 0.03 : Math.sin(now / 380) * size * 0.012;
-    // 歩行位相の半周期ごとに足元基準で少し潰す（scaleY 0.94）
-    const squash = moving && Math.sin(walkPhase) < 0 ? 0.94 : 1;
+    const face = body.face;
+    const fwdRatio = Math.max(-1, Math.min(1, (body.vx * face) / RUN_SPEED));
+    const phase = walkPhaseRef.current;
+    const anim = playerAnimRef.current;
+
+    // 姿勢: 地上は歩行サイクル、空中は伸び＋傾き。着地バネは常に乗る
+    let squashY: number;
+    let lean: number;
+    let bob = 0;
+    if (body.onGround) {
+      const moving = Math.abs(body.vx) > 0.3;
+      squashY = moving ? walkSquashY(phase) : 1;
+      lean = moveLean(fwdRatio);
+      bob = moving ? walkBob(phase) * size * 0.045 : Math.sin(now / 380) * size * 0.012;
+    } else {
+      const pose = airPose(body.vy, fwdRatio);
+      squashY = pose.scaleY;
+      lean = pose.tilt;
+    }
+    squashY *= anim.squash.x;
+    const scaleX = 1 + (1 - squashY) * 0.55;
+
+    // 掘り中は体ごと少し前のめりにする
+    const digging = digRef.current !== null && pressModeRef.current === "dig";
+    if (digging) lean += 0.07;
+
+    // 被弾: 残り時間で揺れと赤みが引く
+    const hurtK = Math.max(0, 1 - (now - hurtAtRef.current) / 220);
+    const shakeX = hurtK > 0 ? Math.sin(now * 1.9) * hurtK * tilePx * 0.09 : 0;
+    // ブロック破砕の反動: 一瞬だけ後ろへ引く
+    const recK = Math.max(0, 1 - (now - breakAtRef.current) / 160);
+    const recoilX = -face * recK * recK * tilePx * 0.1;
+    // 復活直後の出現フェード
+    const spawn = respawnPose((now - respawnAtRef.current) / 300);
+
     const img = charImgRef.current?.ago;
     ctx.save();
-    ctx.translate(feetX, feetY - bob);
-    ctx.scale(face, 1);
-    ctx.scale(1, squash);
+    ctx.translate(feetX + shakeX + recoilX, feetY - bob);
+    ctx.rotate(lean * face);
+    ctx.scale(face * scaleX * spawn.scale, squashY * spawn.scale);
+    ctx.globalAlpha = spawn.alpha;
     if (texReady(img)) {
       ctx.drawImage(img, -size / 2, -size, size, size);
+      if (hurtK > 0) {
+        // 被弾の赤フラッシュ（同画像を赤く重ねる）
+        ctx.globalAlpha = spawn.alpha * hurtK * 0.75;
+        ctx.filter = "brightness(0.55) sepia(1) saturate(5) hue-rotate(-48deg)";
+        ctx.drawImage(img, -size / 2, -size, size, size);
+        ctx.filter = "none";
+      }
     } else {
       // 読み込み中だけの無地プレースホルダ（顔などの造形は描かない）
       ctx.beginPath();
@@ -1497,6 +1764,134 @@ export default function WorldBoxClient() {
       ctx.stroke();
     }
     ctx.restore();
+
+    // 手持ちアイテム（選択中スロット）を体の前に描き、掘り/攻撃に同期して振る
+    const slot = invRef.current.slots[selectedRef.current];
+    if (slot && slot.count > 0) {
+      let angle: number;
+      if (digging && digRef.current) {
+        angle = digSwingAngle(digRef.current.progress);
+      } else if (now - attackAtRef.current < 350) {
+        angle = attackSwingAngle((now - attackAtRef.current) / 350);
+      } else {
+        angle = ARM_REST_ANGLE + Math.sin(now / 500) * 0.05;
+      }
+      ctx.save();
+      ctx.translate(feetX + shakeX + recoilX + face * size * 0.3, feetY - size * 0.44 - bob);
+      ctx.scale(face, 1);
+      ctx.rotate(angle);
+      ctx.globalAlpha = spawn.alpha;
+      drawHeldItem(ctx, slot.id, tilePx * 0.62, now);
+      ctx.restore();
+    }
+  };
+
+  /** 手持ちアイテムの小描画（ItemIcon と同じ色使い。pivot から前方へ伸ばして描く）。 */
+  const drawHeldItem = (ctx: CanvasRenderingContext2D, id: number, s: number, now: number) => {
+    if (id === WOODEN_PICKAXE || id === STONE_PICKAXE || id === COPPER_PICKAXE) {
+      const head = id === WOODEN_PICKAXE ? "#a9743f" : id === STONE_PICKAXE ? "#9a9aa0" : "#e07f3f";
+      ctx.lineCap = "round";
+      ctx.strokeStyle = "#7a5230";
+      ctx.lineWidth = s * 0.14;
+      ctx.beginPath();
+      ctx.moveTo(0, s * 0.3);
+      ctx.lineTo(s * 0.55, -s * 0.25);
+      ctx.stroke();
+      ctx.strokeStyle = head;
+      ctx.lineWidth = s * 0.16;
+      ctx.beginPath();
+      ctx.moveTo(s * 0.12, -s * 0.52);
+      ctx.quadraticCurveTo(s * 0.6, -s * 0.6, s * 0.98, -s * 0.12);
+      ctx.stroke();
+      return;
+    }
+    if (id === SWORD) {
+      ctx.lineCap = "round";
+      ctx.strokeStyle = "#7a5230";
+      ctx.lineWidth = s * 0.15;
+      ctx.beginPath();
+      ctx.moveTo(-s * 0.12, s * 0.34);
+      ctx.lineTo(s * 0.14, s * 0.1);
+      ctx.stroke();
+      ctx.strokeStyle = "#e07f3f";
+      ctx.lineWidth = s * 0.13;
+      ctx.beginPath();
+      ctx.moveTo(s * 0.02, s * 0.22);
+      ctx.lineTo(s * 0.3, -s * 0.06);
+      ctx.stroke();
+      ctx.strokeStyle = "#e8e8ec";
+      ctx.lineWidth = s * 0.14;
+      ctx.beginPath();
+      ctx.moveTo(s * 0.16, s * 0.02);
+      ctx.lineTo(s * 0.95, -s * 0.5);
+      ctx.stroke();
+      return;
+    }
+    if (id === TORCH) {
+      const fl = torchFlameScale(now / 1000, 0.37);
+      ctx.fillStyle = "#8a5a2b";
+      ctx.fillRect(s * 0.3, -s * 0.05, s * 0.11, s * 0.5);
+      ctx.fillStyle = "#ff9d2e";
+      ctx.beginPath();
+      ctx.ellipse(s * 0.36, -s * 0.18, s * 0.15 * fl, s * 0.22 * fl, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "#ffd76a";
+      ctx.beginPath();
+      ctx.ellipse(s * 0.36, -s * 0.13, s * 0.07 * fl, s * 0.11 * fl, 0, 0, Math.PI * 2);
+      ctx.fill();
+      return;
+    }
+    if (id === COPPER_INGOT) {
+      ctx.fillStyle = "#e07f3f";
+      ctx.strokeStyle = "#b35a24";
+      ctx.lineWidth = Math.max(1, s * 0.05);
+      ctx.beginPath();
+      ctx.moveTo(s * 0.08, -s * 0.2);
+      ctx.lineTo(s * 0.62, -s * 0.2);
+      ctx.lineTo(s * 0.78, s * 0.22);
+      ctx.lineTo(-s * 0.08, s * 0.22);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      return;
+    }
+    const texKey = TEXTURE_KEY_BY_BLOCK[id];
+    const tex = texKey ? texturesRef.current?.[texKey] : undefined;
+    if (texReady(tex)) {
+      ctx.drawImage(tex, 0, -s / 2, s, s);
+      return;
+    }
+    const color = BLOCKS[id]?.color ?? itemDef(id)?.color ?? "#888";
+    ctx.fillStyle = color;
+    ctx.fillRect(0, -s / 2, s, s);
+    ctx.strokeStyle = "rgba(0,0,0,0.35)";
+    ctx.lineWidth = Math.max(1, s * 0.05);
+    ctx.strokeRect(0, -s / 2, s, s);
+  };
+
+  /** 流れる雲（平らな楕円の集まり。丘よりさらに遅く流れ、夜は薄くなる）。 */
+  const drawClouds = (ctx: CanvasRenderingContext2D, camX: number, camY: number, vw: number, vh: number, tilePx: number, now: number) => {
+    const sky = skyLevelAt(dayRef.current);
+    const alpha = 0.10 + 0.65 * sky;
+    ctx.fillStyle = `rgba(255,255,255,${alpha.toFixed(3)})`;
+    const drift = now / 1000;
+    const spanTiles = 340; // ワールド幅＋余白（巻き戻し用）
+    for (let i = 0; i < 7; i++) {
+      const h1 = hash2(i, 77);
+      const h2 = hash2(i, 78);
+      const worldX = h1 * 300 + drift * (0.14 + h2 * 0.1);
+      const cx = ((((worldX % spanTiles) + spanTiles) % spanTiles) - 20 - camX * 0.25) * tilePx;
+      if (cx < -tilePx * 12 || cx > vw + tilePx * 4) continue;
+      const cy = (2.2 + h2 * 6 - camY * 0.25) * tilePx;
+      if (cy < -tilePx * 2 || cy > vh) continue;
+      const w = tilePx * (3.4 + h1 * 3.4);
+      const hgt = tilePx * (0.55 + h2 * 0.35);
+      ctx.beginPath();
+      ctx.ellipse(cx, cy, w * 0.5, hgt, 0, 0, Math.PI * 2);
+      ctx.ellipse(cx - w * 0.28, cy + hgt * 0.25, w * 0.3, hgt * 0.7, 0, 0, Math.PI * 2);
+      ctx.ellipse(cx + w * 0.3, cy + hgt * 0.2, w * 0.32, hgt * 0.75, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
   };
 
   /** 遠景の丘シルエット（2層パララックス）。地表ラインに追随し、深い地下では画面外に出る。 */
