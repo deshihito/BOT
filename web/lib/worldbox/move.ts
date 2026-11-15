@@ -15,15 +15,19 @@ export type MoveResult = {
   hitY: boolean;
 };
 
+/** 追加で固体扱いするタイル集合（"x,y" キー）。建物など動的な障害物用。 */
+export type BlockedTiles = ReadonlySet<string>;
+
 /** 円（中心 cx, cy・半径 r）が固体タイルに触れているか。 */
-export function circleHitsSolid(map: TopDownMap, cx: number, cy: number, r: number): boolean {
+export function circleHitsSolid(map: TopDownMap, cx: number, cy: number, r: number, blocked?: BlockedTiles): boolean {
   const x0 = Math.floor(cx - r);
   const x1 = Math.floor(cx + r);
   const y0 = Math.floor(cy - r);
   const y1 = Math.floor(cy + r);
   for (let ty = y0; ty <= y1; ty++) {
     for (let tx = x0; tx <= x1; tx++) {
-      if (!isSolidMapTile(mapTileAt(map, tx, ty))) continue;
+      const solid = isSolidMapTile(mapTileAt(map, tx, ty)) || (blocked?.has(`${tx},${ty}`) ?? false);
+      if (!solid) continue;
       const closestX = Math.max(tx, Math.min(cx, tx + 1));
       const closestY = Math.max(ty, Math.min(cy, ty + 1));
       const dx = cx - closestX;
@@ -38,18 +42,24 @@ export function circleHitsSolid(map: TopDownMap, cx: number, cy: number, r: numb
  * 速度 vel（タイル/秒）で dt 秒進める。軸分離で壁に沿って滑る。
  * マップ外には出ない（端で止まる）。
  */
-export function stepMove(map: TopDownMap, pos: { x: number; y: number }, vel: { x: number; y: number }, dt: number): MoveResult {
+export function stepMove(
+  map: TopDownMap,
+  pos: { x: number; y: number },
+  vel: { x: number; y: number },
+  dt: number,
+  blocked?: BlockedTiles,
+): MoveResult {
   const r = PLAYER_RADIUS;
   let { x, y } = pos;
   let hitX = false;
   let hitY = false;
 
   const nx = x + vel.x * dt;
-  if (circleHitsSolid(map, nx, y, r)) hitX = true;
+  if (circleHitsSolid(map, nx, y, r, blocked)) hitX = true;
   else x = nx;
 
   const ny = y + vel.y * dt;
-  if (circleHitsSolid(map, x, ny, r)) hitY = true;
+  if (circleHitsSolid(map, x, ny, r, blocked)) hitY = true;
   else y = ny;
 
   x = Math.max(r, Math.min(map.width - r, x));
@@ -58,13 +68,13 @@ export function stepMove(map: TopDownMap, pos: { x: number; y: number }, vel: { 
 }
 
 /** その地点に立てるか（固体にめり込んでいないか）。 */
-export function canStandAt(map: TopDownMap, x: number, y: number): boolean {
-  return !circleHitsSolid(map, x, y, PLAYER_RADIUS);
+export function canStandAt(map: TopDownMap, x: number, y: number, blocked?: BlockedTiles): boolean {
+  return !circleHitsSolid(map, x, y, PLAYER_RADIUS, blocked);
 }
 
 /** 固体に埋まっていたら、近くの立てる場所を探す（ロード時の救済）。 */
-export function findFreeNear(map: TopDownMap, x: number, y: number): { x: number; y: number } {
-  if (canStandAt(map, x, y)) return { x, y };
+export function findFreeNear(map: TopDownMap, x: number, y: number, blocked?: BlockedTiles): { x: number; y: number } {
+  if (canStandAt(map, x, y, blocked)) return { x, y };
   for (let ring = 1; ring <= 8; ring++) {
     for (let dy = -ring; dy <= ring; dy++) {
       for (let dx = -ring; dx <= ring; dx++) {
@@ -72,7 +82,7 @@ export function findFreeNear(map: TopDownMap, x: number, y: number): { x: number
         const cx = x + dx;
         const cy = y + dy;
         if (cx < 1 || cy < 1 || cx > map.width - 1 || cy > map.height - 1) continue;
-        if (canStandAt(map, cx, cy)) return { x: cx, y: cy };
+        if (canStandAt(map, cx, cy, blocked)) return { x: cx, y: cy };
       }
     }
   }
