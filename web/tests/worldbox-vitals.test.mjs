@@ -46,7 +46,7 @@ function loadBundle(files, names) {
 }
 
 const v = loadBundle(
-  ["worldbox/items.ts", "worldbox/profile.ts", "worldbox/vitals.ts", "worldbox/economy.ts"],
+  ["worldbox/items.ts", "worldbox/roles.ts", "worldbox/profile.ts", "worldbox/vitals.ts", "worldbox/economy.ts"],
   [
     "ITEMS", "itemById", "DEFAULT_PROFILE", "parseProfile", "serializeProfile", "addItem",
     "HP_MAX", "HUNGER_MAX", "stepVitals", "applyMobDamage", "applyPoison", "curePoison",

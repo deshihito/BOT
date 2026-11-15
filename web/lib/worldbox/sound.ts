@@ -16,7 +16,7 @@ import type { FxBurstKind } from "./fx";
 /* ================= 純粋ロジック: BGM の譜面 ================= */
 
 /** BGM の場面。ワールド昼/夜、ロビー、カジノで曲が切り替わる。 */
-export type WbBgmScene = "field-day" | "field-night" | "lobby" | "casino";
+export type WbBgmScene = "field-day" | "field-night" | "lobby" | "casino" | "cave" | "dungeon";
 
 /**
  * 現在の状況から BGM の場面を決める。優先順位は カジノ > 屋内 > 夜 > 昼。
@@ -29,6 +29,8 @@ export function bgmSceneFor(input: {
   casinoOpen: boolean;
 }): WbBgmScene {
   if (input.casinoOpen) return "casino";
+  if (input.space.startsWith("cave:")) return "cave";
+  if (input.space.startsWith("dungeon:")) return "dungeon";
   if (input.space !== "world") return "lobby";
   return input.night > 0.5 ? "field-night" : "field-day";
 }
@@ -133,6 +135,36 @@ export const BGM_TRACKS: Record<WbBgmScene, WbBgmTrack> = {
       4, null, 3, null, 2, null, null, null,
     ],
     hat: barSteps([1, 3, 5, 7]),
+    kick: barSteps([0, 4]),
+  },
+  // 洞窟: A マイナーペンタの低音・疎な打音。深さの静けさ（ハット/キック無し）。
+  cave: {
+    bpm: 72,
+    root: 220.0, // A3
+    scale: MINOR_PENT,
+    bass: bassLine([0, 3]),
+    lead: [
+      4, null, null, null, 3, null, null, null,
+      null, null, 2, null, null, null, null, null,
+      3, null, null, null, 4, null, null, 5,
+      null, null, null, null, 2, null, null, null,
+    ],
+    hat: [],
+    kick: [],
+  },
+  // ダンジョン: D マイナーペンタ。洞窟より速く、キックで緊張を刻む。
+  dungeon: {
+    bpm: 96,
+    root: 146.83, // D3
+    scale: MINOR_PENT,
+    bass: bassLine([0, 0, 5, 3]),
+    lead: [
+      4, null, 4, null, 3, null, 2, null,
+      4, null, null, null, 5, null, 4, 3,
+      2, null, 2, null, 3, null, 4, null,
+      null, null, 3, null, 2, null, null, null,
+    ],
+    hat: [],
     kick: barSteps([0, 4]),
   },
   // カジノ: D メジャーペンタ。速く跳ねるベースと毎ステップのハット。

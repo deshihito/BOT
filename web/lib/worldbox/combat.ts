@@ -117,6 +117,8 @@ export type MobState = {
   hp: number;
   /** 死亡中の再出現時刻（ms）。これを過ぎたら満タンで復活。 */
   deadUntil?: number;
+  /** 凍結中の解除時刻（ms）。アイスランスで付く。 */
+  frozenUntil?: number;
 };
 
 export function parseMobState(raw: unknown): MobState | null {
@@ -125,10 +127,11 @@ export function parseMobState(raw: unknown): MobState | null {
     try { v = JSON.parse(raw); } catch { return null; }
   }
   if (typeof v !== "object" || v === null) return null;
-  const o = v as { hp?: unknown; deadUntil?: unknown };
+  const o = v as { hp?: unknown; deadUntil?: unknown; frozenUntil?: unknown };
   if (typeof o.hp !== "number" || !Number.isFinite(o.hp)) return null;
   const st: MobState = { hp: Math.max(0, Math.floor(o.hp)) };
   if (typeof o.deadUntil === "number" && Number.isFinite(o.deadUntil)) st.deadUntil = o.deadUntil;
+  if (typeof o.frozenUntil === "number" && Number.isFinite(o.frozenUntil)) st.frozenUntil = o.frozenUntil;
   return st;
 }
 
@@ -136,7 +139,9 @@ export function parseMobStates(raw: unknown): Record<string, MobState> {
   if (typeof raw !== "object" || raw === null) return {};
   const out: Record<string, MobState> = {};
   for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
-    if (!parseMobKey(k)) continue;
+    // インスタンス内は "空間ID|mobId@x,y" の前置キーを許す
+    const baseKey = k.includes("|") ? k.slice(k.lastIndexOf("|") + 1) : k;
+    if (!parseMobKey(baseKey)) continue;
     const st = parseMobState(v);
     if (st) out[k] = st;
   }

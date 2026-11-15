@@ -13,6 +13,7 @@ import {
   HP_MAX, HUNGER_MAX, removeItem,
   type PlayerProfile, type RespawnPoint, type StatusEffect,
 } from "./profile";
+import { maxHpFor, MEDIC_HEAL_MULT } from "./roles";
 
 /** 空腹の減少（/秒）。満腹 100 → 0 まで約20分。 */
 export const HUNGER_DRAIN_PER_SEC = 100 / 1200;
@@ -36,6 +37,9 @@ export const VITAL_SETTLE_CAP_MS = 30 * 60 * 1000;
 export const DEATH_DROP_RATE = 0.5;
 /** リスポーン直後の HP / 空腹。 */
 export const RESPAWN_HP = HP_MAX;
+
+/** そのプレイヤーの最大 HP（守護ボーナス込み）。 */
+export { maxHpFor };
 export const RESPAWN_HUNGER = 50;
 
 export function isPoisoned(profile: PlayerProfile, now: number): boolean {
@@ -149,7 +153,8 @@ export function consumeEffect(
     next = curePoison(next);
   }
   const hungerGain = item.hunger ? Math.min(HUNGER_MAX, next.hunger + item.hunger) - next.hunger : 0;
-  const hpGain = item.heal ? Math.min(HP_MAX, next.hp + item.heal) - next.hp : 0;
+  const healAmount = item.heal ? item.heal * (next.role === "medic" ? MEDIC_HEAL_MULT : 1) : 0;
+  const hpGain = item.heal ? Math.min(maxHpFor(next), next.hp + healAmount) - next.hp : 0;
   next = { ...next, hunger: next.hunger + hungerGain, hp: next.hp + hpGain };
   return { profile: next, hungerGain, hpGain, cured };
 }
@@ -220,7 +225,7 @@ export function applyRest(
 ): PlayerProfile {
   return {
     ...profile,
-    hp: HP_MAX,
+    hp: maxHpFor(profile),
     status: [],
     vitalAt: now,
     ...(point ? { restPoint: point } : {}),

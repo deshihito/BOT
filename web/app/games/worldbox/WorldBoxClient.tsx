@@ -28,6 +28,12 @@ import {
   slashAlpha, spawnAmbient, spawnBurst, spawnMobFx, startShake, stepFx, swingProgress, weatherAmbientKind, weatherAt,
   type FxBurstKind, type FxShake, type FxSystem,
 } from "@/lib/worldbox/fx";
+import type { SkillFxEffect } from "@/lib/worldbox/fx";
+import { skillFxProgress, skillFxStage, spawnSkillFx, thunderBoltPoints } from "@/lib/worldbox/fx";
+import {
+  activeSkillFor, masteryRankOf, maxHpFor, roleById, skillCooldownLeft, SKILLS,
+  SCOUT_STAMINA_MULT,
+} from "@/lib/worldbox/roles";
 import { clockOffsetEstimate, type PresenceEntry } from "@/lib/worldbox/presence";
 import {
   STAMINA_MAX, canDash, createStamina, createTapTracker, isStickDash, registerKeyTap, rescueStamina,
@@ -591,6 +597,11 @@ export default function WorldBoxClient() {
   };
   // インベントリ（ホットバー/ストレージ）とタイル上書き（伐採・畑・作物）
   const [invProfile, setInvProfile] = useState<PlayerProfile | null>(null);
+  const [, setCtTick] = useState(0);
+  useEffect(() => {
+    const timer = window.setInterval(() => setCtTick((v) => v + 1), 500);
+    return () => window.clearInterval(timer);
+  }, []);
   const invRef = useRef<PlayerProfile | null>(null);
   invRef.current = invProfile;
   const [selSlot, setSelSlot] = useState(0);
@@ -630,6 +641,81 @@ export default function WorldBoxClient() {
   /** 演出イベントの受け渡し（行為の成功/失敗→描画ループでパーティクル/揺れ/ポップに変換）。
    * whiff は空振り（風切りのみ、粒なし）。hit/death/spawn はモブ演出用（sizeTiles/color 任意）。 */
   const fxEventsRef = useRef<{ kind: FxBurstKind | "whiff"; x: number; y: number; sizeTiles?: number; color?: string }[]>([]);
+  // 冒険役職の技（ダブルタップ発動）: 進行中の演出・前回タップ・死亡地点。
+  const skillFxRef = useRef<{ effect: SkillFxEffect; stage: number }[]>([]);
+  const lastTapRef = useRef<{ x: number; y: number; at: number } | null>(null);
+  const deathsRef = useRef<{ name: string; x: number; y: number; at: number }[]>([]);
+
+  /** ダブルタップで技を打つ。発動したら true（通常タップは消費される）。 */
+  const castSkillAt = async (t: { x: number; y: number }): Promise<boolean> => {
+    const profile = invRef.current;
+    if (!profile || profile.role === "free") return false;
+    const pos = playerPosRef.current;
+    const space = spaceUi;
+    // 薬師: 死亡マーカーへのダブルタップは蘇生
+    if (profile.role === "medic") {
+      const death = deathsRef.current.find((d) => Math.floor(d.x) === t.x && Math.floor(d.y) === t.y);
+      if (death) {
+        try {
+          const res = await fetch("/api/worldbox/roles", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action: "revive", space, px: pos.x, py: pos.y }),
+          });
+          const data = (await res.json().catch(() => ({}))) as { profile?: PlayerProfile };
+          if (res.ok && data.profile) {
+            setInvProfile(data.profile);
+            skillFxRef.current.push({
+              effect: { kind: "heal_zone", x: death.x, y: death.y, fromX: pos.x, fromY: pos.y, startedAt: performance.now(), seed: Math.floor(Math.random() * 1e9) },
+              stage: -1,
+            });
+            playWbSe("warp");
+            deathsRef.current = deathsRef.current.filter((d) => d !== death);
+          }
+        } catch { /* 蘇生できなくても通常操作は続く */ }
+        return true;
+      }
+    }
+    const ownTile = Math.floor(pos.x) === t.x && Math.floor(pos.y) === t.y;
+    const skill = ownTile && profile.role === "guard" ? SKILLS.taunt : activeSkillFor(profile);
+    if (!skill) return false;
+    if (skillCooldownLeft(profile, skill.id, Date.now()) > 0) return false;
+    try {
+      const res = await fetch("/api/worldbox/roles", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "skill", skill: skill.id, tx: t.x + 0.5, ty: t.y + 0.5,
+          space, px: pos.x, py: pos.y,
+        }),
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        profile?: PlayerProfile; fx?: SkillFxEffect["kind"]; cx?: number; cy?: number; error?: string;
+      };
+      if (res.ok && data.profile) {
+        setInvProfile(data.profile);
+        skillFxRef.current.push({
+          effect: {
+            kind: data.fx ?? skill.fx, x: data.cx ?? t.x + 0.5, y: data.cy ?? t.y + 0.5,
+            fromX: pos.x, fromY: pos.y, startedAt: performance.now(), seed: Math.floor(Math.random() * 1e9),
+          },
+          stage: -1,
+        });
+        playWbSe(skill.id === "heal_zone" || skill.id === "taunt" ? "warp" : "hit");
+        void refreshMobsRef.current();
+        return true;
+      }
+      if (data.error === "cooldown") {
+        void refreshInv();
+        return true;
+      }
+      return false;
+    } catch {
+      return false;
+    }
+  };
+  const castSkillRef = useRef(castSkillAt);
+  castSkillRef.current = castSkillAt;
   /** 自分の不透明 ID（プレゼンス ID）。自分のブロック判定に使う。 */
   const selfIdRef = useRef<string | null>(null);
   /** タイル上書きから設置ブロックの固体集合を作り直す（施設は占有のみで固体にしない）。 */
@@ -653,11 +739,15 @@ export default function WorldBoxClient() {
   /** バイタル API の結果を反映する（死亡時はリスポーン移動まで行う）。 */
   const applyVitalsResult = (data: {
     profile?: PlayerProfile; died?: boolean; respawn?: { x: number; y: number };
+    teleport?: { space: string; x: number; y: number };
   }) => {
     if (data.profile) setInvProfile(data.profile);
     if (data.died && data.respawn) {
       respawnActionRef.current(data.respawn);
       setTileMsg("倒れた");
+    } else if (data.teleport) {
+      respawnActionRef.current({ x: data.teleport.x, y: data.teleport.y });
+      playWbSe("warp");
     }
   };
   const postVitals = async (body: Record<string, unknown>) => {
@@ -770,6 +860,33 @@ export default function WorldBoxClient() {
     bedKeyRef.current = key;
     void postVitals({ action: "set_bed", x, y });
   };
+  // 薬師は近くの死亡地点を定期取得する（蘇生の対象表示）
+  useEffect(() => {
+    if (invProfile?.role !== "medic") {
+      deathsRef.current = [];
+      return;
+    }
+    let disposed = false;
+    const tick = async () => {
+      try {
+        const pos = playerPosRef.current;
+        const res = await fetch(
+          `/api/worldbox/roles?space=${encodeURIComponent(spaceUi)}&x=${pos.x}&y=${pos.y}`,
+          { headers: { Accept: "application/json" } },
+        );
+        if (!res.ok || disposed) return;
+        const data = (await res.json()) as { deaths?: { name: string; x: number; y: number; at: number }[] };
+        if (!disposed) deathsRef.current = data.deaths ?? [];
+      } catch { /* 読めなくても歩き続けられる */ }
+    };
+    void tick();
+    const timer = window.setInterval(tick, 3000);
+    return () => {
+      disposed = true;
+      window.clearInterval(timer);
+    };
+  }, [invProfile?.role, spaceUi]);
+
   // バイタルの定期精算（空腹・毒・飢えはサーバー側の時刻で進む）
   useEffect(() => {
     const timer = window.setInterval(() => void postVitals({ action: "sync" }), 15000);
@@ -1435,7 +1552,11 @@ export default function WorldBoxClient() {
       fetch("/api/worldbox/presence", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: "", x: player.x, y: player.y, vx: player.vx, vy: player.vy, face: player.face, space }),
+        body: JSON.stringify({
+        name: "", x: player.x, y: player.y, vx: player.vx, vy: player.vy, face: player.face, space,
+        role: invRef.current?.role ?? "free",
+        rank: invRef.current ? masteryRankOf(invRef.current, invRef.current.role) : 1,
+      }),
       }).catch(() => { /* noop */ });
     };
     const pollOthers = async () => {
@@ -1728,6 +1849,27 @@ export default function WorldBoxClient() {
       }
       if (space === "world" || parseInstanceSpace(space)) {
         const t = toTile(e);
+        // ダブルタップ（320ms 以内・同タイル近傍）は冒険役職の技が消費する。
+        // クールタイム中・役職なしでは発動せず通常タップとして処理する。
+        const lastTap = lastTapRef.current;
+        const nowTap = performance.now();
+        if (
+          lastTap && nowTap - lastTap.at <= 320 &&
+          Math.abs(lastTap.x - t.x) <= 1 && Math.abs(lastTap.y - t.y) <= 1
+        ) {
+          lastTapRef.current = null;
+          void castSkillRef.current(t).then((cast) => {
+            if (!cast) {
+              if (!handleMobTap(t)) {
+                if (space === "world") handleTileTap(t);
+                else if (parseInstanceSpace(space)?.kind === "ruins") handleRuinsTap(t);
+                else handleCaveTap(t);
+              }
+            }
+          });
+          return;
+        }
+        lastTapRef.current = { x: t.x, y: t.y, at: nowTap };
         if (!handleMobTap(t)) {
           if (space === "world") handleTileTap(t);
           else if (parseInstanceSpace(space)?.kind === "ruins") handleRuinsTap(t);
@@ -2217,7 +2359,8 @@ export default function WorldBoxClient() {
         playWbSe("splash");
         wasSwimming = inWaterNow;
       }
-      stamina = stepStamina(stamina, staminaUse, dt).state;
+      const staminaDt = invRef.current?.role === "scout" && staminaUse !== "none" ? dt * SCOUT_STAMINA_MULT : dt;
+      stamina = stepStamina(stamina, staminaUse, staminaDt).state;
       if (staminaBoostRef.current) {
         // 噴水・休憩の回復（サーバー許可済み）
         stamina = createStamina();
@@ -2585,22 +2728,40 @@ export default function WorldBoxClient() {
             }
           }
         }
-        // 遺跡の床罠は薄いヒビとしてだけ見える（発動済みは消える）
+        // 遺跡の床罠は薄いヒビとしてだけ見える（発動済みは消える）。
+        // 斥候は 3 タイル以内の罠をはっきり視認できる（専門行為の可視化）。
         {
           const ruinsDraw = ruinsNow();
           if (ruinsDraw) {
-            ctx.strokeStyle = "rgba(30,26,20,0.35)";
-            ctx.lineWidth = 1;
+            const scoutNear = invRef.current?.role === "scout";
             for (const trap of ruinsDraw.traps) {
               if (ruinsStateRef.current.traps[String(trap.idx)]) continue;
               if (trap.x < lx0 || trap.x > lx1 || trap.y < ly0 || trap.y > ly1) continue;
               const sx = lobbyOx + trap.x * TILE;
               const sy = lobbyOy + trap.y * TILE;
+              const near = scoutNear && Math.hypot(trap.x + 0.5 - player.x, trap.y + 0.5 - player.y) <= 3;
+              ctx.strokeStyle = near ? "rgba(255,90,60,0.9)" : "rgba(30,26,20,0.35)";
+              ctx.lineWidth = near ? 2 : 1;
               ctx.beginPath();
               ctx.moveTo(sx + 6, sy + TILE - 7);
               ctx.lineTo(sx + TILE / 2, sy + TILE / 2 + 3);
               ctx.lineTo(sx + TILE - 8, sy + 9);
               ctx.stroke();
+              if (near) ctx.strokeRect(sx + 2.5, sy + 2.5, TILE - 5, TILE - 5);
+            }
+          }
+        }
+        // 採掘者は洞窟の鉱脈が脈打って見える（専門行為の可視化）
+        {
+          const caveDraw2 = caveLayerNow();
+          if (caveDraw2 && invRef.current?.role === "miner") {
+            const pulse = 0.35 + 0.25 * Math.sin(now / 240);
+            ctx.strokeStyle = `rgba(255,210,62,${pulse})`;
+            ctx.lineWidth = 2;
+            for (const v of caveDraw2.veins) {
+              if (caveStateRef.current.veins[`${v.x},${v.y}`]) continue;
+              if (v.x < lx0 || v.x > lx1 || v.y < ly0 || v.y > ly1) continue;
+              ctx.strokeRect(lobbyOx + v.x * TILE + 2.5, lobbyOy + v.y * TILE + 2.5, TILE - 5, TILE - 5);
             }
           }
         }
@@ -2671,6 +2832,18 @@ export default function WorldBoxClient() {
             ctx.beginPath();
             ctx.arc(cxp + r.face * w * 0.08 + s * w * 0.11, cy - h * 0.04, Math.max(1.8, sizePx * 0.045), 0, Math.PI * 2);
             ctx.fill();
+          }
+        }
+        // 凍結中は氷色で覆う（アイスランス）
+        {
+          const key = mobKeyFor(placed);
+          const st = mobStatesRef.current[key];
+          if (st?.frozenUntil && st.frozenUntil > Date.now()) {
+            ctx.fillStyle = "rgba(140,210,255,0.45)";
+            ctx.fillRect(Math.round(cxp - w / 2), Math.round(cy - h / 2), Math.round(w), Math.round(h));
+            ctx.strokeStyle = "rgba(220,245,255,0.8)";
+            ctx.lineWidth = 1;
+            ctx.strokeRect(Math.round(cxp - w / 2) + 0.5, Math.round(cy - h / 2) + 0.5, Math.round(w) - 1, Math.round(h) - 1);
           }
         }
         ctx.restore();
@@ -3006,6 +3179,154 @@ export default function WorldBoxClient() {
         }
       }
       drawParticles(false);
+
+      // 冒険役職の技演出: 段階遷移で粒を出し、形を描く
+      {
+        const inCaveFx = space !== "world";
+        const sx = (wx: number) => (inCaveFx ? Math.round(lobbyOx + wx * TILE) : toScreenX(wx));
+        const sy = (wy: number) => (inCaveFx ? Math.round(lobbyOy + wy * TILE) : toScreenY(wy));
+        skillFxRef.current = skillFxRef.current.filter((entry) => skillFxProgress(entry.effect, now) < 1);
+        for (const entry of skillFxRef.current) {
+          const eff = entry.effect;
+          const stage = skillFxStage(eff, now);
+          if (stage > entry.stage) {
+            entry.stage = stage;
+            spawnSkillFx(fxSys, eff, stage);
+            if (eff.kind === "meteor" && stage === 2) shake = startShake(shake, 8, now, 260);
+            if (eff.kind === "thunder_strike" && stage === 1) shake = startShake(shake, 5, now, 200);
+            if ((eff.kind === "sweep" || eff.kind === "whirlwind") && stage === 1) shake = startShake(shake, 3, now, 160);
+            if (eff.kind === "fireball" && stage === 1) shake = startShake(shake, 4, now, 180);
+          }
+          const prog = Math.max(0, skillFxProgress(eff, now));
+          const cxp = sx(eff.x);
+          const cyp = sy(eff.y);
+          ctx.save();
+          if (eff.kind === "heal_zone" || eff.kind === "poison_field") {
+            const rTiles = eff.kind === "heal_zone" ? 2.25 : 2.0;
+            const pulse = 1 + Math.sin(now / 160) * 0.05;
+            ctx.globalAlpha = 0.22 * (1 - prog * 0.5);
+            ctx.fillStyle = eff.kind === "heal_zone" ? "#7ed957" : "#9be15d";
+            ctx.beginPath();
+            ctx.ellipse(cxp, cyp, rTiles * TILE * pulse, rTiles * TILE * 0.45 * pulse, 0, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.globalAlpha = 0.7;
+            ctx.strokeStyle = eff.kind === "heal_zone" ? "#b6f26d" : "#7ac74f";
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.ellipse(cxp, cyp, rTiles * TILE * pulse, rTiles * TILE * 0.45 * pulse, 0, 0, Math.PI * 2);
+            ctx.stroke();
+          } else if (eff.kind === "sweep") {
+            const a0 = -Math.PI * 0.9 + prog * Math.PI * 1.1;
+            ctx.globalAlpha = 0.85 * (1 - prog);
+            ctx.strokeStyle = "#e8f4ff";
+            ctx.lineWidth = 5;
+            for (let k = 0; k < 3; k++) {
+              ctx.beginPath();
+              ctx.arc(sx(eff.fromX), sy(eff.fromY) - TILE * 0.4, (1.1 + k * 0.28) * TILE, a0 - k * 0.16, a0 + 0.9 - k * 0.16);
+              ctx.stroke();
+            }
+          } else if (eff.kind === "whirlwind") {
+            ctx.globalAlpha = 0.8 * (1 - prog * 0.6);
+            ctx.strokeStyle = "#dff3ff";
+            ctx.lineWidth = 4;
+            for (let k = 0; k < 3; k++) {
+              const rr = (0.9 + k * 0.5 + prog * 0.5) * TILE;
+              const a0 = prog * Math.PI * 6 + k * 0.7;
+              ctx.beginPath();
+              ctx.arc(sx(eff.fromX), sy(eff.fromY) - TILE * 0.3, rr, a0, a0 + Math.PI * 1.2);
+              ctx.stroke();
+            }
+          } else if (eff.kind === "fireball" || eff.kind === "ice_lance") {
+            const t01 = Math.min(1, prog / 0.4);
+            const px = eff.fromX + (eff.x - eff.fromX) * t01;
+            const py = eff.fromY - 0.4 + (eff.y - 0.4 - (eff.fromY - 0.4)) * t01;
+            ctx.globalAlpha = 0.95;
+            ctx.fillStyle = eff.kind === "fireball" ? "#ff9a3c" : "#bfe9ff";
+            ctx.beginPath();
+            ctx.arc(sx(px), sy(py), TILE * 0.22, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.globalAlpha = 0.5;
+            ctx.beginPath();
+            ctx.arc(sx(px), sy(py), TILE * 0.36, 0, Math.PI * 2);
+            ctx.fill();
+          } else if (eff.kind === "thunder_strike") {
+            if (stage === 0) {
+              ctx.globalAlpha = 0.25 + 0.2 * Math.sin(now / 60);
+              ctx.fillStyle = "#cfe8ff";
+              ctx.fillRect(cxp - 3, cyp - TILE * 5, 6, TILE * 5);
+            } else {
+              ctx.globalAlpha = stage === 1 ? 0.95 : 0.4;
+              ctx.strokeStyle = "#eaf6ff";
+              ctx.lineWidth = 3;
+              const pts = thunderBoltPoints(eff.seed, eff.x, eff.y - 5, eff.x, eff.y);
+              ctx.beginPath();
+              pts.forEach((pt, i) => {
+                const X = sx(pt.x);
+                const Y = sy(pt.y);
+                if (i === 0) ctx.moveTo(X, Y); else ctx.lineTo(X, Y);
+              });
+              ctx.stroke();
+            }
+          } else if (eff.kind === "meteor") {
+            if (stage === 0) {
+              ctx.globalAlpha = 0.5 + 0.3 * Math.sin(now / 70);
+              ctx.strokeStyle = "#ff6b4a";
+              ctx.lineWidth = 3;
+              ctx.beginPath();
+              ctx.ellipse(cxp, cyp, 2.5 * TILE, 2.5 * TILE * 0.45, 0, 0, Math.PI * 2);
+              ctx.stroke();
+            } else if (stage === 1) {
+              const t01 = (prog - 0.6) / 0.2;
+              const px = eff.x + 2.2 * (1 - t01);
+              const py = eff.y - 4.5 * (1 - t01);
+              ctx.globalAlpha = 0.95;
+              ctx.fillStyle = "#8a6f5c";
+              ctx.beginPath();
+              ctx.arc(sx(px), sy(py), TILE * 0.34, 0, Math.PI * 2);
+              ctx.fill();
+            }
+          } else if (eff.kind === "arrow_rain") {
+            ctx.globalAlpha = 0.5;
+            ctx.strokeStyle = "#ffd23e";
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.ellipse(cxp, cyp, 2.1 * TILE, 2.1 * TILE * 0.45, 0, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.globalAlpha = 0.85;
+            ctx.strokeStyle = "#e8e2d0";
+            for (let i = 0; i < 10; i++) {
+              const h = ((eff.seed * (i + 3) * 7919) % 100) / 100;
+              const ax = eff.x + (((eff.seed >> (i % 8)) % 40) / 10 - 2);
+              const ay = eff.y - 2.6 + ((prog * 3 + h) % 1) * 2.6;
+              ctx.beginPath();
+              ctx.moveTo(sx(ax), sy(ay));
+              ctx.lineTo(sx(ax) + 3, sy(ay) + TILE * 0.5);
+              ctx.stroke();
+            }
+          } else if (eff.kind === "taunt") {
+            ctx.globalAlpha = 0.7 * (1 - prog);
+            ctx.strokeStyle = "#ffd23e";
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.ellipse(sx(eff.fromX), sy(eff.fromY), (0.5 + prog * 3) * TILE, (0.5 + prog * 3) * TILE * 0.45, 0, 0, Math.PI * 2);
+            ctx.stroke();
+          }
+          ctx.restore();
+        }
+        // 薬師向け死亡マーカー
+        if (invRef.current?.role === "medic") {
+          for (const d of deathsRef.current) {
+            const mx = sx(d.x);
+            const my = sy(d.y);
+            ctx.save();
+            ctx.globalAlpha = 0.85;
+            ctx.fillStyle = "#ff5a4a";
+            ctx.fillRect(mx - 2, my - TILE * 0.7, 4, TILE * 0.5);
+            ctx.fillRect(mx - TILE * 0.18, my - TILE * 0.58, TILE * 0.36, 4);
+            ctx.restore();
+          }
+        }
+      }
 
       // 道具スイングと風切り（自分のタップへの応答）
       if (space === "world" || parseInstanceSpace(space)) {
@@ -3588,7 +3909,7 @@ export default function WorldBoxClient() {
             <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
               <span style={{ color: "#ff8a7a", fontSize: 11, width: 28 }}>HP</span>
               <span style={{ flex: 1, height: 8, borderRadius: 4, background: "rgba(255,255,255,0.18)", overflow: "hidden" }}>
-                <span style={{ display: "block", width: `${Math.max(0, Math.min(100, (invProfile.hp / HP_MAX) * 100))}%`, height: "100%", background: invProfile.hp <= 25 ? "#e2483a" : "#7ed957" }} />
+                <span style={{ display: "block", width: `${Math.max(0, Math.min(100, (invProfile.hp / maxHpFor(invProfile)) * 100))}%`, height: "100%", background: invProfile.hp <= 25 ? "#e2483a" : "#7ed957" }} />
               </span>
               <strong style={{ color: "#fff", fontSize: 11 }}>{invProfile.hp}</strong>
             </div>
@@ -3602,6 +3923,40 @@ export default function WorldBoxClient() {
             {invProfile.status.some((e) => e.kind === "poison") && (
               <span style={{ color: "#b6f26d", fontSize: 11 }}>毒</span>
             )}
+            {invProfile.role !== "free" && (() => {
+              const role = roleById(invProfile.role);
+              const skill = activeSkillFor(invProfile);
+              const total = skill ? SKILLS[skill.id].cooldownMs : 0;
+              const left = skill ? skillCooldownLeft(invProfile, skill.id, Date.now()) : 0;
+              const frac = total > 0 ? left / total : 0;
+              return (
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <span
+                    aria-label={role.name}
+                    style={{
+                      position: "relative", display: "inline-flex", alignItems: "center", justifyContent: "center",
+                      width: 22, height: 22, borderRadius: 6, fontSize: 12, fontWeight: 700, overflow: "hidden",
+                      border: "1px solid rgba(255,255,255,0.4)", background: "rgba(255,255,255,0.1)",
+                    }}
+                  >
+                    {frac > 0 && (
+                      <span
+                        aria-hidden
+                        style={{
+                          position: "absolute", inset: 0,
+                          background: `conic-gradient(rgba(0,0,0,0.72) ${frac * 360}deg, transparent ${frac * 360}deg)`,
+                        }}
+                      />
+                    )}
+                    <span style={{ position: "relative" }}>{role.symbol}</span>
+                  </span>
+                  <span style={{ color: "#fff", fontSize: 11, letterSpacing: 2 }}>
+                    {"●".repeat(masteryRankOf(invProfile, invProfile.role))}
+                    <span style={{ opacity: 0.3 }}>{"●".repeat(5 - masteryRankOf(invProfile, invProfile.role))}</span>
+                  </span>
+                </div>
+              );
+            })()}
           </div>
         )}
         {spaceUi === "world" && invProfile && (
