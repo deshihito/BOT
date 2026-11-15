@@ -10,7 +10,21 @@
 // 同期される（読み取り専用のつもりで扱うこと）。保存・通信は
 // profile-online.ts / API ルート側が担い、ここは検証とインベントリ
 // 操作だけを行う。経済の状態遷移は economy.ts。
-import { isAdventureRoleId, type AdventureRoleId } from "./roles";
+/** 冒険役職 ID（プロフィールが所有する。規則は roles.ts）。 */
+export type AdventureRoleId = "free" | "blade" | "guard" | "scout" | "miner" | "medic";
+export const ADVENTURE_ROLE_IDS: readonly AdventureRoleId[] = ["free", "blade", "guard", "scout", "miner", "medic"];
+/** 守護の最大 HP ボーナス。 */
+export const GUARD_HP_BONUS = 20;
+/** 薬師の回復アイテム倍率。 */
+export const MEDIC_HEAL_MULT = 1.5;
+/** 役職込みの最大 HP。 */
+export function maxHpFor(profile: PlayerProfile): number {
+  return HP_MAX + (profile.role === "guard" ? GUARD_HP_BONUS : 0);
+}
+
+export function isAdventureRoleId(v: unknown): v is AdventureRoleId {
+  return typeof v === "string" && (ADVENTURE_ROLE_IDS as readonly string[]).includes(v);
+}
 import { itemById } from "./items";
 
 /** 空腹度の上限（仕様書 3.3: 0〜100）。 */

@@ -14,9 +14,9 @@ import {
   itemById, recipeById, sellPrice, type ItemDef, type Recipe,
 } from "./items";
 import {
-  HP_MAX, HUNGER_MAX, addItem, countItem, removeItem, type PlayerProfile,
+  HP_MAX, HUNGER_MAX, maxHpFor, MEDIC_HEAL_MULT, addItem, countItem, removeItem, type PlayerProfile,
 } from "./profile";
-import { maxHpFor, MEDIC_HEAL_MULT } from "./roles";
+
 
 export type EconomyError =
   | "unknown_item" | "unknown_recipe" | "not_enough_coins" | "not_enough_items"

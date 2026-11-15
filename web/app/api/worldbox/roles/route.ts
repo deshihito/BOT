@@ -15,9 +15,10 @@ import { parseSave } from "@/lib/worldbox/save";
 import { loadWorldBoxSave } from "@/lib/worldbox/save-online";
 import { loadMyLobbyStation } from "@/lib/worldbox/station-online";
 import {
-  activeSkillFor, addMasteryXp, isAdventureRoleId, masteryRankOf, maxHpFor,
+  activeSkillFor, addMasteryXp, isAdventureRoleId, masteryRankOf,
   roleById, skillCooldownLeft, SKILLS, type SkillId,
 } from "@/lib/worldbox/roles";
+import { maxHpFor } from "@/lib/worldbox/profile";
 import { buildCaveLayer, parseInstanceSpace } from "@/lib/worldbox/instances";
 import { loadRuinsPersonal, storeRuinsPersonal } from "@/lib/worldbox/instances-online";
 import { weekKeyOf } from "@/lib/worldbox/instances";

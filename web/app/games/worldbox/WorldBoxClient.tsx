@@ -31,7 +31,7 @@ import {
 import type { SkillFxEffect } from "@/lib/worldbox/fx";
 import { skillFxProgress, skillFxStage, spawnSkillFx, thunderBoltPoints } from "@/lib/worldbox/fx";
 import {
-  activeSkillFor, masteryRankOf, maxHpFor, roleById, skillCooldownLeft, SKILLS,
+  activeSkillFor, masteryRankOf, roleById, skillCooldownLeft, SKILLS,
   SCOUT_STAMINA_MULT,
 } from "@/lib/worldbox/roles";
 import { clockOffsetEstimate, type PresenceEntry } from "@/lib/worldbox/presence";
@@ -63,7 +63,7 @@ import {
   type TileActionKind, type TileOverridesMap,
 } from "@/lib/worldbox/tiles";
 import { CROPS, ITEMS, itemById } from "@/lib/worldbox/items";
-import { HP_MAX, HUNGER_MAX, countItem, type ItemSlot, type PlayerProfile, type SlotRef } from "@/lib/worldbox/profile";
+import { HP_MAX, HUNGER_MAX, countItem, maxHpFor, type ItemSlot, type PlayerProfile, type SlotRef } from "@/lib/worldbox/profile";
 import {
   containerCapacity, isContainerItem, type ContainerSlotRef,
 } from "@/lib/worldbox/containers";

@@ -10,10 +10,10 @@
 // 割合・間隔などの数値はユーザー向けに開示しない（探索優先の原則）。
 import { itemById } from "./items";
 import {
-  HP_MAX, HUNGER_MAX, removeItem,
+  HP_MAX, HUNGER_MAX, maxHpFor, MEDIC_HEAL_MULT, removeItem,
   type PlayerProfile, type RespawnPoint, type StatusEffect,
 } from "./profile";
-import { maxHpFor, MEDIC_HEAL_MULT } from "./roles";
+
 
 /** 空腹の減少（/秒）。満腹 100 → 0 まで約20分。 */
 export const HUNGER_DRAIN_PER_SEC = 100 / 1200;

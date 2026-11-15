@@ -6,16 +6,11 @@
 //   剣士: 薙ぎ払い → 旋風斬り / 守護: アイスランス → サンダーストライク
 //   斥候: ポイズンフィールド → アローレイン / 採掘者: ファイアーボール → メテオ
 //   薬師: ヒーリングゾーン（全ランク、蘇生は専門行為）
-import type { PlayerProfile } from "./profile";
+import type { PlayerProfile, AdventureRoleId } from "./profile";
+import { isAdventureRoleId, ADVENTURE_ROLE_IDS } from "./profile";
+export type { AdventureRoleId } from "./profile";
+export { isAdventureRoleId, ADVENTURE_ROLE_IDS };
 import type { SkillFxKind } from "./fx";
-
-export type AdventureRoleId = "free" | "blade" | "guard" | "scout" | "miner" | "medic";
-
-export const ADVENTURE_ROLE_IDS: readonly AdventureRoleId[] = ["free", "blade", "guard", "scout", "miner", "medic"];
-
-export function isAdventureRoleId(v: unknown): v is AdventureRoleId {
-  return typeof v === "string" && (ADVENTURE_ROLE_IDS as readonly string[]).includes(v);
-}
 
 /** スキル演出プリセット（fx.ts の SkillFxKind と対応）。 */
 export type SkillId =
@@ -106,22 +101,15 @@ export function addMasteryXp(
 }
 
 // ---------------------------------------------------------------- 常時効果
-/** 守護の最大 HP ボーナス。 */
-export const GUARD_HP_BONUS = 20;
 /** 剣士の剣攻撃倍率。 */
 export const BLADE_ATTACK_MULT = 1.25;
 /** 守護の隣接味方への被ダメージ軽減率。 */
 export const GUARD_AURA_REDUCTION = 0.3;
-/** 薬師の回復アイテム倍率。 */
-export const MEDIC_HEAL_MULT = 1.5;
 /** 採掘者の追加ドロップ抽選確率。 */
 export const MINER_BONUS_CHANCE = 0.3;
 /** 斥候の移動スタミナ消費倍率。 */
 export const SCOUT_STAMINA_MULT = 0.8;
 
-export function maxHpFor(profile: PlayerProfile): number {
-  return 100 + (profile.role === "guard" ? GUARD_HP_BONUS : 0);
-}
 
 // ---------------------------------------------------------------- 技
 /** その役職・ランクでダブルタップ発動できる技（上位ランクで置き換わる分は最上位のみ）。 */
