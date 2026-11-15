@@ -36,6 +36,7 @@ import {
   SCOUT_STAMINA_MULT,
 } from "@/lib/worldbox/roles";
 import { clockOffsetEstimate, type PresenceEntry } from "@/lib/worldbox/presence";
+import { createPollGuard, type PollGuard } from "@/lib/poll-guard";
 import {
   STAMINA_MAX, canDash, createStamina, createTapTracker, isStickDash, registerKeyTap, rescueStamina,
   staminaGaugeVisible, stepStamina, type StaminaState, type StaminaUse, type TapTracker,
@@ -328,6 +329,16 @@ export default function WorldBoxClient() {
   const { prefix, embedded, identity } = useGamesNav();
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const minimapRef = useRef<HTMLCanvasElement | null>(null);
+  // ポーリングのガード（S6）: in-flight 重複を抑え、古いレスポンスが新しい
+  // 状態を上書きしない。取得ごとに begin → isCurrent → end を使う。
+  const chatGuardRef = useRef<PollGuard>(createPollGuard());
+  const partyGuardRef = useRef<PollGuard>(createPollGuard());
+  const boardGuardRef = useRef<PollGuard>(createPollGuard());
+  const nationsGuardRef = useRef<PollGuard>(createPollGuard());
+  const invGuardRef = useRef<PollGuard>(createPollGuard());
+  const vitalsGuardRef = useRef<PollGuard>(createPollGuard());
+  const deathsGuardRef = useRef<PollGuard>(createPollGuard());
+  const instanceGuardRef = useRef<PollGuard>(createPollGuard());
   const [statusText, setStatusText] = useState("読み込み中…");
   const [othersCount, setOthersCount] = useState(0);
   const [showMap, setShowMap] = useState(true);
@@ -522,13 +533,20 @@ export default function WorldBoxClient() {
     if (key === "se" && next.se) playWbSe("click");
   };
   const refreshBoard = async () => {
+    // 古いレスポンスが新しい投稿一覧を上書きしない（S6）
+    const ticket = boardGuardRef.current.begin();
+    if (ticket === null) return;
     try {
       const res = await fetch("/api/worldbox/board", { headers: { Accept: "application/json" } });
       if (!res.ok) return;
       const data = (await res.json()) as { posts?: BoardPost[]; loggedIn?: boolean };
+      if (!boardGuardRef.current.isCurrent(ticket)) return;
       setBoardPosts(data.posts ?? []);
       setBoardLoggedIn(!!data.loggedIn);
     } catch { /* 掲示板が読めなくても歩き続けられる */ }
+    finally {
+      boardGuardRef.current.end(ticket);
+    }
   };
   const postBoard = async () => {
     const text = boardText.trim();
@@ -606,12 +624,20 @@ export default function WorldBoxClient() {
     nationsRef.current = data;
     setNationsUi(data);
   };
-  const refreshNations = async () => {
+  const refreshNations = async (force = false) => {
+    // 古いレスポンスが新しい国家状態を上書きしない（S6）。行為直後の再取得は force。
+    const ticket = nationsGuardRef.current.begin(force ? { force: true } : undefined);
+    if (ticket === null) return;
     try {
       const res = await fetch("/api/worldbox/nations", { headers: { Accept: "application/json" } });
       if (!res.ok) return;
-      applyNationsData((await res.json()) as NationsResponse);
+      const data = (await res.json()) as NationsResponse;
+      if (!nationsGuardRef.current.isCurrent(ticket)) return;
+      applyNationsData(data);
     } catch { /* 国家が読めなくても歩き続けられる */ }
+    finally {
+      nationsGuardRef.current.end(ticket);
+    }
   };
   const nationAction = async (body: Record<string, unknown>) => {
     setNationMsg("");
@@ -626,7 +652,7 @@ export default function WorldBoxClient() {
         setNationMsg(NATION_ERROR_LABEL[data.error ?? ""] ?? "失敗しました");
         return;
       }
-      await refreshNations();
+      await refreshNations(true);
     } catch {
       setNationMsg("失敗しました");
     }
@@ -778,12 +804,18 @@ export default function WorldBoxClient() {
   };
 
   const refreshInv = async () => {
+    // 古いレスポンスが行為後の新しいプロフィール（残高・所持）を巻き戻さない（S6）
+    const ticket = invGuardRef.current.begin();
+    if (ticket === null) return;
     try {
       const res = await fetch("/api/worldbox/profile", { headers: { Accept: "application/json" } });
       if (!res.ok) return;
       const data = (await res.json()) as { profile?: PlayerProfile };
-      if (data.profile) setInvProfile(data.profile);
+      if (data.profile && invGuardRef.current.isCurrent(ticket)) setInvProfile(data.profile);
     } catch { /* 読めなくても歩き続けられる */ }
+    finally {
+      invGuardRef.current.end(ticket);
+    }
   };
   /** バイタル API の結果を反映する（死亡時はリスポーン移動まで行う）。 */
   const applyVitalsResult = (data: {
@@ -807,7 +839,11 @@ export default function WorldBoxClient() {
       playWbSe("warp");
     }
   };
-  const postVitals = async (body: Record<string, unknown>) => {
+  const postVitals = async (body: Record<string, unknown>, force = false) => {
+    // 古い精算レスポンスが行為後の新しいプロフィールを巻き戻さない（S6）。
+    // 15s 定期精算はスキップ可、ダメージ・ベッド等の明示呼び出しは force。
+    const ticket = vitalsGuardRef.current.begin(force ? { force: true } : undefined);
+    if (ticket === null) return;
     try {
       const res = await fetch("/api/worldbox/vitals", {
         method: "POST",
@@ -818,8 +854,11 @@ export default function WorldBoxClient() {
         profile?: PlayerProfile; died?: boolean; respawn?: { x: number; y: number };
         teleport?: { space: string; x: number; y: number };
       };
-      if (res.ok) applyVitalsResult(data);
+      if (res.ok && vitalsGuardRef.current.isCurrent(ticket)) applyVitalsResult(data);
     } catch { /* バイタルが届かなくても歩き続けられる（次回同期で精算される） */ }
+    finally {
+      vitalsGuardRef.current.end(ticket);
+    }
   };
   /** モブ接触ダメージ（サーバーが配置・距離・攻撃力を検証する）。 */
   const postMobDamage = (mobId: string, x: number, y: number) => {
@@ -827,7 +866,7 @@ export default function WorldBoxClient() {
       action: "damage", mobId, x, y,
       px: playerPosRef.current.x, py: playerPosRef.current.y,
       ...(parseInstanceSpace(spaceUi) ? { space: spaceUi } : {}),
-    });
+    }, true);
   };
   /** 遺跡の個人状態（宝箱・罠・扉・召喚）。サーバーが正、ここは表示用キャッシュ。 */
   const ruinsStateRef = useRef<{
@@ -835,6 +874,9 @@ export default function WorldBoxClient() {
     doors: Record<string, boolean>; summons: { mobId: string; x: number; y: number }[];
   }>({ chests: {}, traps: {}, doors: {}, summons: [] });
   const refreshRuinsState = async (space: string) => {
+    // 行為直後の明示再取得。古いレスポンスが新しい状態を上書きしない（S6）。
+    const ticket = instanceGuardRef.current.begin({ force: true });
+    if (ticket === null) return;
     try {
       const res = await fetch(`/api/worldbox/instances?space=${encodeURIComponent(space)}`, {
         headers: { Accept: "application/json" },
@@ -844,11 +886,15 @@ export default function WorldBoxClient() {
         chests?: Record<string, boolean>; traps?: Record<string, boolean>;
         doors?: Record<string, boolean>; summons?: { mobId: string; x: number; y: number }[];
       };
+      if (!instanceGuardRef.current.isCurrent(ticket)) return;
       ruinsStateRef.current = {
         chests: data.chests ?? {}, traps: data.traps ?? {},
         doors: data.doors ?? {}, summons: data.summons ?? [],
       };
     } catch { /* 読めなくても歩き続けられる */ }
+    finally {
+      instanceGuardRef.current.end(ticket);
+    }
   };
   const refreshRuinsStateRef = useRef(refreshRuinsState);
   refreshRuinsStateRef.current = refreshRuinsState;
@@ -857,14 +903,21 @@ export default function WorldBoxClient() {
   /** 洞窟の枯渇状態（鉱脈・宝箱）。サーバーが正、ここは表示用キャッシュ。 */
   const caveStateRef = useRef<{ veins: Record<string, number>; chest: number }>({ veins: {}, chest: 0 });
   const refreshCaveState = async (space: string) => {
+    // 行為直後の明示再取得。古いレスポンスが新しい状態を上書きしない（S6）。
+    const ticket = instanceGuardRef.current.begin({ force: true });
+    if (ticket === null) return;
     try {
       const res = await fetch(`/api/worldbox/instances?space=${encodeURIComponent(space)}`, {
         headers: { Accept: "application/json" },
       });
       if (!res.ok) return;
       const data = (await res.json()) as { veins?: Record<string, number>; chest?: number };
+      if (!instanceGuardRef.current.isCurrent(ticket)) return;
       caveStateRef.current = { veins: data.veins ?? {}, chest: data.chest ?? 0 };
     } catch { /* 読めなくても歩き続けられる */ }
+    finally {
+      instanceGuardRef.current.end(ticket);
+    }
   };
   const refreshCaveStateRef = useRef(refreshCaveState);
   refreshCaveStateRef.current = refreshCaveState;
@@ -874,6 +927,9 @@ export default function WorldBoxClient() {
     floorBossDead: Record<string, boolean>; bossDead: boolean; size: number;
   }>({ opened: {}, doors: {}, floorBossDead: {}, bossDead: false, size: 1 });
   const refreshDungeonState = async (space: string) => {
+    // 行為直後の明示再取得。古いレスポンスが新しい状態を上書きしない（S6）。
+    const ticket = instanceGuardRef.current.begin({ force: true });
+    if (ticket === null) return;
     try {
       const res = await fetch(`/api/worldbox/instances?space=${encodeURIComponent(space)}`, {
         headers: { Accept: "application/json" },
@@ -883,12 +939,16 @@ export default function WorldBoxClient() {
         chests?: Record<string, number>; doors?: Record<string, boolean>;
         floorBossDead?: Record<string, boolean>; bossDead?: boolean; size?: number;
       };
+      if (!instanceGuardRef.current.isCurrent(ticket)) return;
       dungeonStateRef.current = {
         opened: Object.fromEntries(Object.keys(data.chests ?? {}).map((k) => [k, true])), doors: data.doors ?? {},
         floorBossDead: data.floorBossDead ?? {}, bossDead: data.bossDead ?? false,
         size: data.size ?? 1,
       };
     } catch { /* 読めなくても歩き続けられる */ }
+    finally {
+      instanceGuardRef.current.end(ticket);
+    }
   };
   const refreshDungeonStateRef = useRef(refreshDungeonState);
   refreshDungeonStateRef.current = refreshDungeonState;
@@ -926,6 +986,9 @@ export default function WorldBoxClient() {
   useEffect(() => {
     let disposed = false;
     const load = async () => {
+      // 古いレスポンスが新しいメッセージ一覧を上書きしない（S6）
+      const ticket = chatGuardRef.current.begin();
+      if (ticket === null) return;
       try {
         const res = await fetch(
           `/api/worldbox/chat?channel=${chatChannelRef.current}&space=${encodeURIComponent(spaceUi)}`,
@@ -933,8 +996,11 @@ export default function WorldBoxClient() {
         );
         if (!res.ok || disposed) return;
         const data = (await res.json()) as { messages?: { name: string; text: string; at: number }[] };
-        if (!disposed) setChatMsgs(data.messages ?? []);
+        if (!disposed && chatGuardRef.current.isCurrent(ticket)) setChatMsgs(data.messages ?? []);
       } catch { /* noop */ }
+      finally {
+        chatGuardRef.current.end(ticket);
+      }
     };
     void load();
     const timer = window.setInterval(() => { void load(); }, 3000);
@@ -960,7 +1026,10 @@ export default function WorldBoxClient() {
       }
     } catch { /* noop */ }
   };
-  const refreshParty = async () => {
+  const refreshParty = async (force = false) => {
+    // 古いレスポンスが新しいパーティ状態（招待・編成）を巻き戻さない（S6）
+    const ticket = partyGuardRef.current.begin(force ? { force: true } : undefined);
+    if (ticket === null) return;
     try {
       const res = await fetch("/api/worldbox/party", { headers: { Accept: "application/json" } });
       if (!res.ok) return;
@@ -968,12 +1037,16 @@ export default function WorldBoxClient() {
         party?: PartyViewClient | null; partyKey?: string; isLeader?: boolean;
         invite?: { partyId: string; leaderName: string } | null;
       };
+      if (!partyGuardRef.current.isCurrent(ticket)) return;
       myPartyKeyRef.current = data.partyKey ?? "";
       setPartyUi({
         party: data.party ?? null, partyKey: data.partyKey ?? "",
         isLeader: data.isLeader ?? false, invite: data.invite ?? null,
       });
     } catch { /* noop */ }
+    finally {
+      partyGuardRef.current.end(ticket);
+    }
   };
   const refreshPartyRef = useRef(refreshParty);
   refreshPartyRef.current = refreshParty;
@@ -991,7 +1064,7 @@ export default function WorldBoxClient() {
         body: JSON.stringify({ action, px: playerPosRef.current.x, py: playerPosRef.current.y, ...extra }),
       });
       const data = (await res.json().catch(() => ({}))) as { space?: string; error?: string };
-      void refreshParty();
+      void refreshParty(true);
       return { ok: res.ok, space: data.space, error: data.error };
     } catch {
       return { ok: false, error: "network" };
@@ -1050,7 +1123,7 @@ export default function WorldBoxClient() {
     const key = `${x},${y}`;
     if (bedKeyRef.current === key) return;
     bedKeyRef.current = key;
-    void postVitals({ action: "set_bed", x, y });
+    void postVitals({ action: "set_bed", x, y }, true);
   };
   // 薬師は近くの死亡地点を定期取得する（蘇生の対象表示）
   useEffect(() => {
@@ -1060,6 +1133,9 @@ export default function WorldBoxClient() {
     }
     let disposed = false;
     const tick = async () => {
+      // 古いレスポンスが蘇生済みの死亡地点を蘇生対象として復活させない（S6）
+      const ticket = deathsGuardRef.current.begin();
+      if (ticket === null) return;
       try {
         const pos = playerPosRef.current;
         const res = await fetch(
@@ -1068,8 +1144,11 @@ export default function WorldBoxClient() {
         );
         if (!res.ok || disposed) return;
         const data = (await res.json()) as { deaths?: { name: string; x: number; y: number; at: number }[] };
-        if (!disposed) deathsRef.current = data.deaths ?? [];
+        if (!disposed && deathsGuardRef.current.isCurrent(ticket)) deathsRef.current = data.deaths ?? [];
       } catch { /* 読めなくても歩き続けられる */ }
+      finally {
+        deathsGuardRef.current.end(ticket);
+      }
     };
     void tick();
     const timer = window.setInterval(tick, 3000);
@@ -1097,6 +1176,9 @@ export default function WorldBoxClient() {
       return;
     }
     tilesInFlightRef.current = true;
+    // 取得開始後にローカル行為（掘る・置く）でタイルが変わったら、その
+    // 古いレスポンスは適用せず取り直す（S6）。行為は tilesVersionRef を進める。
+    const tilesGen = tilesVersionRef.current;
     try {
       const px = Math.floor(playerPosRef.current.x);
       const py = Math.floor(playerPosRef.current.y);
@@ -1106,7 +1188,11 @@ export default function WorldBoxClient() {
         `/api/worldbox/tiles?x0=${x0}&y0=${y0}&x1=${x0 + 127}&y1=${y0 + 127}`,
         { headers: { Accept: "application/json" } },
       );
-      if (res.ok) {
+      if (res.ok && tilesGen !== tilesVersionRef.current) {
+        // 取得中にローカル行為でタイルが変わった。古いスナップショットで
+        // 上書きせず、完了後に取り直す。
+        tilesQueuedRef.current = true;
+      } else if (res.ok) {
         const data = (await res.json()) as { overrides?: TileOverridesMap; selfId?: string | null };
         if (data.selfId !== undefined) selfIdRef.current = data.selfId;
         const next: TileOverridesMap = { ...tilesRef.current };
@@ -1175,7 +1261,19 @@ export default function WorldBoxClient() {
   postTileActionRef.current = postTileAction;
   /** モブ個体状態（傷/死亡がある個体だけサーバーから受ける）。 */
   const mobStatesRef = useRef<Record<string, MobState>>({});
+  // モブ状態の世代（S6）: 攻撃によるローカル書き込みで進み、取得開始後に
+  // 進んでいたら古いレスポンスは適用せず取り直す（倒したモブの生き返り防止）。
+  const mobsVersionRef = useRef(0);
+  const mobsInFlightRef = useRef(false);
+  const mobsQueuedRef = useRef(false);
   const refreshMobs = async () => {
+    // 取得中の追加要求は、完了後に最新状態でもう1回だけ取り直す（S6）
+    if (mobsInFlightRef.current) {
+      mobsQueuedRef.current = true;
+      return;
+    }
+    mobsInFlightRef.current = true;
+    const mobsGen = mobsVersionRef.current;
     try {
       const ruinsSpace = parseInstanceSpace(spaceUi)?.kind === "ruins" ? spaceUi : null;
       if (ruinsSpace) {
@@ -1188,6 +1286,8 @@ export default function WorldBoxClient() {
           states?: Record<string, MobState>;
           summons?: { mobId: string; x: number; y: number; size: number }[];
         };
+        // 取得中に攻撃でモブ状態が変わっていたら古い応答は捨て、取り直す（S6）
+        if (mobsGen !== mobsVersionRef.current) { mobsQueuedRef.current = true; return; }
         ruinsStateRef.current = {
           ...ruinsStateRef.current,
           summons: (data.summons ?? []).map((sm) => ({ mobId: sm.mobId, x: sm.x, y: sm.y })),
@@ -1208,6 +1308,7 @@ export default function WorldBoxClient() {
         );
         if (!res.ok) return;
         const data = (await res.json()) as { states?: Record<string, MobState> };
+        if (mobsGen !== mobsVersionRef.current) { mobsQueuedRef.current = true; return; }
         const next: Record<string, MobState> = { ...mobStatesRef.current };
         for (const key of Object.keys(next)) {
           if (key.startsWith(`${caveSpace}|`)) delete next[key];
@@ -1227,6 +1328,7 @@ export default function WorldBoxClient() {
         );
         if (!res.ok) return;
         const data = (await res.json()) as { states?: Record<string, MobState> };
+        if (mobsGen !== mobsVersionRef.current) { mobsQueuedRef.current = true; return; }
         const next: Record<string, MobState> = { ...mobStatesRef.current };
         for (const key of Object.keys(next)) {
           if (key.startsWith(`${dungeonSpace}#`)) delete next[key];
@@ -1245,6 +1347,7 @@ export default function WorldBoxClient() {
       );
       if (!res.ok) return;
       const data = (await res.json()) as { states?: Record<string, MobState> };
+      if (mobsGen !== mobsVersionRef.current) { mobsQueuedRef.current = true; return; }
       const next: Record<string, MobState> = { ...mobStatesRef.current };
       for (const key of Object.keys(next)) {
         if (key.includes("|")) continue;
@@ -1257,6 +1360,13 @@ export default function WorldBoxClient() {
       Object.assign(next, data.states ?? {});
       mobStatesRef.current = next;
     } catch { /* 読めなくても歩き続けられる */ }
+    finally {
+      mobsInFlightRef.current = false;
+      if (mobsQueuedRef.current) {
+        mobsQueuedRef.current = false;
+        void refreshMobs();
+      }
+    }
   };
   /** モブへの攻撃（サーバーが配置・距離・HP の正）。結果は演出で返す。 */
   const attackMob = async (placed: PlacedMob) => {
@@ -1288,6 +1398,8 @@ export default function WorldBoxClient() {
       if (data.dead) next[key] = { hp: 0, deadUntil: typeof data.deadUntil === "number" ? data.deadUntil : Date.now() + MOB_RESPAWN_MS + mobRespawnDelayMs(key) };
       else if (typeof data.hp === "number") next[key] = { hp: data.hp };
       mobStatesRef.current = next;
+      // 攻撃でローカル状態が進んだ。取得中の古いモブ応答は適用されない（S6）。
+      mobsVersionRef.current += 1;
       fxEventsRef.current.push({
         kind: data.dead ? "death" : "hit",
         x: placed.x, y: placed.y,
@@ -1856,6 +1968,9 @@ export default function WorldBoxClient() {
       }).catch(() => { /* noop */ });
     };
     let nearDungeonShown = false;
+    // プレゼンスポーリングのガード（S6）: 1s 間隔で重ねて走らせず、古い
+    // レスポンスで他者のゴースト復活・欠落の二重カウントを起こさない。
+    const presenceGuard = createPollGuard();
     const pollOthers = async () => {
       // ダンジョン入口の近接（パーティパネル表示用）
       if (space === "world") {
@@ -1879,12 +1994,15 @@ export default function WorldBoxClient() {
         nearDungeonShown = false;
         setNearDungeonEntrance(false);
       }
+      const ticket = presenceGuard.begin();
+      if (ticket === null) return;
       const before = Date.now();
       try {
         const res = await fetch(`/api/worldbox/presence?space=${space}`, { headers: { Accept: "application/json" } });
         if (!res.ok) return;
         const body = (await res.json()) as { players?: PresenceEntry[]; now?: number };
         if (disposed) return;
+        if (!presenceGuard.isCurrent(ticket)) return;
         if (typeof body.now === "number") absorbClockSample(body.now, before, Date.now());
         const now = presenceNow();
         const seen = new Set<string>();
@@ -1909,6 +2027,9 @@ export default function WorldBoxClient() {
         }
         setOthersCount(others.size);
       } catch { /* noop */ }
+      finally {
+        presenceGuard.end(ticket);
+      }
     };
     const leavePresence = () => {
       if (!loggedIn) return;

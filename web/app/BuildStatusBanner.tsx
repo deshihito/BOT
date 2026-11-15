@@ -6,6 +6,7 @@ import {
   prUrl,
   type BuildStatus,
 } from "@/lib/build-status";
+import { createPollGuard, type PollGuard } from "@/lib/poll-guard";
 
 const POLL_MS = 15_000;
 
@@ -20,15 +21,21 @@ export default function BuildStatusBanner() {
 
   useEffect(() => {
     let cancelled = false;
+    // 古いレスポンスがビルド完了後の帯を復活させない（S6）
+    const guard: PollGuard = createPollGuard();
     const load = async () => {
+      const ticket = guard.begin();
+      if (ticket === null) return;
       try {
         const res = await fetch("/api/build-status", { cache: "no-store" });
         if (!res.ok) return;
         const data = (await res.json()) as { status?: BuildStatus | null };
-        if (!cancelled) setStatus(data.status ?? null);
+        if (!cancelled && guard.isCurrent(ticket)) setStatus(data.status ?? null);
       } catch {
         // 取得失敗時は帯を出さない（前回値も残さない）
-        if (!cancelled) setStatus(null);
+        if (!cancelled && guard.isCurrent(ticket)) setStatus(null);
+      } finally {
+        guard.end(ticket);
       }
     };
     void load();
