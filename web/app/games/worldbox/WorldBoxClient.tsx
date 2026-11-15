@@ -17,7 +17,8 @@ import { DASH_SPEED, SWIM_DASH_SPEED, SWIM_SPEED, WALK_SPEED, findFreeNear, isWa
 import { isNightPhase, nightAmount, phaseAtTime } from "@/lib/worldbox/daynight";
 import { mobById, mobOccupiesTile, type PlacedMob } from "@/lib/worldbox/mobs";
 import {
-  MOB_ATTACK_RANGE, MOB_RESPAWN_MS, mobDistance, mobHpNow, mobKeyOf, visibleMobs, type MobState,
+  MOB_ATTACK_RANGE, MOB_RESPAWN_MS, knockbackTarget, mobBlockedTiles, mobDistance, mobFootprintTiles,
+  mobHpNow, mobKeyOf, visibleMobs, type MobState,
 } from "@/lib/worldbox/combat";
 import { advanceWalkPhase, attackSwingAngle, damp, moveLean, stepBeatIndex, walkBob, walkSquashY } from "@/lib/worldbox/anim";
 import {
@@ -837,8 +838,10 @@ export default function WorldBoxClient() {
     let space: SaveSpace = "world";
     let worldReturn: { x: number; y: number } | null = null;
     const activeMap = (): TopDownMap => (space === "lobby" ? lobby.moveMap : effMap);
+    // モブ占有を差し引いた今フレームの固体集合（モブの真上に立つ間の救済用）
+    let mobFrameBlocked: ReadonlySet<string> | undefined;
     const activeBlocked = (): ReadonlySet<string> | undefined =>
-      space === "lobby" ? lobby.blocked : blockedRef.current;
+      mobFrameBlocked ?? (space === "lobby" ? lobby.blocked : blockedRef.current);
     const keys = new Set<string>();
     // 固定式スティック: 基点は左下の固定位置（lib/worldbox/stick）。
     // 基点を持ち歩くのは「スティックが起動したか」と倒し量だけ。
@@ -855,6 +858,9 @@ export default function WorldBoxClient() {
     let mobCacheKey = "";
     let mobCache: PlacedMob[] = [];
     let lastAttackAt = 0;
+    /** 接触中のモブ（個体キー）と、敵対ノックバックを最後に発火した時刻。 */
+    let contactMobKeyNow: string | null = null;
+    let contactFiredAt = 0;
     // スタミナとダッシュ（キーの2度押し / スティックの強い倒し）
     let stamina: StaminaState = createStamina();
     let tapTracker: TapTracker = createTapTracker();
@@ -1507,6 +1513,32 @@ export default function WorldBoxClient() {
         iy /= ilen;
       }
       syncEffMap();
+      // モブ占有: 現在位置の footprint を移動の当たり判定へ合成する。
+      // 占有の真上に立っている間は、そのモブの占有だけ通す（閉じ込め防止）。
+      mobFrameBlocked = undefined;
+      if (space === "world" && mobRenders.size > 0) {
+        const frameMobs: { key: string; size: number; x: number; y: number }[] = [];
+        let standingKey: string | null = null;
+        const ptx = Math.floor(player.x);
+        const pty = Math.floor(player.y);
+        for (const placed of mobCache) {
+          const key = mobKeyOf(placed);
+          const r = mobRenders.get(key);
+          if (!r) continue;
+          const cur = { key, size: placed.size, x: Math.floor(r.wx), y: Math.floor(r.wy) };
+          frameMobs.push(cur);
+          if (mobOccupiesTile(cur.size, cur.x, cur.y, ptx, pty)) standingKey = key;
+        }
+        if (frameMobs.length > 0) {
+          const merged = new Set<string>(blockedRef.current);
+          for (const k of mobBlockedTiles(frameMobs)) merged.add(k);
+          if (standingKey) {
+            const sm = frameMobs.find((m) => m.key === standingKey);
+            if (sm) for (const k of mobFootprintTiles(sm.size, sm.x, sm.y)) merged.delete(k);
+          }
+          mobFrameBlocked = merged;
+        }
+      }
       // ダッシュ（キーの2度押しを持ち続け / スティックの強い倒し）と泳ぎで速さと消費が変わる
       const swimming = space === "world" && isWaterAt(effMap, player.x, player.y);
       const wantDash =
@@ -1555,6 +1587,48 @@ export default function WorldBoxClient() {
         splashes.push({ x: player.x, y: player.y, at: now });
         spawnBurst(fxSys, "warp", player.x, player.y - 0.3);
         saveNow();
+      }
+      // モブ接触: 占有範囲までチェビシェフ距離1以内を接触とする。
+      // 敵対は接触開始時（継続中は1秒間隔）だけ軽いノックバック＋hit バースト。
+      // ダメージは与えない（プレイヤー HP は未実装のまま）。
+      if (space === "world") {
+        let contact: { placed: PlacedMob; key: string; dist: number; cx: number; cy: number } | null = null;
+        const ptx = Math.floor(player.x);
+        const pty = Math.floor(player.y);
+        for (const placed of mobCache) {
+          const key = mobKeyOf(placed);
+          const r = mobRenders.get(key);
+          if (!r) continue;
+          const cx = Math.floor(r.wx);
+          const cy = Math.floor(r.wy);
+          const dist = mobDistance(ptx, pty, { x: cx, y: cy, size: placed.size });
+          if (dist <= 1 && (!contact || dist < contact.dist)) contact = { placed, key, dist, cx, cy };
+        }
+        if (!contact) {
+          contactMobKeyNow = null;
+        } else {
+          const isNew = contact.key !== contactMobKeyNow;
+          contactMobKeyNow = contact.key;
+          const def = mobById(contact.placed.mobId);
+          if (def?.temperament === "hostile" && (isNew || now - contactFiredAt >= 1000)) {
+            contactFiredAt = now;
+            const target = knockbackTarget({ x: contact.cx, y: contact.cy, size: contact.placed.size }, player);
+            const free = findFreeNear(activeMap(), target.x, target.y, activeBlocked(), { swim: true });
+            player.x = free.x;
+            player.y = free.y;
+            prevX = player.x;
+            prevY = player.y;
+            cam.x = player.x;
+            cam.y = player.y;
+            fxEventsRef.current.push({
+              kind: "hit",
+              x: contact.placed.x, y: contact.placed.y,
+              sizeTiles: contact.placed.size,
+              color: MOB_FX_COLOR[def.id],
+            });
+            shake = startShake(shake, 2, now);
+          }
+        }
       }
       checkTileTriggers();
       if (space === "lobby") {

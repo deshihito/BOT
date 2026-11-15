@@ -3,7 +3,7 @@
 // HP と死亡（再出現待ち）だけをサーバー状態として持ち、攻撃のたびに
 // サーバーが配置を再計算して実在を検証する（存在しない個体は殴れない）。
 // ダメージは闘技場と同じ式（arena.ts の playerAttack: 素手8 + 最良の剣 tier×4）。
-import { mobById, mobsForChunk, largeMobsForChunk, mobFootprintBounds, type MobDef, type PlacedMob } from "./mobs";
+import { mobById, mobsForChunk, largeMobsForChunk, mobFootprintBounds, mobOccupiesTile, type MobDef, type PlacedMob } from "./mobs";
 import { CHUNK_SIZE } from "./maplogic";
 
 /** 倒したモブが同じアンカーに再出現するまでの時間。 */
@@ -132,4 +132,59 @@ export function applyMobAttack(
     if (n > 0) gained[entry.itemId] = (gained[entry.itemId] ?? 0) + n;
   }
   return { state: { hp: 0, deadUntil: now + MOB_RESPAWN_MS }, hp: 0, dead: true, gained };
+}
+
+/** 指定アンカー（中心タイル）における占有タイルキー一覧（"x,y"）。 */
+export function mobFootprintTiles(size: number, tx: number, ty: number): string[] {
+  const b = mobFootprintBounds(size, tx, ty);
+  const tiles: string[] = [];
+  for (let y = b.minY; y <= b.maxY; y++) {
+    for (let x = b.minX; x <= b.maxX; x++) tiles.push(`${x},${y}`);
+  }
+  return tiles;
+}
+
+/**
+ * モブ群の占有タイル集合（プレイヤー移動の BlockedTiles へ合成する用）。
+ * 引数の x, y は「現在の中心タイル」（モブは動くためアンカーではなく現在位置）。
+ */
+export function mobBlockedTiles(mobs: readonly { size: number; x: number; y: number }[]): Set<string> {
+  const out = new Set<string>();
+  for (const m of mobs) {
+    for (const key of mobFootprintTiles(m.size, m.x, m.y)) out.add(key);
+  }
+  return out;
+}
+
+/**
+ * 敵対モブ接触時のノックバック先（タイル中心座標）。
+ * モブの中心からプレイヤーへ向かう方向へ押し出し、着地点が占有内であれば
+ * 占有の外に出るまで距離を伸ばす。
+ */
+export function knockbackTarget(
+  placed: Pick<PlacedMob, "x" | "y" | "size">,
+  player: { x: number; y: number },
+  distance = 1.4,
+): { x: number; y: number } {
+  const cx = placed.x + 0.5;
+  const cy = placed.y + 0.5;
+  let dx = player.x - cx;
+  let dy = player.y - cy;
+  const len = Math.hypot(dx, dy);
+  if (len < 0.001) {
+    dx = 0;
+    dy = 1;
+  } else {
+    dx /= len;
+    dy /= len;
+  }
+  let d = distance;
+  let tx = player.x + dx * d;
+  let ty = player.y + dy * d;
+  while (mobOccupiesTile(placed.size, placed.x, placed.y, Math.floor(tx), Math.floor(ty)) && d < placed.size + 2) {
+    d += 0.5;
+    tx = player.x + dx * d;
+    ty = player.y + dy * d;
+  }
+  return { x: tx, y: ty };
 }
