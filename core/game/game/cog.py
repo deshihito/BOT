@@ -95,13 +95,18 @@ WORDWOLF_LISTS = [("standard", "標準"), ("starail", "崩壊：スターレイ�
 # ジャンル説明は他ルートの方針に合わせ、ラベルから自明なものは書かない（導線最適化 S8）。
 GAME_GENRES = {
     "party": ("パーティーゲーム", ""),
+    # 導線最適化 U3: party 30件がセレクト上限25件を超えて2ページ化していたため、
+    # 言葉・推理系16件を「ワード・推理」に分け、どちらも1ページに収める。
+    # カード・運試し系14件は「パーティーゲーム」に残す。
+    "word": ("ワード・推理", ""),
     "solo": ("ミニゲーム", ""),
     "board": ("ボード・カードゲーム", ""),
 }
 # 旧ダンジョンは廃止し WORLD BOX へ統合した（2026-11-15）。ワールド系の遊びは
 # ハブの WORLD BOX リンクボタンが唯一の導線。
 GAME_GENRE_BY_GAME = {
-    **{game: "party" for game in ("jinrou", "wordwolf", "uno", "doubt", "ngword", "shiritori", "janken", "babanuki", "quiz", "bingo", "majority", "onenight", "loveletter", "codenames", "twochoice", "thirtyone", "justone", "ito", "insider", "gauge", "ruins", "hanabi", "hoshi", "liequiz", "cipher", "wirecut", "liardice", "mendou", "yotsuba", "nyokki")},
+    **{game: "party" for game in ("uno", "doubt", "babanuki", "janken", "bingo", "thirtyone", "loveletter", "ruins", "hanabi", "hoshi", "wirecut", "liardice", "mendou", "nyokki")},
+    **{game: "word" for game in ("jinrou", "wordwolf", "ngword", "shiritori", "quiz", "liequiz", "cipher", "justone", "ito", "insider", "codenames", "twochoice", "majority", "onenight", "gauge", "yotsuba")},
     **{game: "solo" for game in ("wordle", "shinkei", "guess", "flash", "minesweeper", "sudoku", "game2048", "nonogram", "highlow")},
     **{game: "board" for game in ("daifugo", "othello", "poker", "shogi", "chess", "koikoi", "gomoku", "connect4")},
 }

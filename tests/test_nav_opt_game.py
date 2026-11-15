@@ -38,15 +38,18 @@ class GameHubOneStepTest(unittest.TestCase):
                                           "nonogram", "shinkei", "sudoku", "wordle"])
 
     def test_genres_have_no_single_game_genre(self):
-        # ラウンド3: 1件ジャンル（旧アドベンチャー）は器を畳んだ。ジャンルは3種
+        # ラウンド3: 1件ジャンル（旧アドベンチャー）は器を畳んだ。ジャンルは4種
+        # （導線最適化 U3: party 30件を word 16件と party 14件に分割）。
         from cogs.game import GAME_GENRES, GAME_GENRE_BY_GAME
 
-        self.assertEqual(sorted(GAME_GENRES), ["board", "party", "solo"])
+        self.assertEqual(sorted(GAME_GENRES), ["board", "party", "solo", "word"])
         counts = {}
         for genre in GAME_GENRE_BY_GAME.values():
             counts[genre] = counts.get(genre, 0) + 1
         self.assertTrue(all(n >= 2 for n in counts.values()))
         self.assertEqual(GAME_GENRE_BY_GAME["wordle"], "solo")
+        self.assertEqual(GAME_GENRE_BY_GAME["wordwolf"], "word")
+        self.assertEqual(GAME_GENRE_BY_GAME["uno"], "party")
 
     def test_select_options_have_no_description(self):
         # ラウンド3: 人数・所要時間は詳細フィールドが担い、セレクトでは重ねない

@@ -81,8 +81,10 @@ class GenreDescriptionPolicyTest(unittest.TestCase):
         self.assertNotIn("assist", SUPPORT_GENRES)
 
     def test_voice_genres(self):
-        for genre in ("connection", "music", "studio", "trigger", "community", "gvc_rooms"):
+        for genre in ("connection", "music", "studio", "trigger", "gvc_rooms"):
             self.assertEqual(VOICE_GENRES[genre][1], "", genre)
+        # 導線最適化 U3: 2件ジャンル「community」は gvc_rooms へ吸収され、ジャンル自体が無い
+        self.assertNotIn("community", VOICE_GENRES)
         self.assertEqual(VOICE_GENRES["tts"][1], "VOICEVOXによるテキスト読み上げ")
         self.assertEqual(VOICE_GENRES["effects"][1], "ボイスチェンジャー")
 
