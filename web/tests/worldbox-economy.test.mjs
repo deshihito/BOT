@@ -194,12 +194,14 @@ test("クライアント配線: 経済パネルと API がつながっている"
   const presenceOnline = fs.readFileSync(path.join(libDir, "worldbox/presence-online.ts"), "utf8");
   assert.match(presenceOnline, /findPresenceOwnerKey/);
   const panel = fs.readFileSync(path.join(rootDir, "app/games/worldbox/WorldBoxEconomyPanel.tsx"), "utf8");
-  for (const action of ["buy", "sell", "eat", "craft", "work", "steal"]) {
+  for (const action of ["buy", "sell", "eat", "craft", "work"]) {
     assert.ok(panel.includes(`"${action}"`) || panel.includes(action), action);
   }
+  // steal は一旦廃止（2026-11-16）: パネルにタブが無く、ルートは拒否する
+  assert.ok(!panel.includes('tabBtn("steal"'), "steal タブが残っている");
   const route = fs.readFileSync(path.join(rootDir, "app/api/worldbox/profile/route.ts"), "utf8");
-  assert.match(route, /resolveSteal/);
-  assert.match(route, /findPresenceOwnerKey/);
+  assert.match(route, /steal_disabled/);
+  assert.ok(!route.includes("resolveSteal"), "ルートが steal を解決している");
   // コインはブリッジのオプとして積み、残高表示はブリッジ側が正
   assert.match(route, /buildEconomyOp/);
   assert.match(route, /economy-bridge/);

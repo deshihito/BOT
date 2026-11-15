@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getRequestSession, publicOrigin, sessionOwnerKey } from "@/lib/auth";
 import {
-  buyItem, craftItem, doWork, eatItem, resolveSteal, sellItem,
+  buyItem, craftItem, doWork, eatItem, sellItem,
   type CoinMovement, type EconomyError,
 } from "@/lib/worldbox/economy";
 import { buildEconomyOp, type EconomyOp } from "@/lib/worldbox/economy-bridge";
@@ -16,7 +16,7 @@ import { isProfileEnabled, loadProfile, storeProfile } from "@/lib/worldbox/prof
 
 export const runtime = "nodejs";
 
-// AGO WORLD BOX の経済（プロフィール＋かばん＋ショップ＋合成＋steal＋労働）。
+// AGO WORLD BOX の経済（プロフィール＋かばん＋ショップ＋合成＋労働。steal は廃止済み）。
 // 状態遷移の規則は lib/worldbox/economy（ボット側経済機能の写し）。
 // コインの正は AGO コイン本体: このルートは残高を書き換えず、遷移が
 // 返した coin を経済ブリッジ（bot_kv worldbox_economy）のオプとして
@@ -29,7 +29,7 @@ export const runtime = "nodejs";
 // POST { action: "craft", recipeId }: 合成
 //   （場所制約: ロビー鍛冶屋の作業台の前にいること。サーバー側で検証）
 // POST { action: "work" }: 労働（空腹度を消費し、報酬は earn オプ）
-// POST { action: "steal", targetId }: いま歩いている相手から steal
+// POST { action: "steal", targetId }: steal は一旦廃止（2026-11-16）。常に拒否する
 // プロフィールの保存先は bot_kv（名前空間 worldbox_profiles、
 // キー = 所有者キー）。コインが動くアクションは Discord ログイン必須。
 // Bot API 未設定なら 503。
@@ -212,64 +212,8 @@ export async function POST(request: Request) {
       return saveWithCoin(doWork(current), gate.discordId);
     }
     case "steal": {
-      const gate = coinGate();
-      if ("response" in gate) return gate.response;
-      if (typeof data.targetId !== "string" || !isPresenceEnabled()) {
-        return errorResponse("invalid_action");
-      }
-      const targetKey = await findPresenceOwnerKey(data.targetId);
-      if (!targetKey) return errorResponse("target_protected");
-      if (targetKey === ownerKey) return errorResponse("self_target");
-      // 奪い元は Discord ユーザーでなければブリッジで移せない（保護扱い）
-      const victimId = targetKey.startsWith("discord:") ? targetKey.slice("discord:".length) : null;
-      if (!victimId) return errorResponse("target_protected");
-      const target = await loadProfile(targetKey);
-      const [actorCoins, targetCoins] = await Promise.all([
-        readUserBalance(gate.discordId),
-        readUserBalance(victimId),
-      ]);
-      if (actorCoins === null || targetCoins === null) {
-        return statusError("economy_unavailable", 503);
-      }
-      const result = resolveSteal(current, target, Date.now(), Math.random, { actorCoins, targetCoins });
-      if (!result.ok) return errorResponse(result.error);
-      if (!(await storeProfile(ownerKey, result.actor))) {
-        return NextResponse.json({ error: "store_failed" }, { status: 503, headers: NO_STORE });
-      }
-      if (!(await storeProfile(targetKey, result.target))) {
-        await storeProfile(ownerKey, current);
-        return NextResponse.json({ error: "store_failed" }, { status: 503, headers: NO_STORE });
-      }
-      // コインの移動: 成功は steal オプ（被害者→実行者）、失敗は罰金の spend オプ
-      let op: EconomyOp | null = null;
-      if (result.success) {
-        op = buildEconomyOp(
-          {
-            kind: "steal", userKey: ownerKey, discordId: gate.discordId,
-            amount: result.amount, reason: "steal", fromDiscordId: victimId,
-          },
-          crypto.randomUUID(),
-          Date.now(),
-        );
-      } else if (result.coin) {
-        op = buildEconomyOp(
-          {
-            kind: result.coin.kind, userKey: ownerKey, discordId: gate.discordId,
-            amount: result.coin.amount, reason: result.coin.reason,
-          },
-          crypto.randomUUID(),
-          Date.now(),
-        );
-      }
-      if (op && !(await enqueueEconomyOp(op))) {
-        await storeProfile(ownerKey, current);
-        await storeProfile(targetKey, target);
-        return statusError("economy_failed", 503);
-      }
-      return NextResponse.json(
-        { profile: result.actor, success: result.success, amount: result.amount },
-        { headers: NO_STORE },
-      );
+      // steal は一旦廃止（2026-11-16 ユーザー指示）。どの経路からも実行できない。
+      return errorResponse("steal_disabled");
     }
     default:
       return NextResponse.json({ error: "invalid_action" }, { status: 400, headers: NO_STORE });
