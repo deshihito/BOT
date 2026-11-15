@@ -10,14 +10,15 @@ import { parseSave } from "@/lib/worldbox/save";
 import { loadWorldBoxSave, storeWorldBoxSave } from "@/lib/worldbox/save-online";
 import { serializeSave } from "@/lib/worldbox/save";
 import {
-  buildCaveLayer, buildRuins, parseInstanceSpace, weekKeyOf,
+  buildCaveLayer, buildRuins, parseInstanceSpace, ruinsCompleteOpId, weekKeyOf,
   CAVE_CHEST_RESPAWN_MS, RUINS_COMPLETE_EARN, RUINS_MAIN_CHEST_LOOT,
 } from "@/lib/worldbox/instances";
+import { withUserLock } from "@/lib/worldbox/user-lock";
 import {
   loadRuinsPersonal, storeRuinsPersonal,
 } from "@/lib/worldbox/instances-online";
 import { buildEconomyOp } from "@/lib/worldbox/economy-bridge";
-import { enqueueEconomyOp, isEconomyEnabled } from "@/lib/worldbox/economy-bridge-online";
+import { enqueueEconomyOpOnce, isEconomyEnabled } from "@/lib/worldbox/economy-bridge-online";
 import { applyPoison } from "@/lib/worldbox/vitals";
 import { removeItem } from "@/lib/worldbox/profile";
 import { isInstancesEnabled, loadInstanceState, storeInstanceState } from "@/lib/worldbox/instances-online";
@@ -190,12 +191,13 @@ async function handleRuins(
       return NextResponse.json({ error: "profile_unavailable" }, { status: 503, headers: NO_STORE });
     }
     if (completedNow && session.provider === "discord" && isEconomyEnabled()) {
+      // 初回開封の earn は決定的 ID で冪等に積む（1遺跡×1人 = 最大1件）
       const op = buildEconomyOp(
         { kind: "earn", userKey: ownerKey, discordId: session.id, amount: RUINS_COMPLETE_EARN, reason: "ruins_complete" },
-        crypto.randomUUID(),
+        ruinsCompleteOpId(inst.entranceX, inst.entranceY, session.id),
         now,
       );
-      if (op) await enqueueEconomyOp(op);
+      if (op) await enqueueEconomyOpOnce(op);
     }
     return NextResponse.json(
       { ok: true, gained, trapped, completed: completedNow, profile: next, chests: personal.chests },
@@ -221,6 +223,25 @@ export async function POST(request: Request) {
   const space = typeof fields.space === "string" ? fields.space : "";
   const inst = parseInstanceSpace(space);
   if (!inst) return NextResponse.json({ error: "invalid_space" }, { status: 400, headers: NO_STORE });
+  // 空間単位で直列化する（カジノ #943 と同型の対策）。洞窟の枯渇状態は
+  // プレイヤー間で共有され、遺跡の個人状態も read-modify-write のため、
+  // 並行リクエストが同じ鉱脈・宝箱・主宝箱を二重に開けてしまう。
+  return withUserLock(`instance:${space}`, () => handleInstancePost(request, session, space, inst, fields));
+}
+
+type InstanceT = NonNullable<ReturnType<typeof parseInstanceSpace>>;
+type FieldsT = {
+  action?: unknown; space?: unknown; veinKey?: unknown;
+  chestIdx?: unknown; doorIdx?: unknown; trapIdx?: unknown;
+};
+
+async function handleInstancePost(
+  request: Request,
+  session: SessionT,
+  space: string,
+  inst: InstanceT,
+  fields: FieldsT,
+): Promise<NextResponse> {
   if (inst.kind === "ruins") return handleRuins(request, session, space, inst, fields);
   if (inst.kind !== "cave") return NextResponse.json({ error: "invalid_space" }, { status: 400, headers: NO_STORE });
   const ownerKey = sessionOwnerKey(session);

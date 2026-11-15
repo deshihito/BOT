@@ -309,6 +309,18 @@ export const RUINS_MAIN_CHEST_LOOT = [
 /** ruins_complete の earn 額（暫定。Plan A の原資範囲内）。 */
 export const RUINS_COMPLETE_EARN = 300;
 
+/**
+ * ruins_complete の earn オプの決定的 ID（入口座標＋プレイヤー）。
+ * 主宝箱の初回開封はその遺跡につき1人1回だけ（completed フラグは
+ * 週次リセットを跨いで残る）なので、オプ ID も1回きりの形にして
+ * 冪等登録（enqueueEconomyOpOnce）と組み合わせる。再試行や並行
+ * リクエストでも earn は最大1件しか積まれない（PR #943 の規則）。
+ * 形式はブリッジの OP_ID_RE（[A-Za-z0-9-]{8,64}）に収める。
+ */
+export function ruinsCompleteOpId(entranceX: number, entranceY: number, discordId: string): string {
+  return `ruins-done-${entranceX}-${entranceY}-${discordId}`;
+}
+
 /** 週キー（月曜始まり、サーバー時刻=UTC 基準）。個人状態の週次リセット判定。 */
 export function weekKeyOf(now: number): string {
   const d = new Date(now);

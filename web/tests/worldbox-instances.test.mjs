@@ -51,7 +51,7 @@ async function loadBundle(files, exportNames) {
 
 const T = await loadBundle(
   ["worldbox/rng.ts", "worldbox/mapgen.ts", "worldbox/lobby.ts", "worldbox/items.ts", "worldbox/mobs.ts", "worldbox/objects.ts", "worldbox/instances.ts", "worldbox/save.ts", "worldbox/presence.ts"],
-  ["makeInstanceSpace", "parseInstanceSpace", "isInstanceSpace", "buildCaveLayer", "lightRadiusTiles", "CAVE_LAYERS", "CAVE_W", "CAVE_H", "isCaveSafeTile", "parseSave", "serializeSave", "sanitizePresenceSpace", "validateSpecialObjects", "specialObjectById"],
+  ["makeInstanceSpace", "parseInstanceSpace", "isInstanceSpace", "buildCaveLayer", "lightRadiusTiles", "CAVE_LAYERS", "CAVE_W", "CAVE_H", "isCaveSafeTile", "parseSave", "serializeSave", "sanitizePresenceSpace", "validateSpecialObjects", "specialObjectById", "ruinsCompleteOpId"],
 );
 
 test("space id roundtrip", () => {
@@ -243,4 +243,28 @@ test("ruins main chest loot boosts relics", () => {
   const map = R.RUINS_MAIN_CHEST_LOOT.find((e) => e.itemId === "star_map");
   assert.ok(relic && relic.chance > 0.25);
   assert.ok(map && map.chance > 0.2);
+});
+
+test("ruinsCompleteOpId: 決定的でブリッジの ID 形式に収まり、入口とプレイヤーで一意", () => {
+  const a = T.ruinsCompleteOpId(12, -34, "611111111111111111");
+  assert.equal(a, T.ruinsCompleteOpId(12, -34, "611111111111111111"), "同じ入力では同じ ID");
+  assert.match(a, /^[A-Za-z0-9-]{8,64}$/);
+  assert.notEqual(a, T.ruinsCompleteOpId(13, -34, "611111111111111111"), "入口が違えば別の ID");
+  assert.notEqual(a, T.ruinsCompleteOpId(12, -34, "622222222222222222"), "プレイヤーが違えば別の ID");
+});
+
+test("冪等性の配線: instances ルートは空間ロックと決定的 ID の冪等登録を使う", () => {
+  const route = fs.readFileSync(path.join(rootDir, "app/api/worldbox/instances/route.ts"), "utf8");
+  assert.match(route, /withUserLock\(`instance:\$\{space\}`,/, "空間単位で直列化する");
+  assert.match(route, /ruinsCompleteOpId/, "ruins_complete は決定的 ID");
+  assert.match(route, /enqueueEconomyOpOnce/, "冪等登録を使う");
+  assert.ok(!route.includes("crypto.randomUUID()"), "経済オプにランダム ID を使わない");
+});
+
+test("冪等性の配線: 共有ロックと冪等登録がブリッジ側に用意されている", () => {
+  const lock = fs.readFileSync(path.join(libDir, "worldbox/user-lock.ts"), "utf8");
+  assert.match(lock, /export async function withUserLock/);
+  const online = fs.readFileSync(path.join(libDir, "worldbox/economy-bridge-online.ts"), "utf8");
+  assert.match(online, /export async function enqueueEconomyOpOnce/);
+  assert.match(online, /findEconomyOp\(op\.userKey, op\.id\)/, "既存オプがあれば作り直さない");
 });

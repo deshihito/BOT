@@ -223,3 +223,224 @@ test("ギルドボードの配線: ロビー配置・チップ・パネル・API
   assert.match(botWorker, /"guild_request_reward"/);
   assert.match(botWorker, /"guild_request_refund"/);
 });
+
+// ---------- API（冪等性: 並行リクエストでも預かり・報酬・返金は各1件だけ） ----------
+
+function dataUrl(js) {
+  return "data:text/javascript;base64," + Buffer.from(js).toString("base64");
+}
+
+const apiBotStubUrl = dataUrl(`
+const store = new Map();
+const users = new Map();
+globalThis.__wbReqStore = store;
+globalThis.__wbReqUsers = users;
+export function isBotApiConfigured() { return true; }
+export async function kvGet(ns, key) { const v = store.get(ns + " " + key); return v === undefined ? null : v; }
+export async function kvSet(ns, key, value) { store.set(ns + " " + key, value); }
+export async function kvDelete(ns, key) { store.delete(ns + " " + key); }
+export async function kvList(ns) {
+  const m = new Map();
+  for (const [k, v] of store) if (k.startsWith(ns + " ")) m.set(k.slice(ns.length + 1), v);
+  return m;
+}
+export async function tableSelect(table, columns, filters, limit) {
+  if (table !== "users") throw new Error("unexpected table " + table);
+  const id = filters.find((f) => f.column === "user_id")?.value;
+  if (!users.has(id)) return [];
+  return [{ balance: users.get(id) }];
+}
+`);
+const apiSubdomainUrl = dataUrl(transpile("subdomain.ts"));
+const apiHeadersStubUrl = dataUrl("export async function cookies() { throw new Error('tests do not use cookies()'); }");
+const apiAuthUrl = dataUrl(
+  transpile("auth.ts").replaceAll('"./subdomain"', JSON.stringify(apiSubdomainUrl)).replaceAll('"next/headers"', JSON.stringify(apiHeadersStubUrl)),
+);
+const apiAuth = await import(apiAuthUrl);
+const apiRngUrl = dataUrl(transpile("worldbox/rng.ts"));
+const apiMapgenUrl = dataUrl(transpile("worldbox/mapgen.ts").replaceAll('"./rng"', JSON.stringify(apiRngUrl)));
+const apiLobbyUrl = dataUrl(transpile("worldbox/lobby.ts").replaceAll('"./mapgen"', JSON.stringify(apiMapgenUrl)));
+const apiItemsUrl = dataUrl(transpile("worldbox/items.ts"));
+const apiProfileUrl = dataUrl(transpile("worldbox/profile.ts").replaceAll('"./items"', JSON.stringify(apiItemsUrl)));
+const apiBridgeUrl = dataUrl(transpile("worldbox/economy-bridge.ts"));
+const apiBridgeOnlineUrl = dataUrl(
+  transpile("worldbox/economy-bridge-online.ts")
+    .replaceAll('"../bot-api"', JSON.stringify(apiBotStubUrl))
+    .replaceAll('"./economy-bridge"', JSON.stringify(apiBridgeUrl)),
+);
+const apiPresenceUrl = dataUrl(transpile("worldbox/presence.ts"));
+const apiPresenceOnlineUrl = dataUrl(
+  transpile("worldbox/presence-online.ts")
+    .replaceAll('"../bot-api"', JSON.stringify(apiBotStubUrl))
+    .replaceAll('"./presence"', JSON.stringify(apiPresenceUrl)),
+);
+const apiTentUrl = dataUrl(
+  transpile("worldbox/tent.ts")
+    .replaceAll('"./mapgen"', JSON.stringify(apiMapgenUrl))
+    .replaceAll('"./lobby"', JSON.stringify(apiLobbyUrl)),
+);
+const apiSaveUrl = dataUrl(
+  transpile("worldbox/save.ts")
+    .replaceAll('"./lobby"', JSON.stringify(apiLobbyUrl))
+    .replaceAll('"./tent"', JSON.stringify(apiTentUrl))
+    .replaceAll('"./mapgen"', JSON.stringify(apiMapgenUrl)),
+);
+const apiSaveOnlineUrl = dataUrl(
+  transpile("worldbox/save-online.ts").replaceAll('"../bot-api"', JSON.stringify(apiBotStubUrl)),
+);
+const apiStationOnlineUrl = dataUrl(
+  transpile("worldbox/station-online.ts")
+    .replaceAll('"./lobby"', JSON.stringify(apiLobbyUrl))
+    .replaceAll('"./tent"', JSON.stringify(apiTentUrl))
+    .replaceAll('"./presence-online"', JSON.stringify(apiPresenceOnlineUrl))
+    .replaceAll('"./save"', JSON.stringify(apiSaveUrl))
+    .replaceAll('"./save-online"', JSON.stringify(apiSaveOnlineUrl)),
+);
+const apiProfileOnlineUrl = dataUrl(
+  transpile("worldbox/profile-online.ts")
+    .replaceAll('"../bot-api"', JSON.stringify(apiBotStubUrl))
+    .replaceAll('"./profile"', JSON.stringify(apiProfileUrl)),
+);
+const apiRequestsUrl = dataUrl(
+  transpile("worldbox/requests.ts")
+    .replaceAll('"./items"', JSON.stringify(apiItemsUrl))
+    .replaceAll('"./profile"', JSON.stringify(apiProfileUrl)),
+);
+const apiRequestsOnlineUrl = dataUrl(
+  transpile("worldbox/requests-online.ts")
+    .replaceAll('"../bot-api"', JSON.stringify(apiBotStubUrl))
+    .replaceAll('"./requests"', JSON.stringify(apiRequestsUrl)),
+);
+const apiNationsStubUrl = dataUrl(`
+let state = { nations: {}, members: {} };
+globalThis.__wbReqNations = { set(s) { state = s; } };
+export function isNationsEnabled() { return true; }
+export async function loadNationsState() { return JSON.parse(JSON.stringify(state)); }
+export async function storeNationsState() { return true; }
+`);
+const apiUserLockUrl = dataUrl(transpile("worldbox/user-lock.ts"));
+const apiNextServerStubUrl = dataUrl(`
+export class NextResponse {
+  static json(body, init = {}) {
+    const headers = new Headers(init.headers || {});
+    headers.set("Content-Type", "application/json");
+    return new Response(JSON.stringify(body), { status: init.status || 200, headers });
+  }
+}
+`);
+const apiRequestsRoute = await import(
+  dataUrl(
+    transpile("api/worldbox/requests/route.ts", rootDir + "/app")
+      .replaceAll('"next/server"', JSON.stringify(apiNextServerStubUrl))
+      .replaceAll('"@/lib/auth"', JSON.stringify(apiAuthUrl))
+      .replaceAll('"@/lib/worldbox/economy-bridge"', JSON.stringify(apiBridgeUrl))
+      .replaceAll('"@/lib/worldbox/economy-bridge-online"', JSON.stringify(apiBridgeOnlineUrl))
+      .replaceAll('"@/lib/worldbox/nations-online"', JSON.stringify(apiNationsStubUrl))
+      .replaceAll('"@/lib/worldbox/profile-online"', JSON.stringify(apiProfileOnlineUrl))
+      .replaceAll('"@/lib/worldbox/requests"', JSON.stringify(apiRequestsUrl))
+      .replaceAll('"@/lib/worldbox/requests-online"', JSON.stringify(apiRequestsOnlineUrl))
+      .replaceAll('"@/lib/worldbox/station-online"', JSON.stringify(apiStationOnlineUrl))
+      .replaceAll('"@/lib/worldbox/user-lock"', JSON.stringify(apiUserLockUrl)),
+  ),
+);
+
+process.env.DISCORD_SESSION_SECRET = "wb-requests-test-secret";
+const API_GUILD = "123456789012345678";
+const API_POSTER = "711111111111111111";
+const API_MEMBER1 = "722222222222222222";
+const API_MEMBER2 = "733333333333333333";
+const apiCookie = (id, name) => `ago_session=${encodeURIComponent(apiAuth.createSession({ id, username: name }))}`;
+const API_URL = "http://localhost/api/worldbox/requests";
+function apiReq(cookie, body) {
+  return new Request(API_URL, {
+    method: "POST",
+    headers: { cookie, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+function apiFindOps(pred) {
+  const out = [];
+  for (const [k, v] of globalThis.__wbReqStore) {
+    if (k.startsWith("worldbox_economy ") && v && typeof v === "object" && pred(v)) out.push(v);
+  }
+  return out;
+}
+function apiSeedProfile(id, items) {
+  globalThis.__wbReqStore.set(`worldbox_profiles discord:${id}`, JSON.stringify({
+    coins: 100, hunger: 100, items, stealActorAt: 0, stealTargetAt: 0,
+  }));
+}
+function apiProfileItems(id) {
+  const raw = globalThis.__wbReqStore.get(`worldbox_profiles discord:${id}`);
+  return JSON.parse(raw).items;
+}
+function apiReset() {
+  const store = globalThis.__wbReqStore;
+  store.clear();
+  globalThis.__wbReqUsers.clear();
+  for (const id of [API_POSTER, API_MEMBER1, API_MEMBER2]) globalThis.__wbReqUsers.set(id, 10000);
+  globalThis.__wbReqNations.set({
+    nations: {
+      [API_GUILD]: {
+        guildId: API_GUILD, name: "テスト国", color: "#e5484d",
+        kingKey: `discord:${API_POSTER}`, capital: { x: 0, y: 0 }, createdAt: 1,
+      },
+    },
+    members: {
+      [`discord:${API_POSTER}`]: { nationId: API_GUILD, role: "king" },
+      [`discord:${API_MEMBER1}`]: { nationId: API_GUILD, role: "citizen" },
+      [`discord:${API_MEMBER2}`]: { nationId: API_GUILD, role: "citizen" },
+    },
+  });
+  apiSeedProfile(API_POSTER, {});
+  apiSeedProfile(API_MEMBER1, { wood: 5 });
+  apiSeedProfile(API_MEMBER2, { wood: 5 });
+  for (const id of [API_POSTER, API_MEMBER1, API_MEMBER2]) {
+    store.set(`worldbox_presence discord:${id}`, JSON.stringify({
+      name: "req-user", x: 24.5, y: 16.5, vx: 0, vy: 0, face: 1, space: "lobby", ts: Date.now(),
+    }));
+  }
+}
+async function apiPost(cookie) {
+  const res = await apiRequestsRoute.POST(apiReq(cookie, { action: "post", itemId: "wood", count: 2, reward: 100 }));
+  assert.equal(res.status, 200);
+  return (await res.json()).request.id;
+}
+
+test("API(requests): 投稿の預かりは決定的 ID の spend 1件だけ", async () => {
+  apiReset();
+  const id = await apiPost(apiCookie(API_POSTER, "poster"));
+  const escrows = apiFindOps((o) => o.kind === "spend" && o.reason === "guild_request_escrow");
+  assert.equal(escrows.length, 1);
+  assert.equal(escrows[0].id, `escrow-${id}`);
+  assert.equal(escrows[0].amount, 100);
+});
+
+test("API(requests): 納品が並行しても報酬 earn は1件だけ（二重納品の回帰防止）", async () => {
+  apiReset();
+  const id = await apiPost(apiCookie(API_POSTER, "poster"));
+  const results = await Promise.all([
+    apiRequestsRoute.POST(apiReq(apiCookie(API_MEMBER1, "m1"), { action: "fulfill", requestId: id })),
+    apiRequestsRoute.POST(apiReq(apiCookie(API_MEMBER2, "m2"), { action: "fulfill", requestId: id })),
+  ]);
+  assert.equal(results.filter((r) => r.status === 200).length, 1);
+  assert.equal(results.filter((r) => r.status === 409).length, 1);
+  const rewards = apiFindOps((o) => o.kind === "earn" && o.reason === "guild_request_reward");
+  assert.equal(rewards.length, 1, "報酬の earn は1件だけ積まれる");
+  assert.equal(rewards[0].id, `reward-${id}`);
+  assert.equal(apiProfileItems(API_POSTER).wood, 2, "投稿者へ渡るアイテムも1回分だけ");
+});
+
+test("API(requests): 納品と取消が競合しても払われるのは報酬か返金のどちらか1件だけ", async () => {
+  apiReset();
+  const id = await apiPost(apiCookie(API_POSTER, "poster"));
+  const results = await Promise.all([
+    apiRequestsRoute.POST(apiReq(apiCookie(API_POSTER, "poster"), { action: "cancel", requestId: id })),
+    apiRequestsRoute.POST(apiReq(apiCookie(API_MEMBER1, "m1"), { action: "fulfill", requestId: id })),
+  ]);
+  assert.equal(results.filter((r) => r.status === 200).length, 1);
+  const payouts = apiFindOps(
+    (o) => o.id === `reward-${id}` || o.id === `refund-${id}`,
+  );
+  assert.equal(payouts.length, 1, "報酬と返金が両方払われることはない");
+});

@@ -185,6 +185,7 @@ const economyOnlineUrl = dataUrl(
     .replaceAll('"../bot-api"', JSON.stringify(botApiStubUrl))
     .replaceAll('"./economy-bridge"', JSON.stringify(economyUrl)),
 );
+const userLockUrl = dataUrl(transpile("worldbox/user-lock.ts"));
 const nextServerStubUrl = dataUrl(`
 export class NextResponse {
   static json(body, init = {}) {
@@ -365,7 +366,8 @@ const profileRoute = await import(
       .replaceAll('"@/lib/worldbox/shops"', JSON.stringify(shopsUrl))
       .replaceAll('"@/lib/worldbox/station-online"', JSON.stringify(stationStubUrl))
       .replaceAll('"@/lib/worldbox/profile-online"', JSON.stringify(profileOnlineStubUrl))
-      .replaceAll('"@/lib/worldbox/profile"', JSON.stringify(profileSwapUrl)),
+      .replaceAll('"@/lib/worldbox/profile"', JSON.stringify(profileSwapUrl))
+      .replaceAll('"@/lib/worldbox/user-lock"', JSON.stringify(userLockUrl)),
   ),
 );
 const URL_P = "http://localhost/api/worldbox/profile";
