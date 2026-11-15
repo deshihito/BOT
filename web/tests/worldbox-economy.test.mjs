@@ -64,7 +64,10 @@ test("アイテムの母数が厚い（28種以上）・IDが一意・価格が�
     if (item.category === "food") assert.ok(item.hunger > 0, item.id);
   }
   const categories = new Set(eco.ITEMS.map((i) => i.category));
-  assert.deepEqual([...categories].sort(), ["crafted", "food", "material", "special"]);
+  assert.deepEqual(
+    [...categories].sort(),
+    ["block", "crafted", "crop", "food", "furniture", "material", "seed", "special", "tool"],
+  );
 });
 
 test("レシピの参照がすべて実在し、合成品は売ると素材代より高くなる", () => {

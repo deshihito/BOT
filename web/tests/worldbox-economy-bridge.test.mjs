@@ -354,6 +354,7 @@ const map = (globalThis.__wbPresence = new Map());
 export function isPresenceEnabled() { return true; }
 export async function findPresenceOwnerKey(id) { return map.has(id) ? map.get(id) : null; }
 `);
+const profileSwapUrl = bundleModule(["worldbox/items.ts", "worldbox/profile.ts"], ["swapSlots"]);
 const profileRoute = await import(
   dataUrl(
     transpile("api/worldbox/profile/route.ts", rootDir + "/app")
@@ -363,7 +364,8 @@ const profileRoute = await import(
       .replaceAll('"@/lib/worldbox/economy-bridge"', JSON.stringify(economyUrl))
       .replaceAll('"@/lib/worldbox/economy"', JSON.stringify(profileEcoUrl))
       .replaceAll('"@/lib/worldbox/presence-online"', JSON.stringify(presenceStubUrl))
-      .replaceAll('"@/lib/worldbox/profile-online"', JSON.stringify(profileOnlineStubUrl)),
+      .replaceAll('"@/lib/worldbox/profile-online"', JSON.stringify(profileOnlineStubUrl))
+      .replaceAll('"@/lib/worldbox/profile"', JSON.stringify(profileSwapUrl)),
   ),
 );
 const URL_P = "http://localhost/api/worldbox/profile";
