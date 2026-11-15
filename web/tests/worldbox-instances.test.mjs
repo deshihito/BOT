@@ -173,3 +173,74 @@ test("cave mobs and vein walls", () => {
   assert.ok(layers.every((c) => c.mobs.every((m) => m.mobId === "cave_bat" || m.mobId === "golem")));
   assert.ok(layers.every((c) => c.veins.every((v) => c.data.tiles[v.y * T.CAVE_W + v.x] === 1)));
 });
+
+// ---- 遺跡（バッチ3） ----
+const R = await loadBundle(
+  ["worldbox/rng.ts", "worldbox/mapgen.ts", "worldbox/lobby.ts", "worldbox/items.ts", "worldbox/mobs.ts", "worldbox/objects.ts", "worldbox/instances.ts"],
+  ["buildRuins", "RUINS_W", "RUINS_H", "weekKeyOf", "RUINS_MAIN_CHEST_LOOT", "RUINS_TRAP_KINDS"],
+);
+
+test("ruins deterministic + 48x48", () => {
+  const a = R.buildRuins(SEED, 300, 400);
+  const b = R.buildRuins(SEED, 300, 400);
+  assert.equal(a.portal.x, b.portal.x);
+  assert.equal(a.chests.length, b.chests.length);
+  assert.equal(a.data.width, 48);
+  assert.equal(a.data.height, 48);
+});
+
+test("ruins main chest at deepest + key door", () => {
+  const ruins = R.buildRuins(SEED, 300, 400);
+  const main = ruins.chests.find((c) => c.main);
+  assert.ok(main);
+  assert.equal(main.requiresKey, ruins.doors.length > 0);
+});
+
+test("ruins connectivity: portal reaches all rooms (door excluded)", () => {
+  const ruins = R.buildRuins(SEED, 300, 400);
+  const seen = new Set([`${ruins.portal.x},${ruins.portal.y}`]);
+  const queue = [{ ...ruins.portal }];
+  while (queue.length) {
+    const cur = queue.pop();
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const nx = cur.x + dx;
+      const ny = cur.y + dy;
+      const key = `${nx},${ny}`;
+      if (seen.has(key) || ruins.data.blocked.has(key)) continue;
+      if (nx < 0 || ny < 0 || nx >= 48 || ny >= 48) continue;
+      if (ruins.data.tiles[ny * 48 + nx] === 1) continue;
+      seen.add(key);
+      queue.push({ x: nx, y: ny });
+    }
+  }
+  // 扉以外の全小宝箱・部屋中心に届く
+  for (const chest of ruins.chests) {
+    if (chest.main) continue;
+    assert.ok([...seen].some((k) => {
+      const [x, y] = k.split(",").map(Number);
+      return Math.abs(x - chest.x) + Math.abs(y - chest.y) <= 1;
+    }), `chest ${chest.idx} reachable`);
+  }
+  assert.ok(ruins.roomCenters.length >= 8);
+});
+
+test("ruins traps: 4 kinds cycle, away from portal", () => {
+  const ruins = R.buildRuins(SEED, 300, 400);
+  assert.ok(ruins.traps.length >= 4);
+  assert.ok(ruins.traps.every((t) => R.RUINS_TRAP_KINDS.includes(t.kind)));
+  assert.ok(ruins.traps.every((t) => Math.hypot(t.x - ruins.portal.x, t.y - ruins.portal.y) > 4));
+});
+
+test("week key is Monday based", () => {
+  // 2026-11-16 は月曜、2026-11-15 は日曜（前週の月曜=11-09）
+  assert.equal(R.weekKeyOf(Date.UTC(2026, 10, 16)), "2026-11-16");
+  assert.equal(R.weekKeyOf(Date.UTC(2026, 10, 15)), "2026-11-09");
+  assert.equal(R.weekKeyOf(Date.UTC(2026, 10, 21)), "2026-11-16");
+});
+
+test("ruins main chest loot boosts relics", () => {
+  const relic = R.RUINS_MAIN_CHEST_LOOT.find((e) => e.itemId === "ancient_relic");
+  const map = R.RUINS_MAIN_CHEST_LOOT.find((e) => e.itemId === "star_map");
+  assert.ok(relic && relic.chance > 0.25);
+  assert.ok(map && map.chance > 0.2);
+});
