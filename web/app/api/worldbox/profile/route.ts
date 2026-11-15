@@ -9,19 +9,22 @@ import {
   enqueueEconomyOp, isEconomyEnabled, readUserBalance,
 } from "@/lib/worldbox/economy-bridge-online";
 import { moveSlot, swapSlots, type PlayerProfile } from "@/lib/worldbox/profile";
-import { loadMyLobbyStation } from "@/lib/worldbox/station-online";
+import { findPresenceOwnerKey, isPresenceEnabled } from "@/lib/worldbox/presence-online";
+import { checkBuyGenre } from "@/lib/worldbox/shops";
+import { loadMyLobbyShopGenre, loadMyLobbyStation } from "@/lib/worldbox/station-online";
 import { isProfileEnabled, loadProfile, storeProfile } from "@/lib/worldbox/profile-online";
 
 export const runtime = "nodejs";
 
-// AGO WORLD BOX の経済（プロフィール＋かばん＋ショップ＋合成＋steal＋労働）。
+// AGO WORLD BOX の経済（プロフィール＋かばん＋ショップ＋合成＋労働。steal は廃止済み）。
 // 状態遷移の規則は lib/worldbox/economy（ボット側経済機能の写し）。
 // コインの正は AGO コイン本体: このルートは残高を書き換えず、遷移が
 // 返した coin を経済ブリッジ（bot_kv worldbox_economy）のオプとして
 // 積むだけ（案B）。実際の移動は Bot 本体のワーカーが適用する。
 // GET: 自分のプロフィール
 // POST { action: "buy" | "sell", itemId, count? }: ショップ売買
-//   （場所制約: ロビーのショップの前にいること。サーバー側でプレゼンス検証）
+//   （場所制約: ロビーの店か鍛冶屋の前にいること。サーバー側でプレゼンス検証。
+//    購入は店ごとの品目ジャンルもサーバー側で検証する）
 // POST { action: "eat", itemId }: かばんの食事を食べて空腹度を回復
 // POST { action: "craft", recipeId }: 合成
 //   （場所制約: ロビー鍛冶屋の作業台の前にいること。サーバー側で検証）
@@ -152,12 +155,22 @@ export async function POST(request: Request) {
     return (await loadMyLobbyStation(ownerKey)) === station ? null : statusError(error, 409);
   };
 
+  /** 売買の場所制約: 店（shop）か鍛冶屋（smith）の前にいなければ 409。 */
+  const shopGate = async () => {
+    const station = await loadMyLobbyStation(ownerKey);
+    return station === "shop" || station === "smith" ? null : statusError("not_at_shop", 409);
+  };
+
   switch (data.action) {
     case "buy": {
       const gate = coinGate();
       if ("response" in gate) return gate.response;
-      const place = await stationGate("shop", "not_at_shop");
+      const place = await shopGate();
       if (place) return place;
+      // 品目は店ごとに違う: いる店のジャンルと買うアイテムのジャンルが
+      // 一致しなければ買えない（鍛冶屋はジャンル "smith"）
+      const genreError = checkBuyGenre(await loadMyLobbyShopGenre(ownerKey), data.itemId);
+      if (genreError) return statusError(genreError, 409);
       const balance = await readUserBalance(gate.discordId);
       if (balance === null) return statusError("economy_unavailable", 503);
       return saveWithCoin(buyItem(current, data.itemId, data.count, balance), gate.discordId);
@@ -165,7 +178,7 @@ export async function POST(request: Request) {
     case "sell": {
       const gate = coinGate();
       if ("response" in gate) return gate.response;
-      const place = await stationGate("shop", "not_at_shop");
+      const place = await shopGate();
       if (place) return place;
       return saveWithCoin(sellItem(current, data.itemId, data.count), gate.discordId);
     }

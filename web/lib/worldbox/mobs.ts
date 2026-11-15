@@ -13,6 +13,28 @@ import { itemById } from "./items";
 import { biomeAt, chunkHash, type BiomeId } from "./maplogic";
 import { CHUNK_SIZE } from "./mapgen";
 
+/** 1チャンクに置く小型〜中型モブの合計上限（種ごとの独立抽選だけだと10体超が密集した）。 */
+export const MOB_CHUNK_CAP = 4;
+/** 同一チャンク内のモブのアンカー間最短距離（チェビシェフ、タイル）。 */
+export const MOB_MIN_ANCHOR_DISTANCE = 5;
+/** ワールドスポーン地点からこの半径（チェビシェフ、タイル）以内にはモブを置かない。 */
+export const MOB_SPAWN_EXCLUSION_RADIUS = 6;
+/**
+ * スポーン基準タイル = 原点（0,0）。無制限マップ化（#937）で初期スポーンは
+ * 原点中心・半径2000のランダム抽選＋原点からの決定的フォールバックになったため、
+ * 固定の除外中心は原点に置く（個人ごとのランダムスポーン位置は決定的配置では
+ * 除外できないぶん、チャンク上限と最短距離の間引きが受け持つ）。
+ */
+export const WORLD_SPAWN_TILE = { x: 0, y: 0 };
+
+/** そのタイルがワールドスポーンの除外半径内か。 */
+export function isNearWorldSpawn(x: number, y: number): boolean {
+  return (
+    Math.max(Math.abs(x - WORLD_SPAWN_TILE.x), Math.abs(y - WORLD_SPAWN_TILE.y)) <=
+    MOB_SPAWN_EXCLUSION_RADIUS
+  );
+}
+
 /** モブサイズの下限・上限（マス）。全モブはこの範囲の整数で規定する。 */
 export const MOB_SIZE_MIN = 1;
 export const MOB_SIZE_MAX = 20;
@@ -186,7 +208,8 @@ export type PlacedMob = { mobId: string; x: number; y: number; biome: BiomeId; s
  * mobFootprintBounds で求める。
  */
 export function mobsForChunk(seed: number, cx: number, cy: number, isNight: boolean): PlacedMob[] {
-  const out: PlacedMob[] = [];
+  // 候補は従来どおり種ごとに決定的に集める（アンカー座標の決め方は変えない）。
+  const candidates: PlacedMob[] = [];
   const used = new Set<string>();
   for (const def of MOBS) {
     if (def.instanceOnly || def.density <= 0 || def.size >= LARGE_MOB_SIZE) continue;
@@ -207,8 +230,27 @@ export function mobsForChunk(seed: number, cx: number, cy: number, isNight: bool
       const biome = biomeAt(seed, x, y);
       if (!def.biomes.includes(biome)) continue;
       used.add(key);
-      out.push({ mobId: def.id, x, y, biome, size: def.size });
+      candidates.push({ mobId: def.id, x, y, biome, size: def.size });
     }
+  }
+  // 種横断の間引き（沸きすぎ対策）: 決定的順序で走査し、スポーン除外・
+  // アンカー間最短距離・チャンク合計上限を満たすものだけを採用する。
+  // 順序は座標と種から決まる決定的キーで固定する（定義表の順序に依存しない）。
+  const ordered = [...candidates].sort((a, b) => {
+    const ka = chunkHash(seed, a.x, a.y, a.mobId.length * 131 + a.mobId.charCodeAt(0));
+    const kb = chunkHash(seed, b.x, b.y, b.mobId.length * 131 + b.mobId.charCodeAt(0));
+    return ka - kb || a.y - b.y || a.x - b.x || (a.mobId < b.mobId ? -1 : 1);
+  });
+  const out: PlacedMob[] = [];
+  for (const cand of ordered) {
+    if (out.length >= MOB_CHUNK_CAP) break;
+    if (isNearWorldSpawn(cand.x, cand.y)) continue;
+    const tooClose = out.some(
+      (m) =>
+        Math.max(Math.abs(m.x - cand.x), Math.abs(m.y - cand.y)) < MOB_MIN_ANCHOR_DISTANCE,
+    );
+    if (tooClose) continue;
+    out.push(cand);
   }
   return out;
 }
@@ -237,6 +279,7 @@ export function largeMobsForChunk(seed: number, cx: number, cy: number, isNight:
     if (chunkHash(seed, cx, cy, def.id.length * 59 + 3) >= (def.regionChance ?? 0)) continue;
     const x = cx * CHUNK_SIZE + Math.floor(CHUNK_SIZE / 2);
     const y = cy * CHUNK_SIZE + Math.floor(CHUNK_SIZE / 2);
+    if (isNearWorldSpawn(x, y)) continue;
     const biome = biomeAt(seed, x, y);
     if (!def.biomes.includes(biome)) continue;
     return [{ mobId: def.id, x, y, biome, size: def.size }];

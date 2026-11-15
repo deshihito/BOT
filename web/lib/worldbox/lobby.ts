@@ -6,6 +6,7 @@
 // ショップ）は同じグリッド内の別領域（サブエリア）として持ち、階段タイルで
 // 往復する。全てマス目管理: 配置・占有・判定はタイル単位。
 import { T_GRASS, T_ROCK, tilesSource, type TopDownMap } from "./mapgen";
+import type { ShopGenreId } from "./shops";
 
 export const LOBBY_W = 56;
 export const LOBBY_H = 64;
@@ -121,12 +122,16 @@ export type LobbyObject = {
   h: number;
   solid: boolean;
   station?: LobbyStation;
+  /** 店（station "shop"）の品目ジャンル。店員ごとに扱う品目が違う（shops.ts）。 */
+  genre?: ShopGenreId;
 };
 
 const objects: LobbyObject[] = [];
 const occupied = new Set<string>();
 
-function put(sprite: string, x: number, y: number, opts: { w?: number; h?: number; solid?: boolean; station?: LobbyStation } = {}): void {
+type PutOpts = { w?: number; h?: number; solid?: boolean; station?: LobbyStation; genre?: ShopGenreId };
+
+function put(sprite: string, x: number, y: number, opts: PutOpts = {}): void {
   const w = opts.w ?? 1;
   const h = opts.h ?? 1;
   for (let dy = 0; dy < h; dy++) {
@@ -136,12 +141,12 @@ function put(sprite: string, x: number, y: number, opts: { w?: number; h?: numbe
       occupied.add(key);
     }
   }
-  objects.push({ sprite, x, y, w, h, solid: opts.solid ?? true, station: opts.station });
+  objects.push({ sprite, x, y, w, h, solid: opts.solid ?? true, station: opts.station, genre: opts.genre });
 }
-function row(sprite: string, x0: number, x1: number, y: number, opts: { solid?: boolean; station?: LobbyStation } = {}): void {
+function row(sprite: string, x0: number, x1: number, y: number, opts: PutOpts = {}): void {
   for (let x = x0; x <= x1; x++) put(sprite, x, y, opts);
 }
-function col(sprite: string, x: number, y0: number, y1: number, opts: { solid?: boolean; station?: LobbyStation } = {}): void {
+function col(sprite: string, x: number, y0: number, y1: number, opts: PutOpts = {}): void {
   for (let y = y0; y <= y1; y++) put(sprite, x, y, opts);
 }
 
@@ -164,17 +169,22 @@ put("vault", 35, 17, { station: "bank" });
 put("atm", 35, 18, { station: "bank" });
 
 // --- ショップ翼（左）: カウンター2列＋店員レーン、什器の間仕切りで小部屋状に ---
-for (const x0 of [4, 8, 12]) row("shop_counter", x0, x0 + 2, 20, { station: "shop" });
-for (const x0 of [4, 12]) row("shop_counter", x0, x0 + 2, 27, { station: "shop" });
+// 店ごとに品目ジャンルが違う（左上から 道具屋・建築屋・家具屋・食料屋・種素材屋）。
+// 陳列棚・棚は属する店の帯（列）のジャンルを引き継ぐ。
+row("shop_counter", 4, 6, 20, { station: "shop", genre: "tools" });
+row("shop_counter", 8, 10, 20, { station: "shop", genre: "blocks" });
+row("shop_counter", 12, 14, 20, { station: "shop", genre: "furniture" });
+row("shop_counter", 4, 6, 27, { station: "shop", genre: "food" });
+row("shop_counter", 12, 14, 27, { station: "shop", genre: "farm" });
 put("sign_board", 16, 20);
 put("planter", 3, 19);
 put("planter", 17, 19);
-col("display_case", 7, 23, 24, { station: "shop" });
-col("display_case", 11, 23, 24, { station: "shop" });
-col("item_shelf", 3, 23, 24, { station: "shop" });
-row("display_case", 8, 10, 27, { station: "shop" });
+col("item_shelf", 3, 23, 24, { station: "shop", genre: "tools" });
+col("display_case", 7, 23, 24, { station: "shop", genre: "blocks" });
+col("display_case", 11, 23, 24, { station: "shop", genre: "blocks" });
+row("display_case", 8, 10, 27, { station: "shop", genre: "farm" });
 put("sign_board", 9, 26);
-row("display_case", 8, 10, 29, { station: "shop" });
+row("display_case", 8, 10, 29, { station: "shop", genre: "farm" });
 put("crate", 16, 23);
 put("crate", 16, 24);
 put("barrel", 15, 24);
@@ -231,13 +241,13 @@ put("lamp", 28, 41);
 
 // --- ショップ翼2階: ギルドショップ（屋台区画のグリッド、区画は空き） ---
 for (const y of [51, 57]) {
-  for (const x0 of [3, 8, 13]) {
-    row("shop_counter", x0, x0 + 2, y, { station: "shop" });
+  for (const [x0, genre] of [[3, "tools"], [8, "blocks"], [13, "furniture"]] as const) {
+    row("shop_counter", x0, x0 + 2, y, { station: "shop", genre });
     put("sign_board", x0 + 3, y);
   }
 }
 row("bookshelf", 3, 5, 54, { station: "rest" });
-row("item_shelf", 8, 10, 54, { station: "shop" });
+row("item_shelf", 8, 10, 54, { station: "shop", genre: "blocks" });
 row("bookshelf", 13, 15, 54, { station: "rest" });
 put("sofa", 3, 60, { station: "rest" });
 put("chair", 4, 60, { station: "rest" });
@@ -328,6 +338,20 @@ export function stationNear(objectsList: readonly LobbyObject[], tx: number, ty:
   for (const o of objectsList) {
     if (!o.station) continue;
     if (tx >= o.x - 1 && tx <= o.x + o.w && ty >= o.y - 1 && ty <= o.y + o.h) return o.station;
+  }
+  return null;
+}
+
+/**
+ * プレイヤーのタイルに隣接する店（station "shop"）の品目ジャンル。
+ * 店に接していない／接した店がジャンルを持たなければ null。
+ * カウンターが陳列棚より先に並ぶため、両方に接する位置ではカウンターの
+ * ジャンルが返る（棚のジャンルはカウンターの帯と一致させてある）。
+ */
+export function stationGenreNear(objectsList: readonly LobbyObject[], tx: number, ty: number): ShopGenreId | null {
+  for (const o of objectsList) {
+    if (o.station !== "shop" || !o.genre) continue;
+    if (tx >= o.x - 1 && tx <= o.x + o.w && ty >= o.y - 1 && ty <= o.y + o.h) return o.genre;
   }
   return null;
 }
