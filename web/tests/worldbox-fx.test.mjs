@@ -61,6 +61,8 @@ const fx = await loadBundle(
     "FX_CAP", "FX_BURST_MAX", "createFxSystem", "fxRand", "fxLifeRatio", "stepFx", "spawnBurst",
     "ambientKindFor", "spawnAmbient", "createShake", "startShake", "shakeOffsetAt",
     "popScale", "popProgress", "SWING_DURATION_MS", "swingProgress", "slashAlpha",
+    "spawnMobFx", "mobCountMul", "mobSizeMul", "WHIFF_ALPHA_SCALE",
+    "WEATHER_PERIOD_SEC", "weatherAt", "weatherAmbientKind", "phaseKind",
   ],
 );
 
@@ -174,6 +176,110 @@ test("fx: スイングは時間で進み、風切りは振り抜きで濃くな�
   assert.equal(fx.slashAlpha(1), 0);
 });
 
+test("fx2: hit は赤い火花で短命、death は大きめの破片、spawn は立ち上る", () => {
+  const hit = fx.createFxSystem(21);
+  assert.equal(fx.spawnBurst(hit, "hit", 5, 5), 10);
+  for (const p of hit.particles) {
+    assert.ok(p.life >= 0.18 && p.life <= 0.38, "hit は短命");
+    assert.ok(["spark", "chip"].includes(p.shape));
+  }
+  assert.ok(hit.particles.some((p) => p.color === "#e5484d"), "ダメージ色（赤）を含む");
+
+  const death = fx.createFxSystem(22);
+  assert.equal(fx.spawnBurst(death, "death", 5, 5), 22);
+  for (const p of death.particles) {
+    assert.ok(["chip", "puff"].includes(p.shape));
+    assert.ok(p.size >= 0.09, "death の粒は大きめ");
+    assert.ok(p.life >= 0.4 && p.life <= 0.85);
+  }
+
+  const spawn = fx.createFxSystem(23);
+  assert.equal(fx.spawnBurst(spawn, "spawn", 5, 5), 14);
+  for (const p of spawn.particles) {
+    assert.ok(["puff", "glow"].includes(p.shape));
+    assert.ok(p.gravity < 0, "spawn は立ち上る（負の重力）");
+  }
+});
+
+test("fx2: spawnMobFx はモブの大きさで粒数・粒サイズがスケールし、上限を守る", () => {
+  const small = fx.createFxSystem(31);
+  const nSmall = fx.spawnMobFx(small, "hit", 5, 5, { sizeTiles: 1 });
+  assert.ok(nSmall >= 9 && nSmall <= 11, `小型の hit は基礎数付近 (n=${nSmall})`);
+
+  const huge = fx.createFxSystem(32);
+  const nHuge = fx.spawnMobFx(huge, "death", 5, 5, { sizeTiles: 20 });
+  assert.equal(nHuge, fx.FX_BURST_MAX, "超巨大でも1バースト上限で頭打ち");
+  const avgSmall = small.particles.reduce((a, p) => a + p.size, 0) / small.particles.length;
+  const avgHuge = huge.particles.reduce((a, p) => a + p.size, 0) / huge.particles.length;
+  assert.ok(avgHuge > avgSmall * 1.5, "大きいモブほど粒も大きい");
+  // 占有範囲いっぱいに散る（アンカー中心から離れた粒がある）
+  assert.ok(huge.particles.some((p) => Math.abs(p.x - 5) > 1), "散らばりが占有に広がる");
+
+  // 不正なサイズは 1 として扱う（粒数はサイズ1と同じ 10）
+  const invalid = fx.createFxSystem(33);
+  assert.equal(fx.spawnMobFx(invalid, "hit", 0, 0, { sizeTiles: 0 }), 10);
+  assert.equal(fx.spawnMobFx(fx.createFxSystem(33), "hit", 0, 0, { sizeTiles: Number.NaN }), 10);
+  // 同時上限（cap）も守る
+  const capped = fx.createFxSystem(34, 20);
+  for (let i = 0; i < 6; i++) fx.spawnMobFx(capped, "death", 0, 0, { sizeTiles: 20 });
+  assert.ok(capped.particles.length <= 20);
+  // 倍率関数自体の頭打ち
+  assert.ok(fx.mobCountMul(20) <= 2.6 && fx.mobSizeMul(20) <= 2.2);
+  assert.ok(fx.mobCountMul(5) > fx.mobCountMul(1));
+});
+
+test("fx2: weatherAt は決定的で、区間内は不変、長期的には雨も晴れも出る", () => {
+  const t0 = 1700000000;
+  assert.equal(fx.weatherAt(t0), fx.weatherAt(t0), "同じ時刻は同じ天候");
+  const idx = Math.floor(t0 / fx.WEATHER_PERIOD_SEC);
+  const start = idx * fx.WEATHER_PERIOD_SEC;
+  assert.equal(fx.weatherAt(start), fx.weatherAt(start + fx.WEATHER_PERIOD_SEC - 1), "区間内は不変");
+  const seen = new Set();
+  for (let i = 0; i < 200; i++) seen.add(fx.weatherAt(start + i * fx.WEATHER_PERIOD_SEC));
+  assert.deepEqual([...seen].sort(), ["clear", "rain"], "200区間で両方が出る");
+  const rainRatio = Array.from({ length: 200 }, (_, i) => fx.weatherAt(start + i * fx.WEATHER_PERIOD_SEC)).filter((w) => w === "rain").length / 200;
+  assert.ok(rainRatio > 0.1 && rainRatio < 0.6, `雨の比率は 35% 前後 (実測 ${rainRatio})`);
+});
+
+test("fx2: weatherAmbientKind の優先順位は 雪 > 雨 > 森 > 夜 > 花粉", () => {
+  assert.equal(fx.weatherAmbientKind("rain", 6, false, 0), "snow", "雪バイオームでは雨でも雪");
+  assert.equal(fx.weatherAmbientKind("rain", 7, true, 0.9), "snow");
+  assert.equal(fx.weatherAmbientKind("rain", 0, true, 0), "rain", "雨は森より優先");
+  assert.equal(fx.weatherAmbientKind("rain", 0, false, 0.9), "rain", "雨は夜より優先");
+  assert.equal(fx.weatherAmbientKind("clear", 0, true, 0), "leaf");
+  assert.equal(fx.weatherAmbientKind("clear", 0, false, 0.9), "firefly");
+  assert.equal(fx.weatherAmbientKind("clear", 0, false, 0), "pollen");
+});
+
+test("fx2: 雨の環境粒は spark の筋で速く落ちる", () => {
+  const sys = fx.createFxSystem(41);
+  const p = fx.spawnAmbient(sys, "rain", 0, 10, 5);
+  assert.ok(p);
+  assert.equal(p.shape, "spark");
+  assert.ok(p.vy >= 7, `雨は速い (vy=${p.vy})`);
+});
+
+test("fx2: phaseKind の境界（daynight の夜判定と整合）", () => {
+  assert.equal(fx.phaseKind(0), "night");
+  assert.equal(fx.phaseKind(0.17), "night");
+  assert.equal(fx.phaseKind(0.18), "dawn");
+  assert.equal(fx.phaseKind(0.29), "dawn");
+  assert.equal(fx.phaseKind(0.3), "day");
+  assert.equal(fx.phaseKind(0.5), "day");
+  assert.equal(fx.phaseKind(0.67), "day");
+  assert.equal(fx.phaseKind(0.68), "dusk");
+  assert.equal(fx.phaseKind(0.85), "dusk");
+  assert.equal(fx.phaseKind(0.86), "night");
+  assert.equal(fx.phaseKind(0.95), "night");
+  // 正規化: 1 を超えても・負でも同じ位相に落ちる
+  assert.equal(fx.phaseKind(1.5), "day");
+  assert.equal(fx.phaseKind(-0.5), "day");
+});
+
+test("fx2: 空振り係数は成功時より薄い（0〜1）", () => {
+  assert.ok(fx.WHIFF_ALPHA_SCALE > 0 && fx.WHIFF_ALPHA_SCALE < 1);
+});
+
 test("fx: クライアント配線（イベント→粒/揺れ/ポップ、スイング、環境粒）", () => {
   const client = fs.readFileSync(path.join(rootDir, "app/games/worldbox/WorldBoxClient.tsx"), "utf8");
   assert.match(client, /from "@\/lib\/worldbox\/fx"/, "fx 基盤を使う");
@@ -185,4 +291,27 @@ test("fx: クライアント配線（イベント→粒/揺れ/ポップ、ス�
   assert.match(client, /popScaleFor/, "設置/建築に出現ポップを付ける");
   assert.match(client, /stepFx\(fxSys, dt\)/, "毎フレーム粒を進める");
   assert.match(client, /prefers-reduced-motion/, "動きを減らす設定を尊重する");
+});
+
+test("fx2: クライアント配線（空振り・天候・時間帯・モブイベント）", () => {
+  const client = fs.readFileSync(path.join(rootDir, "app/games/worldbox/WorldBoxClient.tsx"), "utf8");
+  // 失敗分岐（タイル行為と建築）が whiff を push する（成功バーストは出さない）
+  const whiffPushes = client.match(/fxEventsRef\.current\.push\(\{\s*kind: "whiff"|fxEventsRef\.current\.push\(\{\n\s*kind: "whiff"/g) ?? [];
+  assert.ok(whiffPushes.length >= 2, `whiff の push が複数箇所にある (実測 ${whiffPushes.length})`);
+  assert.match(client, /ev\.kind === "whiff"/, "ループが whiff を分岐する");
+  assert.match(client, /whiff: true/, "whiff スイングを立てる");
+  assert.match(client, /WHIFF_ALPHA_SCALE/, "空振りは風切りを薄くする");
+  assert.match(client, /swing\.whiff \? 1\.5 : 3/, "空振りは風切りを細くする");
+  // whiff 分岐は spawnBurst より前にあり、continue で成功粒を出さない構造
+  const drainAt = client.indexOf('ev.kind === "whiff"');
+  const burstAt = client.indexOf("spawnBurst(fxSys, ev.kind");
+  assert.ok(drainAt >= 0 && burstAt > drainAt, "whiff 判定が成功バーストより前");
+  // モブイベントは spawnMobFx 経由（ループ側で受ける器）
+  assert.match(client, /spawnMobFx\(fxSys, ev\.kind/, "モブイベントを spawnMobFx で出す");
+  assert.match(client, /ev\.kind === "death"\) shake = startShake/, "死亡時は小さな揺れ");
+  // 天候と時間帯を環境粒に使う
+  assert.match(client, /weatherAt\(nowSec\)/, "天候は決定的サイクルから取る");
+  assert.match(client, /weatherAmbientKind\(/, "環境粒の種類に天候を反映する");
+  assert.match(client, /phaseKind\(phase\)/, "時間帯の切り替わりを検出する");
+  assert.match(client, /pk !== lastPhaseKind/, "時間帯が変わったフレームで環境粒を足す");
 });
