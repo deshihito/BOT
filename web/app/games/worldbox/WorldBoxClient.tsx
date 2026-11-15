@@ -48,6 +48,7 @@ import { loadDungeonTiles, loadFarmSprites, loadLobbySprites, loadTextures } fro
 import { isStickTouch, stickBase, stickVector } from "@/lib/worldbox/stick";
 import { useGamesNav } from "../GamesShell";
 import WorldBoxCasinoPanel from "./WorldBoxCasinoPanel";
+import WorldBoxArenaPanel from "./WorldBoxArenaPanel";
 import WorldBoxEconomyPanel from "./WorldBoxEconomyPanel";
 import WorldBoxGuildBoardPanel from "./WorldBoxGuildBoardPanel";
 
@@ -243,6 +244,8 @@ const STATION_LABEL: Record<LobbyStation, string> = {
   casino: "カジノ",
   arena: "闘技場",
   smith: "鍛冶屋",
+  fountain: "噴水",
+  rest: "休憩",
 };
 
 export default function WorldBoxClient() {
@@ -355,6 +358,9 @@ export default function WorldBoxClient() {
   const [stationUi, setStationUi] = useState<LobbyStation | null>(null);
   const warpActionRef = useRef<(target: SaveSpace) => void>(() => {});
   const [casinoOpen, setCasinoOpen] = useState(false);
+  const [arenaOpen, setArenaOpen] = useState(false);
+  const [plazaMsg, setPlazaMsg] = useState("");
+  const staminaBoostRef = useRef(false);
   const [boardOpen, setBoardOpen] = useState(false);
   const [guildBoardOpen, setGuildBoardOpen] = useState(false);
   const [boardPosts, setBoardPosts] = useState<BoardPost[]>([]);
@@ -404,7 +410,41 @@ export default function WorldBoxClient() {
     if (stationUi !== "board") setBoardOpen(false);
     if (stationUi !== "casino") setCasinoOpen(false);
     if (stationUi !== "guild") setGuildBoardOpen(false);
+    if (stationUi !== "arena") setArenaOpen(false);
+    setPlazaMsg("");
   }, [stationUi]);
+
+  // 噴水・休憩の小施設アクション（場所検証はサーバー側、回復はここで適用）
+  const plazaAction = async (action: "fountain" | "rest") => {
+    try {
+      const res = await fetch("/api/worldbox/plaza", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ action }),
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        error?: string; item?: string | null; retryAfterSec?: number;
+      };
+      if (!res.ok) {
+        setPlazaMsg(
+          data.error === "insufficient_balance" ? "コインが足りません"
+          : data.error === "rest_cooldown" ? `まだ休めません（あと ${data.retryAfterSec ?? "?"} 秒）`
+          : data.error === "unauthorized" ? "ログインが必要です"
+          : "受け付けられませんでした",
+        );
+        return;
+      }
+      staminaBoostRef.current = true;
+      if (action === "fountain") {
+        const itemName = data.item ? itemById(data.item)?.name ?? data.item : null;
+        setPlazaMsg(itemName ? `スタミナが回復した。${itemName} を手に入れた` : "スタミナが回復した");
+      } else {
+        setPlazaMsg("スタミナが回復した");
+      }
+    } catch {
+      setPlazaMsg("受け付けられませんでした");
+    }
+  };
 
   const applyNationsData = (data: NationsResponse) => {
     nationsRef.current = data;
@@ -1352,6 +1392,11 @@ export default function WorldBoxClient() {
         wasSwimming = inWaterNow;
       }
       stamina = stepStamina(stamina, staminaUse, dt).state;
+      if (staminaBoostRef.current) {
+        // 噴水・休憩の回復（サーバー許可済み）
+        stamina = createStamina();
+        staminaBoostRef.current = false;
+      }
       playerSwimming = inWaterNow;
       if (inWaterNow && stamina.value <= 0) {
         stamina = rescueStamina(stamina);
@@ -2212,6 +2257,43 @@ export default function WorldBoxClient() {
                 {guildBoardOpen ? "閉じる" : "開く"}
               </button>
             )}
+            {(stationUi === "shop" || stationUi === "bank" || stationUi === "smith") && (
+              <button
+                type="button"
+                style={{ ...btn, minHeight: 32, padding: "2px 10px" }}
+                onClick={() => setShowEconomy(true)}
+              >
+                開く
+              </button>
+            )}
+            {stationUi === "arena" && (
+              <button
+                type="button"
+                style={{ ...btn, minHeight: 32, padding: "2px 10px" }}
+                onClick={() => setArenaOpen((v) => !v)}
+              >
+                {arenaOpen ? "閉じる" : "戦う"}
+              </button>
+            )}
+            {stationUi === "fountain" && (
+              <button
+                type="button"
+                style={{ ...btn, minHeight: 32, padding: "2px 10px" }}
+                onClick={() => void plazaAction("fountain")}
+              >
+                コインを投げる（10）
+              </button>
+            )}
+            {stationUi === "rest" && (
+              <button
+                type="button"
+                style={{ ...btn, minHeight: 32, padding: "2px 10px" }}
+                onClick={() => void plazaAction("rest")}
+              >
+                休む
+              </button>
+            )}
+            {plazaMsg && <span role="status">{plazaMsg}</span>}
           </div>
         )}
         {showMap && spaceUi === "world" && (
@@ -2482,6 +2564,9 @@ export default function WorldBoxClient() {
       {showEconomy && <WorldBoxEconomyPanel space={spaceUi} station={stationUi} onClose={() => setShowEconomy(false)} />}
       {casinoOpen && spaceUi === "lobby" && (
         <WorldBoxCasinoPanel onClose={() => setCasinoOpen(false)} />
+      )}
+      {arenaOpen && spaceUi === "lobby" && (
+        <WorldBoxArenaPanel onClose={() => setArenaOpen(false)} />
       )}
       {guildBoardOpen && spaceUi === "lobby" && (
         <WorldBoxGuildBoardPanel
