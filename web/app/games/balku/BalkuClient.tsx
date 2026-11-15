@@ -1560,6 +1560,29 @@ export default function BalkuClient() {
     ["hand", handZoneRef.current],
   ];
 
+  /* ドロップ判定は見た目より広めに取る（桜井政博の原則: 判定は広めに、
+     当たらないのが一番のストレス。動画 #223「攻撃判定を常に意識」）。
+     2026-11-15: 従来はゾーン矩形ぴったり＋速いフリックでしか届かず、
+     ゆっくり正確に運んでも数pxのズレで弾かれて「ムーブできない」が
+     量産されていた。矩形を四方に広げ、近接フォールバックと合わせて
+     3段で受ける。 */
+  const DROP_PAD = 24;
+  const DROP_NEAR = 96;
+  const relevantZones = (source: DragPayload["source"]): DropZoneId[] =>
+    (
+      {
+        "hand-project": ["build", "sell"],
+        "hand-material": ["build", "sell"],
+        "attached-material": ["hand"],
+        bundle: ["submit-open", "submit-down"],
+        "opponent-bundle": ["hand"],
+        "bid-coin": ["auction"],
+        "market-material": ["hand"],
+        "turn-token": ["pass"],
+        "force-charge": [],
+      } as Partial<Record<DragPayload["source"], DropZoneId[]>>
+    )[source] ?? [];
+
   const zoneAt = (x: number, y: number, payload?: DragPayload): DropZoneId | null => {
     if (payload?.source === "force-charge") {
       const hit = document.elementFromPoint(x, y)?.closest?.("[data-bulk-target]");
@@ -1568,26 +1591,32 @@ export default function BalkuClient() {
     for (const [id, el] of zoneEls()) {
       if (!el) continue;
       const r = el.getBoundingClientRect();
-      if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) return id;
+      if (x >= r.left - DROP_PAD && x <= r.right + DROP_PAD && y >= r.top - DROP_PAD && y <= r.bottom + DROP_PAD) return id;
     }
     return null;
   };
 
-  /** フリック解決: ゾーンに届いていなくても、ゾーン方向への速いスワイプは到達と同等にする。 */
+  /** 近接解決: ゾーンの外で離しても、関係するゾーンの近く（DROP_NEAR px
+      以内）なら一番近いゾーンへのドロップとして受ける。 */
+  const nearestZone = (payload: DragPayload, x: number, y: number): DropZoneId | null => {
+    const wanted = relevantZones(payload.source);
+    let best: { zone: DropZoneId; dist: number } | null = null;
+    for (const [id, el] of zoneEls()) {
+      if (!el || !wanted.includes(id)) continue;
+      const r = el.getBoundingClientRect();
+      const dx = Math.max(r.left - x, 0, x - r.right);
+      const dy = Math.max(r.top - y, 0, y - r.bottom);
+      const dist = Math.hypot(dx, dy);
+      if (dist <= DROP_NEAR && (!best || dist < best.dist)) best = { zone: id, dist };
+    }
+    return best?.zone ?? null;
+  };
+
+  /** フリック解決: ゾーンに届いていなくても、ゾーン方向へのスワイプは到達と同等にする。 */
   const flickZone = (track: { payload: DragPayload; startX: number; startY: number }, vx: number, vy: number): DropZoneId | null => {
     const speed = Math.hypot(vx, vy);
-    if (speed < 0.5) return null;
-    const relevant: Partial<Record<DragPayload["source"], DropZoneId[]>> = {
-      "hand-project": ["build", "sell"],
-      "hand-material": ["build", "sell"],
-      "attached-material": ["hand"],
-      bundle: ["submit-open", "submit-down"],
-      "opponent-bundle": ["hand"],
-      "bid-coin": ["auction"],
-      "market-material": ["hand"],
-      "turn-token": ["pass"],
-    };
-    const wanted = relevant[track.payload.source] ?? [];
+    if (speed < 0.35) return null;
+    const wanted = relevantZones(track.payload.source);
     let best: { zone: DropZoneId; dot: number } | null = null;
     for (const [id, el] of zoneEls()) {
       if (!el || !wanted.includes(id)) continue;
@@ -1597,7 +1626,7 @@ export default function BalkuClient() {
       const dist = Math.hypot(cx, cy);
       if (dist < 24 || dist > 900) continue;
       const dot = (vx * cx + vy * cy) / (speed * dist);
-      if (dot > 0.62 && (!best || dot > best.dot)) best = { zone: id, dot };
+      if (dot > 0.5 && (!best || dot > best.dot)) best = { zone: id, dot };
     }
     return best?.zone ?? null;
   };
@@ -1709,8 +1738,15 @@ export default function BalkuClient() {
       else track.mode = "drag";
     }
     if (track.mode === "fan" && track.fanEl) {
-      track.fanEl.scrollLeft = track.fanStartScroll - dx;
-      return;
+      // 横スワイプとして始まっても、途中で大きく上/下へ向かったら
+      // ドラッグへ昇格させる（一度 fan に決まると最後までドラッグに
+      // なれず「持ち上げられない」事故があった）
+      if (Math.abs(dy) > 56 && Math.abs(dy) > Math.abs(dx) * 1.2) {
+        track.mode = "drag";
+      } else {
+        track.fanEl.scrollLeft = track.fanStartScroll - dx;
+        return;
+      }
     }
     track.lastX = e.clientX;
     track.lastY = e.clientY;
@@ -1751,8 +1787,9 @@ export default function BalkuClient() {
     // 相手の束を自分の側へ「引いて離す」引き寄せ（閾値未満は無効＝確認を兼ねる）
     if (!zone && track.payload.source === "opponent-bundle") {
       const dy = e.clientY - track.startY;
-      if (dy > 56 && vy > 0.12) zone = "hand";
+      if (dy > 40 && vy > 0.05) zone = "hand";
     }
+    if (!zone) zone = nearestZone(track.payload, e.clientX, e.clientY);
     if (!zone) zone = flickZone(track, vx, vy);
     if (zone) {
       setDrag(null);
@@ -2187,6 +2224,12 @@ export default function BalkuClient() {
             tabIndex={0}
             role="button"
             aria-label="公開で提出"
+            onClick={() => {
+              // パッドのタップ＝そのまま提出（ドラッグの着地点がタップでも
+              // 反応する。押して何も起きない面を作らない）
+              if (suppressClickRef.current) return;
+              submitSelected(true);
+            }}
             onKeyDown={(e) => {
               if (e.key === "Enter" || e.key === " ") {
                 e.preventDefault();
@@ -2204,6 +2247,10 @@ export default function BalkuClient() {
             tabIndex={0}
             role="button"
             aria-label="伏せて提出"
+            onClick={() => {
+              if (suppressClickRef.current) return;
+              submitSelected(false);
+            }}
             onKeyDown={(e) => {
               if (e.key === "Enter" || e.key === " ") {
                 e.preventDefault();
@@ -2463,6 +2510,10 @@ export default function BalkuClient() {
                         tabIndex={canBid ? 0 : -1}
                         role="button"
                         aria-label={`${amount}コインで入札`}
+                        onClick={() => {
+                          if (suppressClickRef.current || !canBid) return;
+                          void doMove({ type: "bid", amount });
+                        }}
                         onKeyDown={(e) => {
                           if (canBid && (e.key === "Enter" || e.key === " ")) {
                             e.preventDefault();
@@ -2553,7 +2604,13 @@ export default function BalkuClient() {
                     {...dragHandlers({ source: "market-material", kind }, kind, canBuy)}
                     tabIndex={canBuy ? 0 : -1}
                     role="button"
-                    aria-label={`${kind}を${getMarketPrice(kind)}コインで購入（自分の領域へドラッグ）`}
+                    aria-label={`${kind}を${getMarketPrice(kind)}コインで購入（自分の領域へドラッグ、またはタップ）`}
+                    onClick={() => {
+                      // 市場の引き出しは自分の領域を覆うため、引き出し内から
+                      // 手札までドラッグし切れないことがある。タップでも購入できる
+                      if (suppressClickRef.current || !canBuy) return;
+                      void doMove({ type: "buyMaterial", material: kind });
+                    }}
                     onKeyDown={(e) => {
                       if (canBuy && (e.key === "Enter" || e.key === " ")) {
                         e.preventDefault();
@@ -2590,6 +2647,10 @@ export default function BalkuClient() {
                 tabIndex={0}
                 role="button"
                 aria-label="手番トークン（相手の席へ放つとパス）"
+                onClick={() => {
+                  if (suppressClickRef.current) return;
+                  void doMove({ type: "endTurn" });
+                }}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" || e.key === " ") {
                     e.preventDefault();
