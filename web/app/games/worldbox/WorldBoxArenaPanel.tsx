@@ -29,11 +29,31 @@ interface ArenaState {
   session: ArenaSessionView | null;
 }
 
+interface PvpDuelView {
+  state: "paying" | "fighting";
+  yourHp: number;
+  yourHpMax: number;
+  opponentHp: number;
+  opponentHpMax: number;
+  yourTurn: boolean;
+  turnNo: number;
+  fee: number;
+  prize: number;
+  log: string[];
+}
+
+interface PvpState {
+  queued: boolean;
+  queuePosition: number | null;
+  duel: PvpDuelView | null;
+}
+
 const ERROR_LABEL: Record<string, string> = {
   not_at_arena: "闘技場にいません",
   session_active: "進行中の試合があります",
   no_session: "試合が始まっていません",
   insufficient_balance: "コインが足りません",
+  not_your_turn: "相手の番です",
   payment_pending: "参加費を処理中です。少し待ってください",
   payment_failed: "参加費の支払いに失敗しました",
   bad_tier: "相手が不正です",
@@ -71,6 +91,9 @@ export default function WorldBoxArenaPanel({ onClose }: { onClose: () => void })
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
   const [outcome, setOutcome] = useState<"win" | "lose" | null>(null);
+  const [pvp, setPvp] = useState<PvpState | null>(null);
+  const [pvpMsg, setPvpMsg] = useState("");
+  const [pvpOutcome, setPvpOutcome] = useState<"win" | "lose" | null>(null);
   const aliveRef = useRef(true);
 
   const refresh = useCallback(async () => {
@@ -87,12 +110,25 @@ export default function WorldBoxArenaPanel({ onClose }: { onClose: () => void })
     }
   }, []);
 
+  const refreshPvp = useCallback(async () => {
+    try {
+      const res = await fetch("/api/worldbox/pvp", { headers: { Accept: "application/json" } });
+      if (!res.ok) return;
+      const data = (await res.json()) as PvpState;
+      if (!aliveRef.current) return;
+      setPvp(data);
+    } catch {
+      // 対人戦の取得失敗は PvE の表示を壊さない（次の更新で取り直す）
+    }
+  }, []);
+
   useEffect(() => {
     aliveRef.current = true;
     void refresh();
-    const timer = window.setInterval(() => void refresh(), 3000);
+    void refreshPvp();
+    const timer = window.setInterval(() => { void refresh(); void refreshPvp(); }, 3000);
     return () => { aliveRef.current = false; window.clearInterval(timer); };
-  }, [refresh]);
+  }, [refresh, refreshPvp]);
 
   const post = async (payload: Record<string, unknown>) => {
     setBusy(true);
@@ -113,6 +149,30 @@ export default function WorldBoxArenaPanel({ onClose }: { onClose: () => void })
       if (data.outcome) setOutcome(data.outcome);
     } catch {
       setMsg("受け付けられませんでした");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const postPvp = async (payload: Record<string, unknown>) => {
+    setBusy(true);
+    try {
+      const res = await fetch("/api/worldbox/pvp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = (await res.json().catch(() => ({}))) as PvpState & { error?: string; outcome?: "win" | "lose" };
+      if (!res.ok) {
+        setPvpMsg(ERROR_LABEL[data.error ?? ""] ?? "受け付けられませんでした");
+        if (data.error === "payment_pending") void refreshPvp();
+        return;
+      }
+      setPvpMsg("");
+      setPvp(data);
+      if (data.outcome) setPvpOutcome(data.outcome);
+    } catch {
+      setPvpMsg("受け付けられませんでした");
     } finally {
       setBusy(false);
     }
@@ -151,7 +211,7 @@ export default function WorldBoxArenaPanel({ onClose }: { onClose: () => void })
             </div>
           )}
 
-          {!outcome && !session && (
+          {!outcome && !session && !pvp?.duel && (
             <div style={{ display: "grid", gap: 8 }}>
               {state.tiers.map((t) => (
                 <button
@@ -191,6 +251,76 @@ export default function WorldBoxArenaPanel({ onClose }: { onClose: () => void })
               >
                 棄権する
               </button>
+            </div>
+          )}
+
+          {!outcome && !session && pvp && (
+            <div style={{ marginTop: 16, borderTop: "1px solid rgba(255,255,255,0.15)", paddingTop: 12 }}>
+              <p style={{ margin: "0 0 8px", fontSize: 14, fontWeight: 700 }}>対人戦</p>
+              {pvpOutcome && (
+                <div style={{ marginBottom: 12, textAlign: "center" }}>
+                  <p style={{ margin: "0 0 8px", fontSize: 20, fontWeight: 700 }}>
+                    {pvpOutcome === "win" ? "勝利" : "敗北"}
+                  </p>
+                  <button
+                    type="button" style={btn} disabled={busy}
+                    onClick={() => { setPvpOutcome(null); void refreshPvp(); }}
+                  >
+                    次へ
+                  </button>
+                </div>
+              )}
+              {!pvpOutcome && !pvp.duel && !pvp.queued && (
+                <button
+                  type="button" disabled={busy}
+                  style={{ ...btn, display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%", textAlign: "left" }}
+                  onClick={() => void postPvp({ action: "queue" })}
+                >
+                  <span>対戦相手を探す</span>
+                  <span>参加費 100 → 賞金 240</span>
+                </button>
+              )}
+              {!pvpOutcome && !pvp.duel && pvp.queued && (
+                <div>
+                  <p style={{ margin: "0 0 8px", fontSize: 13 }}>
+                    相手を待っています{pvp.queuePosition ? `（${pvp.queuePosition} 番目）` : ""}
+                  </p>
+                  <button type="button" style={{ ...btn, minHeight: 32, padding: "2px 10px" }} disabled={busy} onClick={() => void postPvp({ action: "leave" })}>やめる</button>
+                </div>
+              )}
+              {!pvpOutcome && pvp.duel && (
+                <div>
+                  <p style={{ margin: "0 0 4px", fontSize: 13 }}>あいて HP {pvp.duel.opponentHp}</p>
+                  <HpBar value={pvp.duel.opponentHp} max={pvp.duel.opponentHpMax} color="#e5534b" />
+                  <p style={{ margin: "8px 0 4px", fontSize: 13 }}>自分 HP {pvp.duel.yourHp}</p>
+                  <HpBar value={pvp.duel.yourHp} max={pvp.duel.yourHpMax} color="#3fb950" />
+                  {pvp.duel.state === "paying" ? (
+                    <p style={{ margin: "10px 0 0", fontSize: 13 }}>参加費を処理中…</p>
+                  ) : (
+                    <>
+                      <p style={{ margin: "10px 0 0", fontSize: 13 }}>
+                        {pvp.duel.yourTurn ? "あなたの番です" : "相手の番です"}（{pvp.duel.turnNo} 手目）
+                      </p>
+                      <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+                        <button type="button" style={{ ...btn, flex: 1 }} disabled={busy || !pvp.duel.yourTurn} onClick={() => void postPvp({ action: "act", move: "attack" })}>たたかう</button>
+                        <button type="button" style={{ ...btn, flex: 1 }} disabled={busy || !pvp.duel.yourTurn} onClick={() => void postPvp({ action: "act", move: "heavy" })}>強攻撃</button>
+                        <button type="button" style={{ ...btn, flex: 1 }} disabled={busy || !pvp.duel.yourTurn} onClick={() => void postPvp({ action: "act", move: "guard" })}>まもる</button>
+                      </div>
+                    </>
+                  )}
+                  <div style={{ display: "grid", gap: 2, marginTop: 12, fontSize: 12, opacity: 0.85 }}>
+                    {pvp.duel.log.map((line, i) => <span key={i}>{line}</span>)}
+                  </div>
+                  <button
+                    type="button" disabled={busy}
+                    style={{ ...btn, minHeight: 32, padding: "2px 10px", marginTop: 12 }}
+                    onClick={() => void postPvp({ action: "forfeit" })}
+                  >
+                    降参する
+                  </button>
+                </div>
+              )}
+              {pvpMsg && <p role="status" style={{ margin: "10px 0 0", fontSize: 13 }}>{pvpMsg}</p>}
             </div>
           )}
 
