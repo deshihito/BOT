@@ -52,7 +52,7 @@ import {
   type TileActionKind, type TileOverridesMap,
 } from "@/lib/worldbox/tiles";
 import { CROPS, ITEMS, itemById } from "@/lib/worldbox/items";
-import { countItem, type ItemSlot, type PlayerProfile, type SlotRef } from "@/lib/worldbox/profile";
+import { HP_MAX, HUNGER_MAX, countItem, type ItemSlot, type PlayerProfile, type SlotRef } from "@/lib/worldbox/profile";
 import {
   containerCapacity, isContainerItem, type ContainerSlotRef,
 } from "@/lib/worldbox/containers";
@@ -433,6 +433,8 @@ export default function WorldBoxClient() {
       setNationMsg("失敗しました");
     }
   };
+  const respawnActionRef = useRef<(point: { x: number; y: number }) => void>(() => {});
+  const bedKeyRef = useRef<string>("");
   const [casinoOpen, setCasinoOpen] = useState(false);
   const [arenaOpen, setArenaOpen] = useState(false);
   const [plazaMsg, setPlazaMsg] = useState("");
@@ -529,7 +531,7 @@ export default function WorldBoxClient() {
         body: JSON.stringify({ action }),
       });
       const data = (await res.json().catch(() => ({}))) as {
-        error?: string; item?: string | null; retryAfterSec?: number;
+        error?: string; item?: string | null; retryAfterSec?: number; profile?: PlayerProfile;
       };
       if (!res.ok) {
         setPlazaMsg(
@@ -540,6 +542,7 @@ export default function WorldBoxClient() {
         );
         return;
       }
+      if (data.profile) setInvProfile(data.profile);
       staminaBoostRef.current = true;
       playWbSe(action === "fountain" ? "coin" : "success");
       if (action === "fountain") {
@@ -692,6 +695,50 @@ export default function WorldBoxClient() {
       if (data.profile) setInvProfile(data.profile);
     } catch { /* 読めなくても歩き続けられる */ }
   };
+  /** バイタル API の結果を反映する（死亡時はリスポーン移動まで行う）。 */
+  const applyVitalsResult = (data: {
+    profile?: PlayerProfile; died?: boolean; respawn?: { x: number; y: number };
+  }) => {
+    if (data.profile) setInvProfile(data.profile);
+    if (data.died && data.respawn) {
+      respawnActionRef.current(data.respawn);
+      setTileMsg("倒れた");
+    }
+  };
+  const postVitals = async (body: Record<string, unknown>) => {
+    try {
+      const res = await fetch("/api/worldbox/vitals", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        profile?: PlayerProfile; died?: boolean; respawn?: { x: number; y: number };
+      };
+      if (res.ok) applyVitalsResult(data);
+    } catch { /* バイタルが届かなくても歩き続けられる（次回同期で精算される） */ }
+  };
+  /** モブ接触ダメージ（サーバーが配置・距離・攻撃力を検証する）。 */
+  const postMobDamage = (mobId: string, x: number, y: number) => {
+    void postVitals({
+      action: "damage", mobId, x, y,
+      px: playerPosRef.current.x, py: playerPosRef.current.y,
+    });
+  };
+  /** ベッドを踏んだらリスポーン点にする（同じベッドでは1回だけ送る）。 */
+  const postBedRespawn = (x: number, y: number) => {
+    const key = `${x},${y}`;
+    if (bedKeyRef.current === key) return;
+    bedKeyRef.current = key;
+    void postVitals({ action: "set_bed", x, y });
+  };
+  // バイタルの定期精算（空腹・毒・飢えはサーバー側の時刻で進む）
+  useEffect(() => {
+    const timer = window.setInterval(() => void postVitals({ action: "sync" }), 15000);
+    return () => window.clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const refreshTiles = async () => {
     try {
       const px = Math.floor(playerPosRef.current.x);
@@ -1815,6 +1862,17 @@ export default function WorldBoxClient() {
       placePlayer(x, y);
       void pollOthers();
     };
+    respawnActionRef.current = (point: { x: number; y: number }) => {
+      space = "world";
+      setSpaceUi("world");
+      setStatusText("共有ワールド");
+      lastStation = null;
+      setStationUi(null);
+      placePlayer(point.x, point.y);
+      spawnBurst(fxSys, "warp", player.x, player.y - 0.3);
+      playWbSe("warp");
+      void pollOthers();
+    };
     /** タイルへ「踏み込んだ」ときだけ発火する（着地したタイルでは再発火しない）。 */
     const checkTileTriggers = () => {
       const tx = Math.floor(player.x);
@@ -1827,8 +1885,9 @@ export default function WorldBoxClient() {
       if (key === lastTileKey) return;
       lastTileKey = key;
       if (space === "world") {
-        // ロビー行きは ≡ メニュー。ワールド側の踏むトリガーはテント入場だけ。
+        // ロビー行きは ≡ メニュー。ワールド側の踏むトリガーはテント入場とベッドのリスポーン設定。
         if (tilesRef.current[tileKey(tx, ty)]?.block?.itemId === "tent") doWarp("tent");
+        else if (tilesRef.current[tileKey(tx, ty)]?.block?.itemId === "bed") postBedRespawn(tx, ty);
         return;
       }
       if (space === "tent") {
@@ -1960,8 +2019,8 @@ export default function WorldBoxClient() {
         saveNow();
       }
       // モブ接触: 占有範囲までチェビシェフ距離1以内を接触とする。
-      // 敵対は接触開始時（継続中は1秒間隔）だけ軽いノックバック＋hit バースト。
-      // ダメージは与えない（プレイヤー HP は未実装のまま）。
+      // 敵対は接触開始時（継続中は1秒間隔）だけ軽いノックバック＋hit バーストを出し、
+      // ダメージはサーバー（/api/worldbox/vitals）が検証して profile の HP に適用する。
       if (space === "world") {
         let contact: { placed: PlacedMob; key: string; dist: number; cx: number; cy: number } | null = null;
         const ptx = Math.floor(player.x);
@@ -1984,6 +2043,7 @@ export default function WorldBoxClient() {
           if (def?.temperament === "hostile" && (isNew || now - contactFiredAt >= 1000)) {
             contactFiredAt = now;
             // 着地点へ瞬間移動させず、着地点までの方向に初速だけ与える（適用は移動ステップ側）
+            postMobDamage(contact.placed.mobId, contact.placed.x, contact.placed.y);
             const target = knockbackTarget({ x: contact.cx, y: contact.cy, size: contact.placed.size }, player);
             kbVel = { x: (target.x - player.x) / 0.16, y: (target.y - player.y) / 0.16 };
             fxEventsRef.current.push({
@@ -3186,6 +3246,34 @@ export default function WorldBoxClient() {
             <button type="button" style={{ ...btn, minHeight: 32, padding: "2px 10px" }} onClick={endBuildMode}>
               終了
             </button>
+          </div>
+        )}
+        {invProfile && (
+          <div
+            aria-label="HPと空腹度"
+            style={{
+              position: "absolute", left: 10, top: 52, display: "flex", flexDirection: "column", gap: 4,
+              padding: "6px 8px", borderRadius: 10, background: "rgba(0,0,0,0.6)", zIndex: 4,
+              pointerEvents: "none", minWidth: 132,
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <span style={{ color: "#ff8a7a", fontSize: 11, width: 28 }}>HP</span>
+              <span style={{ flex: 1, height: 8, borderRadius: 4, background: "rgba(255,255,255,0.18)", overflow: "hidden" }}>
+                <span style={{ display: "block", width: `${Math.max(0, Math.min(100, (invProfile.hp / HP_MAX) * 100))}%`, height: "100%", background: invProfile.hp <= 25 ? "#e2483a" : "#7ed957" }} />
+              </span>
+              <strong style={{ color: "#fff", fontSize: 11 }}>{invProfile.hp}</strong>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <span style={{ color: "#ffd23e", fontSize: 11, width: 28 }}>空腹</span>
+              <span style={{ flex: 1, height: 8, borderRadius: 4, background: "rgba(255,255,255,0.18)", overflow: "hidden" }}>
+                <span style={{ display: "block", width: `${Math.max(0, Math.min(100, (invProfile.hunger / HUNGER_MAX) * 100))}%`, height: "100%", background: invProfile.hunger <= 20 ? "#ff7a59" : "#ffd23e" }} />
+              </span>
+              <strong style={{ color: "#fff", fontSize: 11 }}>{invProfile.hunger}</strong>
+            </div>
+            {invProfile.status.some((e) => e.kind === "poison") && (
+              <span style={{ color: "#b6f26d", fontSize: 11 }}>毒</span>
+            )}
           </div>
         )}
         {spaceUi === "world" && invProfile && (

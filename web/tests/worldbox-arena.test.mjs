@@ -196,6 +196,11 @@ const arenaRoute = await import(
       .replaceAll('"@/lib/worldbox/station-online"', JSON.stringify(stationOnlineUrl)),
   ),
 );
+const vitalsUrl = dataUrl(
+  transpile("worldbox/vitals.ts")
+    .replaceAll('"./items"', JSON.stringify(itemsUrl))
+    .replaceAll('"./profile"', JSON.stringify(profileUrl)),
+);
 const plazaRoute = await import(
   dataUrl(
     transpile("api/worldbox/plaza/route.ts", rootDir + "/app")
@@ -206,7 +211,10 @@ const plazaRoute = await import(
       .replaceAll('"@/lib/worldbox/economy-bridge-online"', JSON.stringify(economyOnlineUrl))
       .replaceAll('"@/lib/worldbox/profile"', JSON.stringify(profileUrl))
       .replaceAll('"@/lib/worldbox/profile-online"', JSON.stringify(profileOnlineUrl))
-      .replaceAll('"@/lib/worldbox/station-online"', JSON.stringify(stationOnlineUrl)),
+      .replaceAll('"@/lib/worldbox/station-online"', JSON.stringify(stationOnlineUrl))
+      .replaceAll('"@/lib/worldbox/save"', JSON.stringify(saveUrl))
+      .replaceAll('"@/lib/worldbox/save-online"', JSON.stringify(saveOnlineUrl))
+      .replaceAll('"@/lib/worldbox/vitals"', JSON.stringify(vitalsUrl)),
   ),
 );
 

@@ -14,7 +14,7 @@ import {
   itemById, recipeById, sellPrice, type ItemDef, type Recipe,
 } from "./items";
 import {
-  HUNGER_MAX, addItem, countItem, removeItem, type PlayerProfile,
+  HP_MAX, HUNGER_MAX, addItem, countItem, removeItem, type PlayerProfile,
 } from "./profile";
 
 export type EconomyError =
@@ -76,14 +76,26 @@ export function sellItem(profile: PlayerProfile, itemId: unknown, countRaw?: unk
 /** かばんの食事・飲み物を消費して空腹度を回復する。 */
 export function eatItem(profile: PlayerProfile, itemId: unknown): Transition<{ item: ItemDef }> {
   const item = itemById(itemId);
-  if (!item || !item.hunger) return { ok: false, error: "unknown_item" };
-  if (profile.hunger >= HUNGER_MAX) return { ok: false, error: "hunger_full" };
+  if (!item || (!item.hunger && !item.heal && !item.curePoison)) return { ok: false, error: "unknown_item" };
+  const poisoned = Array.isArray(profile.status) && profile.status.some((e) => e.kind === "poison");
+  if (
+    profile.hunger >= HUNGER_MAX
+    && (!item.heal || (typeof profile.hp === "number" ? profile.hp : HP_MAX) >= HP_MAX)
+    && (!item.curePoison || !poisoned)
+  ) {
+    return { ok: false, error: "hunger_full" };
+  }
   const removed = removeItem(profile, item.id, 1);
   if (!removed) return { ok: false, error: "not_enough_items" };
   return {
     ok: true,
     item,
-    profile: { ...removed, hunger: Math.min(HUNGER_MAX, removed.hunger + item.hunger) },
+    profile: {
+      ...removed,
+      hunger: Math.min(HUNGER_MAX, removed.hunger + (item.hunger ?? 0)),
+      hp: Math.min(HP_MAX, (typeof removed.hp === "number" ? removed.hp : HP_MAX) + (item.heal ?? 0)),
+      status: item.curePoison && Array.isArray(removed.status) ? removed.status.filter((e) => e.kind !== "poison") : removed.status,
+    },
   };
 }
 
