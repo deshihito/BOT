@@ -161,6 +161,11 @@ const saveUrl = dataUrl(
 const saveOnlineUrl = dataUrl(
   transpile("worldbox/save-online.ts").replaceAll('"../bot-api"', JSON.stringify(botApiStubUrl)),
 );
+const profileOnlineUrl = dataUrl(
+  transpile("worldbox/profile-online.ts")
+    .replaceAll('"../bot-api"', JSON.stringify(botApiStubUrl))
+    .replaceAll('"./profile"', JSON.stringify(profileUrl)),
+);
 const stationOnlineUrl = dataUrl(
   transpile("worldbox/station-online.ts")
     .replaceAll('"./lobby"', JSON.stringify(lobbyUrl))
@@ -168,17 +173,13 @@ const stationOnlineUrl = dataUrl(
     .replaceAll('"./tent"', JSON.stringify(tentUrl))
     .replaceAll('"./presence-online"', JSON.stringify(presenceOnlineUrl))
     .replaceAll('"./save"', JSON.stringify(saveUrl))
-    .replaceAll('"./save-online"', JSON.stringify(saveOnlineUrl)),
+    .replaceAll('"./save-online"', JSON.stringify(saveOnlineUrl))
+    .replaceAll('"./profile-online"', JSON.stringify(profileOnlineUrl)),
 );
 const arenaOnlineUrl = dataUrl(
   transpile("worldbox/arena-online.ts")
     .replaceAll('"../bot-api"', JSON.stringify(botApiStubUrl))
     .replaceAll('"./arena"', JSON.stringify(arenaUrl)),
-);
-const profileOnlineUrl = dataUrl(
-  transpile("worldbox/profile-online.ts")
-    .replaceAll('"../bot-api"', JSON.stringify(botApiStubUrl))
-    .replaceAll('"./profile"', JSON.stringify(profileUrl)),
 );
 const userLockUrl = dataUrl(transpile("worldbox/user-lock.ts"));
 const nextServerStubUrl = dataUrl(`
