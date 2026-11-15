@@ -1,12 +1,26 @@
 import { NextResponse } from "next/server";
 import { getRequestSession, publicOrigin, sessionOwnerKey } from "@/lib/auth";
 import {
-  CASINO_REASON, casinoMachineNear, playRoulette, playSlot, validateCasinoBet,
-  type CasinoGame, type RoulettePick,
-} from "@/lib/worldbox/casino";
-import { buildEconomyOp } from "@/lib/worldbox/economy-bridge";
+  canDouble, createBlackjackGame, doubleDown, handValue, hit, stand, startRound,
+} from "@/lib/blackjack";
 import {
-  enqueueEconomyOp, isEconomyEnabled, loadMyEconomyOps, readUserBalance,
+  CASINO_REASON, CASINO_SESSION_REASONS, casinoMachineNear, isCasinoSpendReason,
+  playRoulette, playSlot, validateCasinoBet, type CasinoGame, type RoulettePick,
+} from "@/lib/worldbox/casino";
+import {
+  SLOT7_MAX_SPINS, SLOT7_MIN_SPINS, doubleCashout, doubleGo, rollDice, spinSlot7,
+  validateDice,
+} from "@/lib/worldbox/casino-games";
+import {
+  CASINO_SESSION_TTL_MS, publicSessionView, publicUserStateView, type CasinoSession,
+} from "@/lib/worldbox/casino-session";
+import {
+  clearCasinoSession, loadCasinoSession, loadCasinoUserState, saveCasinoSession,
+  saveCasinoUserState,
+} from "@/lib/worldbox/casino-session-online";
+import { buildEconomyOp, ECONOMY_AMOUNT_MAX, GAMBLE_PAYOUT_MAX, type EconomyOp } from "@/lib/worldbox/economy-bridge";
+import {
+  enqueueEconomyOp, findEconomyOp, isEconomyEnabled, loadMyEconomyOps, readUserBalance,
 } from "@/lib/worldbox/economy-bridge-online";
 import { buildLobby } from "@/lib/worldbox/lobby";
 import { isPresenceEnabled, loadMyPresence } from "@/lib/worldbox/presence-online";
@@ -17,15 +31,20 @@ export const runtime = "nodejs";
 // 遊べるのは、プレゼンス（サーバーが持つ現在位置）がロビーの
 // カジノ機器（スロットマシン / カジノテーブル）に隣接しているときだけ。
 // 位置はクライアントの自己申告ではなくプレゼンスで検証する。
-// 抽選はこのサーバー側で行い、1プレイは「ベット＋確定配当」の
-// gamble オプ1件として経済ブリッジへ積む。残高の適用（ベットの
-// 引き落とし→配当の支払い、負けの還流）は Bot 側ワーカーが
-// 原子的に行うため、Web が残高を直接動かすことはない（案B / Plan A）。
-// GET: { balance, effectiveBalance, machine, ops }
-//   effectiveBalance は処理中ベットを差し引いた実質残高、
-//   machine は今隣接している機器（"slot" | "roulette" | null）、
-//   ops は自分の gamble オプ直近分（処理中表示と精算確認用）。
-// POST { game: "slot", bet } / { game: "roulette", bet, pick: "red" | "black" }
+// 抽選はこのサーバー側で行い、お金の移動はすべて経済ブリッジの
+// オプ経由（Web が残高を直接動かすことはない。案B / Plan A）:
+// - 単発ゲーム（スロット/ルーレット/ダイス）: 1プレイ = gamble オプ1件。
+// - セッション型（セブンスロット/ダブルアップ/ブラックジャック）:
+//   開始時に spend オプでベットを先払いし、終了時に prepaid の
+//   gamble オプ1件で精算する。精算オプは先払いが done になってから
+//   作る（先払い失敗のセッションは無効化され、配当も発生しない）。
+// GET: { balance, effectiveBalance, machine, ops, session, userState }
+// POST: { action: "play", game, bet, pick?, maxValue?, number? }
+//       { action: "slot7_start", bet, spins } / { action: "slot7_spin" }
+//       { action: "double_start", bet } / { action: "double_go" } /
+//       { action: "double_cashout" }
+//       { action: "bj_start", bet } / { action: "bj_hit" } /
+//       { action: "bj_stand" } / { action: "bj_double" }
 // Bot API 未設定なら 503。
 
 const NO_STORE = { "Cache-Control": "no-store, max-age=0" };
@@ -39,7 +58,6 @@ function errorResponse(error: string, status: number) {
   return NextResponse.json({ error }, { status, headers: NO_STORE });
 }
 
-/** カジノの本人キーは Discord ユーザーID。Discord セッション以外は対象外。 */
 function casinoSession(request: Request) {
   const session = getRequestSession(request);
   if (!session) return { session: null, status: 401 as const };
@@ -47,14 +65,12 @@ function casinoSession(request: Request) {
   return { session, status: 200 as const };
 }
 
-/** 暗号論的 RNG（抽選はサーバー側のこれでのみ行う）。 */
 function rng(): number {
   const buf = new Uint32Array(1);
   crypto.getRandomValues(buf);
   return buf[0] / 4294967296;
 }
 
-/** 今隣接しているカジノ機器。ロビー外・鮮度切れ・未送信は null。 */
 async function currentMachine(ownerKey: string) {
   if (!isPresenceEnabled()) return null;
   const presence = await loadMyPresence(ownerKey);
@@ -66,23 +82,187 @@ async function currentMachine(ownerKey: string) {
   );
 }
 
+/** 処理中のカジノ関係オプ（gamble のベット + カジノ spend）の合計。 */
+function pendingCasinoTotal(ops: readonly EconomyOp[]): number {
+  return ops
+    .filter((op) => op.status === "pending" && (op.kind === "gamble" || (op.kind === "spend" && isCasinoSpendReason(op.reason))))
+    .reduce((sum, op) => sum + op.amount, 0);
+}
+
+type OpStatus = "pending" | "done" | "failed" | "missing";
+
+async function spendStatus(userKey: string, opId: string): Promise<OpStatus> {
+  const op = await findEconomyOp(userKey, opId);
+  if (!op) return "missing";
+  return op.status;
+}
+
+async function enqueue(userKey: string, discordId: string, input: {
+  kind: "spend" | "gamble";
+  amount: number;
+  reason: string;
+  payout?: number;
+  prepaid?: boolean;
+}): Promise<EconomyOp | null> {
+  const op = buildEconomyOp(
+    {
+      kind: input.kind, userKey, discordId, amount: input.amount, reason: input.reason,
+      payout: input.payout, prepaid: input.prepaid,
+    },
+    crypto.randomUUID(),
+    Date.now(),
+  );
+  if (!op) return null;
+  return (await enqueueEconomyOp(op)) ? op : null;
+}
+
+type Ctx = { userKey: string; discordId: string };
+
+/** セブンスロットの精算（集計払い戻し + 未使用スピン返金 + ペナルティ）。 */
+async function settleSlot7(ctx: Ctx, session: Extract<CasinoSession, { kind: "slot7" }>): Promise<boolean> {
+  const prepayTotal = session.bet * session.total;
+  const netReturn = session.pendingReward - session.pendingPenalty + session.remaining * session.bet;
+  const settle = await enqueue(ctx.userKey, ctx.discordId, {
+    kind: "gamble",
+    amount: prepayTotal,
+    reason: CASINO_SESSION_REASONS.slot7Settle,
+    payout: Math.max(0, netReturn),
+    prepaid: true,
+  });
+  if (!settle) return false;
+  if (netReturn < 0) {
+    await enqueue(ctx.userKey, ctx.discordId, {
+      kind: "spend", amount: -netReturn, reason: CASINO_SESSION_REASONS.slot7Penalty,
+    });
+  }
+  await clearCasinoSession(ctx.userKey);
+  return true;
+}
+
+/** ダブルアップの精算（バーストは 0、キャッシュアウトは確定額、期限切れは返金）。 */
+async function settleDouble(
+  ctx: Ctx,
+  session: Extract<CasinoSession, { kind: "double" }>,
+  payout: number,
+): Promise<boolean> {
+  const op = await enqueue(ctx.userKey, ctx.discordId, {
+    kind: "gamble",
+    amount: session.bet,
+    reason: CASINO_SESSION_REASONS.doubleSettle,
+    payout,
+    prepaid: true,
+  });
+  if (!op) return false;
+  await clearCasinoSession(ctx.userKey);
+  return true;
+}
+
+/** ブラックジャックの精算（bj.bet はダブル込みの総ベット）。 */
+async function settleBlackjack(ctx: Ctx, session: Extract<CasinoSession, { kind: "blackjack" }>): Promise<boolean> {
+  const bj = session.bj;
+  if (bj.phase !== "settled" || !bj.result) return false;
+  const payout = bj.bet + bj.result.delta;
+  const op = await enqueue(ctx.userKey, ctx.discordId, {
+    kind: "gamble",
+    amount: bj.bet,
+    reason: CASINO_SESSION_REASONS.blackjackSettle,
+    payout,
+    prepaid: true,
+  });
+  if (!op) return false;
+  await clearCasinoSession(ctx.userKey);
+  return true;
+}
+
+/**
+ * 終了済みセッションの精算を試みる。先払いが全て done のときだけ精算し、
+ * failed があれば無効化（配当なしで閉じる）、pending があれば次回に回す。
+ * 戻り値: 精算/無効化したら null、それ以外はセッションそのまま。
+ */
+async function tryFinishSession(ctx: Ctx, session: CasinoSession): Promise<CasinoSession | null> {
+  const spendIds = session.kind === "blackjack" ? session.spendOpIds : [session.prepayOpId];
+  const statuses: OpStatus[] = [];
+  for (const id of spendIds) statuses.push(await spendStatus(ctx.userKey, id));
+  if (statuses.some((s) => s === "failed" || s === "missing")) {
+    await clearCasinoSession(ctx.userKey);
+    return null;
+  }
+  if (statuses.some((s) => s === "pending")) return session;
+  if (session.kind === "slot7") {
+    if (session.remaining > 0) return session;
+    return (await settleSlot7(ctx, session)) ? null : session;
+  }
+  if (session.kind === "double") {
+    if (!session.busted) return session;
+    return (await settleDouble(ctx, session, 0)) ? null : session;
+  }
+  return (await settleBlackjack(ctx, session)) ? null : session;
+}
+
+/** 期限切れセッションの後片付け（未使用分の返金つき）。 */
+async function expireSessionIfNeeded(ctx: Ctx, session: CasinoSession | null): Promise<CasinoSession | null> {
+  if (!session) return null;
+  if (Date.now() - session.createdAt <= CASINO_SESSION_TTL_MS) {
+    return tryFinishSession(ctx, session);
+  }
+  const spendIds = session.kind === "blackjack" ? session.spendOpIds : [session.prepayOpId];
+  const statuses: OpStatus[] = [];
+  for (const id of spendIds) statuses.push(await spendStatus(ctx.userKey, id));
+  if (statuses.some((s) => s === "pending")) return session;
+  if (statuses.some((s) => s === "failed" || s === "missing")) {
+    await clearCasinoSession(ctx.userKey);
+    return null;
+  }
+  if (session.kind === "slot7") {
+    return (await settleSlot7(ctx, session)) ? null : session;
+  }
+  if (session.kind === "double") {
+    return (await settleDouble(ctx, session, session.busted ? 0 : session.bet)) ? null : session;
+  }
+  if (session.bj.phase === "settled") {
+    return (await settleBlackjack(ctx, session)) ? null : session;
+  }
+  // プレイ中のブラックジャックは払った分だけ返金する。
+  const paid = session.bet * session.spendOpIds.length;
+  const op = await enqueue(ctx.userKey, ctx.discordId, {
+    kind: "gamble", amount: paid, reason: CASINO_SESSION_REASONS.blackjackSettle, payout: paid, prepaid: true,
+  });
+  if (op) await clearCasinoSession(ctx.userKey);
+  return op ? null : session;
+}
+
+async function loadSessionFor(ctx: Ctx): Promise<CasinoSession | null> {
+  const session = await loadCasinoSession(ctx.userKey);
+  return expireSessionIfNeeded(ctx, session);
+}
+
+function sessionJson(session: CasinoSession | null) {
+  return session ? publicSessionView(session) : null;
+}
+
 export async function GET(request: Request) {
   const { session, status } = casinoSession(request);
   if (!session) return errorResponse(status === 401 ? "unauthorized" : "discord_required", status);
   if (!isEconomyEnabled()) return errorResponse("economy_unavailable", 503);
-  const userKey = sessionOwnerKey(session);
-  const [balance, ops, machine] = await Promise.all([
+  const ctx: Ctx = { userKey: sessionOwnerKey(session), discordId: session.id };
+  const [balance, ops, machine, activeSession, userState] = await Promise.all([
     readUserBalance(session.id),
-    loadMyEconomyOps(userKey),
-    currentMachine(userKey),
+    loadMyEconomyOps(ctx.userKey),
+    currentMachine(ctx.userKey),
+    loadSessionFor(ctx),
+    loadCasinoUserState(ctx.userKey),
   ]);
   if (balance === null) return errorResponse("economy_unavailable", 503);
   const gambleOps = ops.filter((op) => op.kind === "gamble");
-  const pendingBets = gambleOps
-    .filter((op) => op.status === "pending")
-    .reduce((sum, op) => sum + op.amount, 0);
   return NextResponse.json(
-    { balance, effectiveBalance: balance - pendingBets, machine, ops: gambleOps },
+    {
+      balance,
+      effectiveBalance: balance - pendingCasinoTotal(ops),
+      machine,
+      ops: gambleOps,
+      session: sessionJson(activeSession),
+      userState: publicUserStateView(userState),
+    },
     { headers: NO_STORE },
   );
 }
@@ -98,49 +278,273 @@ export async function POST(request: Request) {
   } catch {
     return errorResponse("invalid_request", 400);
   }
-  const fields = (body ?? {}) as { game?: unknown; bet?: unknown; pick?: unknown };
-  const game: CasinoGame | null =
-    fields.game === "slot" || fields.game === "roulette" ? fields.game : null;
-  if (game === null) return errorResponse("invalid_game", 400);
-  const bet = validateCasinoBet(fields.bet);
-  if (bet === null) return errorResponse("invalid_bet", 400);
-  const pick: RoulettePick | null =
-    fields.pick === "red" || fields.pick === "black" ? fields.pick : null;
-  if (game === "roulette" && pick === null) return errorResponse("invalid_pick", 400);
+  const fields = (body ?? {}) as Record<string, unknown>;
+  const action = typeof fields.action === "string" ? fields.action : "play";
+  const ctx: Ctx = { userKey: sessionOwnerKey(session), discordId: session.id };
 
-  const userKey = sessionOwnerKey(session);
-  const machine = await currentMachine(userKey);
+  const machine = await currentMachine(ctx.userKey);
   if (machine === null) return errorResponse("not_at_casino", 409);
-  if (machine !== game) return errorResponse("wrong_machine", 409);
 
   const [balance, ops] = await Promise.all([
     readUserBalance(session.id),
-    loadMyEconomyOps(userKey),
+    loadMyEconomyOps(ctx.userKey),
   ]);
   if (balance === null) return errorResponse("economy_unavailable", 503);
-  const pendingBets = ops
-    .filter((op) => op.kind === "gamble" && op.status === "pending")
-    .reduce((sum, op) => sum + op.amount, 0);
-  if (bet > balance - pendingBets) return errorResponse("not_enough_coins", 409);
+  const effectiveBalance = balance - pendingCasinoTotal(ops);
+  const activeSession = await loadSessionFor(ctx);
 
-  const result = game === "slot" ? playSlot(bet, rng) : playRoulette(bet, pick as RoulettePick, rng);
-  const op = buildEconomyOp(
-    {
-      kind: "gamble",
-      userKey,
-      discordId: session.id,
-      amount: bet,
-      reason: CASINO_REASON[game],
-      payout: result.payout,
-    },
-    crypto.randomUUID(),
-    Date.now(),
-  );
-  if (!op) return errorResponse("economy_failed", 500);
-  const stored = await enqueueEconomyOp(op);
-  if (!stored) return errorResponse("economy_failed", 503);
-  return NextResponse.json(
-    { ok: true, game, bet, payout: result.payout, result, opId: op.id },
-    { headers: NO_STORE },
-  );
+  const requireMachine = (want: "slot" | "roulette") =>
+    machine === want ? null : errorResponse("wrong_machine", 409);
+  const requireNoSession = () =>
+    activeSession ? errorResponse("session_active", 409) : null;
+  const requireSession = <K extends CasinoSession["kind"]>(
+    kind: K,
+  ): { session: Extract<CasinoSession, { kind: K }> | null; error: NextResponse | null } => {
+    if (!activeSession) return { session: null, error: errorResponse("no_session", 409) };
+    if (activeSession.kind !== kind) return { session: null, error: errorResponse("wrong_session", 409) };
+    return { session: activeSession as Extract<CasinoSession, { kind: K }>, error: null };
+  };
+
+  // ------------------------------------------------------------ 単発プレイ
+  if (action === "play") {
+    const game: CasinoGame | null =
+      fields.game === "slot" || fields.game === "roulette" || fields.game === "dice"
+        ? fields.game
+        : null;
+    if (game === null) return errorResponse("invalid_game", 400);
+    const bet = validateCasinoBet(fields.bet);
+    if (bet === null) return errorResponse("invalid_bet", 400);
+    const machineError = requireMachine(game === "slot" ? "slot" : "roulette");
+    if (machineError) return machineError;
+    if (bet > effectiveBalance) return errorResponse("not_enough_coins", 409);
+
+    if (game === "dice") {
+      const maxValue = typeof fields.maxValue === "number" ? fields.maxValue : NaN;
+      const number = typeof fields.number === "number" ? fields.number : NaN;
+      const invalid = validateDice(maxValue, number);
+      if (invalid) return errorResponse(invalid, 400);
+      if (bet * maxValue > GAMBLE_PAYOUT_MAX) return errorResponse("invalid_bet", 400);
+      const rolled = rollDice(maxValue, rng);
+      const hitDice = rolled === number;
+      const payout = hitDice ? bet * maxValue : 0;
+      const op = await enqueue(ctx.userKey, ctx.discordId, {
+        kind: "gamble", amount: bet, reason: CASINO_REASON.dice, payout,
+      });
+      if (!op) return errorResponse("economy_failed", 503);
+      return NextResponse.json(
+        { ok: true, game, bet, payout, result: { rolled, hit: hitDice, maxValue, number }, opId: op.id },
+        { headers: NO_STORE },
+      );
+    }
+
+    const pick: RoulettePick | null =
+      fields.pick === "red" || fields.pick === "black" ? fields.pick : null;
+    if (game === "roulette" && pick === null) return errorResponse("invalid_pick", 400);
+    const result = game === "slot" ? playSlot(bet, rng) : playRoulette(bet, pick as RoulettePick, rng);
+    const op = await enqueue(ctx.userKey, ctx.discordId, {
+      kind: "gamble", amount: bet, reason: CASINO_REASON[game], payout: result.payout,
+    });
+    if (!op) return errorResponse("economy_failed", 503);
+    return NextResponse.json(
+      { ok: true, game, bet, payout: result.payout, result, opId: op.id },
+      { headers: NO_STORE },
+    );
+  }
+
+  // ------------------------------------------------------------ セブンスロット
+  if (action === "slot7_start") {
+    const machineError = requireMachine("slot");
+    if (machineError) return machineError;
+    const noSession = requireNoSession();
+    if (noSession) return noSession;
+    const bet = validateCasinoBet(fields.bet);
+    if (bet === null) return errorResponse("invalid_bet", 400);
+    const spins = typeof fields.spins === "number" ? fields.spins : NaN;
+    if (!Number.isInteger(spins) || spins < SLOT7_MIN_SPINS || spins > SLOT7_MAX_SPINS) {
+      return errorResponse("invalid_spins", 400);
+    }
+    const total = bet * spins;
+    if (total > ECONOMY_AMOUNT_MAX) return errorResponse("invalid_bet", 400);
+    if (total > effectiveBalance) return errorResponse("not_enough_coins", 409);
+    const prepay = await enqueue(ctx.userKey, ctx.discordId, {
+      kind: "spend", amount: total, reason: CASINO_SESSION_REASONS.slot7Prepay,
+    });
+    if (!prepay) return errorResponse("economy_failed", 503);
+    const next: CasinoSession = {
+      kind: "slot7", bet, total: spins, remaining: spins, prepayOpId: prepay.id,
+      pendingReward: 0, pendingPenalty: 0, lastReels: null, lastEvents: [], createdAt: Date.now(),
+    };
+    await saveCasinoSession(ctx.userKey, next);
+    return NextResponse.json({ ok: true, session: sessionJson(next) }, { headers: NO_STORE });
+  }
+
+  if (action === "slot7_spin") {
+    const machineError = requireMachine("slot");
+    if (machineError) return machineError;
+    const { session: s7, error } = requireSession("slot7");
+    if (error || !s7) return error ?? errorResponse("no_session", 409);
+    if (s7.remaining <= 0) return errorResponse("no_spins_left", 409);
+    const userState = await loadCasinoUserState(ctx.userKey);
+    const spin = spinSlot7(userState, s7.bet, rng);
+    await saveCasinoUserState(ctx.userKey, userState);
+    const next: CasinoSession = {
+      ...s7,
+      remaining: s7.remaining - 1,
+      pendingReward: s7.pendingReward + spin.reward,
+      pendingPenalty: s7.pendingPenalty + spin.penalty,
+      lastReels: spin.reels,
+      lastEvents: spin.events,
+    };
+    let settled = false;
+    if (next.remaining <= 0) {
+      const after = await tryFinishSession(ctx, next);
+      settled = after === null;
+      if (!settled) await saveCasinoSession(ctx.userKey, next);
+      return NextResponse.json(
+        { ok: true, spin, session: sessionJson(settled ? null : next), settled },
+        { headers: NO_STORE },
+      );
+    }
+    await saveCasinoSession(ctx.userKey, next);
+    return NextResponse.json({ ok: true, spin, session: sessionJson(next) }, { headers: NO_STORE });
+  }
+
+  // ------------------------------------------------------------ ダブルアップ
+  if (action === "double_start") {
+    const machineError = requireMachine("roulette");
+    if (machineError) return machineError;
+    const noSession = requireNoSession();
+    if (noSession) return noSession;
+    const bet = validateCasinoBet(fields.bet);
+    if (bet === null) return errorResponse("invalid_bet", 400);
+    if (bet > effectiveBalance) return errorResponse("not_enough_coins", 409);
+    const prepay = await enqueue(ctx.userKey, ctx.discordId, {
+      kind: "spend", amount: bet, reason: CASINO_SESSION_REASONS.doubleBet,
+    });
+    if (!prepay) return errorResponse("economy_failed", 503);
+    const next: CasinoSession = {
+      kind: "double", bet, multiplier: 1, streak: 0, prepayOpId: prepay.id, createdAt: Date.now(),
+    };
+    await saveCasinoSession(ctx.userKey, next);
+    return NextResponse.json({ ok: true, session: sessionJson(next) }, { headers: NO_STORE });
+  }
+
+  if (action === "double_go") {
+    const machineError = requireMachine("roulette");
+    if (machineError) return machineError;
+    const { session: dbl, error } = requireSession("double");
+    if (error || !dbl) return error ?? errorResponse("no_session", 409);
+    if (dbl.busted) return errorResponse("session_finished", 409);
+    const userState = await loadCasinoUserState(ctx.userKey);
+    const sessionState = { bet: dbl.bet, multiplier: dbl.multiplier, streak: dbl.streak };
+    const go = doubleGo(sessionState, userState, rng);
+    await saveCasinoUserState(ctx.userKey, userState);
+    const next: CasinoSession = {
+      ...dbl, multiplier: sessionState.multiplier, streak: sessionState.streak,
+      ...(go.finished ? { busted: true } : {}),
+    };
+    if (go.finished) {
+      const after = await tryFinishSession(ctx, next);
+      if (after !== null) await saveCasinoSession(ctx.userKey, next);
+      return NextResponse.json(
+        { ok: true, go, session: sessionJson(after) },
+        { headers: NO_STORE },
+      );
+    }
+    await saveCasinoSession(ctx.userKey, next);
+    return NextResponse.json({ ok: true, go, session: sessionJson(next) }, { headers: NO_STORE });
+  }
+
+  if (action === "double_cashout") {
+    const machineError = requireMachine("roulette");
+    if (machineError) return machineError;
+    const { session: dbl, error } = requireSession("double");
+    if (error || !dbl) return error ?? errorResponse("no_session", 409);
+    if (dbl.busted) return errorResponse("session_finished", 409);
+    const prepayStatus = await spendStatus(ctx.userKey, dbl.prepayOpId);
+    if (prepayStatus === "pending") return errorResponse("bet_pending", 409);
+    if (prepayStatus !== "done") {
+      await clearCasinoSession(ctx.userKey);
+      return errorResponse("bet_failed", 409);
+    }
+    const userState = await loadCasinoUserState(ctx.userKey);
+    const payout = doubleCashout({ bet: dbl.bet, multiplier: dbl.multiplier, streak: dbl.streak }, userState);
+    await saveCasinoUserState(ctx.userKey, userState);
+    const settled = await settleDouble(ctx, dbl, payout);
+    if (!settled) return errorResponse("economy_failed", 503);
+    return NextResponse.json({ ok: true, payout, session: null }, { headers: NO_STORE });
+  }
+
+  // ------------------------------------------------------------ ブラックジャック
+  if (action === "bj_start") {
+    const machineError = requireMachine("roulette");
+    if (machineError) return machineError;
+    const noSession = requireNoSession();
+    if (noSession) return noSession;
+    const bet = validateCasinoBet(fields.bet);
+    if (bet === null) return errorResponse("invalid_bet", 400);
+    if (bet > effectiveBalance) return errorResponse("not_enough_coins", 409);
+    const prepay = await enqueue(ctx.userKey, ctx.discordId, {
+      kind: "spend", amount: bet, reason: CASINO_SESSION_REASONS.blackjackBet,
+    });
+    if (!prepay) return errorResponse("economy_failed", 503);
+    const seed = Math.floor(rng() * 0x7fffffff);
+    const bj = startRound(createBlackjackGame(seed, effectiveBalance), bet);
+    const next: CasinoSession = {
+      kind: "blackjack", bet, spendOpIds: [prepay.id], bj, createdAt: Date.now(),
+    };
+    await saveCasinoSession(ctx.userKey, next);
+    const finalView = bj.phase === "settled" ? publicSessionView(next) : null;
+    const after = await tryFinishSession(ctx, next);
+    if (after !== null && after !== next) await saveCasinoSession(ctx.userKey, after);
+    return NextResponse.json(
+      { ok: true, session: sessionJson(after), final: finalView },
+      { headers: NO_STORE },
+    );
+  }
+
+  if (action === "bj_hit" || action === "bj_stand") {
+    const machineError = requireMachine("roulette");
+    if (machineError) return machineError;
+    const { session: bjs, error } = requireSession("blackjack");
+    if (error || !bjs) return error ?? errorResponse("no_session", 409);
+    if (bjs.bj.phase !== "player") return errorResponse("not_in_play", 409);
+    const bj = action === "bj_hit" ? hit(bjs.bj) : stand(bjs.bj);
+    const next: CasinoSession = { ...bjs, bj };
+    const finalView = bj.phase === "settled" ? publicSessionView(next) : null;
+    const after = await tryFinishSession(ctx, next);
+    if (after !== null) await saveCasinoSession(ctx.userKey, after);
+    return NextResponse.json(
+      { ok: true, session: sessionJson(after), final: finalView, playerTotal: handValue(bj.playerHand).total },
+      { headers: NO_STORE },
+    );
+  }
+
+  if (action === "bj_double") {
+    const machineError = requireMachine("roulette");
+    if (machineError) return machineError;
+    const { session: bjs, error } = requireSession("blackjack");
+    if (error || !bjs) return error ?? errorResponse("no_session", 409);
+    if (bjs.bj.phase !== "player" || !canDouble(bjs.bj)) return errorResponse("cannot_double", 409);
+    const firstStatus = await spendStatus(ctx.userKey, bjs.spendOpIds[0]);
+    if (firstStatus === "pending") return errorResponse("bet_pending", 409);
+    if (firstStatus !== "done") {
+      await clearCasinoSession(ctx.userKey);
+      return errorResponse("bet_failed", 409);
+    }
+    if (bjs.bet > effectiveBalance) return errorResponse("not_enough_coins", 409);
+    const second = await enqueue(ctx.userKey, ctx.discordId, {
+      kind: "spend", amount: bjs.bet, reason: CASINO_SESSION_REASONS.blackjackBet,
+    });
+    if (!second) return errorResponse("economy_failed", 503);
+    const bj = doubleDown(bjs.bj);
+    const next: CasinoSession = { ...bjs, bj, spendOpIds: [...bjs.spendOpIds, second.id] };
+    await saveCasinoSession(ctx.userKey, next);
+    return NextResponse.json(
+      { ok: true, session: sessionJson(next), final: publicSessionView(next) },
+      { headers: NO_STORE },
+    );
+  }
+
+  return errorResponse("invalid_action", 400);
 }
