@@ -3,8 +3,9 @@
 // このファイルは「どのタイトルをどの区分・どの順で筐体化するか」のデータだけを持つ。
 // 人数・タイトルは registry 側（各ゲームモジュール）が正で、ここでは重複して持たない。
 // ネットコードは作らない（既存の OnlineShell / useOnlineRoom のルーム基盤に載せる）。
-// 筐体スプライトは L3 で作成済み（web/public/img/worldbox/lobby/arcade_<id>.png、
-// textures.ts の LOBBY_SPRITE_SRC に登録）。第1弾の配置は lobby-floors.ts の 2F 北弧。
+// 筐体スプライトは L3/L6 で作成済み（web/public/img/worldbox/lobby/arcade_<id>.png、
+// textures.ts の LOBBY_SPRITE_SRC に登録）。第1弾の配置は lobby-floors.ts の 2F 北弧、
+// 第2弾は 2F 南弧＋3F 西弧・東弧・南弧・北デッキ（26タイトル全て）。
 // 経済: アーケードの対戦に AGO コインを賭ける機能は入れない（案Bのみ・ミント禁止）。
 
 /** 筐体の区分。移植の優先順は faceoff → party → realtime。 */
@@ -67,6 +68,62 @@ export const ARCADE_FIRST_WAVE: readonly string[] = [
   "werewolf",
   "wordwolf",
   "majority",
+];
+
+/**
+ * L6 で筐体を置く第2弾（残り20タイトル・全て）。並びは ARCADE_GAMES の
+ * 区分・order 順（faceoff の残り → party の残り → realtime）。
+ * 配置: 2F 南弧に先頭6台、3F 西弧・東弧・南弧・北デッキに残り14台。
+ */
+export const ARCADE_SECOND_WAVE: readonly string[] = [
+  "territory",
+  "drawguess",
+  "daifugo",
+  "babanuki",
+  "quizbattle",
+  "bombpass",
+  "shiritori",
+  "nanja",
+  "liarsdice",
+  "cheat",
+  "hagetaka",
+  "burst",
+  "texas",
+  "countdown",
+  "musicalchairs",
+  "wordbasket",
+  "speed",
+  "typerace",
+  "calcrace",
+  "stopbattle",
+];
+
+/** 第2弾のうち 2F 南弧（y=19）に置く6台。前に立つのは北側 y=18（円の中心側）。 */
+export const ARCADE_SECOND_WAVE_2F: readonly string[] = [
+  "territory",
+  "drawguess",
+  "daifugo",
+  "babanuki",
+  "quizbattle",
+  "bombpass",
+];
+
+/** 第2弾のうち 3F に置く14台（西弧4・東弧4・南弧4・北デッキ2）。 */
+export const ARCADE_SECOND_WAVE_3F: readonly string[] = [
+  "shiritori",
+  "nanja",
+  "liarsdice",
+  "cheat",
+  "hagetaka",
+  "burst",
+  "texas",
+  "countdown",
+  "musicalchairs",
+  "wordbasket",
+  "speed",
+  "typerace",
+  "calcrace",
+  "stopbattle",
 ];
 
 export function arcadeById(id: string): ArcadeEntry | undefined {
