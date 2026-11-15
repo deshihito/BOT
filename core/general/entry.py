@@ -450,11 +450,15 @@ class GeneralCog(
                     pass
             if blocked_message:
                 return await self._safe_respond(interaction, blocked_message)
-        if value == "money_panel":
+        if value in MONEY_PANEL_CATEGORY_VALUES:
+            # 導線最適化 U1: /general のマネージャンルはマネーパネルの
+            # カテゴリ入口に一本化した。選んだカテゴリでパネルを開き、
+            # 個別アクションの実行はパネル内のボタンに委譲する。
             panel_cog = self.bot.get_cog("MoneyPanelCog")
             if panel_cog is None:
                 return await self._safe_respond(interaction, MONEY_PANEL_NOT_LOADED)
-            return await panel_cog.show_panel(interaction)
+            return await panel_cog.show_panel(
+                interaction, category=MONEY_PANEL_CATEGORY_VALUES[value])
 
         if value in {"starter_claim", "daily_bonus_claim", "jailbreak"}:
             # マネーパネルの概要ボタンと同じ実行部 (claim_starter /

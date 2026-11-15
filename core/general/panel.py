@@ -107,13 +107,15 @@ class GeneralHistorySelect(discord.ui.Select):
 
 
 class GeneralGenreSelect(discord.ui.Select):
-    def __init__(self, cog, selected: str | None = None, row: int = 0):
+    def __init__(self, cog, selected: str | None = None, row: int = 0,
+                 shortcut_mode: bool = False):
         self.cog = cog
         super().__init__(
             placeholder="ジャンルを選択してください",
-            options=[discord.SelectOption(label=label, description=f"{len(GENERAL_ACTIONS[value])}個の機能", value=value,
+            options=[discord.SelectOption(label=label, description=f"{len(general_panel_actions(value, shortcut_mode=shortcut_mode))}個の機能", value=value,
                                           default=value == selected)
-                     for value, (label, _description) in GENERAL_GENRES.items()],
+                     for value, (label, _description) in
+                     ((g, GENERAL_GENRES[g]) for g in general_panel_genres(shortcut_mode=shortcut_mode))],
             custom_id="panel:general:genre",
             row=row,
         )
@@ -135,23 +137,67 @@ class GeneralGenreSelect(discord.ui.Select):
 ACTION_PAGE_SIZE = 25  # Discord のセレクト選択肢上限
 
 
-def general_action_pages(genre: str) -> list:
+# /general パネル（通常モード）のマネージャンル入口。マネーパネルの
+# 6カテゴリと1対1で対応し、選ぶとそのカテゴリでマネーパネルが開く。
+# 36件の個別アクションはマネーパネル内のボタンから実行する（実行の
+# 所在はパネルに一本化）。ラベルはマネーパネルの CATEGORIES と一致
+# させる（home だけ既存の「マネーパネル」を維持する）。
+MONEY_PANEL_ENTRIES: tuple[tuple[str, str], ...] = (
+    ("マネーパネル", "money_panel"),
+    ("市場（交換）", "money_panel_market"),
+    ("アイテム", "money_panel_items"),
+    ("合成・工房（生産）", "money_panel_craft"),
+    ("あそぶ", "money_panel_play"),
+    ("その他", "money_panel_more"),
+)
+
+# 通常モードで表示しない旧ジャンル（マネーへ統合）。
+_MERGED_ECONOMY_GENRES = ("trade_craft", "play")
+
+
+def general_panel_genres(*, shortcut_mode: bool = False) -> list[str]:
+    """パネルに表示するジャンル順。通常モードは経済3ジャンルをマネーへ統合する。
+
+    ショートカット作成モードではカタログ全体（13ジャンル）を出し、
+    個別アクションへの新規登録を残す。
+    """
+    genres = list(GENERAL_GENRES)
+    if shortcut_mode:
+        return genres
+    return [g for g in genres if g not in _MERGED_ECONOMY_GENRES]
+
+
+def general_panel_actions(genre: str, *, shortcut_mode: bool = False) -> list:
+    """パネルに表示するジャンルのアクション一覧（(ラベル, 値) の並び）。
+
+    通常モードのマネージャンルはマネーパネルの6カテゴリ入口だけを
+    出す。ショートカット作成モードではレジストリどおり全件を出す。
+    """
+    if genre == "money" and not shortcut_mode:
+        return list(MONEY_PANEL_ENTRIES)
+    return GENERAL_ACTIONS[genre]
+
+
+def general_action_pages(genre: str, *, shortcut_mode: bool = False) -> list:
     """ジャンルのアクションをセレクト上限（25件）ごとのページに分ける。
 
     導線最適化ラウンド4: マネージャンルが28件になり上限を超えたため、
     ゲームハブ（core/game/game/cog.py の game_select_pages）と同じ
     「セレクトは1つに固定し、ページをボタンでめくる」方式にした。
+    導線最適化 U1: 通常モードのマネージャンルは6カテゴリ入口に
+    統合され、実ジャンルは全て1ページに収まる（機構は残す）。
     """
-    actions = GENERAL_ACTIONS[genre]
+    actions = general_panel_actions(genre, shortcut_mode=shortcut_mode)
     return [actions[i:i + ACTION_PAGE_SIZE]
             for i in range(0, len(actions), ACTION_PAGE_SIZE)] or [[]]
 
 
 class GeneralActionSelect(discord.ui.Select):
-    def __init__(self, cog, genre: str, row: int = 1, page: int = 0):
+    def __init__(self, cog, genre: str, row: int = 1, page: int = 0,
+                 shortcut_mode: bool = False):
         self.cog = cog
         self.genre = genre
-        pages = general_action_pages(genre)
+        pages = general_action_pages(genre, shortcut_mode=shortcut_mode)
         page = min(max(page, 0), len(pages) - 1)
         placeholder = "機能を選択してください"
         if len(pages) > 1:
@@ -199,7 +245,7 @@ class GeneralActionPageButton(discord.ui.Button):
         view: GeneralPanel = self.view
         wrapper = view if hasattr(view, "panel") else None
         panel = getattr(view, "panel", view)
-        pages = general_action_pages(panel.genre)
+        pages = general_action_pages(panel.genre, shortcut_mode=panel.shortcut_mode)
         panel.action_page = min(max(panel.action_page + self.delta, 0), len(pages) - 1)
         if wrapper is not None:
             wrapper.refresh()
@@ -214,20 +260,25 @@ class GeneralPanel(discord.ui.View):
         super().__init__(timeout=600)  # ルートパネル共通の寿命（導線最適化 S10）
         self.cog = cog
         self.owner_id = owner_id
+        self.shortcut_mode = shortcut_mode
+        self.shortcut_item = shortcut_item
         saved = (shortcut_item or {}).get("action", {})
         _genre = genre or saved.get("genre")
+        if not shortcut_mode and _genre in _MERGED_ECONOMY_GENRES:
+            # 導線最適化 U1: 通常モードでは旧 trade_craft / play は
+            # マネージャンルに統合した（保存済みの開き直しもマネーへ）。
+            _genre = "money"
         self.genre = GENERAL_GENRE_ALIASES.get(_genre, _genre)
         self.action = saved.get("value")
         # 保存済みショートカットから開いた場合は、その機能が含まれる
         # ページを初期表示にする（ページング対象ジャンルだけの配慮）。
         self.action_page = 0
         if self.genre in GENERAL_ACTIONS and self.action:
-            for index, chunk in enumerate(general_action_pages(self.genre)):
+            for index, chunk in enumerate(general_action_pages(
+                    self.genre, shortcut_mode=shortcut_mode)):
                 if any(value == self.action for _label, value in chunk):
                     self.action_page = index
                     break
-        self.shortcut_mode = shortcut_mode
-        self.shortcut_item = shortcut_item
         # 「よく使う／最近」の対象（core.general.action_usage.history_panel_specs の結果）。
         # 空ならセクション自体を出さず、従来の見た目と完全同一に保つ。
         self.history_specs = list(history_specs or [])
@@ -239,12 +290,14 @@ class GeneralPanel(discord.ui.View):
         if self.history_specs:
             self.add_item(GeneralHistorySelect(self.cog, self.history_specs, row=0))
             offset = 1
-        self.add_item(GeneralGenreSelect(self.cog, self.genre, row=offset))
+        self.add_item(GeneralGenreSelect(
+            self.cog, self.genre, row=offset, shortcut_mode=self.shortcut_mode))
         if self.genre:
-            pages = general_action_pages(self.genre)
+            pages = general_action_pages(self.genre, shortcut_mode=self.shortcut_mode)
             self.action_page = min(max(self.action_page, 0), len(pages) - 1)
             self.add_item(GeneralActionSelect(
-                self.cog, self.genre, row=offset + 1, page=self.action_page))
+                self.cog, self.genre, row=offset + 1, page=self.action_page,
+                shortcut_mode=self.shortcut_mode))
             if len(pages) > 1:
                 pager_row = offset + 2
                 self.add_item(GeneralActionPageButton(
