@@ -2,7 +2,6 @@
 
 - /help: 📖 の凡例はカテゴリページ全ページのフッターから、概要（入口）へ移設
 - /game: 詳細・ランキングの静的フッターを削除
-- nation 状態表示: 空腹度の説明はフッターから空腹度フィールドのそばへ移設
 - UNO 募集: ボタン説明の静的フッターを削除
 Discord には接続しない。
 """
@@ -24,10 +23,8 @@ from discord.ext import commands  # noqa: E402
 
 from game_fakes import FakeBot, FakeChannel, FakeGuild, FakeInteraction, FakeMember, fast_time, press, real_sleep  # noqa: E402
 from tests.test_all_commands import USER_ID, fake_interaction  # noqa: E402
-from tests.test_nation import NationFakeDBAPI, run  # noqa: E402
 
 import core.game.game.cog as game_module
-import core.game.nation.cog as nation_module
 import core.game.uno.cog as uno
 from cogs.help import category_pages, overview_embed  # noqa: E402
 from core.game.game.game_guides import GAME_ORDER  # noqa: E402
@@ -75,39 +72,6 @@ class GameFooterTest(unittest.TestCase):
         embed = asyncio.run(game_module.ranking_embed(None, GAME_ORDER[0]))
         self.assertIsNone(embed.footer.text)
         self.assertTrue(embed.title.endswith("のサーバーランキング"))
-
-
-class NationStatusTest(unittest.TestCase):
-    def setUp(self):
-        self.db = NationFakeDBAPI()
-        self.bot = commands.Bot(command_prefix="!", intents=discord.Intents.none())
-        self.bot.db_api = self.db
-        self.cog = nation_module.NationCog(self.bot)
-
-    def call(self, name, user_id=USER_ID):
-        interaction, _, _ = fake_interaction(self.bot)
-        sent = []
-
-        async def send(*args, **kwargs):
-            sent.append(kwargs)
-
-        interaction.user.id = user_id
-        interaction.user.send = send
-        interaction.user.guild_permissions = discord.Permissions.all()
-        interaction.guild.owner_id = 1
-        ctx = types.SimpleNamespace(guild=interaction.guild, author=interaction.user,
-                                    send=send, bot=self.bot)
-        run(getattr(self.cog, name).callback(self.cog, ctx))
-        return sent
-
-    def test_status_hunger_note_is_next_to_field_not_footer(self):
-        self.call("found")
-        self.call("join")
-        sent = self.call("status")
-        embed = sent[-1]["embed"]
-        self.assertIsNone(embed.footer.text)
-        hunger = next(f for f in embed.fields if f.name == "空腹度")
-        self.assertIn("サーバーで発言すると少しずつ減ります", hunger.value)
 
 
 class UnoLobbyFooterTest(unittest.IsolatedAsyncioTestCase):

@@ -232,10 +232,6 @@ from core.support.server_assist.cog import (  # noqa: F401
 # server_setup — 実装: core/support/server_setup/cog.py
 # =====================================================================
 from core.support.server_setup.cog import (  # noqa: F401
-    NATION_SECTION,
-    NOTIFY_LEVELS,
-    NOTIFY_MAJOR,
-    nation_settings,
     EMBED_COLOR,
     can_post,
     pick_welcome_channel,

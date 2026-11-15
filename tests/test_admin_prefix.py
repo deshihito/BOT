@@ -1,4 +1,4 @@
-"""! に移した持ち主専用コマンド（!d1ping・!check_api・!dungeon_reset）のテスト。"""
+"""! に移した持ち主専用コマンド（!d1ping・!check_api）のテスト。"""
 
 import asyncio
 import sys
@@ -40,13 +40,6 @@ class AdminPrefixTest(unittest.TestCase):
         other = self.run_cmd(d1_test.D1TestCog.d1ping, cog, 1)
         self.assertFalse(other.send.await_count)
 
-    def test_dungeon_reset_ignores_others(self):
-        import core.game.dungeon.entry as dangeon
-        cog = types.SimpleNamespace(db_api=None)
-        with patch.object(dangeon, 'dg_maps') as maps:
-            c = self.run_cmd(dangeon.DungeonCog.dungeon_reset, cog, 1)
-        self.assertFalse(c.send.await_count)
-        maps.clear.assert_not_called()
 
 
 if __name__ == '__main__':

@@ -17,7 +17,6 @@ import core.game.guess.cog as guess_module
 import core.game.jinrou.entry as jinrou_module
 import core.support.log_viewer.cog as log_viewer_module
 import core.support.muted.cog as muted_module
-import core.game.nation.cog as nation_module
 import core.vc.music.entry as music_module
 import core.vc.rec.entry as rec_module
 import core.vc.voice_entry as voice_module
@@ -387,20 +386,6 @@ class SioRecEchoCleanupLoggingTests(unittest.TestCase):
             cleanup("test")
         self.assertTrue(any("受信停止" in line for line in logs.output))
         self.assertTrue(any("再生停止" in line for line in logs.output))
-
-
-class NationErrorReplyLoggingTests(unittest.IsolatedAsyncioTestCase):
-    """nation のエラー通知送信失敗が debug ログになること（元のエラーは log.error 済み）。"""
-
-    async def test_reply_failure_logs_debug(self):
-        cog = object.__new__(nation_module.NationCog)
-        cog._reply = AsyncMock(side_effect=_http_exception())
-        cog._embed = lambda *args, **kwargs: object()
-        ctx = types.SimpleNamespace()
-        error = nation_module.commands.CommandError("boom")
-        with self.assertLogs("cogs.nation", level="DEBUG") as logs:
-            await cog.cog_command_error(ctx, error)
-        self.assertTrue(any("エラー通知の送信" in line for line in logs.output))
 
 
 if __name__ == "__main__":

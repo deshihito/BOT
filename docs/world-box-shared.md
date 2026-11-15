@@ -63,3 +63,10 @@ AGO WORLD BOX（web/app/games/worldbox）に関わる作業をする Muse は、
 - 着手前に必ず最新の main を確認する。他の Muse が同じファイルを触っている前提で、**復元・巻き戻し系の変更をする前に現行 main の内容を読む**。
 - WORLD BOX の主要ファイル（WorldBoxClient.tsx、economy.ts、profile.ts、items.ts）は特に衝突が起きやすい。大きな変更は PR を分け、タイトルに範囲を明記する。
 - 本番デプロイは Pi の自動デプロイ（数分〜遅延あり）。「live に無い」=「消えた」ではない。まず main と live の到達点（どの PR まで出ているか）を切り分ける。
+
+## 旧システムの廃止・統合（2026-11-15）
+
+- Discord 側の旧ダンジョン（`core/game/dungeon`、/game の「ダンジョン」、`!dungeon_reset`）と旧国づくり（`core/game/nation`、`core/game/nation_onboarding`、`!nation` 群、サーバー設定の国づくり設定、`docs/sql/nation*.sql`）は廃止し、WORLD BOX に統合した。**復活させない。**
+- 後継: 探索・採掘・戦闘・建築は WORLD BOX のワールド側（道具・夜の敵・自由建築）が担う。国は本ノートのユニオン（国 = Discord サーバー、ユニオンマーク）が唯一の国システムで、旧国の空腹度・首都タイル・役職（!nation 側）は引き継がない。
+- Discord 側の導線は /game ハブの WORLD BOX リンクボタンに一本化した。
+- DB: 旧テーブル（`dungeon_*` / `nation_*`）と RPC（`dungeon_apply_coins` / `nation_found` / `nation_adjust`）は API 許可リスト（`api/app.py`）から除去済み。テーブル自体の DROP はしていない（データは残置し、Bot からは到達不可）。

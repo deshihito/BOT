@@ -630,35 +630,6 @@ AGOコインでバイインしてチップに換え、5枚ドローポーカー�
     },
 }
 
-GAME_GUIDES["dungeon"] = {
-    "id": "dungeon",
-    "name": "ダンジョン",
-    "category": "game",
-    "summary": "マップを探索し、戦闘と成長を重ねてダンジョンを攻略します。",
-    "players": "1人",
-    "min_players": 1,
-    "max_players": 1,
-    "duration": "自由にプレイ",
-    "commands": ["/game"],
-    "guide": """## 概要
-ダンジョンを探索し、敵との戦闘やアイテムを通じてプレイヤーを成長させます。
-
-## 人数
-1人で遊べます。
-
-## 所要時間
-好きなときに開始・中断できます。
-
-## 遊び方
-1. `/game` で「ダンジョン」を選び、「募集する」を押します。
-2. 画面の移動・戦闘・ステータスボタンから操作します。
-3. STATUS画面からClefによる自動操作と作戦を設定できます。
-
-## コマンド
-- `/game`: パーティーゲームの入口（ルール確認と募集）
-""",
-}
-
 GAME_GUIDES["quiz"] = {
     "id": "quiz",
     "name": "クイズ大会",
@@ -1756,7 +1727,7 @@ GAME_GUIDES["nyokki"] = {
 """,
 }
 
-GAME_ORDER = ["jinrou", "wordwolf", "uno", "doubt", "ngword", "shiritori", "janken", "wordle", "shinkei", "babanuki", "guess", "flash", "minesweeper", "daifugo", "othello", "poker", "shogi", "chess", "dungeon", "quiz", "bingo", "majority", "onenight", "loveletter", "codenames", "twochoice", "thirtyone", "koikoi", "gomoku", "connect4", "sudoku", "game2048", "nonogram", "highlow", "justone", "ito", "insider", "gauge", "ruins", "hanabi", "hoshi", "liequiz", "cipher", "wirecut", "liardice", "mendou", "yotsuba", "nyokki"]
+GAME_ORDER = ["jinrou", "wordwolf", "uno", "doubt", "ngword", "shiritori", "janken", "wordle", "shinkei", "babanuki", "guess", "flash", "minesweeper", "daifugo", "othello", "poker", "shogi", "chess", "quiz", "bingo", "majority", "onenight", "loveletter", "codenames", "twochoice", "thirtyone", "koikoi", "gomoku", "connect4", "sudoku", "game2048", "nonogram", "highlow", "justone", "ito", "insider", "gauge", "ruins", "hanabi", "hoshi", "liequiz", "cipher", "wirecut", "liardice", "mendou", "yotsuba", "nyokki"]
 
 
 # ----------------------------------------------------------------------

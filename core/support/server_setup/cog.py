@@ -4,8 +4,7 @@ Slash の /setup コマンド登録は廃止済み。
   1. 認証: 付けるロール・自己紹介チャンネル・フォームの有効/無効（cogs/auth.py が使う）
   2. グローバルチャット: このチャンネルをつなぐ / 外す（cogs/globalchat.py の保存先をそのまま使う）
   3. ミュート管理ロール: muted.py が設定を保存できる場合だけ表示する
-  4. 国づくり: 参加する/しない・お知らせチャンネル・通知の量（core.support.guild_settings.nation_settings で読める）
-  5. まとめ: 設定内容と、機能ごとに Bot に足りない権限
+  4. まとめ: 設定内容と、機能ごとに Bot に足りない権限
 設定は core/support/guild_settings.py（Supabase の bot_kv。使えないときはローカルの JSON）に保存する。
 """
 from __future__ import annotations
@@ -20,7 +19,7 @@ from discord.ext import commands
 from core.channel_safety import is_hidden_channel
 from core.help.help.command_catalog import permission_label
 from core.support.emojis import BOOK, COIN, FAILED, GAME, GEAR, MUSIC, SUCCESS
-from core.support.guild_settings import NATION_SECTION, NOTIFY_LEVELS, NOTIFY_MAJOR, get_store, nation_settings
+from core.support.guild_settings import get_store
 from core.support.panel_v2 import as_panel_v2
 from core.support.localization import localization
 from core.support.panel_recovery.cog import build_panel
@@ -303,8 +302,7 @@ def _channel_missing(channel, me, names) -> list[str]:
     return missing
 
 
-def check_permissions(guild, channel, *, auth: dict, global_channel_ids=(), mute_supported: bool = True,
-                      nation: Optional[dict] = None) -> list[dict]:
+def check_permissions(guild, channel, *, auth: dict, global_channel_ids=(), mute_supported: bool = True) -> list[dict]:
     """機能ごとに、Bot に足りない権限を調べる。
 
     戻り値: [{"label": 機能名, "missing": [権限名(日本語)], "notes": [補足], "skipped": 未設定で確認しなかったか}]
@@ -359,16 +357,6 @@ def check_permissions(guild, channel, *, auth: dict, global_channel_ids=(), mute
     # ミュート
     if mute_supported:
         add("ミュート（/support）", _missing(guild_perms, ["manage_roles", "manage_channels"]))
-
-    # 国づくり
-    if nation is not None:
-        target = guild.get_channel(nation["channel_id"]) if nation.get("channel_id") else None
-        if not nation.get("enabled", True):
-            add("国づくり", skipped=True, notes=["参加していません"])
-        elif target is None:
-            add("国づくり", skipped=True, notes=["お知らせチャンネルが未設定です"])
-        else:
-            add("国づくり", _channel_missing(target, me, ["view_channel", "send_messages", "embed_links"]))
 
     # ボイス
     add("ボイス・音楽", _missing(guild_perms, ["connect", "speak"]))
