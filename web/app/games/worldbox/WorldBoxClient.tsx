@@ -15,6 +15,7 @@ import { WALK_SPEED, findFreeNear, stepMove } from "@/lib/worldbox/move";
 import { nightAmount, phaseAtTime } from "@/lib/worldbox/daynight";
 import { advanceWalkPhase, damp, moveLean, walkBob, walkSquashY } from "@/lib/worldbox/anim";
 import { SNAP_DISTANCE, predictPosition, type PresenceEntry } from "@/lib/worldbox/presence";
+import { TERRITORY_RADIUS, type NationRole, type NationView, type NationsResponse } from "@/lib/worldbox/nations";
 import { parseSave, serializeSave } from "@/lib/worldbox/save";
 import { chooseInitialSave } from "@/lib/worldbox/save-source";
 import { loadTextures } from "@/lib/worldbox/textures";
@@ -72,6 +73,36 @@ function texReady(img: HTMLImageElement | undefined): img is HTMLImageElement {
   return !!img && img.complete && img.naturalWidth > 0;
 }
 
+/** "#rrggbb" + alpha → rgba() 文字列。 */
+function hexA(hex: string, alpha: number): string {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+
+/** そのタイルを含む領地の国（描画用に線形探索。国の数は少ない前提）。 */
+function territoryAt(nations: NationView[], x: number, y: number): NationView | null {
+  for (const n of nations) {
+    if (Math.max(Math.abs(x - n.capital.x), Math.abs(y - n.capital.y)) <= TERRITORY_RADIUS) return n;
+  }
+  return null;
+}
+
+const ROLE_LABEL: Record<NationRole, string> = { king: "王", minister: "大臣", citizen: "国民" };
+const NATION_ERROR_LABEL: Record<string, string> = {
+  already_in_nation: "既に国に所属しています",
+  name_taken: "その国名は使われています",
+  no_free_tile: "首都を置ける空き地がありません",
+  invalid_name: "国名は1〜16文字です",
+  nation_not_found: "国が見つかりません",
+  not_in_nation: "国に所属していません",
+  king_must_transfer_or_disband: "国民がいる間、王は離脱できません",
+  unauthorized: "ログインが必要です",
+};
+
+const EMPTY_NATIONS: NationsResponse = { nations: [], me: null, playerNations: {}, loggedIn: false };
+
 export default function WorldBoxClient() {
   const { prefix } = useGamesNav();
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -81,6 +112,51 @@ export default function WorldBoxClient() {
   const [showMap, setShowMap] = useState(true);
   const showMapRef = useRef(true);
   showMapRef.current = showMap;
+  // 国家レイヤー（描画ループは ref、パネルは state で同じデータを見る）
+  const nationsRef = useRef<NationsResponse>(EMPTY_NATIONS);
+  const playerPosRef = useRef({ x: 64.5, y: 64.5 });
+  const [nationsUi, setNationsUi] = useState<NationsResponse>(EMPTY_NATIONS);
+  const [showNations, setShowNations] = useState(false);
+  const [nationName, setNationName] = useState("");
+  const [nationMsg, setNationMsg] = useState("");
+
+  const applyNationsData = (data: NationsResponse) => {
+    nationsRef.current = data;
+    setNationsUi(data);
+  };
+  const refreshNations = async () => {
+    try {
+      const res = await fetch("/api/worldbox/nations", { headers: { Accept: "application/json" } });
+      if (!res.ok) return;
+      applyNationsData((await res.json()) as NationsResponse);
+    } catch { /* 国家が読めなくても歩き続けられる */ }
+  };
+  const nationAction = async (body: Record<string, unknown>) => {
+    setNationMsg("");
+    try {
+      const res = await fetch("/api/worldbox/nations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) {
+        setNationMsg(NATION_ERROR_LABEL[data.error ?? ""] ?? "失敗しました");
+        return;
+      }
+      setNationName("");
+      await refreshNations();
+    } catch {
+      setNationMsg("失敗しました");
+    }
+  };
+
+  useEffect(() => {
+    void refreshNations();
+    const timer = window.setInterval(() => void refreshNations(), 15000);
+    return () => window.clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -285,6 +361,7 @@ export default function WorldBoxClient() {
       phase: number,
       speedRatio: number,
       name: string | null,
+      nationColor: string | null = null,
     ) => {
       const size = TILE * AVATAR_TILES;
       const bob = walkBob(phase) * TILE * 0.07 * speedRatio;
@@ -315,7 +392,59 @@ export default function WorldBoxClient() {
         c.strokeText(name, sx, ly);
         c.fillStyle = "#ffffff";
         c.fillText(name, sx, ly);
+        if (nationColor) {
+          const w = c.measureText(name).width;
+          c.fillStyle = nationColor;
+          c.fillRect(sx - w / 2, ly + 3, w, 2.5);
+        }
       }
+    };
+
+    // ---- 首都マーカー（石の櫓＋国の色の旗＋国名） ----
+    const drawCapital = (c: CanvasRenderingContext2D, sx: number, sy: number, nation: NationView) => {
+      c.fillStyle = "rgba(20,30,16,0.30)";
+      c.beginPath();
+      c.ellipse(sx, sy, TILE * 0.34, TILE * 0.11, 0, 0, Math.PI * 2);
+      c.fill();
+      const w = TILE * 0.52;
+      const h = TILE * 0.62;
+      const x0 = sx - w / 2;
+      const y0 = sy - h;
+      c.fillStyle = "#9aa0a6";
+      c.fillRect(x0, y0, w, h);
+      c.strokeStyle = "rgba(30,34,38,0.8)";
+      c.lineWidth = 1.5;
+      c.strokeRect(x0, y0, w, h);
+      // 胸壁
+      c.fillStyle = "#878d94";
+      const bw = w / 5;
+      for (let i = 0; i < 3; i++) c.fillRect(x0 + i * bw * 2, y0 - TILE * 0.10, bw, TILE * 0.10);
+      // 旗竿と旗
+      c.strokeStyle = "#4c4438";
+      c.lineWidth = 2;
+      c.beginPath();
+      c.moveTo(sx, y0 - TILE * 0.08);
+      c.lineTo(sx, y0 - TILE * 0.52);
+      c.stroke();
+      c.fillStyle = nation.color;
+      c.beginPath();
+      c.moveTo(sx, y0 - TILE * 0.52);
+      c.lineTo(sx + TILE * 0.34, y0 - TILE * 0.42);
+      c.lineTo(sx, y0 - TILE * 0.32);
+      c.closePath();
+      c.fill();
+      // 国名
+      c.font = "600 11px sans-serif";
+      c.textAlign = "center";
+      c.lineWidth = 3;
+      c.strokeStyle = "rgba(10,16,10,0.65)";
+      const ly = y0 - TILE * 0.62;
+      c.strokeText(nation.name, sx, ly);
+      c.fillStyle = "#ffffff";
+      c.fillText(nation.name, sx, ly);
+      const nw = c.measureText(nation.name).width;
+      c.fillStyle = nation.color;
+      c.fillRect(sx - nw / 2, ly + 3, nw, 2.5);
     };
 
     // ---- メインループ ----
@@ -355,6 +484,8 @@ export default function WorldBoxClient() {
       else if (player.vx > 0.2) player.face = 1;
       player.phase = advanceWalkPhase(player.phase, speed, dt);
       const speedRatio = Math.min(1, speed / WALK_SPEED);
+      playerPosRef.current.x = player.x;
+      playerPosRef.current.y = player.y;
 
       // カメラ（向き先読みつきのなめらか追従）
       const lookX = player.x + player.vx * 0.35;
@@ -415,16 +546,36 @@ export default function WorldBoxClient() {
             const inset = TILE * 0.05;
             ctx.drawImage(textures.leaves, sx + inset, sy + inset - TILE * 0.08, TILE - inset * 2, TILE - inset * 2);
           }
+          // 領地ティント（国色の薄塗り＋境界の強調）
+          const terr = territoryAt(nationsRef.current.nations, tx, ty);
+          if (terr) {
+            ctx.fillStyle = hexA(terr.color, 0.15);
+            ctx.fillRect(sx, sy, TILE + 1, TILE + 1);
+            ctx.fillStyle = hexA(terr.color, 0.6);
+            if (territoryAt(nationsRef.current.nations, tx, ty - 1) !== terr) ctx.fillRect(sx, sy, TILE + 1, 3);
+            if (territoryAt(nationsRef.current.nations, tx, ty + 1) !== terr) ctx.fillRect(sx, sy + TILE - 2, TILE + 1, 3);
+            if (territoryAt(nationsRef.current.nations, tx - 1, ty) !== terr) ctx.fillRect(sx, sy, 3, TILE + 1);
+            if (territoryAt(nationsRef.current.nations, tx + 1, ty) !== terr) ctx.fillRect(sx + TILE - 2, sy, 3, TILE + 1);
+          }
         }
+      }
+
+      // 首都マーカー
+      for (const n of nationsRef.current.nations) {
+        const csx = toScreenX(n.capital.x + 0.5);
+        const csy = toScreenY(n.capital.y + 1);
+        if (csx < -TILE * 2 || csy < -TILE * 2 || csx > cw + TILE * 2 || csy > ch + TILE * 2) continue;
+        drawCapital(ctx, csx, csy, n);
       }
 
       // プレイヤー群（y 順で奥行き感）
       const drawList: { y: number; draw: () => void }[] = [];
       for (const o of others.values()) {
+        const nationColor = nationsRef.current.playerNations[o.entry.id]?.color ?? null;
         drawList.push({
           y: o.ry,
           draw: () =>
-            drawAvatar(ctx, toScreenX(o.rx), toScreenY(o.ry), o.entry.face, o.phase, Math.min(1, Math.hypot(o.entry.vx, o.entry.vy) / WALK_SPEED), o.entry.name || null),
+            drawAvatar(ctx, toScreenX(o.rx), toScreenY(o.ry), o.entry.face, o.phase, Math.min(1, Math.hypot(o.entry.vx, o.entry.vy) / WALK_SPEED), o.entry.name || null, nationColor),
         });
       }
       drawList.push({
@@ -461,6 +612,16 @@ export default function WorldBoxClient() {
         if (mm && mctx) {
           mctx.clearRect(0, 0, mm.width, mm.height);
           mctx.drawImage(terrainCanvas, 0, 0);
+          // 領地と首都
+          for (const n of nationsRef.current.nations) {
+            mctx.fillStyle = hexA(n.color, 0.45);
+            mctx.fillRect(
+              n.capital.x - TERRITORY_RADIUS, n.capital.y - TERRITORY_RADIUS,
+              TERRITORY_RADIUS * 2 + 1, TERRITORY_RADIUS * 2 + 1,
+            );
+            mctx.fillStyle = n.color;
+            mctx.fillRect(n.capital.x - 1, n.capital.y - 1, 3, 3);
+          }
           mctx.fillStyle = "#ffffff";
           for (const o of others.values()) {
             mctx.fillRect(Math.floor(o.rx) - 1, Math.floor(o.ry) - 1, 2, 2);
@@ -557,7 +718,100 @@ export default function WorldBoxClient() {
         <button type="button" style={btn} onClick={() => setShowMap((v) => !v)} aria-pressed={showMap}>
           マップ{showMap ? "を隠す" : "を出す"}
         </button>
+        <button type="button" style={btn} onClick={() => setShowNations((v) => !v)} aria-pressed={showNations}>
+          国{showNations ? "を閉じる" : ""}
+        </button>
       </div>
+
+      {showNations && (
+        <div
+          style={{
+            maxWidth: 640, margin: "12px auto 0", padding: 14, borderRadius: 12,
+            border: "1px solid rgba(255,255,255,0.18)", background: "rgba(255,255,255,0.04)", textAlign: "left",
+          }}
+        >
+          {(() => {
+            const me = nationsUi.me;
+            const myNation = me ? nationsUi.nations.find((n) => n.id === me.nationId) ?? null : null;
+            if (me && myNation) {
+              return (
+                <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                  <span aria-hidden style={{ width: 12, height: 12, borderRadius: 3, background: myNation.color, display: "inline-block" }} />
+                  <strong>{myNation.name}</strong>
+                  <span>{ROLE_LABEL[me.role]}</span>
+                  <span className="muted">国民 {myNation.members}人</span>
+                  <span style={{ flex: 1 }} />
+                  <button
+                    type="button"
+                    style={btn}
+                    onClick={() => void nationAction({ action: "leave" })}
+                  >
+                    {me.role === "king" && myNation.members <= 1 ? "解散" : "離脱"}
+                  </button>
+                </div>
+              );
+            }
+            return (
+              <div>
+                {nationsUi.loggedIn && (
+                  <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+                    <input
+                      value={nationName}
+                      onChange={(e) => setNationName(e.target.value)}
+                      maxLength={24}
+                      placeholder="国名"
+                      aria-label="国名"
+                      style={{
+                        flex: 1, minHeight: 40, padding: "6px 10px", borderRadius: 10,
+                        border: "1px solid rgba(255,255,255,0.25)", background: "rgba(255,255,255,0.06)", color: "inherit",
+                      }}
+                    />
+                    <button
+                      type="button"
+                      style={btn}
+                      disabled={!nationName.trim()}
+                      onClick={() => void nationAction({ action: "found", name: nationName })}
+                    >
+                      建国
+                    </button>
+                  </div>
+                )}
+                {nationsUi.nations.length === 0 ? (
+                  <p className="muted" style={{ margin: 0 }}>まだ国はありません</p>
+                ) : (
+                  <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: 8 }}>
+                    {nationsUi.nations.map((n) => {
+                      const dist = Math.round(Math.hypot(
+                        n.capital.x + 0.5 - playerPosRef.current.x,
+                        n.capital.y + 0.5 - playerPosRef.current.y,
+                      ));
+                      return (
+                        <li key={n.id} style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                          <span aria-hidden style={{ width: 12, height: 12, borderRadius: 3, background: n.color, display: "inline-block" }} />
+                          <strong>{n.name}</strong>
+                          <span className="muted">{n.members}人 ・ {dist}タイル</span>
+                          <span style={{ flex: 1 }} />
+                          {nationsUi.loggedIn && (
+                            <button type="button" style={btn} onClick={() => void nationAction({ action: "join", nationId: n.id })}>
+                              参加
+                            </button>
+                          )}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+                {!nationsUi.loggedIn && (
+                  <p className="muted" style={{ margin: "10px 0 0", fontSize: 13 }}>建国・参加はログイン後</p>
+                )}
+              </div>
+            );
+          })()}
+          {nationMsg && (
+            <p role="status" style={{ margin: "10px 0 0" }}>{nationMsg}</p>
+          )}
+        </div>
+      )}
 
       <p className="muted" style={{ textAlign: "center", fontSize: 13, maxWidth: 860, margin: "14px auto 0" }}>
         PC: WASD・矢印キーで移動。タッチ: 画面左側のスティックで移動。
