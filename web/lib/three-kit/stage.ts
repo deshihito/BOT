@@ -141,6 +141,7 @@ export function createStage(container: HTMLElement, options: StageOptions = {}):
 
   let raf = 0;
   let disposed = false;
+  let frameErrorLogged = false;
   const animate = () => {
     if (disposed) return;
     raf = requestAnimationFrame(animate);
@@ -150,7 +151,16 @@ export function createStage(container: HTMLElement, options: StageOptions = {}):
     const frozen = now < freezeUntil;
     const dt = frozen ? 0 : rawDt;
     if (!frozen) elapsed += dt;
-    options.onFrame?.(dt, elapsed);
+    // onFrame の例外で描画まで止めない（チェスの疎配列走査で盤面が
+    // 真っ暗になる事故の再発防止）。例外は初回だけ記録する。
+    try {
+      options.onFrame?.(dt, elapsed);
+    } catch (err) {
+      if (!frameErrorLogged) {
+        frameErrorLogged = true;
+        console.error("three-kit: onFrame threw; rendering continues", err);
+      }
+    }
     const w = container.clientWidth || 1;
     const h = container.clientHeight || 1;
     const pr = renderer.getPixelRatio();
