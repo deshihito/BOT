@@ -49,6 +49,7 @@ export const LOBBY_SPRITE_SRC: Record<string, string> = {
   wall_stone: "/img/worldbox/lobby/wall_stone.png",
   fountain: "/img/worldbox/lobby/fountain.png",
   bulletin_board: "/img/worldbox/lobby/bulletin_board.png",
+  guild_board: "/img/worldbox/lobby/guild_board.png",
   warp_pad: "/img/worldbox/lobby/warp_pad.png",
   shop_counter: "/img/worldbox/lobby/shop_counter.png",
   display_case: "/img/worldbox/lobby/display_case.png",

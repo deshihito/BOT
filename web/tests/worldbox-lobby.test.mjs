@@ -141,9 +141,10 @@ test("lobby: オブジェクトに重なりが無く、全て壁・無効でな�
   assert.equal(lobby.blocked.size, solidTiles);
 });
 
-test("lobby: 6つのステーションが全て存在し、隣接で検出できる", () => {
+test("lobby: 7つのステーションが全て存在し、隣接で検出できる", () => {
   const cases = [
     ["board", 28, 16],
+    ["guild", 24, 16],
     ["bank", 34, 18],
     ["shop", 5, 21],
     ["casino", 44, 20],

@@ -891,17 +891,20 @@ test("クライアント: 国家 API・首都マーカーが配線され、領�
 });
 
 test("クライアント: 建国・参加はサーバー単位（国名の自由入力は無い）", () => {
+  // 建国・参加の UI はギルドボードの役職タブ（WorldBoxGuildBoardPanel）が home
   const client = fs.readFileSync(path.join(rootDir, "app/games/worldbox/WorldBoxClient.tsx"), "utf8");
-  assert.ok(!client.includes('placeholder="国名"'), "国名の自由入力が残っている");
-  assert.ok(!client.includes("nationName"), "国名の入力状態が残っている");
-  assert.ok(!client.includes('action: "found", name'), "建国で名前を送っている");
-  assert.ok(!client.includes('action: "join", nationId'), "参加が国 ID 指定のまま");
-  assert.ok(client.includes("建国できるサーバー"), "建国できるサーバーの一覧が無い");
-  assert.ok(client.includes("国があるサーバー"), "国があるサーバーの一覧が無い");
-  assert.ok(client.includes('action: "found", guildId'), "建国がサーバー指定でない");
-  assert.ok(client.includes('action: "join", guildId'), "参加がサーバー指定でない");
-  assert.ok(client.includes("guildsScopeRequired"), "再ログイン導線の分岐が無い");
-  assert.ok(client.includes("/api/auth/discord/authorize?next=/games/worldbox"), "再ログインリンクが無い");
+  const panel = fs.readFileSync(path.join(rootDir, "app/games/worldbox/WorldBoxGuildBoardPanel.tsx"), "utf8");
+  const ui = client + panel;
+  assert.ok(!ui.includes('placeholder="国名"'), "国名の自由入力が残っている");
+  assert.ok(!ui.includes("nationName"), "国名の入力状態が残っている");
+  assert.ok(!ui.includes('action: "found", name'), "建国で名前を送っている");
+  assert.ok(!ui.includes('action: "join", nationId'), "参加が国 ID 指定のまま");
+  assert.ok(panel.includes("建国できるサーバー"), "建国できるサーバーの一覧が無い");
+  assert.ok(panel.includes("国があるサーバー"), "国があるサーバーの一覧が無い");
+  assert.ok(panel.includes('action: "found", guildId'), "建国がサーバー指定でない");
+  assert.ok(panel.includes('action: "join", guildId'), "参加がサーバー指定でない");
+  assert.ok(panel.includes("guildsScopeRequired"), "再ログイン導線の分岐が無い");
+  assert.ok(panel.includes("/api/auth/discord/authorize?next=/games/worldbox"), "再ログインリンクが無い");
 });
 
 test("クライアント: 建築モード・建物描画・繁栄度が配線されている", () => {
@@ -914,8 +917,9 @@ test("クライアント: 建築モード・建物描画・繁栄度が配線さ
   assert.ok(client.includes('action: "build"'), "建築アクションを送っていない");
   assert.ok(client.includes('action: "demolish"'), "取り壊しアクションを送っていない");
   assert.ok(client.includes("取り壊し"), "取り壊し UI が無い");
-  assert.ok(client.includes("繁栄度"), "繁栄度の表示が無い");
-  assert.ok(client.includes("prosperity - a.prosperity") || client.includes("b.prosperity - a.prosperity"), "国リストが繁栄度順でない");
+  const panel = fs.readFileSync(path.join(rootDir, "app/games/worldbox/WorldBoxGuildBoardPanel.tsx"), "utf8");
+  assert.ok(panel.includes("繁栄度"), "繁栄度の表示が無い");
+  assert.ok(panel.includes("prosperity - a.prosperity") || panel.includes("b.prosperity - a.prosperity"), "国リストが繁栄度順でない");
   // 建物は移動の当たり判定に入る（空間でマップと固体集合を切り替える）
   assert.ok(client.includes("stepMove(activeMap(), player, vel, dt, activeBlocked(), { swim: space === \"world\" })"), "建物が当たり判定に入っていない");
   assert.ok(client.includes("blockedRef.current"), "ワールドの固体集合に建物が入っていない");
