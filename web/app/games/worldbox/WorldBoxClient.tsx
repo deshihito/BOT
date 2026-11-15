@@ -6,22 +6,23 @@
 // 純粋ロジックは lib/worldbox/ に分離（生成・物理・在庫・敵・体力・工作・崩落・保存）。
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
-import { AIR, BEDROCK, BLOCKS, COAL_ORE, COPPER_ORE, DIRT, GRASS, LEAVES, SAND, STONE, WOOD, canDigBlock, dropOf } from "@/lib/worldbox/blocks";
-import { generateWorld, getTile, findSpawn, WORLD_H, WORLD_W, type World } from "@/lib/worldbox/worldgen";
+import { AIR, BEDROCK, BLOCKS, COAL_ORE, COPPER_ORE, DIRT, GRASS, LEAVES, SAND, STONE, TORCH, WOOD, WORKBENCH, canDigBlock, dropOf } from "@/lib/worldbox/blocks";
+import { generateWorld, getTile, findSpawn, WORLD_H, WORLD_SEED, WORLD_W, type World } from "@/lib/worldbox/worldgen";
 import { createBody, stepPlayer, PLAYER_H, PLAYER_W, type PlayerBody } from "@/lib/worldbox/physics";
-import { digTile, placeTile, withinReach } from "@/lib/worldbox/rules";
+import { crackStage, digTile, placeTile, placeTorch, pressModeFor, withinReach, type PressMode } from "@/lib/worldbox/rules";
+import { buildLightField, lightLevelAt, type LightField } from "@/lib/worldbox/light";
 import { SLOT_COUNT, addItem, canAdd, cloneInventory, countOf, createInventory, isInventoryFull, type InventoryV2, type InvSlot } from "@/lib/worldbox/inventory";
 import { attackDamageOf, canDigWith, digSecondsFor, isTool, itemDef, requiredTier, tierOfTool, COPPER_INGOT, COPPER_PICKAXE, DEEP_STONE_Y, STONE_PICKAXE, SWORD, WOODEN_PICKAXE } from "@/lib/worldbox/items";
 import { advancePhase, isNightPhase, nightAmount } from "@/lib/worldbox/daynight";
 import { CONTACT_DAMAGE, ENEMY_H, ENEMY_MAX_HP, ENEMY_W, SPAWN_INTERVAL_SEC, attackEnemy, burnEnemiesAtDawn, enemyTouches, rollsHeartDrop, stepEnemy, trySpawnEnemy, type Enemy } from "@/lib/worldbox/enemies";
-import { HEART_HEAL, createPickup, pickupTouches, stepPickup, type Pickup } from "@/lib/worldbox/pickups";
+import { HEART_HEAL, PICKUP_SIZE, createPickup, pickupTouches, stepPickup, type Pickup } from "@/lib/worldbox/pickups";
 import { PLAYER_MAX_HP, createHealth, damagePlayer, deathDrops, fallDamageFor, healPlayer, isDead, type HealthState } from "@/lib/worldbox/health";
 import { RECIPES, SMELT_SECONDS, applyCraft, canStartSmelt, checkCraft, collectSmelt, createFurnace, startSmelt, tickFurnace, type Furnace } from "@/lib/worldbox/craft";
 import { FALL_BLOCK_DAMAGE, settleAfterChange, stepFalling, type FallingBlock } from "@/lib/worldbox/collapse";
 import { parseSave, serializeSave, type WorldBoxState } from "@/lib/worldbox/save";
 import { chooseInitialSave } from "@/lib/worldbox/save-source";
 import { TEXTURE_DATA, loadTextures } from "@/lib/worldbox/textures";
-import { sfxPlace, sfxTap } from "@/lib/sfx";
+import { sfxHit, sfxKo, sfxPlace, sfxPop, sfxTap, sfxTick } from "@/lib/sfx";
 import { useGamesNav } from "../GamesShell";
 
 const SAVE_KEY = "ago-worldbox-save-v1";
@@ -152,6 +153,27 @@ function ItemIcon({ id, size = 26 }: { id: number; size?: number }) {
       </svg>
     );
   }
+  if (id === TORCH) {
+    // 松明（棒＋炎）
+    return (
+      <svg viewBox="0 0 24 24" width={size} height={size} aria-hidden style={{ display: "block", margin: "0 auto" }}>
+        <path d="M11 11 L13 11 L12.7 21 L11.3 21 Z" fill="#8a5a2b" />
+        <path d="M12 2.5 C14.5 5.5 15.5 7.5 15.5 9.8 A3.5 3.5 0 1 1 8.5 9.8 C8.5 7.5 9.5 5.5 12 2.5 Z" fill="#ff9d2e" />
+        <path d="M12 6.5 C13.2 8.2 13.7 9.2 13.7 10.4 A1.7 1.7 0 1 1 10.3 10.4 C10.3 9.2 10.8 8.2 12 6.5 Z" fill="#ffd76a" />
+      </svg>
+    );
+  }
+  if (id === WORKBENCH) {
+    // 作業台（天板＋脚）
+    return (
+      <svg viewBox="0 0 24 24" width={size} height={size} aria-hidden style={{ display: "block", margin: "0 auto" }}>
+        <rect x="3" y="7" width="18" height="4.5" rx="1" fill="#a9743f" stroke="#7a5230" strokeWidth="1" />
+        <rect x="5" y="11.5" width="2.6" height="8.5" fill="#7a5230" />
+        <rect x="16.4" y="11.5" width="2.6" height="8.5" fill="#7a5230" />
+        <path d="M7 9.2 L12 9.2" stroke="rgba(255,255,255,0.45)" strokeWidth="1.2" strokeLinecap="round" />
+      </svg>
+    );
+  }
   const texKey = TEXTURE_KEY_BY_BLOCK[id];
   if (texKey && TEXTURE_DATA[texKey]) {
     return (
@@ -192,12 +214,27 @@ export default function WorldBoxClient() {
   const fallingRef = useRef<FallingBlock[]>([]);
   const furnaceRef = useRef<Furnace>(createFurnace());
   const poofsRef = useRef<{ x: number; y: number; at: number }[]>([]);
+  const lightRef = useRef<LightField | null>(null);
+  const lightDirtyRef = useRef(true);
+  /** ブロック破砕・回収の破片パーティクル（タイル座標、life は残り秒数）。 */
+  const particlesRef = useRef<{ x: number; y: number; vx: number; vy: number; life: number; maxLife: number; blockId: number; heart: boolean }[]>([]);
+  const hitstopUntilRef = useRef(0);
+  /** 置いた直後のタイルの「ポップ」演出（キー "x,y" → 時刻）。 */
+  const placedPopRef = useRef(new Map<string, number>());
+  /** 作業台タップ判定（押した時刻と場所）。短く離すと「つくる」が開く。 */
+  const benchTapRef = useRef<{ x: number; y: number; at: number } | null>(null);
+  /** 掘りヒビの段階（音を鳴らすための前回値）。 */
+  const digStageRef = useRef(0);
   const texturesRef = useRef<Record<string, HTMLImageElement> | null>(null);
   const charImgRef = useRef<{ ago: HTMLImageElement; jinrou: HTMLImageElement } | null>(null);
   const enemyHitRef = useRef(new Map<number, number>());
   const selectedRef = useRef(0);
   const keysRef = useRef({ left: false, right: false, jump: false, fastFall: false });
-  const touchRef = useRef({ jump: false, dig: false });
+  const touchRef = useRef({ jump: false, dig: false, place: false });
+  /** プレスの操作モード（押し始めた対象で固定。離すまで変わらない）。 */
+  const pressModeRef = useRef<PressMode | null>(null);
+  /** 設置モードで最後に処理したタイル（スワイプ軌跡の補間用）。 */
+  const lastPlaceRef = useRef<{ tx: number; ty: number } | null>(null);
   const digKeyRef = useRef(false);
   const pointerRef = useRef<{ down: boolean; pointerId: number; tx: number; ty: number }>({ down: false, pointerId: -1, tx: -1, ty: -1 });
   const joyRef = useRef<{ active: boolean; pointerId: number; ox: number; oy: number; dx: number; dy: number }>({
@@ -287,16 +324,18 @@ export default function WorldBoxClient() {
       dayRef.current = state.dayPhase;
       seedRef.current = state.seed;
     } else {
-      const seed = (Math.floor(Math.random() * 2 ** 31) + 1) >>> 0;
-      const world = generateWorld(seed);
+      // 世界は全員共通の固定シード1つだけ（ランダムシードは作らない）。
+      // 「新しいワールド」は地形を変えず、進行（所持品・位置・体力）だけを戻す。
+      const world = generateWorld(WORLD_SEED);
       worldRef.current = world;
       invRef.current = createInventory();
       const spawn = findSpawn(world);
       bodyRef.current = createBody(spawn.x + 0.1, spawn.y + 2 - PLAYER_H);
       dayRef.current = 0.3;
-      seedRef.current = seed;
+      seedRef.current = WORLD_SEED;
       dirtyRef.current = true;
     }
+    lightDirtyRef.current = true;
     setSeedShown(seedRef.current);
     syncHud();
   };
@@ -349,10 +388,29 @@ export default function WorldBoxClient() {
       });
   };
 
+  /** ブロック破砕・回収の破片を散らす（テクスチャの小片、重力で落ちて消える）。 */
+  const spawnParticles = (cx: number, cy: number, blockId: number, heart: boolean, count: number) => {
+    for (let i = 0; i < count; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const speed = 1.2 + Math.random() * 2.6;
+      particlesRef.current.push({
+        x: cx + (Math.random() - 0.5) * 0.5,
+        y: cy + (Math.random() - 0.5) * 0.5,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed - 2.2,
+        life: 0.4,
+        maxLife: 0.4,
+        blockId,
+        heart,
+      });
+    }
+  };
+
   /** 敵を倒したときの処理（消滅・煙・ハートドロップ）。 */
   const killEnemy = (e: Enemy, now: number) => {
     enemiesRef.current = enemiesRef.current.filter((o) => o.id !== e.id);
     poofsRef.current.push({ x: e.x, y: e.y, at: now });
+    sfxKo();
     if (rollsHeartDrop(Math.random)) {
       pickupsRef.current.push(createPickup("heart", 0, 1, e.x + 0.2, e.y));
     }
@@ -394,12 +452,18 @@ export default function WorldBoxClient() {
       const world = worldRef.current;
       const body = bodyRef.current;
       if (!world || !body) return;
-      const dt = Math.min(0.05, (now - last) / 1000);
+      const rawDt = Math.min(0.05, (now - last) / 1000);
       last = now;
+      // ヒットストップ中はシミュレーションだけを止める（描画は続く）
+      const dt = now < hitstopUntilRef.current ? 0 : rawDt;
+      // 光フィールドはタイルが変わったフレームだけ作り直す
+      if (lightDirtyRef.current) {
+        lightRef.current = buildLightField(world);
+        lightDirtyRef.current = false;
+      }
       gameTimeRef.current += dt;
       const gt = gameTimeRef.current;
       dayRef.current = advancePhase(dayRef.current, dt);
-      const night = isNightPhase(dayRef.current);
 
       // ---- 入力（キーボード or ジョイスティック） ----
       const joy = joyRef.current;
@@ -414,6 +478,8 @@ export default function WorldBoxClient() {
         right: keysRef.current.right,
         jump: keysRef.current.jump || touchRef.current.jump,
         fastFall: keysRef.current.fastFall || stickFastFall,
+        // one-way の上での下入力はすり抜け（キーボードの下キー／スティック下倒し共通）
+        dropThrough: keysRef.current.fastFall || stickFastFall,
         moveX,
       };
       // 物理は2サブステップで安定させる。落下ダメージはサブステップごとに拾う
@@ -421,7 +487,10 @@ export default function WorldBoxClient() {
         stepPlayer(world, body, input, dt / 2);
         if (body.landedFall > 0) {
           const dmg = fallDamageFor(body.landedFall);
-          if (dmg > 0 && damagePlayer(healthRef.current, dmg, gt)) syncHud();
+          if (dmg > 0 && damagePlayer(healthRef.current, dmg, gt)) {
+            sfxHit(2);
+            syncHud();
+          }
         }
       }
       if (input.left || input.right || (moveX !== undefined && Math.abs(moveX) > 0.2)) walkPhaseRef.current += dt * 10;
@@ -439,14 +508,17 @@ export default function WorldBoxClient() {
       attackCdRef.current -= dt;
       placeCooldownRef.current -= dt;
 
-      // ---- 敵: 出現・移動・燃焼・接触 ----
+      // ---- 敵: 出現（暗さベース）・移動・燃焼・接触 ----
       spawnTimerRef.current -= dt;
-      if (night && spawnTimerRef.current <= 0) {
+      if (spawnTimerRef.current <= 0) {
         spawnTimerRef.current = SPAWN_INTERVAL_SEC;
-        const spawned = trySpawnEnemy(world, dayRef.current, { x: body.x, y: body.y }, enemiesRef.current.length, Math.random);
-        if (spawned) enemiesRef.current.push(spawned);
+        const field = lightRef.current;
+        if (field) {
+          const spawned = trySpawnEnemy(world, field, dayRef.current, { x: body.x, y: body.y }, enemiesRef.current.length, Math.random);
+          if (spawned) enemiesRef.current.push(spawned);
+        }
       }
-      const burned = burnEnemiesAtDawn(enemiesRef.current, dayRef.current, dt);
+      const burned = lightRef.current ? burnEnemiesAtDawn(world, lightRef.current, enemiesRef.current, dayRef.current, dt) : [];
       if (burned.length > 0) {
         for (const id of burned) {
           const e = enemiesRef.current.find((o) => o.id === id);
@@ -461,6 +533,7 @@ export default function WorldBoxClient() {
           if (damagePlayer(healthRef.current, CONTACT_DAMAGE, gt)) {
             body.kx = (centerX < e.x + 0.45 ? -1 : 1) * 7;
             body.vy = Math.min(body.vy, -5.5);
+            sfxHit(2);
             syncHud();
           }
         }
@@ -492,7 +565,8 @@ export default function WorldBoxClient() {
       // ---- 掘る ----
       let target: { x: number; y: number } | null = null;
       if (!attacked) {
-        if (pointerRef.current.down) {
+        if (pointerRef.current.down && pressModeRef.current === "dig") {
+          // 採掘モードで固定したプレスだけが掘る（ドラッグで隣へ移っても連続採掘）
           target = { x: pointerRef.current.tx, y: pointerRef.current.ty };
         } else if (digKeyRef.current || touchRef.current.dig) {
           const frontX = body.face > 0 ? Math.floor(body.x + PLAYER_W + 0.2) : Math.floor(body.x - 0.2);
@@ -506,6 +580,7 @@ export default function WorldBoxClient() {
         }
       }
       let dug = false;
+      if (!digRef.current) digStageRef.current = 0;
       gatedRef.current = null;
       if (target) {
         const id = getTile(world, target.x, target.y);
@@ -523,15 +598,27 @@ export default function WorldBoxClient() {
               digRef.current = { x: target.x, y: target.y, progress: 0 };
             }
             digRef.current.progress += dt / digSecondsFor(id, target.y, toolId);
+            // ヒビが深くなるたびに小さな掘り音
+            const stage = crackStage(digRef.current.progress);
+            if (stage > digStageRef.current) {
+              digStageRef.current = stage;
+              sfxTick();
+            }
             if (digRef.current.progress >= 1) {
-              if (digTile(world, invRef.current, target.x, target.y) !== null) {
-                sfxTap();
+              const dugId = digTile(world, invRef.current, target.x, target.y);
+              if (dugId !== null) {
+                // 破砕: 音＋破片＋ごく短いヒットストップ
+                sfxHit(1);
+                hitstopUntilRef.current = now + 40;
+                spawnParticles(target.x + 0.5, target.y + 0.5, dugId, false, 8);
                 dirtyRef.current = true;
+                lightDirtyRef.current = true;
                 dug = true;
                 // 支えを失った緩いブロックが崩落する
                 fallingRef.current.push(...settleAfterChange(world, target.x, target.y));
               }
               digRef.current = null;
+              digStageRef.current = 0;
             }
           }
         } else {
@@ -541,18 +628,43 @@ export default function WorldBoxClient() {
         digRef.current = null;
       }
 
-      // ---- 置く（ポインタを押している間、空セルへ連続設置） ----
-      if (pointerRef.current.down && !dug && !attacked && placeCooldownRef.current <= 0) {
-        const { tx, ty } = pointerRef.current;
+      // ---- 置く（設置モードで固定したプレスだけ。スワイプの軌跡に沿って連続設置） ----
+      if (pointerRef.current.down && pressModeRef.current === "place" && !attacked) {
         const slot = invRef.current.slots[selectedRef.current];
-        if (slot && BLOCKS[slot.id]?.placeable && getTile(world, tx, ty) === AIR && withinReach(centerX, centerY, tx, ty)) {
-          if (placeTile(world, invRef.current, tx, ty, slot.id, playerRect)) {
+        if (slot && (slot.id === TORCH || BLOCKS[slot.id]?.placeable) && countOf(invRef.current, slot.id) > 0) {
+          const from = lastPlaceRef.current ?? { tx: pointerRef.current.tx, ty: pointerRef.current.ty };
+          const to = { tx: pointerRef.current.tx, ty: pointerRef.current.ty };
+          // 前フレームの位置から今の位置までを補間し、間のセルにも置く（速いスワイプでも隙間を作らない）
+          const steps = Math.max(Math.abs(to.tx - from.tx), Math.abs(to.ty - from.ty));
+          let placedAny = false;
+          for (let i = 0; i <= steps; i++) {
+            const tx = Math.round(from.tx + ((to.tx - from.tx) * i) / Math.max(1, steps));
+            const ty = Math.round(from.ty + ((to.ty - from.ty) * i) / Math.max(1, steps));
+            if (getTile(world, tx, ty) !== AIR || !withinReach(centerX, centerY, tx, ty)) continue;
+            const placed =
+              slot.id === TORCH
+                ? placeTorch(world, invRef.current, tx, ty)
+                : placeTile(world, invRef.current, tx, ty, slot.id, playerRect);
+            if (placed) {
+              placedAny = true;
+              placedPopRef.current.set(`${tx},${ty}`, now);
+              fallingRef.current.push(...settleAfterChange(world, tx, ty));
+              if (countOf(invRef.current, slot.id) <= 0) break;
+            }
+          }
+          if (placedAny) {
             sfxPlace();
             dirtyRef.current = true;
-            placeCooldownRef.current = 0.22;
-            fallingRef.current.push(...settleAfterChange(world, tx, ty));
+            lightDirtyRef.current = true;
           }
+          lastPlaceRef.current = to;
         }
+      }
+
+      // タッチの「置く」長押し: 向いている方向へ連続設置（掘る側には化けない）
+      if (touchRef.current.place && placeCooldownRef.current <= 0) {
+        placeFacing();
+        placeCooldownRef.current = 0.22;
       }
 
       // ---- 崩落（落下ブロックの進行・着地・潰し） ----
@@ -562,10 +674,16 @@ export default function WorldBoxClient() {
           ...enemiesRef.current.map((e) => ({ key: `enemy:${e.id}`, x: e.x, y: e.y, w: ENEMY_W, h: ENEMY_H })),
         ];
         const events = stepFalling(world, fallingRef.current, dt, targets);
-        if (events.landed.length > 0) dirtyRef.current = true;
+        if (events.landed.length > 0) {
+          dirtyRef.current = true;
+          lightDirtyRef.current = true;
+        }
         for (const crush of events.crushed) {
           if (crush.targetKey === "player") {
-            if (damagePlayer(healthRef.current, FALL_BLOCK_DAMAGE, gt)) syncHud();
+            if (damagePlayer(healthRef.current, FALL_BLOCK_DAMAGE, gt)) {
+              sfxHit(2);
+              syncHud();
+            }
           } else {
             const id = Number(crush.targetKey.slice("enemy:".length));
             const e = enemiesRef.current.find((o) => o.id === id);
@@ -581,12 +699,16 @@ export default function WorldBoxClient() {
         if (p.kind === "heart") {
           if (healPlayer(healthRef.current, HEART_HEAL) > 0) {
             pickupsRef.current = pickupsRef.current.filter((o) => o.id !== p.id);
+            sfxPop();
+            spawnParticles(p.x + PICKUP_SIZE / 2, p.y + PICKUP_SIZE / 2, p.blockId, true, 4);
             syncHud();
           }
         } else {
           const added = addItem(invRef.current, p.blockId, p.count);
           if (added >= p.count) {
             pickupsRef.current = pickupsRef.current.filter((o) => o.id !== p.id);
+            sfxPop();
+            spawnParticles(p.x + PICKUP_SIZE / 2, p.y + PICKUP_SIZE / 2, p.blockId, false, 4);
             dirtyRef.current = true;
           } else if (added > 0) {
             p.count -= added;
@@ -600,6 +722,23 @@ export default function WorldBoxClient() {
 
       // ---- 死亡 ----
       if (isDead(healthRef.current)) handleDeath();
+
+      // ---- パーティクル更新 ----
+      if (particlesRef.current.length > 0) {
+        const next: typeof particlesRef.current = [];
+        for (const p of particlesRef.current) {
+          p.life -= dt;
+          if (p.life <= 0) continue;
+          p.vy = Math.min(14, p.vy + 22 * dt);
+          p.x += p.vx * dt;
+          p.y += p.vy * dt;
+          next.push(p);
+        }
+        particlesRef.current = next;
+      }
+      for (const [k, at] of placedPopRef.current) {
+        if (now - at > 200) placedPopRef.current.delete(k);
+      }
 
       draw(now);
 
@@ -716,16 +855,22 @@ export default function WorldBoxClient() {
     const body = bodyRef.current;
     if (!world || !body) return;
     const slot = invRef.current.slots[selectedRef.current];
-    if (!slot || !BLOCKS[slot.id]?.placeable) return;
+    if (!slot || (slot.id !== TORCH && !BLOCKS[slot.id]?.placeable)) return;
     const frontX = body.face > 0 ? Math.floor(body.x + PLAYER_W + 0.2) : Math.floor(body.x - 0.2);
     const centerX = body.x + PLAYER_W / 2;
     const centerY = body.y + PLAYER_H / 2;
     const rows = [Math.floor(body.y + 0.9), Math.floor(body.y + PLAYER_H - 0.1), Math.floor(body.y + 0.2)];
     for (const ty of rows) {
       if (getTile(world, frontX, ty) === AIR && withinReach(centerX, centerY, frontX, ty)) {
-        if (placeTile(world, invRef.current, frontX, ty, slot.id, { x: body.x, y: body.y, w: PLAYER_W, h: PLAYER_H })) {
+        const placed =
+          slot.id === TORCH
+            ? placeTorch(world, invRef.current, frontX, ty)
+            : placeTile(world, invRef.current, frontX, ty, slot.id, { x: body.x, y: body.y, w: PLAYER_W, h: PLAYER_H });
+        if (placed) {
           sfxPlace();
           dirtyRef.current = true;
+          lightDirtyRef.current = true;
+          placedPopRef.current.set(`${frontX},${ty}`, performance.now());
           fallingRef.current.push(...settleAfterChange(world, frontX, ty));
           syncHud();
           return;
@@ -791,13 +936,20 @@ export default function WorldBoxClient() {
       for (let tx = x0; tx <= x1; tx++) {
         const id = getTile(world, tx, ty);
         if (id === AIR) continue;
-        drawBlock(ctx, id, tx, ty, (tx - camX) * tilePx, (ty - camY) * tilePx, tilePx);
+        // 置いた直後のタイルは少し膨らんで跳ねる（ポップ）
+        const popAt = placedPopRef.current.get(`${tx},${ty}`);
+        const pop = popAt !== undefined && now - popAt < 130 ? 1 + 0.16 * (1 - (now - popAt) / 130) : 1;
+        // 隙間対策: 位置をピクセルへスナップし、1px重ねて描く
+        // （カメラの小数オフセットや反転描画でブロック間に継ぎ目を作らない）
+        const px = Math.round((tx - camX) * tilePx);
+        const py = Math.round((ty - camY) * tilePx);
+        drawBlock(ctx, id, tx, ty, px, py, tilePx + 1, pop);
       }
     }
 
-    // 落下中のブロック
+    // 落下中のブロック（動きは滑らかなまま、大きさだけ1px重ねる）
     for (const f of fallingRef.current) {
-      drawBlock(ctx, f.blockId, f.x, Math.floor(f.y), (f.x - camX) * tilePx, (f.y - camY) * tilePx, tilePx);
+      drawBlock(ctx, f.blockId, f.x, Math.floor(f.y), (f.x - camX) * tilePx, (f.y - camY) * tilePx, tilePx + 1);
     }
 
     // 拾い物
@@ -830,6 +982,29 @@ export default function WorldBoxClient() {
           ctx.font = `700 ${Math.max(10, tilePx * 0.34)}px sans-serif`;
           ctx.textAlign = "right";
           ctx.fillText(String(p.count), px + s, py + s);
+        }
+      }
+    }
+
+    // 暗さ（光フィールドからタイルごとに引く。近傍平均で境目を滑らかにする）
+    // キャラは暗くしない（暗がりでも自分と敵は見える、操作性優先）
+    const field = lightRef.current;
+    if (field) {
+      const phase = dayRef.current;
+      for (let ty = y0; ty <= y1; ty++) {
+        for (let tx = x0; tx <= x1; tx++) {
+          const l =
+            (lightLevelAt(field, world, tx, ty, phase) * 2 +
+              lightLevelAt(field, world, tx - 1, ty, phase) +
+              lightLevelAt(field, world, tx + 1, ty, phase) +
+              lightLevelAt(field, world, tx, ty - 1, phase) +
+              lightLevelAt(field, world, tx, ty + 1, phase)) /
+            6;
+          const a = (1 - l) * 0.86;
+          if (a > 0.02) {
+            ctx.fillStyle = `rgba(5,7,26,${a.toFixed(3)})`;
+            ctx.fillRect((tx - camX) * tilePx - 0.5, (ty - camY) * tilePx - 0.5, tilePx + 1, tilePx + 1);
+          }
         }
       }
     }
@@ -869,32 +1044,72 @@ export default function WorldBoxClient() {
           ctx.lineTo(px + tilePx * 0.25, py + tilePx * 0.75);
           ctx.stroke();
         } else if (t.progress > 0) {
-          ctx.strokeStyle = `rgba(20,16,8,${0.35 + t.progress * 0.5})`;
+          // ヒビは4段階: 段階が上がるごとに線の組が増える
+          const stage = crackStage(t.progress);
+          ctx.strokeStyle = "rgba(20,16,8,0.78)";
           ctx.lineWidth = 1.6;
-          const p = t.progress;
           ctx.beginPath();
-          ctx.moveTo(px + tilePx * 0.15, py + tilePx * 0.2);
-          ctx.lineTo(px + tilePx * (0.3 + p * 0.3), py + tilePx * 0.5);
-          ctx.lineTo(px + tilePx * 0.25, py + tilePx * 0.85);
-          ctx.moveTo(px + tilePx * 0.85, py + tilePx * 0.15);
-          ctx.lineTo(px + tilePx * (0.7 - p * 0.25), py + tilePx * 0.55);
-          ctx.lineTo(px + tilePx * 0.8, py + tilePx * 0.9);
+          const line = (ax: number, ay: number, bx: number, by: number) => {
+            ctx.moveTo(px + tilePx * ax, py + tilePx * ay);
+            ctx.lineTo(px + tilePx * bx, py + tilePx * by);
+          };
+          if (stage >= 1) {
+            line(0.5, 0.3, 0.44, 0.52);
+            line(0.44, 0.52, 0.56, 0.68);
+          }
+          if (stage >= 2) {
+            line(0.44, 0.52, 0.28, 0.62);
+            line(0.56, 0.68, 0.74, 0.78);
+            line(0.5, 0.3, 0.66, 0.22);
+          }
+          if (stage >= 3) {
+            line(0.28, 0.62, 0.2, 0.86);
+            line(0.66, 0.22, 0.8, 0.42);
+            line(0.74, 0.78, 0.68, 0.95);
+            line(0.44, 0.52, 0.4, 0.34);
+          }
+          if (stage >= 4) {
+            line(0.2, 0.86, 0.38, 0.92);
+            line(0.8, 0.42, 0.95, 0.5);
+            line(0.4, 0.34, 0.22, 0.2);
+            line(0.56, 0.68, 0.5, 0.9);
+            line(0.3, 0.1, 0.5, 0.3);
+          }
           ctx.stroke();
         }
       }
+    }
+
+    // 破片パーティクル（壊したブロックの欠片・回収の欠片）
+    for (const p of particlesRef.current) {
+      const px = (p.x - camX) * tilePx;
+      const py = (p.y - camY) * tilePx;
+      const s = Math.max(3, tilePx * 0.22);
+      ctx.save();
+      ctx.globalAlpha = Math.max(0, p.life / p.maxLife);
+      if (p.heart) {
+        ctx.fillStyle = "#e5484d";
+        ctx.fillRect(px, py, s, s);
+      } else {
+        const texKey = TEXTURE_KEY_BY_BLOCK[p.blockId];
+        const tex = texKey ? texturesRef.current?.[texKey] : undefined;
+        if (texReady(tex)) {
+          ctx.drawImage(tex, px, py, s, s);
+        } else {
+          const def = BLOCKS[p.blockId];
+          ctx.fillStyle = def?.colorDark ?? "#6e6e73";
+          ctx.fillRect(px, py, s, s);
+          ctx.fillStyle = def?.color ?? "#9a9aa0";
+          ctx.fillRect(px, py, s, s * 0.55);
+        }
+      }
+      ctx.restore();
     }
 
     // プレイヤー（標準AGOキャラ）。無敵時間中は点滅させる
     const invuln = gameTimeRef.current < healthRef.current.invulnUntil;
     if (!invuln || Math.floor(now / 90) % 2 === 0) {
       drawPlayer(ctx, (body.x - camX) * tilePx, (body.y - camY) * tilePx, tilePx, body.face, walkPhaseRef.current, body.onGround, now);
-    }
-
-    // 夜の暗さ
-    const night = nightAmount(dayRef.current);
-    if (night > 0.02) {
-      ctx.fillStyle = `rgba(6,8,32,${night * 0.42})`;
-      ctx.fillRect(0, 0, vw, vh);
     }
 
     // ジョイスティック（タッチ中だけ表示）
@@ -959,9 +1174,47 @@ export default function WorldBoxClient() {
     }
   };
 
-  const drawBlock = (ctx: CanvasRenderingContext2D, id: number, tx: number, ty: number, px: number, py: number, s: number) => {
+  const drawBlock = (ctx: CanvasRenderingContext2D, id: number, tx: number, ty: number, px: number, py: number, s: number, pop = 1) => {
     const def = BLOCKS[id];
     if (!def) return;
+    if (pop !== 1) {
+      const ns = s * pop;
+      px -= (ns - s) / 2;
+      py -= (ns - s) / 2;
+      s = ns;
+    }
+    if (id === TORCH) {
+      // 松明: 棒＋炎。背景は塗らない（非固体）。ほのかな光は暗さオーバーレイ側で表現される
+      ctx.fillStyle = "rgba(255,176,66,0.16)";
+      ctx.beginPath();
+      ctx.arc(px + s / 2, py + s * 0.36, s * 0.52, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "#8a5a2b";
+      ctx.fillRect(px + s * 0.44, py + s * 0.42, s * 0.12, s * 0.52);
+      ctx.fillStyle = "#ff9d2e";
+      ctx.beginPath();
+      ctx.ellipse(px + s / 2, py + s * 0.32, s * 0.16, s * 0.24, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "#ffd76a";
+      ctx.beginPath();
+      ctx.ellipse(px + s / 2, py + s * 0.38, s * 0.08, s * 0.13, 0, 0, Math.PI * 2);
+      ctx.fill();
+      return;
+    }
+    if (id === WORKBENCH) {
+      // 作業台: 天板＋脚（下は空いた足場として描く）
+      ctx.fillStyle = def.colorDark;
+      ctx.fillRect(px + s * 0.08, py + s * 0.34, s * 0.1, s * 0.6);
+      ctx.fillRect(px + s * 0.82, py + s * 0.34, s * 0.1, s * 0.6);
+      ctx.fillStyle = def.color;
+      ctx.fillRect(px, py + s * 0.12, s, s * 0.24);
+      ctx.fillStyle = "rgba(0,0,0,0.22)";
+      ctx.fillRect(px, py + s * 0.3, s, s * 0.06);
+      ctx.fillStyle = "rgba(255,255,255,0.25)";
+      ctx.fillRect(px + s * 0.18, py + s * 0.17, s * 0.3, s * 0.07);
+      ctx.fillRect(px + s * 0.6, py + s * 0.17, s * 0.2, s * 0.07);
+      return;
+    }
     // 用意済みテクスチャ素材で描く（読み込み前/失敗時は下のフラット描画にフォールバック）
     const texKey = TEXTURE_KEY_BY_BLOCK[id];
     const tex = texKey ? texturesRef.current?.[texKey] : undefined;
@@ -1137,6 +1390,18 @@ export default function WorldBoxClient() {
     if (!t) return;
     e.currentTarget.setPointerCapture?.(e.pointerId);
     pointerRef.current = { down: true, pointerId: e.pointerId, tx: t.tx, ty: t.ty };
+    const w = worldRef.current;
+    // 作業台へのタップ候補（短く離したら「つくる」を開く。長押しは掘って回収）
+    benchTapRef.current = w && getTile(w, t.tx, t.ty) === WORKBENCH ? { x: t.tx, y: t.ty, at: performance.now() } : null;
+    // 操作モードを押し始めの対象で固定する（この長押しの間は変わらない）
+    if (w) {
+      const slot = invRef.current.slots[selectedRef.current];
+      const hasPlaceable = !!slot && (slot.id === TORCH || !!BLOCKS[slot.id]?.placeable);
+      const pt = { x: t.tx + 0.5, y: t.ty + 0.5 };
+      const enemyThere = enemiesRef.current.some((o) => pt.x >= o.x - 0.2 && pt.x <= o.x + 1.1 && pt.y >= o.y - 0.2 && pt.y <= o.y + 1.1);
+      pressModeRef.current = pressModeFor(getTile(w, t.tx, t.ty), hasPlaceable, enemyThere);
+      lastPlaceRef.current = { tx: t.tx, ty: t.ty };
+    }
   };
   const onPointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
     const joy = joyRef.current;
@@ -1162,6 +1427,13 @@ export default function WorldBoxClient() {
     if (e.pointerId === pointerRef.current.pointerId) {
       pointerRef.current.down = false;
       digRef.current = null;
+      pressModeRef.current = null;
+      lastPlaceRef.current = null;
+      // 作業台を短くタップしたら「つくる」を開く（掘り切る前の短押しだけ）
+      if (benchTapRef.current && performance.now() - benchTapRef.current.at < 260) {
+        setCraftOpen(true);
+      }
+      benchTapRef.current = null;
     }
   };
 
@@ -1200,7 +1472,7 @@ export default function WorldBoxClient() {
   const selectedSlot = hud.slots[selected] ?? null;
   const selectedName = selectedSlot ? itemName(selectedSlot.id) : "空き枠";
   const statusText =
-    `深さ ${hud.depth} m ・ ${hud.night ? "夜（人狼あごむにが出ます）" : "昼"} ・ 選択中: ${selectedName}` +
+    `深さ ${hud.depth} m ・ ${hud.night ? "夜" : "昼"} ・ 選択中: ${selectedName}` +
     (selectedSlot && !isTool(selectedSlot.id) ? `（所持 ${selectedSlot.count}）` : "") +
     (hud.gate ? ` ・ ${hud.gate}` : "") +
     (onlineMode ? " ・ オンライン保存" : "");
@@ -1225,7 +1497,7 @@ export default function WorldBoxClient() {
       </nav>
       <div className="page-heading compact-heading">
         <h1>AGO WORLD BOX</h1>
-        <p className="muted">横スクロールの2Dサンドボックス。掘って集めて道具を作り、夜の人狼あごむにから生き延びます。</p>
+        <p className="muted">掘って、作って、暗がりで生き延びる2Dサンドボックス。</p>
       </div>
 
       <p className="classic-status" role="status">{statusText}</p>
@@ -1270,7 +1542,7 @@ export default function WorldBoxClient() {
         {touchUi && (
           <div style={{ position: "absolute", right: 10, bottom: 10, display: "flex", gap: 8 }}>
             {holdBtn("掘る", (d) => { touchRef.current.dig = d; }, "向いている方向を掘る・攻撃する")}
-            {holdBtn("置く", (d) => { if (d) placeFacing(); }, "向いている方向に置く")}
+            {holdBtn("置く", (d) => { touchRef.current.place = d; }, "向いている方向に置く")}
             {holdBtn("跳", (d) => { touchRef.current.jump = d; }, "ジャンプ")}
           </div>
         )}
@@ -1292,12 +1564,15 @@ export default function WorldBoxClient() {
             </div>
             {RECIPES.map((recipe) => {
               const check = checkCraft(invForPanel, recipe);
-              const owned = countOf(invForPanel, recipe.output) > 0;
+              const owned = isTool(recipe.output) && countOf(invForPanel, recipe.output) > 0;
               return (
                 <div key={recipe.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 0", borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
                   <div style={{ width: 34, flex: "0 0 auto" }}><ItemIcon id={recipe.output} size={30} /></div>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 13, fontWeight: 700 }}>{recipe.name}</div>
+                    <div style={{ fontSize: 13, fontWeight: 700 }}>
+                      {recipe.name}
+                      {(recipe.outputCount ?? 1) > 1 ? ` ×${recipe.outputCount}` : ""}
+                    </div>
                     <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                       {recipe.costs.map((cost) => {
                         const have = countOf(invForPanel, cost.id);
@@ -1421,7 +1696,7 @@ export default function WorldBoxClient() {
       </div>
       {hud.full && (
         <p className="muted" role="status" style={{ textAlign: "center", fontSize: 13, marginTop: 6 }}>
-          持ち物がいっぱいです（5枠）。置いて枠を空けるか、道具に作り替えてください。
+          持ち物がいっぱいです（5枠）
         </p>
       )}
 
@@ -1429,7 +1704,7 @@ export default function WorldBoxClient() {
         <span className="muted" style={{ fontSize: 13, alignSelf: "center" }}>シード: {seedShown}</span>
         <button type="button" style={btn} onClick={() => { syncHud(); setCraftOpen((v) => !v); }}>つくる（C）</button>
         {!confirmNew ? (
-          <button type="button" style={btn} onClick={() => setConfirmNew(true)}>新しいワールド</button>
+          <button type="button" style={btn} onClick={() => setConfirmNew(true)}>進行をリセット</button>
         ) : (
           <>
             <button
@@ -1443,7 +1718,7 @@ export default function WorldBoxClient() {
                 putOnlineSave();
               }}
             >
-              本当に作り直す（今のワールドは消えます）
+              本当にリセットする
             </button>
             <button type="button" style={btn} onClick={() => setConfirmNew(false)}>やめる</button>
           </>
@@ -1451,14 +1726,11 @@ export default function WorldBoxClient() {
       </div>
 
       <p className="muted" style={{ textAlign: "center", fontSize: 13, maxWidth: 860, margin: "14px auto 0" }}>
-        PC: A/D・←/→で移動、Space/W/↑でジャンプ、S/↓で速く落下。ブロックをマウスで押し続けると掘れて、
-        空いた場所を押すと選択中のブロックを置きます（届く範囲は約4マス）。J長押しでも掘れて、Kで前に置けます。
-        数字キー1〜5で枠を切り替え、Cで「つくる」を開きます。
-        スマホ・タブレットでは、画面左側を触るとスティックが出て（傾けた量で歩き/走り、下に倒すと急降下）、
-        右下のボタンで掘る・置く・跳ぶができます。
-        夜は人狼あごむにが出ます。石は木のツルハシ、石炭・銅の鉱石は石のツルハシ、深い石は銅のツルハシがないと掘れません。
-        草・土・砂・葉は支えを失うと崩れ落ち、当たると痛いです。持ち物は5枠まで。
-        ログイン中はサーバーにも自動保存され、別の端末でも続きが遊べます。
+        PC: A/D・←/→ 移動、Space/W/↑ ジャンプ、S/↓ 速落下・すり抜け、J 掘る、K 置く、1〜5 枠、C つくる。
+        タッチ: 左スティック＋右下ボタン。
+        暗い場所に人狼あごむに。松明の周りには出ない。
+        原木と葉は上に乗れて、横と下は通り抜ける。作業台は短く触ると「つくる」。
+        石は木のツルハシ、鉱石は石のツルハシ、深い石は銅のツルハシ。草・土・砂・葉は崩れる。持ち物5枠。
       </p>
     </div>
   );
