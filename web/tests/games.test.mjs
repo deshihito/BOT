@@ -68,6 +68,43 @@ test("カタログ: スラッグが一意で、チェスがプレイ可能・ア
   assert.ok(catalog.playableGames().some((g) => g.slug === "chess"));
 });
 
+test("ジャンル: WORLD BOX が先頭ジャンルで、所属は worldbox だけ", () => {
+  assert.equal(catalog.GAME_GENRES[0].id, "worldbox");
+  assert.equal(catalog.GAME_GENRES[0].label, "WORLD BOX");
+  const desc = catalog.GAME_GENRES[0].description;
+  assert.ok(desc.length > 0 && !desc.includes("\n"), "ジャンル説明は1行");
+  assert.ok(!/Minecraft|マイクラ/.test(desc), "他作品の名前を出さない");
+  assert.equal(catalog.getGameGenre("worldbox").label, "WORLD BOX");
+  assert.equal(catalog.getWebGame("worldbox").genre, "worldbox");
+  assert.deepEqual(catalog.gamesInGenre("worldbox").map((g) => g.slug), ["worldbox"]);
+  for (const g of catalog.WEB_GAMES) {
+    if (g.slug !== "worldbox") {
+      assert.equal(g.genre, undefined, `${g.slug}: ジャンル所属は worldbox だけのはず`);
+    }
+  }
+});
+
+test("ジャンル: 日替わりおすすめにジャンル常設タイトルが入らない", () => {
+  for (let day = 0; day < 60; day++) {
+    const date = new Date(Date.UTC(2026, 0, 1 + day));
+    for (const pick of catalog.dailyPicksFor(date)) {
+      assert.ok(!pick.genre, `${pick.slug}: ジャンル常設タイトルがおすすめに入っている`);
+    }
+  }
+});
+
+test("ジャンル: ハブ先頭に WORLD BOX セクションとチップが配線されている", () => {
+  const gridSrc = fs.readFileSync(path.join(import.meta.dirname, "..", "app", "games", "GamesGrid.tsx"), "utf8");
+  assert.ok(gridSrc.includes("GAME_GENRES"), "ジャンル定義を使っていない");
+  const sectionRender = gridSrc.indexOf("genreSections.map");
+  assert.ok(sectionRender > 0, "ジャンルセクションの描画が無い");
+  assert.ok(sectionRender < gridSrc.indexOf("{daily &&"), "ジャンルセクションがデイリー帯より前でない");
+  assert.ok(sectionRender < gridSrc.indexOf("primary.map"), "ジャンルセクションが通常一覧より前でない");
+  const chip = gridSrc.indexOf('label: "WORLD BOX"');
+  assert.ok(chip > 0, "WORLD BOX の絞り込みチップが無い");
+  assert.ok(chip < gridSrc.indexOf('label: "すべて"'), "WORLD BOX チップが先頭でない");
+});
+
 test("カタログ: glyph / accent フィールドは廃止され、参照も残っていない", () => {
   for (const g of catalog.WEB_GAMES) {
     assert.ok(!("glyph" in g), `${g.slug}: glyph が残っている`);
