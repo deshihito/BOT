@@ -12,7 +12,7 @@ import type { Metadata } from "next";
 // 参考コラージュに寄せ、地球のガラス球・雲・スカイライン・蝶・
 // 草花の要素を足した。さらに同日の追加指示で、光沢の境界を
 // ハッキリさせ（上部で濃く下端で薄く、境界はシャープ）、
-// グラデーションは下に行くほど明るくなるガラス光沢に統一した。さらに同日の追加指示で、その光沢を全UI要素（ヘッダー/ヒーロー/フッター/経歴ドット等）へ展開し、イルカ画像を About 欄の右上へ移し、配色全体をかなり鮮やかにした。さらに泡は「ぼかした白い丸」ではなく縁とハイライトの境目がハッキリしたガラス球の質感に作り替え、パネルのスペキュラは上端から少し下げた位置から薄く効かせるようにした。地球儀は大陸を消して青一色（#0080ff）にした（光沢は維持）。その後、ユーザー提示のガラス玉アイコンを参考に、深い青のガラス球＋淡い大陸＋ネットワークの線と結節点＋強いスペキュラの質感で描き直した（WebP化）。動物の写真はユーザー指示で低解像度化した（縮小→バイリニア拡大のぼんやりタイプ。ドット絵ではない）。その後、ページ内の画像はすべて明るさ・彩度を上げて鮮やかなフルティガーエアロ調に寄せた。さらに Frutiger Aero のスペキュラ仕様（50%付近のハードストップ段差、内側リムライト＋外側の暗い輪郭線、下端のバウンスライト、ドーム型ハイライト、斜めのガラス反射）に沿ってガラス表現を全面改修し、オーロラの帯とボケ味も加えた。その後、水玉を同仕様で作り直し（ドームの段差＋リムライト）、泡は左下から右上へ流れる配置＋透明度のバラつきにし、街並みは流線型の白＋ガラス建築（屋上の緑・テラス・滝）に描き替えた。装飾は高解像度で描いた画像（data URI）に統一し（建物は種類を増やして反射表現も追加）、水玉も高解像度のままCSSで描いている。背景は端末幅での引き延ばし対策としてインラインSVG化した。魚と蝶はその後、実写写真（Wikimedia Commons のフリー素材を切り抜き、WebP で埋め込み）に置き換えた（クレジットはフッター下に明記）。さらに Helvetica Aqua Aero の定番ラインナップの実写も追加した。その後ユーザー指示で動物は熱帯魚3種（リーガルエンゼルフィッシュ／カクレクマノミ／ナンヨウハギ）に絞り（ディスカス・ウミガメ・タツノオトシゴ・蝶・イルカは撤去）、水しぶきは実写の切り抜きを試したがページに馴染まず撤去し、魚のそばにはページ既存のガラス泡（folio-fa-bubble）の小クラスタを置いた。生き物自体は動かさないオーロラは光の帯らしくぼかし＋スクリーン合成にし、ボケの奥行きとキラキラの発光感を足した。アイコン画像は本人が
+// グラデーションは下に行くほど明るくなるガラス光沢に統一した。さらに同日の追加指示で、その光沢を全UI要素（ヘッダー/ヒーロー/フッター/経歴ドット等）へ展開し、イルカ画像を About 欄の右上へ移し、配色全体をかなり鮮やかにした。さらに泡は「ぼかした白い丸」ではなく縁とハイライトの境目がハッキリしたガラス球の質感に作り替え、パネルのスペキュラは上端から少し下げた位置から薄く効かせるようにした。地球儀は大陸を消して青一色（#0080ff）にした（光沢は維持）。その後、ユーザー提示のガラス玉アイコンを参考に、深い青のガラス球＋淡い大陸＋ネットワークの線と結節点＋強いスペキュラの質感で描き直した（WebP化）。動物の写真はユーザー指示で低解像度化した（縮小→バイリニア拡大のぼんやりタイプ。ドット絵ではない）。その後、ページ内の画像はすべて明るさ・彩度を上げて鮮やかなフルティガーエアロ調に寄せた。さらに背景に水面（湖）を追加した：水面はベクター（高解像度）のまま、建物と丘を上下反転＋波紋フィルター（feTurbulence＋feDisplacementMap）＋減衰マスクで反射させ、池は湖に統合して撤去、草の帯は手前の岸辺として下端に残した。さらに Frutiger Aero のスペキュラ仕様（50%付近のハードストップ段差、内側リムライト＋外側の暗い輪郭線、下端のバウンスライト、ドーム型ハイライト、斜めのガラス反射）に沿ってガラス表現を全面改修し、オーロラの帯とボケ味も加えた。その後、水玉を同仕様で作り直し（ドームの段差＋リムライト）、泡は左下から右上へ流れる配置＋透明度のバラつきにし、街並みは流線型の白＋ガラス建築（屋上の緑・テラス・滝）に描き替えた。装飾は高解像度で描いた画像（data URI）に統一し（建物は種類を増やして反射表現も追加）、水玉も高解像度のままCSSで描いている。背景は端末幅での引き延ばし対策としてインラインSVG化した。魚と蝶はその後、実写写真（Wikimedia Commons のフリー素材を切り抜き、WebP で埋め込み）に置き換えた（クレジットはフッター下に明記）。さらに Helvetica Aqua Aero の定番ラインナップの実写も追加した。その後ユーザー指示で動物は熱帯魚3種（リーガルエンゼルフィッシュ／カクレクマノミ／ナンヨウハギ）に絞り（ディスカス・ウミガメ・タツノオトシゴ・蝶・イルカは撤去）、水しぶきは実写の切り抜きを試したがページに馴染まず撤去し、魚のそばにはページ既存のガラス泡（folio-fa-bubble）の小クラスタを置いた。生き物自体は動かさないオーロラは光の帯らしくぼかし＋スクリーン合成にし、ボケの奥行きとキラキラの発光感を足した。アイコン画像は本人が
 // 用意したらヒーローのプレースホルダと差し替える。
 // 専用ヘッダー/フッターはこのファイルの中で完結させる（サイト共通の
 // ヘッダー/フッターは lib/site-chrome.ts の /folio 判定で出ない）。
@@ -342,11 +342,65 @@ export default function TadanoenFolioPage() {
         <path d="M0 126 C160 53 300 168 470 126 C640 84 760 171 930 132 C1080 97 1180 145 1280 111 L1280 250 L0 250 Z" fill="#2ed94f" opacity=".8" />
         <path d="M0 182 C180 121 340 213 540 174 C740 137 880 216 1060 182 C1160 163 1220 187 1280 171 L1280 250 L0 250 Z" fill="#00c853" opacity=".92" />
         <path d="M0 221 C240 182 460 240 700 211 C920 187 1100 232 1280 208 L1280 250 L0 250 Z" fill="#00a83c" />
-        <ellipse cx="1005" cy="198" rx="92" ry="15" fill="#7fd4ff" opacity=".84" />
-        <ellipse cx="1005" cy="196" rx="60" ry="8" fill="#d2f5ff" opacity=".75" />
-        <g stroke="#ffffff" strokeWidth="2"><line x1="950" y1="194" x2="990" y2="194" opacity=".78" /><line x1="1018" y1="200" x2="1062" y2="200" opacity=".67" /></g>
-        <path d="M975 188 L976.4 191.6 L980 193 L976.4 194.4 L975 198 L973.6 194.4 L970 193 L973.6 191.6 Z" fill="#ffffff" opacity=".92" />
-        <g transform="translate(0 186)">
+        <defs>
+          <linearGradient id="folio-fa-water" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#79dcff" />
+            <stop offset="30%" stopColor="#35b6f2" />
+            <stop offset="100%" stopColor="#0e7cd4" />
+          </linearGradient>
+          <linearGradient id="folio-fa-reflfade" gradientUnits="userSpaceOnUse" x1="0" y1="158" x2="0" y2="250">
+            <stop offset="0%" stopColor="#ffffff" stopOpacity=".85" />
+            <stop offset="100%" stopColor="#ffffff" stopOpacity="0" />
+          </linearGradient>
+          <mask id="folio-fa-reflmask">
+            <rect x="0" y="158" width="1280" height="92" fill="url(#folio-fa-reflfade)" />
+          </mask>
+          <filter id="folio-fa-ripple" x="-5%" y="-5%" width="110%" height="110%">
+            <feTurbulence type="fractalNoise" baseFrequency="0.012 0.14" numOctaves="2" seed="7" result="n" />
+            <feDisplacementMap in="SourceGraphic" in2="n" scale="9" />
+          </filter>
+        </defs>
+        <rect x="0" y="158" width="1280" height="92" fill="url(#folio-fa-water)" />
+        <g mask="url(#folio-fa-reflmask)" opacity=".4" filter="url(#folio-fa-ripple)">
+          <g transform="translate(0 316) scale(1 -1)">
+<path d="M30 132 L30 88 A30 30 0 0 1 90 88 L90 132 Z" fill="#37b6ff" opacity=".84" />
+        <polygon points="38,118 52,62 68,62 54,118" fill="#ffffff" opacity=".4" />
+        <g stroke="#ffffff" strokeWidth="1" opacity=".22"><line x1="36" y1="98" x2="84" y2="98" /><line x1="36" y1="109" x2="84" y2="109" /><line x1="36" y1="120" x2="84" y2="120" /></g>
+        <path d="M120 132 L120 86 A44 44 0 0 1 208 86 L208 132 Z" fill="#f4fbff" opacity=".96" />
+        <rect x="127" y="89" width="74" height="35" fill="#8ad8ff" opacity=".82" />
+        <polygon points="128,124 142,58 158,58 144,124" fill="#ffffff" opacity=".45" />
+        <g><circle cx="156" cy="42" r="7" fill="#00c853" /><circle cx="165" cy="37" r="8.5" fill="#54e86a" /><circle cx="175" cy="43" r="6" fill="#00c853" /></g>
+        <path d="M236 132 L242 52 L254 34 L262 30 L270 34 L282 52 L288 132 Z" fill="#37b6ff" opacity=".84" />
+        <line x1="262" y1="30" x2="262" y2="13" stroke="#dcf5ff" strokeWidth="2" />
+        <circle cx="262" cy="11" r="3.4" fill="#ffffff" />
+        <polygon points="246,120 254,42 262,42 254,120" fill="#ffffff" opacity=".37" />
+        <path d="M330 132 L330 104 A60 30 0 0 1 450 104 L450 132 Z" fill="#f4fbff" opacity=".96" />
+        <g fill="#8ad8ff" opacity=".82"><rect x="356" y="92" width="12" height="16" /><rect x="382" y="92" width="12" height="16" /><rect x="408" y="92" width="12" height="16" /></g>
+        <polygon points="342,122 358,64 374,64 358,122" fill="#ffffff" opacity=".4" />
+        <path d="M486 132 L486 68 A34 34 0 0 1 554 68 L554 132 Z" fill="#37b6ff" opacity=".88" />
+        <g><circle cx="512" cy="33" r="6.5" fill="#00c853" /><circle cx="521" cy="28" r="8" fill="#54e86a" /><circle cx="530" cy="34" r="5.5" fill="#00c853" /></g>
+        <g stroke="#ffffff" strokeWidth="1" opacity=".22"><line x1="494" y1="84" x2="546" y2="84" /><line x1="494" y1="95" x2="546" y2="95" /><line x1="494" y1="106" x2="546" y2="106" /><line x1="494" y1="117" x2="546" y2="117" /></g>
+        <rect x="503" y="74" width="34" height="6" fill="#00c853" opacity=".9" />
+        <rect x="516" y="80" width="12" height="52" fill="#bfeaff" opacity=".88" />
+        <line x1="522" y1="80" x2="522" y2="132" stroke="#ffffff" strokeWidth="2" opacity=".9" />
+        <path d="M0 92 C200 26 380 126 560 87 C760 45 900 121 1080 82 C1180 61 1240 82 1280 71 L1280 250 L0 250 Z" fill="#6ee86e" opacity=".6" />
+<path d="M0 126 C160 53 300 168 470 126 C640 84 760 171 930 132 C1080 97 1180 145 1280 111 L1280 250 L0 250 Z" fill="#2ed94f" opacity=".8" />
+          </g>
+        </g>
+        <rect x="0" y="158" width="1280" height="92" fill="#35b6f2" opacity=".18" />
+        <ellipse cx="640" cy="166" rx="560" ry="10" fill="#ffffff" opacity=".16" />
+        <g stroke="#ffffff" strokeLinecap="round">
+          <line x1="120" y1="182" x2="196" y2="182" strokeWidth="2.4" opacity=".5" />
+          <line x1="330" y1="204" x2="438" y2="204" strokeWidth="2.8" opacity=".38" />
+          <line x1="700" y1="188" x2="782" y2="188" strokeWidth="2.2" opacity=".5" />
+          <line x1="920" y1="216" x2="1040" y2="216" strokeWidth="3" opacity=".32" />
+          <line x1="180" y1="228" x2="262" y2="228" strokeWidth="2.6" opacity=".3" />
+          <line x1="1080" y1="196" x2="1150" y2="196" strokeWidth="2.2" opacity=".42" />
+        </g>
+        <path d="M420 176 L421.4 179.6 L425 181 L421.4 182.4 L420 186 L418.6 182.4 L415 181 L418.6 179.6 Z" fill="#ffffff" opacity=".9" />
+        <path d="M985 226 L986.4 229.6 L990 231 L986.4 232.4 L985 236 L983.6 232.4 L980 231 L983.6 229.6 Z" fill="#ffffff" opacity=".8" />
+        <rect x="0" y="157" width="1280" height="2.4" fill="#ffffff" opacity=".55" />
+        <g transform="translate(0 224)">
           <path d="M0 64 L0 40 L16 18 L28 44 L44 12 L58 42 L76 22 L90 46 L108 16 L122 44 L140 26 L154 48 L172 14 L188 44 L204 24 L218 46 L236 18 L252 44 L268 28 L282 48 L300 12 L316 42 L332 22 L348 46 L364 20 L380 44 L396 26 L412 48 L428 16 L444 42 L460 24 L476 46 L492 14 L508 44 L524 28 L540 48 L556 18 L572 42 L588 22 L604 46 L620 12 L636 44 L652 26 L668 48 L684 20 L700 42 L716 24 L732 46 L748 16 L764 44 L780 28 L796 48 L812 14 L828 42 L844 22 L860 46 L876 18 L892 44 L908 26 L924 48 L940 12 L956 42 L972 24 L988 46 L1004 20 L1020 44 L1036 28 L1052 48 L1068 16 L1084 42 L1100 22 L1116 46 L1132 14 L1148 44 L1164 26 L1180 48 L1196 18 L1212 42 L1228 24 L1244 46 L1260 28 L1280 44 L1280 64 Z" fill="#2e8b34" />
           <g fill="#ffffff">
             <g transform="translate(120 44)"><circle r="3.2" fill="#ffd94d" /><circle cx="0" cy="-5" r="3" /><circle cx="4.8" cy="-1.6" r="3" /><circle cx="3" cy="4.2" r="3" /><circle cx="-3" cy="4.2" r="3" /><circle cx="-4.8" cy="-1.6" r="3" /></g>
