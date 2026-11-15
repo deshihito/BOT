@@ -182,19 +182,22 @@ put("barrel", 3, 29);
 put("stairs", 17, 29, { solid: false }); // 2階（ギルドショップ）への階段
 put("stairs", 18, 29, { solid: false });
 
-// --- カジノ翼（右）: スロット列とテーブルの小集団、生垣とソファで隅を作る ---
-for (const x of [39, 41, 43, 45, 47, 49, 51]) put("slot_machine", x, 19, { station: "casino" });
-for (const x of [40, 42, 44, 46, 48, 50]) put("slot_machine", x, 29, { station: "casino" });
-for (const [x, y] of [[41, 23], [42, 23], [47, 23], [48, 23], [41, 26], [47, 26]] as const) {
-  put("casino_table", x, y, { station: "casino" });
-}
-put("table_round", 44, 24);
-put("chair", 43, 24);
-put("chair", 45, 24);
+// --- カジノ翼（右）: 1台1ゲーム。北=スロット/セブン列、中央=テーブル3種、南=ダブル列 ---
+for (const x of [39, 41, 43]) put("slot_machine", x, 19, { station: "casino" });
+for (const x of [46, 48, 50]) put("slot7_machine", x, 19, { station: "casino" });
+put("roulette_table", 40, 24, { station: "casino" });
+put("dice_table", 44, 24, { station: "casino" });
+put("blackjack_table", 48, 24, { station: "casino" });
+put("chair", 40, 25);
+put("chair", 44, 25);
+put("chair", 48, 25);
+for (const x of [40, 43, 46]) put("double_machine", x, 29, { station: "casino" });
+put("slot_machine", 50, 29, { station: "casino" });
+put("table_round", 44, 22);
 put("sofa", 51, 24);
 put("sofa", 51, 25);
-put("table_round", 50, 24);
-put("piano", 39, 26, { station: "casino" });
+put("table_round", 50, 22);
+put("piano", 39, 26);
 put("hedge", 44, 21);
 put("hedge", 44, 27);
 put("planter", 52, 19);

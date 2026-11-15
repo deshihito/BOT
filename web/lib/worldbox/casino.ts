@@ -10,7 +10,8 @@
 import type { LobbyObject } from "./lobby";
 
 export type CasinoGame = "slot" | "roulette" | "dice";
-export type CasinoMachine = "slot" | "roulette";
+/** カジノ機器 = ゲームそのもの（1台1ゲーム）。 */
+export type CasinoMachine = "slot" | "slot7" | "roulette" | "dice" | "blackjack" | "double";
 
 /** ベットの選択肢（コイン）。既存カジノ系の最低額（10）に揃えた刻み。 */
 export const CASINO_BET_TIERS: readonly number[] = [10, 100, 1000];
@@ -129,23 +130,39 @@ export function rouletteRtp(): number {
 
 // ---------------------------------------------------------------- 施設判定
 
+/** 機器スプライト → ゲーム。カジノテーブル（旧汎用）はルーレット扱いを残す。 */
+export const CASINO_SPRITE_MACHINE: Record<string, CasinoMachine> = {
+  slot_machine: "slot",
+  slot7_machine: "slot7",
+  roulette_table: "roulette",
+  casino_table: "roulette",
+  dice_table: "dice",
+  blackjack_table: "blackjack",
+  double_machine: "double",
+};
+
 /**
- * プレイヤーのタイルに隣接するカジノ機器の種別。
- * スロットマシン → "slot"、カジノテーブル → "roulette"。
- * どちらにも隣接していなければ null（カジノ内の椅子やピアノでは遊べない）。
+ * プレイヤーのタイルに隣接するカジノ機器の種別（1台1ゲーム）。
+ * 複数に隣接する場合は最も近い機器を返す。どれにも隣接していなければ null。
  */
 export function casinoMachineNear(
   objectsList: readonly LobbyObject[],
   tx: number,
   ty: number,
 ): CasinoMachine | null {
-  let table = false;
+  let best: CasinoMachine | null = null;
+  let bestDist = Infinity;
   for (const o of objectsList) {
+    const machine = CASINO_SPRITE_MACHINE[o.sprite];
+    if (!machine) continue;
     if (tx < o.x - 1 || tx > o.x + o.w || ty < o.y - 1 || ty > o.y + o.h) continue;
-    if (o.sprite === "slot_machine") return "slot";
-    if (o.sprite === "casino_table") table = true;
+    const dist = Math.max(Math.abs(tx - o.x), Math.abs(ty - o.y));
+    if (dist < bestDist) {
+      bestDist = dist;
+      best = machine;
+    }
   }
-  return table ? "roulette" : null;
+  return best;
 }
 
 /** ゲーム種別 → ブリッジの理由コード。 */

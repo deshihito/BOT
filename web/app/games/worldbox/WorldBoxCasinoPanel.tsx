@@ -60,13 +60,21 @@ type PlayResult =
   | { game: "roulette"; number: number; color: RouletteColor; payout: number }
   | { game: "dice"; rolled: number; hit: boolean; payout: number };
 
-type Tab = "slot" | "slot7" | "roulette" | "dice" | "blackjack" | "double";
 
 interface Celebration {
   key: number;
   tier: WinTier;
   amount: number;
 }
+
+const MACHINE_LABEL: Record<CasinoMachine, string> = {
+  slot: "スロット",
+  slot7: "セブンスロット",
+  roulette: "ルーレット",
+  dice: "ダイス",
+  blackjack: "ブラックジャック",
+  double: "ダブルアップ",
+};
 
 const ERROR_LABEL: Record<string, string> = {
   not_enough_coins: "コインが足りません",
@@ -264,7 +272,6 @@ export default function WorldBoxCasinoPanel({ onClose }: { onClose: () => void }
   const [state, setState] = useState<CasinoState | null>(null);
   const [bet, setBet] = useState<number>(CASINO_BET_TIERS[0]);
   const [pick, setPick] = useState<RoulettePick>("red");
-  const [tab, setTab] = useState<Tab>("slot");
   const [result, setResult] = useState<PlayResult | null>(null);
   const [spinning, setSpinning] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -387,7 +394,10 @@ export default function WorldBoxCasinoPanel({ onClose }: { onClose: () => void }
 
   const play = async () => {
     if (!state?.machine || spinning) return;
-    const game = tab === "dice" ? "dice" : state.machine;
+    const game = state.machine === "slot" || state.machine === "roulette" || state.machine === "dice"
+      ? state.machine
+      : null;
+    if (game === null) return;
     setMsg("");
     setResult(null);
     setCelebration(null);
@@ -486,6 +496,7 @@ export default function WorldBoxCasinoPanel({ onClose }: { onClose: () => void }
   const header = (
     <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
       <strong>カジノ</strong>
+      {state?.machine && <span style={{ fontWeight: 700, color: "#ffd23e" }}>{MACHINE_LABEL[state.machine]}</span>}
       {state && <span>残高 <strong>{state.effectiveBalance}</strong></span>}
       <span style={{ flex: 1 }} />
       <button type="button" style={{ ...btn, minHeight: 32, padding: "2px 10px" }} onClick={onClose}>
@@ -512,21 +523,6 @@ export default function WorldBoxCasinoPanel({ onClose }: { onClose: () => void }
   ];
   const pending = state.ops.filter((op) => op.status === "pending");
   const recent = state.ops.slice(0, 3);
-  const tabs: { id: Tab; label: string }[] =
-    machine === "slot"
-      ? [{ id: "slot", label: "スロット" }, { id: "slot7", label: "セブン" }]
-      : machine === "roulette"
-        ? [
-            { id: "roulette", label: "ルーレット" },
-            { id: "dice", label: "ダイス" },
-            { id: "blackjack", label: "ブラックジャック" },
-            { id: "double", label: "ダブルアップ" },
-          ]
-        : [];
-  const activeTab: Tab = session
-    ? session.kind === "slot7" ? "slot7" : session.kind === "double" ? "double" : "blackjack"
-    : tabs.some((t) => t.id === tab) ? tab : (tabs[0]?.id ?? "slot");
-
   const betRow = (actionButton: React.ReactNode) => (
     <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 14, flexWrap: "wrap" }}>
       <span>ベット</span>
@@ -589,22 +585,11 @@ export default function WorldBoxCasinoPanel({ onClose }: { onClose: () => void }
       {header}
 
       {machine === null && (
-        <p style={{ margin: "12px 0 0" }}>スロットマシンかカジノテーブルの前へ</p>
-      )}
-
-      {machine !== null && (
-        <div style={{ display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap" }}>
-          {tabs.map((t) => (
-            <button key={t.id} type="button" style={{ ...tabBtn, ...(activeTab === t.id ? chipOn : {}) }}
-              onClick={() => { setTab(t.id); setResult(null); setBjFinal(null); setCelebration(null); }} aria-pressed={activeTab === t.id}>
-              {t.label}
-            </button>
-          ))}
-        </div>
+        <p style={{ margin: "12px 0 0" }}>遊びたいゲームの台・テーブルの前へ</p>
       )}
 
       {/* ------------------------------------------------ スロット */}
-      {machine === "slot" && activeTab === "slot" && !session && (
+      {machine === "slot" && !session && (
         <>
           <div style={{ display: "flex", gap: 8, justifyContent: "center", marginTop: 12 }}>
             {shownReels.map((idx, i) => (
@@ -642,7 +627,7 @@ export default function WorldBoxCasinoPanel({ onClose }: { onClose: () => void }
       )}
 
       {/* ------------------------------------------------ セブンスロット */}
-      {machine === "slot" && (activeTab === "slot7" || session?.kind === "slot7") && (
+      {(machine === "slot7" || session?.kind === "slot7") && (
         <div style={{ marginTop: 12 }}>
           {session?.kind === "slot7" ? (
             <>
@@ -705,7 +690,7 @@ export default function WorldBoxCasinoPanel({ onClose }: { onClose: () => void }
       )}
 
       {/* ------------------------------------------------ ルーレット */}
-      {machine === "roulette" && activeTab === "roulette" && !session && (
+      {machine === "roulette" && !session && (
         <>
           <div style={{ display: "flex", gap: 10, alignItems: "center", justifyContent: "center", marginTop: 12 }}>
             <div
@@ -750,7 +735,7 @@ export default function WorldBoxCasinoPanel({ onClose }: { onClose: () => void }
       )}
 
       {/* ------------------------------------------------ ダイス */}
-      {machine === "roulette" && activeTab === "dice" && !session && (
+      {machine === "dice" && !session && (
         <div style={{ marginTop: 12 }}>
           <div style={{ display: "flex", gap: 10, alignItems: "center", justifyContent: "center" }}>
             <div style={{
@@ -798,7 +783,7 @@ export default function WorldBoxCasinoPanel({ onClose }: { onClose: () => void }
       )}
 
       {/* ------------------------------------------------ ブラックジャック */}
-      {machine === "roulette" && (activeTab === "blackjack" || session?.kind === "blackjack") && (
+      {(machine === "blackjack" || session?.kind === "blackjack") && (
         <div style={{ marginTop: 12 }}>
           {(() => {
             const view = session?.kind === "blackjack" ? session : bjFinal;
@@ -889,7 +874,7 @@ export default function WorldBoxCasinoPanel({ onClose }: { onClose: () => void }
       )}
 
       {/* ------------------------------------------------ ダブルアップ */}
-      {machine === "roulette" && (activeTab === "double" || session?.kind === "double") && (
+      {(machine === "double" || session?.kind === "double") && (
         <div style={{ marginTop: 12 }}>
           {session?.kind === "double" ? (
             <>
