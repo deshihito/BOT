@@ -3,7 +3,9 @@
 // （人数集計・解散時の所属一括削除）ため、独立したプレゼンスと違い
 // "nations" / "members" の2キーを read-modify-write でまとめて扱う。
 import { isBotApiConfigured, kvGet, kvSet } from "../bot-api";
-import { emptyNationsState, parseNationsState, type NationsState } from "./nations";
+import {
+  NATIONS_STATE_VERSION, emptyNationsState, parseNationsState, type NationsState,
+} from "./nations";
 
 export const WORLDBOX_NATIONS_NAMESPACE = "worldbox_nations";
 const NATIONS_KEY = "nations";
@@ -27,11 +29,15 @@ export async function loadNationsState(): Promise<NationsState> {
   }
 }
 
-/** 国家状態を保存する。成功したら true。 */
+/** 国家状態を保存する。成功したら true。nations 側は版の包み付きで保存する。 */
 export async function storeNationsState(state: NationsState): Promise<boolean> {
   if (!isBotApiConfigured()) return false;
   try {
-    await kvSet(WORLDBOX_NATIONS_NAMESPACE, NATIONS_KEY, JSON.stringify(state.nations));
+    await kvSet(
+      WORLDBOX_NATIONS_NAMESPACE,
+      NATIONS_KEY,
+      JSON.stringify({ v: NATIONS_STATE_VERSION, nations: state.nations }),
+    );
     await kvSet(WORLDBOX_NATIONS_NAMESPACE, MEMBERS_KEY, JSON.stringify(state.members));
     return true;
   } catch {
