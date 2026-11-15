@@ -87,6 +87,22 @@ MONEY_PRISON_BLOCKED_VALUES = frozenset({
     "starter_claim", "daily_bonus_claim",
 })
 
+# マネーパネルのカテゴリへ直接開く入口（導線最適化 U1）。
+# キーは dispatch_general が受ける値、値は money_panel.CATEGORIES の
+# カテゴリ。money_panel（概要）は既存の実行入口で、残り5件はこの
+# 一本化で新設する。レジストリ (GENERAL_ACTIONS) には載せない
+# パネル専用値で、/general パネル以外からは money_panel 経由で
+# 従来どおり到達できる。表示ラベルは core/general/panel.py の
+# MONEY_PANEL_ENTRIES が持ち、カテゴリ名は CATEGORIES と一致させる。
+MONEY_PANEL_CATEGORY_VALUES = {
+    "money_panel": "home",
+    "money_panel_market": "market",
+    "money_panel_items": "items",
+    "money_panel_craft": "craft",
+    "money_panel_play": "play",
+    "money_panel_more": "more",
+}
+
 GENERAL_ACTIONS = {
     # 経済系は旧 money 1ジャンル36件の平積み（セレクト2ページ）を、
     # money パネルのカテゴリ分類に沿って3ジャンルへ分割した
