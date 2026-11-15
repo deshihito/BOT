@@ -107,7 +107,8 @@ VOICE_ACTIONS_BY_GENRE = {
               ("自動再生・再生履歴管理", "music_autoplay"),
               ("キュー表示", "music_queue"),
               ("楽曲検索・追加", "music_search"),
-              ("音声ファイルID一覧", "music_files")],
+              ("音声ファイルID一覧", "music_files"),
+              ("ラジオ", "radio_panel")],
     "studio": [(f"録音: {label}", f"record_{value}") for label, value in
                 (("開始", "start"), ("停止", "stop"), ("状態", "status"), ("音程解析", "pitch"))] +
                [(f"やまびこ: {label}", f"echo_{value}") for label, value in
@@ -169,6 +170,7 @@ GVC_ROOM_ACTIONS = {"gvc_room_list", "gvc_members", "gvc_chat_disconnect", *GVC_
 # 起動時のロード一覧に漏れていても、初回利用時に読み込み直せる拡張（機能キー -> モジュール名）
 LAZY_EXTENSIONS = {
     "transcribe": "vc",  # cogs/vc.py（VC統合入口）
+    "radio": "vc",
 }
 
 COGS = {
@@ -180,6 +182,7 @@ COGS = {
     "match": "SaitoRelay",
     "global": "GlobalVCCog",
     "tts": "TTSCog",
+    "radio": "RadioCog",
 }
 
 
