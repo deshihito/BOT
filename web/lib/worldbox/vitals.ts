@@ -27,7 +27,7 @@ export const POISON_DURATION_MS = 30000;
 /** 毒を持つモブが毒を与える確率。 */
 export const POISON_CHANCE = 0.35;
 /** 毒を与えるモブ。 */
-export const POISON_MOB_IDS: ReadonlySet<string> = new Set(["spider", "spider_queen", "bee"]);
+export const POISON_MOB_IDS: ReadonlySet<string> = new Set(["spider", "spider_queen", "bee", "jellyfish"]);
 /** モブ接触ダメージの最小間隔（ミリ秒）。クライアントの接触発火間隔と一致。 */
 export const MOB_DAMAGE_COOLDOWN_MS = 1000;
 /** バイタル精算で進める時間の上限（ミリ秒）。長期離脱で即死させない。 */
