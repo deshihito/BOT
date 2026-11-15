@@ -70,7 +70,7 @@ export const ITEMS: readonly ItemDef[] = [
   { id: "blanket", name: "毛布", desc: "布を重ねた防寒具", category: "crafted", price: 56 },
   { id: "potion", name: "薬草ポーション", desc: "飲むと空腹度が大きく回復", category: "crafted", price: 76, hunger: 60 },
   { id: "toolbox", name: "鉄の道具箱", desc: "鉄と木の実用品", category: "crafted", price: 85 },
-  { id: "tent", name: "テント", desc: "布と木の野営道具", category: "crafted", price: 110 },
+  { id: "tent", name: "テント", desc: "布と木の野営道具", category: "crafted", price: 110, facility: true },
   { id: "accessory", name: "金のアクセサリー", desc: "金とガラスの装飾品", category: "crafted", price: 140 },
   { id: "special_course", name: "特上コース料理", desc: "定食を超える一品", category: "crafted", price: 130, hunger: 100 },
   // ---- 特殊（所持しているだけで効く） ---------------------------------

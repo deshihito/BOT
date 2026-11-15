@@ -16,11 +16,11 @@ const MAX_VELOCITY = 16;
 export const PRESENCE_NAME_MAX = 24;
 
 /** プレイヤーがいる空間。ワールドとロビーでプレゼンスは混ざらない。 */
-export type PresenceSpace = "world" | "lobby";
+export type PresenceSpace = "world" | "lobby" | "tent";
 
 /** 空間の指定として解釈する。不正な値はワールドに寄せる。 */
 export function sanitizePresenceSpace(raw: unknown): PresenceSpace {
-  return raw === "lobby" ? "lobby" : "world";
+  return raw === "lobby" ? "lobby" : raw === "tent" ? "tent" : "world";
 }
 
 export type Heartbeat = {

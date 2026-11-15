@@ -91,7 +91,7 @@ export default function WorldBoxEconomyPanel({ space, station, onClose }: { spac
   // でもプレゼンスで検証されるため、ここは表示の一致が役割）。
   const inLobby = space === "lobby";
   const atShop = inLobby && station === "shop";
-  const atWorkbench = inLobby && station === "smith";
+  const atWorkbench = space !== "world" && station === "smith";
   const atBank = inLobby && station === "bank";
   const [profile, setProfile] = useState<PlayerProfile | null>(null);
   const [loadState, setLoadState] = useState<LoadState>("loading");

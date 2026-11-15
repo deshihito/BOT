@@ -8,12 +8,13 @@
 // のワールド位置で、ロビーを出るとそこへ戻る（無ければ null = スポーン）。
 // v5 以前は破棄する（v5 はロビーが無く空間を持たない。v4 以前は旧マップ時代）。
 import { LOBBY_H, LOBBY_W } from "./lobby";
+import { TENT_H, TENT_W } from "./tent";
 import { MAP_H, MAP_W } from "./mapgen";
 
 export const SAVE_VERSION = 6;
 
 /** プレイヤーがいる空間。 */
-export type SaveSpace = "world" | "lobby";
+export type SaveSpace = "world" | "lobby" | "tent";
 
 /** プレイヤー状態（位置と空間）。座標はタイル単位の浮動小数。 */
 export type WorldBoxState = {
@@ -29,11 +30,13 @@ function clampPos(v: number, max: number): number {
 }
 
 function sanitizeSpace(raw: unknown): SaveSpace {
-  return raw === "lobby" ? "lobby" : "world";
+  return raw === "lobby" ? "lobby" : raw === "tent" ? "tent" : "world";
 }
 
 function boundsFor(space: SaveSpace): { width: number; height: number } {
-  return space === "lobby" ? { width: LOBBY_W, height: LOBBY_H } : { width: MAP_W, height: MAP_H };
+  if (space === "lobby") return { width: LOBBY_W, height: LOBBY_H };
+  if (space === "tent") return { width: TENT_W, height: TENT_H };
+  return { width: MAP_W, height: MAP_H };
 }
 
 function clampToSpace(space: SaveSpace, x: number, y: number): { x: number; y: number } {
