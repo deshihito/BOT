@@ -10,6 +10,21 @@
 // 同期される（読み取り専用のつもりで扱うこと）。保存・通信は
 // profile-online.ts / API ルート側が担い、ここは検証とインベントリ
 // 操作だけを行う。経済の状態遷移は economy.ts。
+/** 冒険役職 ID（プロフィールが所有する。規則は roles.ts）。 */
+export type AdventureRoleId = "free" | "blade" | "guard" | "scout" | "miner" | "medic";
+export const ADVENTURE_ROLE_IDS: readonly AdventureRoleId[] = ["free", "blade", "guard", "scout", "miner", "medic"];
+/** 守護の最大 HP ボーナス。 */
+export const GUARD_HP_BONUS = 20;
+/** 薬師の回復アイテム倍率。 */
+export const MEDIC_HEAL_MULT = 1.5;
+/** 役職込みの最大 HP。 */
+export function maxHpFor(profile: PlayerProfile): number {
+  return HP_MAX + (profile.role === "guard" ? GUARD_HP_BONUS : 0);
+}
+
+export function isAdventureRoleId(v: unknown): v is AdventureRoleId {
+  return typeof v === "string" && (ADVENTURE_ROLE_IDS as readonly string[]).includes(v);
+}
 import { itemById } from "./items";
 
 /** 空腹度の上限（仕様書 3.3: 0〜100）。 */
@@ -64,6 +79,18 @@ export type PlayerProfile = {
   stealActorAt: number;
   /** 最後に steal された時刻（epoch ms）。 */
   stealTargetAt: number;
+  /** 冒険役職（自由人/剣士/守護/斥候/採掘者/薬師）。 */
+  role: AdventureRoleId;
+  /** 役職ごとの熟練 XP（ランクは roles.rankForXp で導出）。 */
+  mastery: Partial<Record<AdventureRoleId, { xp: number }>>;
+  /** 技ごとの最終発動時刻（epoch ms）。クールタイム検証はサーバー側。 */
+  skillAt: Record<string, number>;
+  /** 守護の挑発が有効な時刻（epoch ms）。 */
+  tauntUntil: number;
+  /** 薬師の蘇生を使った遠征（空間 ID と時刻）。1遠征1回の判定に使う。 */
+  reviveMark: { space: string; at: number } | null;
+  /** 蘇生で戻される先（次回 sync でクライアントが適用し、サーバーが消す）。 */
+  pendingTeleport: { space: string; x: number; y: number } | null;
 };
 
 function emptySlots(size: number): ItemSlot[] {
@@ -71,6 +98,12 @@ function emptySlots(size: number): ItemSlot[] {
 }
 
 export const DEFAULT_PROFILE: PlayerProfile = {
+  role: "free",
+  mastery: {},
+  skillAt: {},
+  tauntUntil: 0,
+  reviveMark: null,
+  pendingTeleport: null,
   coins: STARTING_COINS,
   hunger: HUNGER_MAX,
   hp: HP_MAX,
@@ -186,16 +219,17 @@ export function parseProfile(raw: unknown): PlayerProfile {
     try {
       data = JSON.parse(raw) as Record<string, unknown>;
     } catch {
-      return { ...DEFAULT_PROFILE, items: {}, hotbar: emptySlots(HOTBAR_SLOTS), storage: emptySlots(STORAGE_SLOTS) };
+      return { ...DEFAULT_PROFILE, items: {}, hotbar: emptySlots(HOTBAR_SLOTS), storage: emptySlots(STORAGE_SLOTS), status: [], mastery: {}, skillAt: {} };
     }
   } else if (raw && typeof raw === "object") {
     data = raw as Record<string, unknown>;
   }
   if (!data) {
-    return { ...DEFAULT_PROFILE, items: {}, hotbar: emptySlots(HOTBAR_SLOTS), storage: emptySlots(STORAGE_SLOTS) };
+    return { ...DEFAULT_PROFILE, items: {}, hotbar: emptySlots(HOTBAR_SLOTS), storage: emptySlots(STORAGE_SLOTS), status: [], mastery: {}, skillAt: {} };
   }
   const inv = invOf({
     coins: 0, hunger: 0, hp: HP_MAX, status: [], vitalAt: 0, respawn: null, restPoint: null, lastDamageAt: 0, deaths: 0, stealActorAt: 0, stealTargetAt: 0,
+    role: "free", mastery: {}, skillAt: {}, tauntUntil: 0, reviveMark: null, pendingTeleport: null,
     items: data.items as Record<string, number>,
     hotbar: data.hotbar as ItemSlot[],
     storage: data.storage as ItemSlot[],
@@ -203,7 +237,7 @@ export function parseProfile(raw: unknown): PlayerProfile {
   return {
     coins: clampInt(data.coins, 0, Number.MAX_SAFE_INTEGER, DEFAULT_PROFILE.coins),
     hunger: clampInt(data.hunger, 0, HUNGER_MAX, DEFAULT_PROFILE.hunger),
-    hp: clampInt(data.hp, 0, HP_MAX, HP_MAX),
+    hp: clampInt(data.hp, 0, HP_MAX + 20, HP_MAX), // 守護の最大HPボーナス分まで許す
     status: parseStatus(data.status),
     vitalAt: clampInt(data.vitalAt, 0, Number.MAX_SAFE_INTEGER, 0),
     respawn: parsePoint(data.respawn),
@@ -215,7 +249,48 @@ export function parseProfile(raw: unknown): PlayerProfile {
     storage: inv.storage,
     stealActorAt: clampInt(data.stealActorAt, 0, Number.MAX_SAFE_INTEGER, 0),
     stealTargetAt: clampInt(data.stealTargetAt, 0, Number.MAX_SAFE_INTEGER, 0),
+    role: isAdventureRoleId(data.role) ? data.role : "free",
+    mastery: parseMastery(data.mastery),
+    skillAt: parseSkillAt(data.skillAt),
+    tauntUntil: clampInt(data.tauntUntil, 0, Number.MAX_SAFE_INTEGER, 0),
+    reviveMark: parseReviveMark(data.reviveMark),
+    pendingTeleport: parsePendingTeleport(data.pendingTeleport),
   };
+}
+
+function parseMastery(raw: unknown): Partial<Record<AdventureRoleId, { xp: number }>> {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const out: Partial<Record<AdventureRoleId, { xp: number }>> = {};
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (!isAdventureRoleId(k)) continue;
+    const xp = (v as { xp?: unknown } | null)?.xp;
+    if (typeof xp === "number" && Number.isFinite(xp) && xp > 0) out[k] = { xp: Math.floor(xp) };
+  }
+  return out;
+}
+
+function parseSkillAt(raw: unknown): Record<string, number> {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const out: Record<string, number> = {};
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof v === "number" && Number.isFinite(v) && v > 0) out[k] = Math.floor(v);
+  }
+  return out;
+}
+
+function parseReviveMark(raw: unknown): { space: string; at: number } | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const v = raw as { space?: unknown; at?: unknown };
+  if (typeof v.space !== "string" || typeof v.at !== "number" || !Number.isFinite(v.at)) return null;
+  return { space: v.space.slice(0, 64), at: Math.floor(v.at) };
+}
+
+function parsePendingTeleport(raw: unknown): { space: string; x: number; y: number } | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const v = raw as { space?: unknown; x?: unknown; y?: unknown };
+  if (typeof v.space !== "string" || typeof v.x !== "number" || typeof v.y !== "number") return null;
+  if (!Number.isFinite(v.x) || !Number.isFinite(v.y)) return null;
+  return { space: v.space.slice(0, 64), x: v.x, y: v.y };
 }
 
 function parseStatus(raw: unknown): StatusEffect[] {
@@ -247,7 +322,7 @@ export function serializeProfile(profile: PlayerProfile): string {
   return JSON.stringify({
     coins: clampInt(profile.coins, 0, Number.MAX_SAFE_INTEGER, 0),
     hunger: clampInt(profile.hunger, 0, HUNGER_MAX, 0),
-    hp: clampInt(profile.hp, 0, HP_MAX, HP_MAX),
+    hp: clampInt(profile.hp, 0, HP_MAX + 20, HP_MAX),
     status: parseStatus(profile.status),
     vitalAt: clampInt(profile.vitalAt, 0, Number.MAX_SAFE_INTEGER, 0),
     respawn: parsePoint(profile.respawn),
@@ -259,6 +334,12 @@ export function serializeProfile(profile: PlayerProfile): string {
     storage: inv.storage,
     stealActorAt: clampInt(profile.stealActorAt, 0, Number.MAX_SAFE_INTEGER, 0),
     stealTargetAt: clampInt(profile.stealTargetAt, 0, Number.MAX_SAFE_INTEGER, 0),
+    role: isAdventureRoleId(profile.role) ? profile.role : "free",
+    mastery: parseMastery(profile.mastery),
+    skillAt: parseSkillAt(profile.skillAt),
+    tauntUntil: clampInt(profile.tauntUntil, 0, Number.MAX_SAFE_INTEGER, 0),
+    reviveMark: parseReviveMark(profile.reviveMark),
+    pendingTeleport: parsePendingTeleport(profile.pendingTeleport),
   });
 }
 

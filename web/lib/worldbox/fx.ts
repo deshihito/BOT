@@ -496,3 +496,117 @@ export function slashAlpha(k: number): number {
   if (c < 0.25) return c / 0.25;
   return Math.max(0, 1 - (c - 0.25) / 0.5);
 }
+
+/* ================= スキル演出プリセット（バッチ4） =================
+ * プレビュー9種（~/workspace/worldbox-skill-fx/）の仕様を fx.ts に preset 化したもの。
+ * 描画はクライアントが SkillFxEffect の進行度から行い、粒は spawnSkillFx が
+ * 段階遷移時に spawnBurst へ委譲する。予告系（thunder/meteor）は2段構成。
+ */
+
+export type SkillFxKind =
+  | "fireball" | "heal_zone" | "sweep" | "thunder_strike" | "ice_lance"
+  | "meteor" | "whirlwind" | "arrow_rain" | "poison_field" | "taunt";
+
+export type SkillFxEffect = {
+  kind: SkillFxKind;
+  /** 中心（ワールド座標）。 */
+  x: number;
+  y: number;
+  /** 発動者（投射物の起点）。 */
+  fromX: number;
+  fromY: number;
+  startedAt: number;
+  seed: number;
+};
+
+export const SKILL_FX_DURATION_MS: Record<SkillFxKind, number> = {
+  fireball: 650,
+  heal_zone: 2500,
+  sweep: 350,
+  thunder_strike: 850,
+  ice_lance: 500,
+  meteor: 1450,
+  whirlwind: 900,
+  arrow_rain: 1500,
+  poison_field: 3000,
+  taunt: 500,
+};
+
+/** 進行度（0..1）。終了したら 1 以上。 */
+export function skillFxProgress(effect: SkillFxEffect, nowMs: number): number {
+  return (nowMs - effect.startedAt) / SKILL_FX_DURATION_MS[effect.kind];
+}
+
+/** 段階番号（予告=0、本体=1、余韻=2）。クライアントの描画・粒発生の切り替えに使う。 */
+export function skillFxStage(effect: SkillFxEffect, nowMs: number): number {
+  const p = skillFxProgress(effect, nowMs);
+  switch (effect.kind) {
+    case "thunder_strike":
+      return p < 0.55 ? 0 : p < 0.75 ? 1 : 2;
+    case "meteor":
+      return p < 0.6 ? 0 : p < 0.8 ? 1 : 2;
+    case "fireball":
+    case "ice_lance":
+      return p < 0.4 ? 0 : 1;
+    default:
+      return p < 0.15 ? 0 : 1;
+  }
+}
+
+/** 決定的な 0..1 ハッシュ（稲妻の形など、フレーム間で安定させる用途）。 */
+export function hash01(n: number): number {
+  let t = (n | 0) ^ 0x9e3779b9;
+  t = Math.imul(t ^ (t >>> 16), 0x21f0aaad);
+  t = Math.imul(t ^ (t >>> 15), 0x735a2d97);
+  return ((t ^ (t >>> 15)) >>> 0) / 4294967296;
+}
+
+/** 落雷の稲妻ポリライン（決定的生成）。起点→終点の間に中間点を刻む。 */
+export function thunderBoltPoints(
+  seed: number, x0: number, y0: number, x1: number, y1: number,
+): { x: number; y: number }[] {
+  const pts: { x: number; y: number }[] = [{ x: x0, y: y0 }];
+  const segs = 6;
+  for (let i = 1; i < segs; i++) {
+    const t = i / segs;
+    const jitter = (hash01(seed * 31 + i * 17) - 0.5) * 0.5 * (1 - Math.abs(t - 0.5));
+    pts.push({ x: x0 + (x1 - x0) * t + jitter, y: y0 + (y1 - y0) * t });
+  }
+  pts.push({ x: x1, y: y1 });
+  return pts;
+}
+
+/** 段階遷移時の粒を出す（クライアントが前回段階を覚えて呼ぶ）。 */
+export function spawnSkillFx(sys: FxSystem, effect: SkillFxEffect, stage: number): void {
+  const { x, y } = effect;
+  switch (effect.kind) {
+    case "fireball":
+      if (stage === 1) { spawnBurst(sys, "death", x, y); spawnBurst(sys, "poof", x, y); }
+      break;
+    case "meteor":
+      if (stage === 2) { spawnBurst(sys, "death", x, y); spawnBurst(sys, "mine", x, y); spawnBurst(sys, "death", x, y); }
+      break;
+    case "thunder_strike":
+      if (stage === 1) { spawnBurst(sys, "death", x, y); spawnBurst(sys, "poof", x, y); }
+      break;
+    case "ice_lance":
+      if (stage === 1) spawnBurst(sys, "poof", x, y);
+      break;
+    case "sweep":
+    case "whirlwind":
+      if (stage === 1) spawnBurst(sys, "dash", x, y);
+      break;
+    case "arrow_rain":
+      if (stage === 1) spawnBurst(sys, "poof", x, y);
+      break;
+    case "heal_zone":
+      if (stage === 1) spawnBurst(sys, "warp", x, y);
+      break;
+    case "poison_field":
+      if (stage === 1) spawnBurst(sys, "poof", x, y);
+      break;
+    case "taunt":
+      if (stage === 1) spawnBurst(sys, "poof", x, y);
+      break;
+  }
+}

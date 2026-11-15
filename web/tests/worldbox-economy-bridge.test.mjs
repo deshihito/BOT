@@ -84,7 +84,7 @@ test("economy: buildEconomyOp は種類ごとの制約を守る", () => {
     "12345678-abcd-4abc-8abc-1234567890ab", 1,
   ), null);
   // earn はホワイトリストの理由だけ
-  for (const reason of ["harvest", "guild_shop_sale", "arena_prize", "shop_sale", "work"]) {
+  for (const reason of ["harvest", "guild_shop_sale", "arena_prize", "shop_sale"]) {
     const op = eco.buildEconomyOp(
       { kind: "earn", userKey: MY_KEY, discordId: ME, amount: 10, reason },
       "12345678-abcd-4abc-8abc-1234567890ab", 1,
@@ -93,6 +93,11 @@ test("economy: buildEconomyOp は種類ごとの制約を守る", () => {
   }
   assert.equal(eco.buildEconomyOp(
     { kind: "earn", userKey: MY_KEY, discordId: ME, amount: 10, reason: "cheat" },
+    "12345678-abcd-4abc-8abc-1234567890ab", 1,
+  ), null);
+  // 労働は廃止（2026-11-16）: earn の許可リストから外れたため作れない
+  assert.equal(eco.buildEconomyOp(
+    { kind: "earn", userKey: MY_KEY, discordId: ME, amount: 10, reason: "work" },
     "12345678-abcd-4abc-8abc-1234567890ab", 1,
   ), null);
   // spend は理由自由（サーバー側の呼び出し専用）
@@ -353,6 +358,7 @@ export async function findPresenceOwnerKey(id) { return map.has(id) ? map.get(id
 `);
 await import(presenceStubUrl); // ルートはもう presence-online を読まないため、状態だけ先に作る
 const profileSwapUrl = bundleModule(["worldbox/items.ts", "worldbox/profile.ts"], ["swapSlots", "moveSlot"]);
+const rolesUrl = bundleModule(["worldbox/items.ts", "worldbox/profile.ts", "worldbox/roles.ts"], ["addMasteryXp"]);
 const shopsUrl = bundleModule(["worldbox/items.ts", "worldbox/shops.ts"], ["checkBuyGenre", "checkBuySold"]);
 const profileRoute = await import(
   dataUrl(
@@ -367,7 +373,8 @@ const profileRoute = await import(
       .replaceAll('"@/lib/worldbox/station-online"', JSON.stringify(stationStubUrl))
       .replaceAll('"@/lib/worldbox/profile-online"', JSON.stringify(profileOnlineStubUrl))
       .replaceAll('"@/lib/worldbox/profile"', JSON.stringify(profileSwapUrl))
-      .replaceAll('"@/lib/worldbox/user-lock"', JSON.stringify(userLockUrl)),
+      .replaceAll('"@/lib/worldbox/user-lock"', JSON.stringify(userLockUrl))
+      .replaceAll('"@/lib/worldbox/roles"', JSON.stringify(rolesUrl)),
   ),
 );
 const URL_P = "http://localhost/api/worldbox/profile";
@@ -408,21 +415,28 @@ test("API(profile): buy は実残高不足で 409、オプもアイテムも増�
   assert.equal(globalThis.__wbBridge.ops.length, 0);
 });
 
-test("API(profile): sell は earn(shop_sale)、work は earn(work) オプを積む", async () => {
+test("API(profile): sell は earn(shop_sale) オプを積む", async () => {
   resetBridgeState();
   const cookie = sessionCookie(ME, "eco-user");
   globalThis.__wbProfiles.set(MY_KEY, { coins: 100, hunger: 100, items: { wood: 1 }, stealActorAt: 0, stealTargetAt: 0 });
   const sold = await profileRoute.POST(apiRequest(URL_P, "POST", cookie, { action: "sell", itemId: "wood" }));
   assert.equal(sold.status, 200);
   assert.equal((await sold.json()).profile.items.wood, undefined);
-  const worked = await profileRoute.POST(apiRequest(URL_P, "POST", cookie, { action: "work" }));
-  assert.equal(worked.status, 200);
-  assert.equal((await worked.json()).profile.hunger, 90);
   const ops = globalThis.__wbBridge.ops;
   assert.deepEqual(ops.map((op) => [op.kind, op.reason, op.amount]), [
     ["earn", "shop_sale", 4],
-    ["earn", "work", 20],
   ]);
+});
+
+test("API(profile): work は廃止され、オプもプロフィールも動かない", async () => {
+  resetBridgeState();
+  const cookie = sessionCookie(ME, "eco-user");
+  globalThis.__wbProfiles.set(MY_KEY, { coins: 100, hunger: 100, items: {}, stealActorAt: 0, stealTargetAt: 0 });
+  const res = await profileRoute.POST(apiRequest(URL_P, "POST", cookie, { action: "work" }));
+  assert.equal(res.status, 409);
+  assert.equal((await res.json()).error, "work_disabled");
+  assert.equal(globalThis.__wbBridge.ops.length, 0);
+  assert.equal(globalThis.__wbProfiles.get(MY_KEY)?.hunger, 100);
 });
 
 test("API(profile): eat はオプを積まない", async () => {

@@ -317,10 +317,9 @@ export function blockMineTool(def: ItemDef): ToolKind | null {
   return def.mineTool ?? "pickaxe";
 }
 
-/** 設置の文脈（ユニオンマーク・建物レイヤーはルート側が真値を持つ）。 */
+/** 設置の文脈（ユニオンマークはルート側が真値を持つ）。 */
 export type PlaceBlockContext = {
   onCapital: boolean;
-  hasBuilding: boolean;
 };
 
 /**
@@ -351,7 +350,6 @@ export function applyPlaceBlock(
   const { x, y } = tile;
   const key = tileKey(x, y);
   if (ctx.onCapital) return { ok: false, error: "on_capital" };
-  if (ctx.hasBuilding) return { ok: false, error: "tile_blocked" };
   const active = isOverrideActive(current, now) ? current : null;
   if (active?.block) return { ok: false, error: "tile_blocked" };
   if (active?.crop) return { ok: false, error: "tile_blocked" };

@@ -53,6 +53,25 @@ export const MOB_SPRITE: Readonly<Record<string, string>> = {
   giant_golem: "/img/worldbox/mobs/golem.png",
   ancient_turtle: "/img/worldbox/mobs/turtle.png",
   world_dragon: "/img/worldbox/mobs/dragon.png",
+  cat: "/img/worldbox/mobs/cat.png",
+  dog: "/img/worldbox/mobs/dog.png",
+  duck: "/img/worldbox/mobs/duck.png",
+  goat: "/img/worldbox/mobs/goat.png",
+  fox: "/img/worldbox/mobs/fox.png",
+  tanuki: "/img/worldbox/mobs/tanuki.png",
+  bird_blue: "/img/worldbox/mobs/bird_blue.png",
+  crow: "/img/worldbox/mobs/crow.png",
+  owl: "/img/worldbox/mobs/owl.png",
+  penguin: "/img/worldbox/mobs/penguin.png",
+  butterfly: "/img/worldbox/mobs/butterfly.png",
+  ladybug: "/img/worldbox/mobs/ladybug.png",
+  snail: "/img/worldbox/mobs/snail.png",
+  fish_blue: "/img/worldbox/mobs/fish_blue.png",
+  fish_orange: "/img/worldbox/mobs/fish_orange.png",
+  jellyfish: "/img/worldbox/mobs/jellyfish.png",
+  octopus: "/img/worldbox/mobs/octopus.png",
+  mushroom: "/img/worldbox/mobs/mushroom_mob.png",
+  werewolf: "/img/worldbox/mobs/werewolf.png",
 };
 
 /** 素材が無い種の明示フォールバック（最小限の図形描画に落とす種）。 */
@@ -98,6 +117,8 @@ export type MobState = {
   hp: number;
   /** 死亡中の再出現時刻（ms）。これを過ぎたら満タンで復活。 */
   deadUntil?: number;
+  /** 凍結中の解除時刻（ms）。アイスランスで付く。 */
+  frozenUntil?: number;
 };
 
 export function parseMobState(raw: unknown): MobState | null {
@@ -106,10 +127,11 @@ export function parseMobState(raw: unknown): MobState | null {
     try { v = JSON.parse(raw); } catch { return null; }
   }
   if (typeof v !== "object" || v === null) return null;
-  const o = v as { hp?: unknown; deadUntil?: unknown };
+  const o = v as { hp?: unknown; deadUntil?: unknown; frozenUntil?: unknown };
   if (typeof o.hp !== "number" || !Number.isFinite(o.hp)) return null;
   const st: MobState = { hp: Math.max(0, Math.floor(o.hp)) };
   if (typeof o.deadUntil === "number" && Number.isFinite(o.deadUntil)) st.deadUntil = o.deadUntil;
+  if (typeof o.frozenUntil === "number" && Number.isFinite(o.frozenUntil)) st.frozenUntil = o.frozenUntil;
   return st;
 }
 
@@ -117,7 +139,9 @@ export function parseMobStates(raw: unknown): Record<string, MobState> {
   if (typeof raw !== "object" || raw === null) return {};
   const out: Record<string, MobState> = {};
   for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
-    if (!parseMobKey(k)) continue;
+    // インスタンス内は "空間ID|mobId@x,y" の前置キーを許す
+    const baseKey = k.includes("|") ? k.slice(k.lastIndexOf("|") + 1) : k;
+    if (!parseMobKey(baseKey)) continue;
     const st = parseMobState(v);
     if (st) out[k] = st;
   }

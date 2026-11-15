@@ -4,8 +4,7 @@
 // （オーナー=王、ADMINISTRATOR=大臣、メンバー=国民。判定は guilds.ts）。
 // 国はあくまで所属区分: 1ユーザー = 最大1国まで所属する。建国するとマップ
 // 中央から渦巻き状（チェビシェフリング）に空き地を探して首都を置く。首都
-// 同士は一定の間隔を空けるが、所属が建築などの行動を制限することはない
-// （建物は lib/worldbox/buildings の個人所有）。
+// 同士は一定の間隔を空けるが、所属が建築などの行動を制限することはない。
 // 状態遷移（建国・参加・離脱・解散）はここに集約し、API ルートは保存・認証・
 // Discord 検証だけを担う。地形は lib/worldbox/mapgen の決定的マップを参照する。
 import {
@@ -13,7 +12,6 @@ import {
 } from "./mapgen";
 import { findFreeNear } from "./move";
 import { presenceIdFor } from "./presence";
-import { BUILDING_PROSPERITY, emptyBuildings, type BuildingsMap } from "./buildings";
 
 /** 首都同士の最小間隔の基準（チェビシェフ距離）。首都はこの2倍より離して置く。 */
 export const TERRITORY_RADIUS = 6;
@@ -248,23 +246,11 @@ export function fastTravelDestination(
 export const PROSPERITY_PER_MEMBER = 5;
 
 /**
- * 繁栄度（所属の指標）: 国民数 × PROSPERITY_PER_MEMBER + 現在の国民が所有する
- * 建物の合計。建物そのものは個人所有で、所属していない人の建物は算入しない。
+ * 繁栄度（所属の指標）: 国民数 × PROSPERITY_PER_MEMBER のみ。
+ * 旧プレハブ建物（家・畑・塔）の算入は建物システムの廃止に伴い撤去した。
  */
-export function prosperityOf(state: NationsState, buildings: BuildingsMap, nationId: string): number {
-  const memberIds = new Set<string>();
-  let memberCount = 0;
-  for (const [ownerKey, m] of Object.entries(state.members)) {
-    if (m.nationId === nationId) {
-      memberCount++;
-      memberIds.add(presenceIdFor(ownerKey));
-    }
-  }
-  let score = PROSPERITY_PER_MEMBER * memberCount;
-  for (const b of Object.values(buildings)) {
-    if (memberIds.has(b.ownerId)) score += BUILDING_PROSPERITY[b.type];
-  }
-  return score;
+export function prosperityOf(state: NationsState, nationId: string): number {
+  return PROSPERITY_PER_MEMBER * (memberCounts(state)[nationId] ?? 0);
 }
 
 // ---------- 保存形式 ----------
@@ -339,7 +325,7 @@ export type NationView = {
   color: string;
   capital: { x: number; y: number };
   members: number;
-  /** 繁栄度（国民数 + 国民の建物から算出する所属指標）。 */
+  /** 繁栄度（国民数から算出する所属指標）。 */
   prosperity: number;
   /** 王の不透明 ID（presenceIdFor と同じ方式）。 */
   kingId: string;
@@ -370,7 +356,7 @@ export type NationsResponse = {
   guildsScopeRequired: boolean;
 };
 
-export function nationViews(state: NationsState, buildings: BuildingsMap = emptyBuildings()): NationView[] {
+export function nationViews(state: NationsState): NationView[] {
   const counts = memberCounts(state);
   return Object.values(state.nations)
     .sort((a, b) => a.createdAt - b.createdAt || a.guildId.localeCompare(b.guildId))
@@ -381,7 +367,7 @@ export function nationViews(state: NationsState, buildings: BuildingsMap = empty
       color: n.color,
       capital: { ...n.capital },
       members: counts[n.guildId] ?? 0,
-      prosperity: prosperityOf(state, buildings, n.guildId),
+      prosperity: prosperityOf(state, n.guildId),
       kingId: presenceIdFor(n.kingKey),
       createdAt: n.createdAt,
     }));
@@ -399,12 +385,11 @@ export function playerNationMap(state: NationsState): Record<string, { nationId:
 export function buildNationsResponse(
   state: NationsState,
   selfKey: string | null,
-  buildings: BuildingsMap = emptyBuildings(),
   extra: { myGuilds?: MyGuildView[]; guildsScopeRequired?: boolean } = {},
 ): NationsResponse {
   const mine = selfKey ? state.members[selfKey] : undefined;
   return {
-    nations: nationViews(state, buildings),
+    nations: nationViews(state),
     me: mine ? { nationId: mine.nationId, role: mine.role } : null,
     playerNations: playerNationMap(state),
     loggedIn: selfKey !== null,

@@ -10,7 +10,6 @@ import {
   applyMineBlock, applyPlaceBlock, applyTileAction, isOverrideActive, tileKey,
   type TileActionResult, type TileOverridesMap,
 } from "@/lib/worldbox/tiles";
-import { loadBuildings } from "@/lib/worldbox/buildings-online";
 import { loadNationsState } from "@/lib/worldbox/nations-online";
 import { containerIsEmpty, isContainerItem } from "@/lib/worldbox/containers";
 import { loadContainer, storeContainer } from "@/lib/worldbox/containers-online";
@@ -21,8 +20,8 @@ import {
 export const runtime = "nodejs";
 
 // AGO WORLD BOX のタイル行為（伐採・採掘・耕作・作付け・収穫・
-// ブロック設置/採掘＝自由建築）。設置はユニオンマーク（首都）・既存の
-// 建物タイルを避け、採掘は設置者だけが行える。
+// ブロック設置/採掘＝自由建築）。設置はユニオンマーク（首都）を避け、
+// 採掘は設置者だけが行える。
 // 地形の真値は生成マップ＋bot_kv の上書き（名前空間 worldbox_tiles、
 // キー "x,y"）で、行為の可否はすべてサーバー側で検証する。
 // 収納コンテナ（樽・宝箱）は中身が入っている間は掘れない（not_empty）。
@@ -149,14 +148,13 @@ export async function POST(request: Request) {
   /** 掘り出す対象が収納コンテナなら、そのアイテム ID（回収後に状態を消す）。 */
   let minedContainerItem: string | null = null;
   if (fields.action === "place_block") {
-    // ユニオンマーク（首都）・建物レイヤーの保護はルート側の真値で判定する
-    const [nationsState, buildings] = await Promise.all([loadNationsState(), loadBuildings()]);
+    // ユニオンマーク（首都）の保護はルート側の真値で判定する
+    const nationsState = await loadNationsState();
     const capitals = Object.values(nationsState.nations).map((n) => n.capital);
     result = applyPlaceBlock(
       current, profile, map, ownerKey, fields.x, fields.y, fields.itemId, Date.now(),
       {
         onCapital: hasCoord && capitals.some((c) => c.x === tx && c.y === ty),
-        hasBuilding: hasCoord && buildings[`${tx},${ty}`] !== undefined,
       },
     );
   } else if (fields.action === "mine_block") {

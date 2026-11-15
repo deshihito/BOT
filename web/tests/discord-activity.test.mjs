@@ -186,10 +186,12 @@ test("音楽 Activity 画面と専用ルートは廃止され、旧 URL は /gam
   assert.ok(stub.includes('redirect("/games")'), "旧 URL のスタブが /games へ寄せていない");
 });
 
-test("games-auth ルートはコード交換だけを行い、音楽用トークンを発行しない", () => {
+test("games-auth ルートはコード交換とセッション発行を行い、音楽用トークンを発行しない", () => {
   const src = readSource("app/api/activity/games-auth/route.ts");
   assert.ok(src.includes("exchangeDiscordActivityCode"), "コード交換ヘルパーを使っていない");
   assert.ok(src.includes("buildDiscordIdentity"), "identity を組み立てていない");
+  assert.ok(src.includes("createSession"), "通常ログインと同じセッションを張っていない");
+  assert.ok(src.includes("SESSION_COOKIE"), "セッション Cookie を返していない");
   assert.ok(!src.includes("createActivityToken"), "音楽用トークン発行が混入している");
 });
 

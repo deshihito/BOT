@@ -148,6 +148,7 @@ export class NextResponse {
   }
 }
 `);
+const rolesUrl = dataUrl(transpile("worldbox/roles.ts").replaceAll('"./profile"', JSON.stringify(profileUrl)));
 const profileRoute = await import(
   dataUrl(
     transpile("api/worldbox/profile/route.ts", rootDir + "/app")
@@ -161,7 +162,8 @@ const profileRoute = await import(
       .replaceAll('"@/lib/worldbox/shops"', JSON.stringify(shopsUrl))
       .replaceAll('"@/lib/worldbox/station-online"', JSON.stringify(stationOnlineUrl))
       .replaceAll('"@/lib/worldbox/profile-online"', JSON.stringify(profileOnlineUrl))
-      .replaceAll('"@/lib/worldbox/user-lock"', JSON.stringify(userLockUrl)),
+      .replaceAll('"@/lib/worldbox/user-lock"', JSON.stringify(userLockUrl))
+      .replaceAll('"@/lib/worldbox/roles"', JSON.stringify(rolesUrl)),
   ),
 );
 const economyRoute = await import(

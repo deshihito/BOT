@@ -274,16 +274,23 @@ class TestEarn(WorkerCase):
         self.assertEqual(record["error"], "invalid_reason")
         self.assertEqual(self.store.pay_calls, 0)
 
-    async def test_earn_shop_sale_and_work_reasons(self):
+    async def test_earn_shop_sale_reason(self):
         self.store.pool = 5000
-        for reason in ("shop_sale", "work"):
-            self.setUp()
-            self.store.pool = 5000
-            op = self.add_op(kind="earn", amount=120, reason=reason)
-            await self.worker.poll_once()
-            record = self.record(op["id"])
-            self.assertEqual(record["status"], "done", reason)
-            self.assertEqual(record["appliedAmount"], 120, reason)
+        op = self.add_op(kind="earn", amount=120, reason="shop_sale")
+        await self.worker.poll_once()
+        record = self.record(op["id"])
+        self.assertEqual(record["status"], "done")
+        self.assertEqual(record["appliedAmount"], 120)
+
+    async def test_earn_work_reason_rejected(self):
+        # 労働は廃止（2026-11-16）: earn の許可リストから外れたため適用しない
+        self.store.pool = 5000
+        op = self.add_op(kind="earn", amount=120, reason="work")
+        await self.worker.poll_once()
+        record = self.record(op["id"])
+        self.assertEqual(record["status"], "failed")
+        self.assertEqual(record["error"], "invalid_reason")
+        self.assertEqual(self.store.pay_calls, 0)
 
 
 class TestTransfer(WorkerCase):

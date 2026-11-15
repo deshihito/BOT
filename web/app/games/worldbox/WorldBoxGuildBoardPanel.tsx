@@ -1,7 +1,8 @@
 "use client";
 // AGO WORLD BOX のギルドボードパネル（ロビー中央広場のギルドボード専用）。
-// タブは2つ: 「依頼」（ユニオン内のアイテム依頼: 投稿・納品・取消）と
-// 「役職」（国 = Discord サーバーへの建国・参加・離脱と自分の役職）。
+// タブは3つ: 「依頼」（ユニオン内のアイテム依頼: 投稿・納品・取消）と
+// 「役職」（国 = Discord サーバーへの建国・参加・離脱と自分の役職）と
+// 「冒険役職」（剣士/守護/斥候/採掘者/薬師の選択と熟練ランク表示）。
 // 役職まわりの home はここ: ≡ メニューには置かない。
 // コインの正は AGO コイン本体: 依頼の預かり・報酬・返金は API 側が
 // 経済ブリッジのオプとして積む（このパネルは結果を表示するだけ）。
@@ -9,6 +10,7 @@ import { useCallback, useEffect, useState } from "react";
 import { ITEMS, itemById } from "@/lib/worldbox/items";
 import type { NationRole, NationsResponse } from "@/lib/worldbox/nations";
 import type { PlayerProfile } from "@/lib/worldbox/profile";
+import { ADVENTURE_ROLES, masteryRankOf, type AdventureRoleId } from "@/lib/worldbox/roles";
 import type { GuildRequest } from "@/lib/worldbox/requests";
 
 const ROLE_LABEL: Record<NationRole, string> = { king: "王", minister: "大臣", citizen: "国民" };
@@ -97,7 +99,7 @@ export default function WorldBoxGuildBoardPanel({
   getPlayerPos: () => { x: number; y: number };
   onClose: () => void;
 }) {
-  const [tab, setTab] = useState<"requests" | "roles">("requests");
+  const [tab, setTab] = useState<"requests" | "roles" | "adventure">("requests");
   const [data, setData] = useState<RequestsData | null>(null);
   const [msg, setMsg] = useState("");
   const [busy, setBusy] = useState(false);
@@ -171,6 +173,14 @@ export default function WorldBoxGuildBoardPanel({
           onClick={() => setTab("roles")}
         >
           役職
+        </button>
+        <button
+          type="button"
+          style={{ ...tabBtn, ...(tab === "adventure" ? tabOn : {}) }}
+          aria-pressed={tab === "adventure"}
+          onClick={() => setTab("adventure")}
+        >
+          冒険役職
         </button>
         <button type="button" style={tabBtn} onClick={onClose}>
           閉じる
@@ -298,6 +308,67 @@ export default function WorldBoxGuildBoardPanel({
             </div>
           )}
           {msg && <p role="status" style={{ margin: "10px 0 0", fontSize: 13 }}>{msg}</p>}
+        </div>
+      )}
+
+      {tab === "adventure" && (
+        <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 8 }}>
+          {Object.values(ADVENTURE_ROLES).map((r) => {
+            const rank = profile ? masteryRankOf(profile, r.id) : 1;
+            const current = profile?.role === r.id;
+            return (
+              <div key={r.id} style={{ ...rowStyle, justifyContent: "space-between" }}>
+                <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span
+                    aria-hidden
+                    style={{
+                      display: "inline-flex", alignItems: "center", justifyContent: "center",
+                      width: 26, height: 26, borderRadius: 7, fontSize: 14, fontWeight: 700,
+                      border: "1px solid rgba(255,255,255,0.35)",
+                      background: current ? "rgba(255,210,62,0.25)" : "rgba(255,255,255,0.08)",
+                    }}
+                  >
+                    {r.symbol}
+                  </span>
+                  <strong>{r.name}</strong>
+                  <span aria-label={`熟練ランク ${rank}`} style={{ letterSpacing: 2, fontSize: 11 }}>
+                    {"●".repeat(rank)}
+                    <span style={{ opacity: 0.3 }}>{"●".repeat(5 - rank)}</span>
+                  </span>
+                </span>
+                <button
+                  type="button"
+                  style={{ ...btn, ...(current ? tabOn : {}) }}
+                  disabled={busy || current || !profile}
+                  onClick={async () => {
+                    setBusy(true);
+                    setMsg("");
+                    try {
+                      const res = await fetch("/api/worldbox/roles", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ action: "set_role", role: r.id as AdventureRoleId }),
+                      });
+                      const json = (await res.json().catch(() => ({}))) as { profile?: PlayerProfile; error?: string };
+                      if (res.ok && json.profile) {
+                        onProfileChange(json.profile);
+                        setMsg(`${r.name}になりました`);
+                      } else {
+                        setMsg(json.error === "not_at_guild_board" ? "ギルドボードの前で操作してください" : "変更できませんでした");
+                      }
+                    } catch {
+                      setMsg("変更できませんでした");
+                    } finally {
+                      setBusy(false);
+                    }
+                  }}
+                >
+                  {current ? "選択中" : "選ぶ"}
+                </button>
+              </div>
+            );
+          })}
+          {msg && <div style={{ fontSize: 13 }}>{msg}</div>}
         </div>
       )}
 

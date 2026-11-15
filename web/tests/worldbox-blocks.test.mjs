@@ -138,7 +138,7 @@ const treeAt = findTile(T.T_TREE);
 const NOW = 1_700_000_000_000;
 const ME_KEY = "discord:611111111111111111";
 const OTHER_KEY = "discord:622222222222222222";
-const NO_CTX = { onCapital: false, hasBuilding: false };
+const NO_CTX = { onCapital: false };
 const withItems = (items) => inv.parseProfile({ items });
 const place = (current, profile, key, at, itemId, ctx = NO_CTX) =>
   T.applyPlaceBlock(current, profile, map, key, at.x, at.y, itemId, NOW, ctx);
@@ -188,10 +188,9 @@ test("設置: ブロック以外・在庫なし・置けない地形は拒む", 
   }
 });
 
-test("設置: 首都・スポーン広場・建物のあるタイルは保護される", () => {
+test("設置: 首都（ユニオンマーク）のあるタイルは保護される", () => {
   const p = withItems({ dirt_block: 1 });
   assert.equal(place(null, p, ME_KEY, grassAt, "dirt_block", { ...NO_CTX, onCapital: true }).error, "on_capital");
-  assert.equal(place(null, p, ME_KEY, grassAt, "dirt_block", { ...NO_CTX, hasBuilding: true }).error, "tile_blocked");
 });
 
 test("設置: 畑・作物・既存ブロック・切り株（再生待ち）の上には置けない", () => {
@@ -296,10 +295,6 @@ const authUrl = dataUrl(
 const auth = await import(authUrl);
 
 const presenceBundleUrl = bundleModule(["worldbox/presence.ts"], ["presenceIdFor"]);
-const buildingsBundleUrl = bundleModule(
-  ["worldbox/rng.ts", "worldbox/mapgen.ts", "worldbox/presence.ts", "worldbox/buildings.ts"],
-  ["applyBuild"],
-);
 const profileOnlineStubUrl = dataUrl(`
 import { parseProfile, serializeProfile } from ${JSON.stringify(invUrl)};
 const store = (globalThis.__wbBlockProfiles ??= new Map());
@@ -336,10 +331,6 @@ const nationsOnlineStubUrl = dataUrl(`
 export function isNationsEnabled() { return true; }
 export async function loadNationsState() { return globalThis.__wbBlockNations ?? { nations: {} }; }
 `);
-const buildingsOnlineStubUrl = dataUrl(`
-export function isBuildingsEnabled() { return true; }
-export async function loadBuildings() { return globalThis.__wbBlockBuildings ?? {}; }
-`);
 const nextServerStubUrl = dataUrl(`
 export class NextResponse {
   static json(body, init = {}) {
@@ -364,8 +355,6 @@ const tilesRoute = await import(
       .replaceAll('"@/lib/worldbox/tiles-online"', JSON.stringify(tilesOnlineStubUrl))
       .replaceAll('"@/lib/worldbox/containers"', JSON.stringify(containersBundleUrl))
       .replaceAll('"@/lib/worldbox/containers-online"', JSON.stringify(containersOnlineStubUrl))
-      .replaceAll('"@/lib/worldbox/buildings"', JSON.stringify(buildingsBundleUrl))
-      .replaceAll('"@/lib/worldbox/buildings-online"', JSON.stringify(buildingsOnlineStubUrl))
       .replaceAll('"@/lib/worldbox/nations-online"', JSON.stringify(nationsOnlineStubUrl)),
   ),
 );
@@ -397,7 +386,6 @@ function resetStores() {
   globalThis.__wbBlockContainers?.clear();
   globalThis.__wbBlockPresence = [];
   globalThis.__wbBlockNations = { nations: {} };
-  globalThis.__wbBlockBuildings = {};
 }
 
 test("API(blocks): 未ログインの設置は 401", async () => {
@@ -438,22 +426,16 @@ test("API(blocks): 設置→GET(selfId)→採掘の往復", async () => {
   assert.equal(globalThis.__wbBlockTiles.has(KEY), false);
 });
 
-test("API(blocks): 首都・建物タイルは 409 で保護され、旧スポーン地点は保護されない", async () => {
+test("API(blocks): 首都タイルは 409 で保護され、旧スポーン地点は保護されない", async () => {
   resetStores();
   const cookie = sessionCookie(ME, "builder");
   globalThis.__wbBlockProfiles.set(MY_KEY, inv.serializeProfile(inv.parseProfile({ items: { dirt_block: 5 } })));
-  // 首都
+  // 首都（ユニオンマーク）
   globalThis.__wbBlockNations = { nations: { g1: { capital: { x: grassAt.x, y: grassAt.y } } } };
   const cap = await tilesRoute.POST(apiRequest(URL_T, "POST", cookie, { action: "place_block", x: grassAt.x, y: grassAt.y, itemId: "dirt_block" }));
   assert.equal(cap.status, 409);
   assert.equal((await cap.json()).error, "on_capital");
   globalThis.__wbBlockNations = { nations: {} };
-  // 建物レイヤー
-  globalThis.__wbBlockBuildings = { [KEY]: { ownerId: "zz", type: "house", at: 1 } };
-  const occ = await tilesRoute.POST(apiRequest(URL_T, "POST", cookie, { action: "place_block", x: grassAt.x, y: grassAt.y, itemId: "dirt_block" }));
-  assert.equal(occ.status, 409);
-  assert.equal((await occ.json()).error, "tile_blocked");
-  globalThis.__wbBlockBuildings = {};
   // 固定のスポーン広場は無い（旧マップ中央の草タイルにも置ける）
   const center = await tilesRoute.POST(apiRequest(URL_T, "POST", cookie, { action: "place_block", x: 512, y: 512, itemId: "dirt_block" }));
   assert.equal(center.status, 200);

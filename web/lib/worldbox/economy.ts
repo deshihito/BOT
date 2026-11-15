@@ -14,8 +14,9 @@ import {
   itemById, recipeById, sellPrice, type ItemDef, type Recipe,
 } from "./items";
 import {
-  HP_MAX, HUNGER_MAX, addItem, countItem, removeItem, type PlayerProfile,
+  HP_MAX, HUNGER_MAX, maxHpFor, MEDIC_HEAL_MULT, addItem, countItem, removeItem, type PlayerProfile,
 } from "./profile";
+
 
 export type EconomyError =
   | "unknown_item" | "unknown_recipe" | "not_enough_coins" | "not_enough_items"
@@ -93,7 +94,11 @@ export function eatItem(profile: PlayerProfile, itemId: unknown): Transition<{ i
     profile: {
       ...removed,
       hunger: Math.min(HUNGER_MAX, removed.hunger + (item.hunger ?? 0)),
-      hp: Math.min(HP_MAX, (typeof removed.hp === "number" ? removed.hp : HP_MAX) + (item.heal ?? 0)),
+      hp: Math.min(
+        maxHpFor(removed),
+        (typeof removed.hp === "number" ? removed.hp : HP_MAX) +
+          (item.heal ?? 0) * (removed.role === "medic" ? MEDIC_HEAL_MULT : 1),
+      ),
       status: item.curePoison && Array.isArray(removed.status) ? removed.status.filter((e) => e.kind !== "poison") : removed.status,
     },
   };

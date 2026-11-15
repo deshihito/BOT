@@ -20,6 +20,7 @@ import {
 import { buildEconomyOp } from "@/lib/worldbox/economy-bridge";
 import { enqueueEconomyOpOnce, isEconomyEnabled } from "@/lib/worldbox/economy-bridge-online";
 import { applyPoison } from "@/lib/worldbox/vitals";
+import { addMasteryXp, MINER_BONUS_CHANCE } from "@/lib/worldbox/roles";
 import { removeItem } from "@/lib/worldbox/profile";
 import { isInstancesEnabled, loadInstanceState, storeInstanceState } from "@/lib/worldbox/instances-online";
 import { rollObjectLoot, specialObjectById } from "@/lib/worldbox/objects";
@@ -125,6 +126,7 @@ async function handleRuins(
     if (!near(trap.x, trap.y)) return NextResponse.json({ error: "too_far" }, { status: 409, headers: NO_STORE });
     personal.traps[String(trap.idx)] = true;
     let next = profile;
+    if (profile.role === "scout") next = addMasteryXp(next, "scout", 3).profile;
     let teleport: { x: number; y: number } | null = null;
     if (trap.kind === "damage") {
       next = { ...next, hp: Math.max(0, next.hp - 12) };
@@ -164,6 +166,7 @@ async function handleRuins(
     const def = specialObjectById("ruins_chest");
     if (!def) return NextResponse.json({ error: "no_chest" }, { status: 404, headers: NO_STORE });
     const rng = makeRng((now ^ chest.x * 131 ^ chest.y * 17) >>> 0);
+    void rng;
     let gained: Record<string, number> = {};
     let trapped = false;
     if (chest.main) {
@@ -176,10 +179,13 @@ async function handleRuins(
       const loot = rollObjectLoot(def, rng);
       gained = loot.gained;
       trapped = loot.trapped;
+      // 斥候の専門: 宝箱の罠率を半減する
+      if (trapped && profile.role === "scout" && rng() < 0.5) trapped = false;
     }
     let next = profile;
     for (const [id, count] of Object.entries(gained)) next = addItem(next, id, count);
     if (trapped) next = { ...next, hp: Math.max(0, next.hp - 10) };
+    if (profile.role === "scout") next = addMasteryXp(next, "scout", 4).profile;
     personal.chests[String(chest.idx)] = true;
     let completedNow = false;
     if (chest.main && !personal.completed) {
@@ -293,6 +299,14 @@ async function handleInstancePost(
       const loot = rollObjectLoot(def, makeRng((now ^ vein.x * 131 ^ vein.y * 17) >>> 0));
       let next = profile;
       for (const [id, count] of Object.entries(loot.gained)) next = addItem(next, id, count);
+      if (profile.role === "miner") {
+        // 採掘者の常時効果: 追加ドロップ抽選 + 熟練（希少以上は多め）
+        if (Math.random() < MINER_BONUS_CHANCE) {
+          const bonus = rollObjectLoot(def, makeRng((now ^ 0x5eed) >>> 0));
+          for (const [id, count] of Object.entries(bonus.gained)) next = addItem(next, id, count);
+        }
+        next = addMasteryXp(next, "miner", (def.minTier ?? 0) >= 2 ? 4 : 1).profile;
+      }
       state.veins[vein.key] = now;
       await storeInstanceState(space, state);
       if (!(await storeProfile(ownerKey, next))) {

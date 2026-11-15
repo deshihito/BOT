@@ -222,7 +222,7 @@ test("クライアント: モブ描画・タップ攻撃・モーションが配
 
 test("モブ素材: 全モブがスプライトか明示フォールバックを持ち、ファイルが実在する", () => {
   assert.deepEqual(combat.validateMobSprites(), []);
-  assert.equal(Object.keys(combat.MOB_SPRITE).length, 26);
+  assert.equal(Object.keys(combat.MOB_SPRITE).length, 45);
   assert.deepEqual([...combat.MOB_SPRITE_FALLBACK].sort(), ["giant", "mouse", "ogre"]);
   for (const def of mobs.MOBS) {
     assert.ok(combat.mobHasVisual(def.id), `${def.id} に描画手段が無い`);
@@ -233,7 +233,7 @@ test("モブ素材: 全モブがスプライトか明示フォールバックを
     files.add(src);
     assert.ok(fs.existsSync(path.join(rootDir, "public", src)), `missing sprite file ${src}`);
   }
-  assert.equal(files.size, 23, "実ファイルは23点（流用含む）");
+  assert.equal(files.size, 42, "実ファイルは42点（流用含む）");
 });
 
 test("再出現: 基本15分＋個体キー決定的な追加遅延0〜10分で分散する", () => {

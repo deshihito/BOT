@@ -18,6 +18,7 @@ import { pickRandomSpawn } from "@/lib/worldbox/spawn";
 import { DASH_SPEED, PLAYER_RADIUS, SWIM_DASH_SPEED, SWIM_SPEED, WALK_SPEED, circleHitsSolid, findFreeNear, isWaterAt, stepMove } from "@/lib/worldbox/move";
 import { isNightPhase, nightAmount, phaseAtTime } from "@/lib/worldbox/daynight";
 import { mobById, mobOccupiesTile, type PlacedMob } from "@/lib/worldbox/mobs";
+import { PATTERN_DEF, createBehaviorState, isBossMob, locomotionFor, locomotionPose, stepMobBehavior, type BehaviorEvent, type MobBehaviorState, type MobPatternId } from "@/lib/worldbox/mob-behavior";
 import {
   MOB_ATTACK_RANGE, MOB_RESPAWN_MS, MOB_SPRITE, MOB_SPRITE_FALLBACK, attackTarget, knockbackTarget, mobBlockedTiles, mobDistance, mobFootprintTiles,
   mobHpNow, mobKeyOf, mobRespawnDelayMs, visibleMobs, type MobState,
@@ -28,6 +29,12 @@ import {
   slashAlpha, spawnAmbient, spawnBurst, spawnMobFx, startShake, stepFx, swingProgress, weatherAmbientKind, weatherAt,
   type FxBurstKind, type FxShake, type FxSystem,
 } from "@/lib/worldbox/fx";
+import type { SkillFxEffect } from "@/lib/worldbox/fx";
+import { skillFxProgress, skillFxStage, spawnSkillFx, thunderBoltPoints } from "@/lib/worldbox/fx";
+import {
+  activeSkillFor, masteryRankOf, roleById, skillCooldownLeft, SKILLS,
+  SCOUT_STAMINA_MULT,
+} from "@/lib/worldbox/roles";
 import { clockOffsetEstimate, type PresenceEntry } from "@/lib/worldbox/presence";
 import {
   STAMINA_MAX, canDash, createStamina, createTapTracker, isStickDash, registerKeyTap, rescueStamina,
@@ -35,7 +42,6 @@ import {
 } from "@/lib/worldbox/stamina";
 import { createRemoteTrack, stepRemoteTrack, updateRemoteTrack, type RemoteTrack } from "@/lib/worldbox/remote";
 import type { NationView, NationsResponse } from "@/lib/worldbox/nations";
-import { USER_BUILDING_CAP, type BuildingType, type BuildingView } from "@/lib/worldbox/buildings";
 import {
   L_PLAZA, L_SAND, L_VOID,
   LOBBY_ENTRY, LOBBY_FLOOR_FALLBACK, LOBBY_FLOOR_SPRITE, LOBBY_H, LOBBY_STAIRS_DOWN, LOBBY_STAIRS_UP,
@@ -58,7 +64,7 @@ import {
   type TileActionKind, type TileOverridesMap,
 } from "@/lib/worldbox/tiles";
 import { CROPS, ITEMS, itemById } from "@/lib/worldbox/items";
-import { HP_MAX, HUNGER_MAX, countItem, type ItemSlot, type PlayerProfile, type SlotRef } from "@/lib/worldbox/profile";
+import { HP_MAX, HUNGER_MAX, countItem, maxHpFor, type ItemSlot, type PlayerProfile, type SlotRef } from "@/lib/worldbox/profile";
 import {
   containerCapacity, isContainerItem, type ContainerSlotRef,
 } from "@/lib/worldbox/containers";
@@ -147,10 +153,6 @@ function texReady(img: HTMLImageElement | undefined): img is HTMLImageElement {
 }
 
 
-/** 建築ツール（建物3種＋取り壊し）。 */
-type BuildTool = BuildingType | "demolish";
-const BUILD_TOOL_LABEL: Record<BuildTool, string> = { house: "家", farm: "畑", tower: "塔", demolish: "取り壊し" };
-
 const NATION_ERROR_LABEL: Record<string, string> = {
   already_in_nation: "既に国に所属しています",
   nation_exists: "そのサーバーの国は既にあります",
@@ -164,11 +166,7 @@ const NATION_ERROR_LABEL: Record<string, string> = {
   king_must_transfer_or_disband: "国民がいる間、王は離脱できません",
   not_at_guild_board: "ギルドボードの前で操作してください",
   unauthorized: "ログインが必要です",
-  tile_blocked: "そこには建てられません",
-  cap_reached: "建築上限に達しています",
   forbidden: "その権限がありません",
-  invalid_type: "建物の種類が不正です",
-  on_capital: "首都には建てられません",
 };
 
 /** タイル行為の失敗ラベル（断片のみ）。 */
@@ -198,6 +196,25 @@ const MOB_STYLE: Record<string, { body: string }> = {
   giant: { body: "#c9a186" },
   ancient_turtle: { body: "#5f7f5a" },
   world_dragon: { body: "#7a4a8c" },
+  cat: { body: "#c9a06a" },
+  dog: { body: "#a97c50" },
+  duck: { body: "#f0ead8" },
+  goat: { body: "#d8d2c4" },
+  fox: { body: "#d97c3c" },
+  tanuki: { body: "#8a6844" },
+  bird_blue: { body: "#5a9ec9" },
+  crow: { body: "#3a3f4a" },
+  owl: { body: "#7a6248" },
+  penguin: { body: "#44506a" },
+  butterfly: { body: "#c97ab8" },
+  ladybug: { body: "#d94a3c" },
+  snail: { body: "#b8a86a" },
+  fish_blue: { body: "#4a86c9" },
+  fish_orange: { body: "#e07c3c" },
+  jellyfish: { body: "#d98ac9" },
+  octopus: { body: "#b85a7a" },
+  mushroom: { body: "#d96a5a" },
+  werewolf: { body: "#6a5a8c" },
 };
 /** モブ被弾/死亡エフェクトの色（本体色に寄せる）。 */
 const MOB_FX_COLOR: Record<string, string> = Object.fromEntries(
@@ -282,19 +299,9 @@ function SlotContent({ slot }: { slot: ItemSlot }) {
   );
 }
 
-/** 建物側の文言（not_owner は国家側と意味が違うため上書きする）。 */
-const BUILDING_ERROR_LABEL: Record<string, string> = {
-  ...NATION_ERROR_LABEL,
-  not_owner: "自分の建物だけ取り壊せます",
-};
-
 const EMPTY_NATIONS: NationsResponse = {
   nations: [], me: null, playerNations: {}, loggedIn: false, myGuilds: [], guildsScopeRequired: false,
 };
-
-/** 建物データ（建物は個人所有で、国家データとは別 API から取る）。 */
-type BuildingsData = { buildings: BuildingView[]; loggedIn: boolean };
-const EMPTY_BUILDINGS: BuildingsData = { buildings: [], loggedIn: false };
 
 /** 足元に平置きで描くロビースプライト（上に立てるもの）。 */
 const FLAT_LOBBY_SPRITES = new Set(["warp_pad", "stairs", "tapestry"]);
@@ -313,7 +320,7 @@ const STATION_LABEL: Record<LobbyStation, string> = {
 };
 
 export default function WorldBoxClient() {
-  const { prefix } = useGamesNav();
+  const { prefix, embedded, identity } = useGamesNav();
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const minimapRef = useRef<HTMLCanvasElement | null>(null);
   const [statusText, setStatusText] = useState("読み込み中…");
@@ -325,7 +332,6 @@ export default function WorldBoxClient() {
   const nationsRef = useRef<NationsResponse>(EMPTY_NATIONS);
   const playerPosRef = useRef({ x: 0.5, y: 0.5 });
   const [nationsUi, setNationsUi] = useState<NationsResponse>(EMPTY_NATIONS);
-  const [showNations, setShowNations] = useState(false);
   const [showEconomy, setShowEconomy] = useState(false);
   // マップ表示モード（周辺マップを大きく見る。描画ループは ref で見る）
   const [mapView, setMapView] = useState(false);
@@ -354,37 +360,8 @@ export default function WorldBoxClient() {
   // 座標表示（タイル単位の整数。ループが毎フレーム書く playerPosRef から拾う）
   const [coords, setCoords] = useState({ x: 0, y: 0 });
   const [nationMsg, setNationMsg] = useState("");
-  // 建築モード（描画・入力ループは ref、パネルは state で見る）
-  const [buildMode, setBuildMode] = useState(false);
-  const [buildTool, setBuildTool] = useState<BuildTool>("house");
-  const buildRef = useRef<{ active: boolean; tool: BuildTool }>({ active: false, tool: "house" });
-  /** 建物の当たり判定（"x,y" の集合）。建物データの更新に合わせて作り直す。 */
+  /** ワールドの固体タイル（"x,y" の集合）。設置ブロックから作り直す。 */
   const blockedRef = useRef<ReadonlySet<string>>(new Set());
-  /** 建物レイヤー分の固体タイル。 */
-  const buildingBlockedRef = useRef<ReadonlySet<string>>(new Set());
-  /** 設置ブロック分の固体タイル（タイル上書きから作る）。 */
-  const blockBlockedRef = useRef<ReadonlySet<string>>(new Set());
-  /** ワールドの固体タイル = 建物 ∪ 設置ブロック。 */
-  const syncWorldBlocked = () => {
-    const merged = new Set<string>(buildingBlockedRef.current);
-    for (const k of blockBlockedRef.current) merged.add(k);
-    blockedRef.current = merged;
-  };
-  const buildActionRef = useRef<(tool: BuildTool, x: number, y: number) => void>(() => {});
-
-  const chooseBuildTool = (tool: BuildTool) => {
-    setBuildTool(tool);
-    setBuildMode(true);
-    buildRef.current = { active: true, tool };
-  };
-  const endBuildMode = () => {
-    setBuildMode(false);
-    buildRef.current.active = false;
-  };
-
-  // 建物レイヤー（描画ループは ref、パネルは state で同じデータを見る）
-  const buildingsRef = useRef<BuildingsData>(EMPTY_BUILDINGS);
-  const [buildingsUi, setBuildingsUi] = useState<BuildingsData>(EMPTY_BUILDINGS);
 
   // 座標表示の更新（250ms 間隔・タイルが変わったときだけ再描画）
   useEffect(() => {
@@ -400,6 +377,7 @@ export default function WorldBoxClient() {
 
   // 入場ゲート（Discord ログイン必須。許可されるまでワールドは描画しない）
   const [gate, setGate] = useState<"checking" | "ok" | "denied">("checking");
+  const [gateTry, setGateTry] = useState(0);
   const gateOk = gate === "ok";
   useEffect(() => {
     let cancelled = false;
@@ -415,7 +393,29 @@ export default function WorldBoxClient() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [gateTry]);
+  // Activity 内では GamesShell の SDK 認証が完了するとセッションが張られる。
+  // 本人情報が届いた時点でゲートを引き直す（初回チェックが認証より先に
+  // 走って denied になっても、押せないログインリンクで詰まらないように）。
+  const identityId = identity?.id;
+  useEffect(() => {
+    if (identityId) setGateTry((t) => t + 1);
+  }, [identityId]);
+  // 認証完了の通知を取りこぼした場合の保険: Activity 内で denied の間は
+  // しばらく自動で引き直す。
+  useEffect(() => {
+    if (!embedded || gate !== "denied") return;
+    let count = 0;
+    const timer = window.setInterval(() => {
+      count += 1;
+      if (count > 24) {
+        window.clearInterval(timer);
+        return;
+      }
+      setGateTry((t) => t + 1);
+    }, 2500);
+    return () => window.clearInterval(timer);
+  }, [embedded, gate]);
   // 空間（ワールド / ロビー）とハンバーガーメニュー、ステーション、掲示板
   const [spaceUi, setSpaceUi] = useState<SaveSpace>("world");
   const [menuOpen, setMenuOpen] = useState(false);
@@ -578,20 +578,6 @@ export default function WorldBoxClient() {
       applyNationsData((await res.json()) as NationsResponse);
     } catch { /* 国家が読めなくても歩き続けられる */ }
   };
-  const applyBuildingsData = (data: BuildingsData) => {
-    buildingsRef.current = data;
-    buildingBlockedRef.current = new Set(data.buildings.map((b) => `${b.x},${b.y}`));
-    syncWorldBlocked();
-    if (!data.loggedIn && buildRef.current.active) endBuildMode();
-    setBuildingsUi(data);
-  };
-  const refreshBuildings = async () => {
-    try {
-      const res = await fetch("/api/worldbox/buildings", { headers: { Accept: "application/json" } });
-      if (!res.ok) return;
-      applyBuildingsData((await res.json()) as BuildingsData);
-    } catch { /* 建物が読めなくても歩き続けられる */ }
-  };
   const nationAction = async (body: Record<string, unknown>) => {
     setNationMsg("");
     try {
@@ -610,41 +596,13 @@ export default function WorldBoxClient() {
       setNationMsg("失敗しました");
     }
   };
-  const buildingAction = async (body: Record<string, unknown>) => {
-    setNationMsg("");
-    try {
-      const res = await fetch("/api/worldbox/buildings", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      const data = (await res.json().catch(() => ({}))) as { error?: string };
-      if (!res.ok) {
-        setNationMsg(BUILDING_ERROR_LABEL[data.error ?? ""] ?? "失敗しました");
-        // 失敗は空振りで返す（風切りだけ・成功の粒は出さない）
-        fxEventsRef.current.push({
-          kind: "whiff",
-          x: typeof body.x === "number" ? body.x : Math.floor(playerPosRef.current.x),
-          y: typeof body.y === "number" ? body.y : Math.floor(playerPosRef.current.y),
-        });
-        return;
-      }
-      if (typeof body.x === "number" && typeof body.y === "number") {
-        fxEventsRef.current.push({ kind: body.action === "demolish" ? "debris" : "build", x: body.x, y: body.y });
-      }
-      await refreshBuildings();
-    } catch {
-      setNationMsg("失敗しました");
-    }
-  };
-  const buildAction = (tool: BuildTool, x: number, y: number) => {
-    if (tool === "demolish") void buildingAction({ action: "demolish", x, y });
-    else void buildingAction({ action: "build", type: tool, x, y });
-  };
-  buildActionRef.current = buildAction;
-
   // インベントリ（ホットバー/ストレージ）とタイル上書き（伐採・畑・作物）
   const [invProfile, setInvProfile] = useState<PlayerProfile | null>(null);
+  const [, setCtTick] = useState(0);
+  useEffect(() => {
+    const timer = window.setInterval(() => setCtTick((v) => v + 1), 500);
+    return () => window.clearInterval(timer);
+  }, []);
   const invRef = useRef<PlayerProfile | null>(null);
   invRef.current = invProfile;
   const [selSlot, setSelSlot] = useState(0);
@@ -665,7 +623,6 @@ export default function WorldBoxClient() {
     const onEsc = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
       setMenuOpen(false);
-      setShowNations(false);
       setShowEconomy(false);
       setMapView(false);
       setCasinoOpen(false);
@@ -685,6 +642,81 @@ export default function WorldBoxClient() {
   /** 演出イベントの受け渡し（行為の成功/失敗→描画ループでパーティクル/揺れ/ポップに変換）。
    * whiff は空振り（風切りのみ、粒なし）。hit/death/spawn はモブ演出用（sizeTiles/color 任意）。 */
   const fxEventsRef = useRef<{ kind: FxBurstKind | "whiff"; x: number; y: number; sizeTiles?: number; color?: string }[]>([]);
+  // 冒険役職の技（ダブルタップ発動）: 進行中の演出・前回タップ・死亡地点。
+  const skillFxRef = useRef<{ effect: SkillFxEffect; stage: number }[]>([]);
+  const lastTapRef = useRef<{ x: number; y: number; at: number } | null>(null);
+  const deathsRef = useRef<{ name: string; x: number; y: number; at: number }[]>([]);
+
+  /** ダブルタップで技を打つ。発動したら true（通常タップは消費される）。 */
+  const castSkillAt = async (t: { x: number; y: number }): Promise<boolean> => {
+    const profile = invRef.current;
+    if (!profile || profile.role === "free") return false;
+    const pos = playerPosRef.current;
+    const space = spaceUi;
+    // 薬師: 死亡マーカーへのダブルタップは蘇生
+    if (profile.role === "medic") {
+      const death = deathsRef.current.find((d) => Math.floor(d.x) === t.x && Math.floor(d.y) === t.y);
+      if (death) {
+        try {
+          const res = await fetch("/api/worldbox/roles", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action: "revive", space, px: pos.x, py: pos.y }),
+          });
+          const data = (await res.json().catch(() => ({}))) as { profile?: PlayerProfile };
+          if (res.ok && data.profile) {
+            setInvProfile(data.profile);
+            skillFxRef.current.push({
+              effect: { kind: "heal_zone", x: death.x, y: death.y, fromX: pos.x, fromY: pos.y, startedAt: performance.now(), seed: Math.floor(Math.random() * 1e9) },
+              stage: -1,
+            });
+            playWbSe("warp");
+            deathsRef.current = deathsRef.current.filter((d) => d !== death);
+          }
+        } catch { /* 蘇生できなくても通常操作は続く */ }
+        return true;
+      }
+    }
+    const ownTile = Math.floor(pos.x) === t.x && Math.floor(pos.y) === t.y;
+    const skill = ownTile && profile.role === "guard" ? SKILLS.taunt : activeSkillFor(profile);
+    if (!skill) return false;
+    if (skillCooldownLeft(profile, skill.id, Date.now()) > 0) return false;
+    try {
+      const res = await fetch("/api/worldbox/roles", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "skill", skill: skill.id, tx: t.x + 0.5, ty: t.y + 0.5,
+          space, px: pos.x, py: pos.y,
+        }),
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        profile?: PlayerProfile; fx?: SkillFxEffect["kind"]; cx?: number; cy?: number; error?: string;
+      };
+      if (res.ok && data.profile) {
+        setInvProfile(data.profile);
+        skillFxRef.current.push({
+          effect: {
+            kind: data.fx ?? skill.fx, x: data.cx ?? t.x + 0.5, y: data.cy ?? t.y + 0.5,
+            fromX: pos.x, fromY: pos.y, startedAt: performance.now(), seed: Math.floor(Math.random() * 1e9),
+          },
+          stage: -1,
+        });
+        playWbSe(skill.id === "heal_zone" || skill.id === "taunt" ? "warp" : "hit");
+        void refreshMobsRef.current();
+        return true;
+      }
+      if (data.error === "cooldown") {
+        void refreshInv();
+        return true;
+      }
+      return false;
+    } catch {
+      return false;
+    }
+  };
+  const castSkillRef = useRef(castSkillAt);
+  castSkillRef.current = castSkillAt;
   /** 自分の不透明 ID（プレゼンス ID）。自分のブロック判定に使う。 */
   const selfIdRef = useRef<string | null>(null);
   /** タイル上書きから設置ブロックの固体集合を作り直す（施設は占有のみで固体にしない）。 */
@@ -694,8 +726,7 @@ export default function WorldBoxClient() {
     for (const [key, ov] of Object.entries(tilesRef.current)) {
       if (ov.block && placedBlockSolid(ov.block.itemId) && isOverrideActive(ov, now)) next.add(key);
     }
-    blockBlockedRef.current = next;
-    syncWorldBlocked();
+    blockedRef.current = next;
   };
 
   const refreshInv = async () => {
@@ -709,11 +740,15 @@ export default function WorldBoxClient() {
   /** バイタル API の結果を反映する（死亡時はリスポーン移動まで行う）。 */
   const applyVitalsResult = (data: {
     profile?: PlayerProfile; died?: boolean; respawn?: { x: number; y: number };
+    teleport?: { space: string; x: number; y: number };
   }) => {
     if (data.profile) setInvProfile(data.profile);
     if (data.died && data.respawn) {
       respawnActionRef.current(data.respawn);
       setTileMsg("倒れた");
+    } else if (data.teleport) {
+      respawnActionRef.current({ x: data.teleport.x, y: data.teleport.y });
+      playWbSe("warp");
     }
   };
   const postVitals = async (body: Record<string, unknown>) => {
@@ -826,6 +861,33 @@ export default function WorldBoxClient() {
     bedKeyRef.current = key;
     void postVitals({ action: "set_bed", x, y });
   };
+  // 薬師は近くの死亡地点を定期取得する（蘇生の対象表示）
+  useEffect(() => {
+    if (invProfile?.role !== "medic") {
+      deathsRef.current = [];
+      return;
+    }
+    let disposed = false;
+    const tick = async () => {
+      try {
+        const pos = playerPosRef.current;
+        const res = await fetch(
+          `/api/worldbox/roles?space=${encodeURIComponent(spaceUi)}&x=${pos.x}&y=${pos.y}`,
+          { headers: { Accept: "application/json" } },
+        );
+        if (!res.ok || disposed) return;
+        const data = (await res.json()) as { deaths?: { name: string; x: number; y: number; at: number }[] };
+        if (!disposed) deathsRef.current = data.deaths ?? [];
+      } catch { /* 読めなくても歩き続けられる */ }
+    };
+    void tick();
+    const timer = window.setInterval(tick, 3000);
+    return () => {
+      disposed = true;
+      window.clearInterval(timer);
+    };
+  }, [invProfile?.role, spaceUi]);
+
   // バイタルの定期精算（空腹・毒・飢えはサーバー側の時刻で進む）
   useEffect(() => {
     const timer = window.setInterval(() => void postVitals({ action: "sync" }), 15000);
@@ -1130,13 +1192,11 @@ export default function WorldBoxClient() {
 
   useEffect(() => {
     void refreshNations();
-    void refreshBuildings();
     void refreshInv();
     void refreshTiles();
     void refreshMobs();
     const timer = window.setInterval(() => {
       void refreshNations();
-      void refreshBuildings();
       void refreshInv();
       void refreshTiles();
       void refreshMobs();
@@ -1210,7 +1270,7 @@ export default function WorldBoxClient() {
 
     // 地形はチャンク単位で生成してキャッシュする。実効タイル源は
     // 「チャンク地形＋タイル上書き（伐採・採掘の地形置き換え）」で、
-    // 移動・描画・建築可否はこちらを見る。全体グリッドは持たない。
+    // 移動・描画・行為可否はこちらを見る。全体グリッドは持たない。
     const chunkCache = new Map<string, Uint8Array>();
     const baseTileAt = (x: number, y: number): number => {
       const cx = Math.floor(x / CHUNK_SIZE);
@@ -1245,7 +1305,7 @@ export default function WorldBoxClient() {
     const spawn = pickRandomSpawn(Math.random);
     const player: PlayerState = { x: spawn.x, y: spawn.y, vx: 0, vy: 0, face: 1, phase: 0 };
     const cam = { x: player.x, y: player.y };
-    // 空間（ワールド / ロビー）。ロビーでは建物・国家・ミニマップは扱わない。
+    // 空間（ワールド / ロビー）。ロビーでは国家・ミニマップは扱わない。
     let space: SaveSpace = "world";
     let worldReturn: { x: number; y: number } | null = null;
     const activeMap = (): TopDownMap => (space === "world" ? worldMap : indoorData().moveMap);
@@ -1283,8 +1343,15 @@ export default function WorldBoxClient() {
       ax: number; ay: number; wx: number; wy: number;
       tx: number; ty: number; nextThink: number; phase: number; face: 1 | -1;
       flashAt: number; kx: number; ky: number; seenAt: number; fleeUntil: number;
+      behavior: MobBehaviorState; provokedUntil: number; lastSpeed: number;
     };
     const mobRenders = new Map<string, MobRender>();
+    /** パターンの予兆マーカー（地面描画）と投射物・糸跡（見た目のみ、ダメージ経路は持たない）。 */
+    type MobTelegraph = { pattern: MobPatternId; x: number; y: number; tx: number; ty: number; dirX: number; dirY: number; from: number; until: number; size: number };
+    const mobTelegraphs: MobTelegraph[] = [];
+    type MobProjectile = { pattern: MobPatternId; x: number; y: number; tx: number; ty: number; from: number; until: number; color: string };
+    const mobProjectiles: MobProjectile[] = [];
+    const mobWebs: { x: number; y: number; until: number }[] = [];
     let mobCacheKey = "";
     let mobCache: PlacedMob[] = [];
     let lastAttackAt = 0;
@@ -1493,7 +1560,11 @@ export default function WorldBoxClient() {
       fetch("/api/worldbox/presence", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: "", x: player.x, y: player.y, vx: player.vx, vy: player.vy, face: player.face, space }),
+        body: JSON.stringify({
+        name: "", x: player.x, y: player.y, vx: player.vx, vy: player.vy, face: player.face, space,
+        role: invRef.current?.role ?? "free",
+        rank: invRef.current ? masteryRankOf(invRef.current, invRef.current.role) : 1,
+      }),
       }).catch(() => { /* noop */ });
     };
     const pollOthers = async () => {
@@ -1585,8 +1656,6 @@ export default function WorldBoxClient() {
       const rect = canvas.getBoundingClientRect();
       return { x: e.clientX - rect.left, y: e.clientY - rect.top, w: rect.width, h: rect.height };
     };
-    /** 建築モードで狙っているタイル（ハイライト用）。 */
-    let hoverTile: { x: number; y: number } | null = null;
     const toTile = (e: PointerEvent) => {
       const p = canvasPos(e);
       return {
@@ -1775,13 +1844,6 @@ export default function WorldBoxClient() {
       return true;
     };
     const onPointerDown = (e: PointerEvent) => {
-      if (buildRef.current.active && space === "world") {
-        // 建築モードではタップそのものが確定（スティックは無効）
-        const t = toTile(e);
-        hoverTile = t;
-        buildActionRef.current(buildRef.current.tool, t.x, t.y);
-        return;
-      }
       const p = canvasPos(e);
       // スティックは固定基点の円の中から始まったタッチだけ。それ以外の
       // タッチはタイル操作に回し、設置・採掘とスティックを干渉させない。
@@ -1795,6 +1857,27 @@ export default function WorldBoxClient() {
       }
       if (space === "world" || parseInstanceSpace(space)) {
         const t = toTile(e);
+        // ダブルタップ（320ms 以内・同タイル近傍）は冒険役職の技が消費する。
+        // クールタイム中・役職なしでは発動せず通常タップとして処理する。
+        const lastTap = lastTapRef.current;
+        const nowTap = performance.now();
+        if (
+          lastTap && nowTap - lastTap.at <= 320 &&
+          Math.abs(lastTap.x - t.x) <= 1 && Math.abs(lastTap.y - t.y) <= 1
+        ) {
+          lastTapRef.current = null;
+          void castSkillRef.current(t).then((cast) => {
+            if (!cast) {
+              if (!handleMobTap(t)) {
+                if (space === "world") handleTileTap(t);
+                else if (parseInstanceSpace(space)?.kind === "ruins") handleRuinsTap(t);
+                else handleCaveTap(t);
+              }
+            }
+          });
+          return;
+        }
+        lastTapRef.current = { x: t.x, y: t.y, at: nowTap };
         if (!handleMobTap(t)) {
           if (space === "world") handleTileTap(t);
           else if (parseInstanceSpace(space)?.kind === "ruins") handleRuinsTap(t);
@@ -1803,10 +1886,6 @@ export default function WorldBoxClient() {
       }
     };
     const onPointerMove = (e: PointerEvent) => {
-      if (buildRef.current.active && space === "world") {
-        hoverTile = toTile(e);
-        return;
-      }
       if (!joy.active || e.pointerId !== joy.pointerId) return;
       const p = canvasPos(e);
       const v = stickVector(p.x, p.y, stickBase(p.w, p.h));
@@ -1983,93 +2062,6 @@ export default function WorldBoxClient() {
       c.fillRect(sx - nw / 2, ly + 3, nw, 2.5);
     };
 
-    // ---- 建物（平たい紙風。家=壁+三角屋根、畑=畝と作物、塔=石積み+所属色の旗） ----
-    const drawBuilding = (c: CanvasRenderingContext2D, sx: number, sy: number, type: BuildingType, color: string) => {
-      c.fillStyle = "rgba(20,30,16,0.28)";
-      c.beginPath();
-      c.ellipse(sx + TILE / 2, sy + TILE * 0.93, TILE * 0.34, TILE * 0.10, 0, 0, Math.PI * 2);
-      c.fill();
-      c.lineWidth = 1.5;
-      c.strokeStyle = "rgba(40,36,28,0.75)";
-      if (type === "house") {
-        c.fillStyle = "#f0e4c6";
-        c.fillRect(sx + TILE * 0.18, sy + TILE * 0.42, TILE * 0.64, TILE * 0.52);
-        c.strokeRect(sx + TILE * 0.18, sy + TILE * 0.42, TILE * 0.64, TILE * 0.52);
-        c.fillStyle = color;
-        c.beginPath();
-        c.moveTo(sx + TILE * 0.09, sy + TILE * 0.45);
-        c.lineTo(sx + TILE * 0.5, sy + TILE * 0.09);
-        c.lineTo(sx + TILE * 0.91, sy + TILE * 0.45);
-        c.closePath();
-        c.fill();
-        c.stroke();
-        c.fillStyle = "#7a5a38";
-        c.fillRect(sx + TILE * 0.44, sy + TILE * 0.68, TILE * 0.13, TILE * 0.26);
-      } else if (type === "farm") {
-        c.fillStyle = "#8a5a2b";
-        c.fillRect(sx + TILE * 0.07, sy + TILE * 0.15, TILE * 0.86, TILE * 0.74);
-        c.strokeRect(sx + TILE * 0.07, sy + TILE * 0.15, TILE * 0.86, TILE * 0.74);
-        c.strokeStyle = "rgba(56,34,14,0.85)";
-        c.lineWidth = 2;
-        for (const fy of [0.33, 0.52, 0.71]) {
-          c.beginPath();
-          c.moveTo(sx + TILE * 0.10, sy + TILE * fy);
-          c.lineTo(sx + TILE * 0.90, sy + TILE * fy);
-          c.stroke();
-        }
-        c.fillStyle = "#69b84a";
-        for (const fy of [0.24, 0.43, 0.62, 0.81]) {
-          for (const fx of [0.22, 0.42, 0.62, 0.82]) {
-            c.beginPath();
-            c.arc(sx + TILE * fx, sy + TILE * fy, TILE * 0.045, 0, Math.PI * 2);
-            c.fill();
-          }
-        }
-      } else {
-        // tower: 背の高い石積み＋胸壁＋国色の小さな旗
-        const tw = TILE * 0.46;
-        const tx0 = sx + (TILE - tw) / 2;
-        const topY = sy - TILE * 0.22;
-        c.fillStyle = "#9aa0a6";
-        c.fillRect(tx0, topY + TILE * 0.12, tw, TILE * 1.04);
-        c.strokeRect(tx0, topY + TILE * 0.12, tw, TILE * 1.04);
-        c.fillStyle = "#878d94";
-        const bw = tw / 5;
-        for (let i = 0; i < 3; i++) c.fillRect(tx0 + i * bw * 2, topY, bw, TILE * 0.12);
-        c.fillStyle = "#3c4147";
-        c.fillRect(sx + TILE * 0.44, sy + TILE * 0.28, TILE * 0.12, TILE * 0.18);
-        c.strokeStyle = "#4c4438";
-        c.lineWidth = 2;
-        c.beginPath();
-        c.moveTo(sx + TILE / 2, topY);
-        c.lineTo(sx + TILE / 2, topY - TILE * 0.30);
-        c.stroke();
-        c.fillStyle = color;
-        c.beginPath();
-        c.moveTo(sx + TILE / 2, topY - TILE * 0.30);
-        c.lineTo(sx + TILE / 2 + TILE * 0.24, topY - TILE * 0.22);
-        c.lineTo(sx + TILE / 2, topY - TILE * 0.14);
-        c.closePath();
-        c.fill();
-      }
-    };
-
-    /** 建築モードの可否プレビュー（サーバー判定の鏡像。最終判定はサーバー）。 */
-    const buildValidity = (tx: number, ty: number): boolean => {
-      const data = buildingsRef.current;
-      if (!data.loggedIn) return false;
-      if (buildRef.current.tool === "demolish") {
-        const b = data.buildings.find((v) => v.x === tx && v.y === ty);
-        return !!b && b.mine;
-      }
-      if (nationsRef.current.nations.some((n) => n.capital.x === tx && n.capital.y === ty)) return false;
-      const t = mapTileAt(worldMap, tx, ty);
-      if (t !== T_GRASS && t !== T_DIRT && t !== T_SAND) return false;
-      if (data.buildings.some((v) => v.x === tx && v.y === ty)) return false;
-      if (data.buildings.filter((v) => v.mine).length >= USER_BUILDING_CAP) return false;
-      return true;
-    };
-
     // ---- 空間移動（ワープパッド・階段・ハンバーガーメニュー） ----
     let lastTileKey = "";
     let lastStation: LobbyStation | null = null;
@@ -2098,10 +2090,6 @@ export default function WorldBoxClient() {
         space = "lobby";
         setSpaceUi("lobby");
         setStatusText("ロビー");
-        if (buildRef.current.active) {
-          buildRef.current.active = false;
-          setBuildMode(false);
-        }
         setBoardOpen(false);
         setGuildBoardOpen(false);
         placePlayer(LOBBY_ENTRY.x, LOBBY_ENTRY.y);
@@ -2178,10 +2166,6 @@ export default function WorldBoxClient() {
         lastStationGenre = null;
         setStationGenre(null);
         setBoardOpen(false);
-        if (buildRef.current.active) {
-          buildRef.current.active = false;
-          setBuildMode(false);
-        }
       }
       placePlayer(x, y);
       void pollOthers();
@@ -2383,7 +2367,8 @@ export default function WorldBoxClient() {
         playWbSe("splash");
         wasSwimming = inWaterNow;
       }
-      stamina = stepStamina(stamina, staminaUse, dt).state;
+      const staminaDt = invRef.current?.role === "scout" && staminaUse !== "none" ? dt * SCOUT_STAMINA_MULT : dt;
+      stamina = stepStamina(stamina, staminaUse, staminaDt).state;
       if (staminaBoostRef.current) {
         // 噴水・休憩の回復（サーバー許可済み）
         stamina = createStamina();
@@ -2480,7 +2465,10 @@ export default function WorldBoxClient() {
           // モブ演出: 大きさに応じて粒をスケール。死亡は小さな揺れ、出現はポップも併用
           playWbSe(seForFxBurst(ev.kind));
           spawnMobFx(fxSys, ev.kind, ev.x + 0.5, ev.y + 0.5, { sizeTiles: ev.sizeTiles, color: ev.color });
-          if (ev.kind === "death") shake = startShake(shake, 3, now);
+          if (ev.kind === "death") {
+            shake = startShake(shake, (ev.sizeTiles ?? 1) >= 4 ? 6 : 3, now);
+            if ((ev.sizeTiles ?? 1) >= 4) spawnMobFx(fxSys, "hit", ev.x + 0.5, ev.y + 0.5, { sizeTiles: ev.sizeTiles, color: ev.color });
+          }
           if (ev.kind === "spawn") pops.set(`${ev.x},${ev.y}`, now);
           if (ev.kind === "hit") {
             // 被弾した個体は白フラッシュ＋ノックバック。敵対でなければ逃げる
@@ -2493,7 +2481,7 @@ export default function WorldBoxClient() {
               r.kx += (dx / len) * TILE * 0.20;
               r.ky += (dy / len) * TILE * 0.20;
               const mdef = mobById(mkey.split("@")[0]);
-              if (mdef && mdef.temperament !== "hostile") r.fleeUntil = now + 900;
+              if (mdef && mdef.temperament !== "hostile") { r.fleeUntil = now + 900; r.provokedUntil = now + 6000; }
             }
           }
           continue;
@@ -2675,42 +2663,28 @@ export default function WorldBoxClient() {
       }
 
       // ブロック/施設を選択中は、置ける隣接タイルを薄く光らせる（置ける場所を構造で示す）
-      if (!buildRef.current.active) {
-        const prof = invRef.current;
-        const slot = prof?.hotbar[selSlotRef.current] ?? null;
-        const selDef = slot ? itemById(slot.id) : null;
-        if (prof && selDef && (selDef.category === "block" || selDef.facility === true || !!selDef.placesBlock)) {
-          const px = Math.floor(player.x);
-          const py = Math.floor(player.y);
-          for (let dy = -1; dy <= 1; dy++) {
-            for (let dx = -1; dx <= 1; dx++) {
-              const vx = px + dx;
-              const vy = py + dy;
-              const v = tileView(terrainMap, tilesRef.current, vx, vy, nowMs, null);
-              if (actionForTile(v, { blockId: selDef.id })?.action !== "place_block") continue;
-              ctx.fillStyle = "rgba(140,255,150,0.20)";
-              ctx.fillRect(toScreenX(vx), toScreenY(vy), TILE, TILE);
-              ctx.strokeStyle = "rgba(225,255,225,0.55)";
-              ctx.lineWidth = 1.5;
-              ctx.strokeRect(toScreenX(vx) + 1, toScreenY(vy) + 1, TILE - 2, TILE - 2);
-            }
+      const prof = invRef.current;
+      const slot = prof?.hotbar[selSlotRef.current] ?? null;
+      const selDef = slot ? itemById(slot.id) : null;
+      if (prof && selDef && (selDef.category === "block" || selDef.facility === true || !!selDef.placesBlock)) {
+        const px = Math.floor(player.x);
+        const py = Math.floor(player.y);
+        for (let dy = -1; dy <= 1; dy++) {
+          for (let dx = -1; dx <= 1; dx++) {
+            const vx = px + dx;
+            const vy = py + dy;
+            const v = tileView(terrainMap, tilesRef.current, vx, vy, nowMs, null);
+            if (actionForTile(v, { blockId: selDef.id })?.action !== "place_block") continue;
+            ctx.fillStyle = "rgba(140,255,150,0.20)";
+            ctx.fillRect(toScreenX(vx), toScreenY(vy), TILE, TILE);
+            ctx.strokeStyle = "rgba(225,255,225,0.55)";
+            ctx.lineWidth = 1.5;
+            ctx.strokeRect(toScreenX(vx) + 1, toScreenY(vy) + 1, TILE - 2, TILE - 2);
           }
         }
       }
 
       ctx.imageSmoothingEnabled = true;
-
-      // 建築モード: 狙っているタイルの可否ハイライト
-      if (buildRef.current.active && hoverTile) {
-        const hx = toScreenX(hoverTile.x);
-        const hy = toScreenY(hoverTile.y);
-        const okTile = buildValidity(hoverTile.x, hoverTile.y);
-        ctx.fillStyle = okTile ? "rgba(140,255,150,0.32)" : "rgba(255,90,90,0.32)";
-        ctx.fillRect(hx, hy, TILE, TILE);
-        ctx.strokeStyle = okTile ? "rgba(225,255,225,0.9)" : "rgba(255,205,205,0.9)";
-        ctx.lineWidth = 2;
-        ctx.strokeRect(hx + 1, hy + 1, TILE - 2, TILE - 2);
-      }
 
       // 首都マーカー
       for (const n of nationsRef.current.nations) {
@@ -2765,22 +2739,40 @@ export default function WorldBoxClient() {
             }
           }
         }
-        // 遺跡の床罠は薄いヒビとしてだけ見える（発動済みは消える）
+        // 遺跡の床罠は薄いヒビとしてだけ見える（発動済みは消える）。
+        // 斥候は 3 タイル以内の罠をはっきり視認できる（専門行為の可視化）。
         {
           const ruinsDraw = ruinsNow();
           if (ruinsDraw) {
-            ctx.strokeStyle = "rgba(30,26,20,0.35)";
-            ctx.lineWidth = 1;
+            const scoutNear = invRef.current?.role === "scout";
             for (const trap of ruinsDraw.traps) {
               if (ruinsStateRef.current.traps[String(trap.idx)]) continue;
               if (trap.x < lx0 || trap.x > lx1 || trap.y < ly0 || trap.y > ly1) continue;
               const sx = lobbyOx + trap.x * TILE;
               const sy = lobbyOy + trap.y * TILE;
+              const near = scoutNear && Math.hypot(trap.x + 0.5 - player.x, trap.y + 0.5 - player.y) <= 3;
+              ctx.strokeStyle = near ? "rgba(255,90,60,0.9)" : "rgba(30,26,20,0.35)";
+              ctx.lineWidth = near ? 2 : 1;
               ctx.beginPath();
               ctx.moveTo(sx + 6, sy + TILE - 7);
               ctx.lineTo(sx + TILE / 2, sy + TILE / 2 + 3);
               ctx.lineTo(sx + TILE - 8, sy + 9);
               ctx.stroke();
+              if (near) ctx.strokeRect(sx + 2.5, sy + 2.5, TILE - 5, TILE - 5);
+            }
+          }
+        }
+        // 採掘者は洞窟の鉱脈が脈打って見える（専門行為の可視化）
+        {
+          const caveDraw2 = caveLayerNow();
+          if (caveDraw2 && invRef.current?.role === "miner") {
+            const pulse = 0.35 + 0.25 * Math.sin(now / 240);
+            ctx.strokeStyle = `rgba(255,210,62,${pulse})`;
+            ctx.lineWidth = 2;
+            for (const v of caveDraw2.veins) {
+              if (caveStateRef.current.veins[`${v.x},${v.y}`]) continue;
+              if (v.x < lx0 || v.x > lx1 || v.y < ly0 || v.y > ly1) continue;
+              ctx.strokeRect(lobbyOx + v.x * TILE + 2.5, lobbyOy + v.y * TILE + 2.5, TILE - 5, TILE - 5);
             }
           }
         }
@@ -2799,8 +2791,10 @@ export default function WorldBoxClient() {
         const def = mobById(placed.mobId);
         if (!def) return;
         const sizePx = TILE * Math.max(1, placed.size) * 0.94;
-        const bob = walkBob(r.phase) * TILE * 0.045;
-        const cxp = toScreenX(r.wx) + r.kx;
+        const loco = locomotionFor(def.id);
+        const pose = locomotionPose(loco, r.phase, r.lastSpeed > 0.05);
+        const bob = pose.bob * TILE;
+        const cxp = toScreenX(r.wx) + r.kx + pose.sway * TILE;
         const baseY = toScreenY(r.wy) + r.ky;
         const cy = baseY - bob;
         const flash = now - r.flashAt < 130;
@@ -2814,11 +2808,27 @@ export default function WorldBoxClient() {
           ctx.scale(pop, pop);
           ctx.translate(-cxp, -baseY);
         }
+        // locomotion の傾き・つぶれ＋windup の沈み込み（予兆の読みやすさ）
+        const windupSquash = r.behavior.mode === "windup" ? 0.84 : 1;
+        if (pose.tilt !== 0 || pose.squashY !== 1 || windupSquash !== 1) {
+          ctx.translate(cxp, baseY);
+          ctx.rotate(pose.tilt * r.face);
+          ctx.scale(1, pose.squashY * windupSquash);
+          ctx.translate(-cxp, -baseY);
+        }
         // 影
         ctx.fillStyle = "rgba(20,26,20,0.25)";
         ctx.beginPath();
         ctx.ellipse(cxp, baseY + sizePx * 0.02, sizePx * 0.34, sizePx * 0.12, 0, 0, Math.PI * 2);
         ctx.fill();
+        if (r.behavior.enraged) {
+          // 怒り状態: 赤いオーラ（脈動）
+          const pulse = 0.16 + 0.08 * Math.sin(now * 0.012);
+          ctx.fillStyle = `rgba(226,72,58,${pulse.toFixed(3)})`;
+          ctx.beginPath();
+          ctx.ellipse(cxp, cy, sizePx * 0.55, sizePx * 0.45, 0, 0, Math.PI * 2);
+          ctx.fill();
+        }
         // 本体: 素材スプライト（16×16、ピクセル固定・足元基準・向き反転）
         const spriteSrc = MOB_SPRITE[def.id];
         const img = spriteSrc ? mobSprites[def.id] : undefined;
@@ -2851,6 +2861,18 @@ export default function WorldBoxClient() {
             ctx.beginPath();
             ctx.arc(cxp + r.face * w * 0.08 + s * w * 0.11, cy - h * 0.04, Math.max(1.8, sizePx * 0.045), 0, Math.PI * 2);
             ctx.fill();
+          }
+        }
+        // 凍結中は氷色で覆う（アイスランス）
+        {
+          const key = mobKeyFor(placed);
+          const st = mobStatesRef.current[key];
+          if (st?.frozenUntil && st.frozenUntil > Date.now()) {
+            ctx.fillStyle = "rgba(140,210,255,0.45)";
+            ctx.fillRect(Math.round(cxp - w / 2), Math.round(cy - h / 2), Math.round(w), Math.round(h));
+            ctx.strokeStyle = "rgba(220,245,255,0.8)";
+            ctx.lineWidth = 1;
+            ctx.strokeRect(Math.round(cxp - w / 2) + 0.5, Math.round(cy - h / 2) + 0.5, Math.round(w) - 1, Math.round(h) - 1);
           }
         }
         ctx.restore();
@@ -2904,53 +2926,141 @@ export default function WorldBoxClient() {
               ax: placed.x, ay: placed.y, wx: placed.x + 0.5, wy: placed.y + 0.5,
               tx: placed.x + 0.5, ty: placed.y + 0.5, nextThink: 0,
               phase: Math.random() * 6, face: 1, flashAt: 0, kx: 0, ky: 0, seenAt: now, fleeUntil: 0,
+              behavior: createBehaviorState(placed.x + 0.5, placed.y + 0.5), provokedUntil: 0, lastSpeed: 0,
             };
             mobRenders.set(key, r);
             fxEventsRef.current.push({ kind: "spawn", x: placed.x, y: placed.y, sizeTiles: placed.size, color: MOB_FX_COLOR[def.id] });
-          }
-          // 思考: うろつき / 敵対は接近 / 被弾直後の非敵対は逃げる
-          if (now >= r.nextThink) {
-            r.nextThink = now + 1400 + Math.random() * 1800;
-            const fleeing = now < r.fleeUntil;
-            const distP = Math.hypot(player.x - r.wx, player.y - r.wy);
-            if (fleeing) {
-              const dx = r.wx - player.x;
-              const dy = r.wy - player.y;
-              const len = Math.hypot(dx, dy) || 1;
-              r.tx = placed.x + 0.5 + (dx / len) * 2;
-              r.ty = placed.y + 0.5 + (dy / len) * 2;
-            } else if (def.temperament === "hostile" && distP < 5 && placed.size < 4) {
-              r.tx = player.x;
-              r.ty = player.y;
-            } else if (placed.size < 4) {
-              const ang = Math.random() * Math.PI * 2;
-              const rad = Math.random() * 1.3;
-              r.tx = placed.x + 0.5 + Math.cos(ang) * rad;
-              r.ty = placed.y + 0.5 + Math.sin(ang) * rad;
-            } else {
-              r.tx = placed.x + 0.5;
-              r.ty = placed.y + 0.5;
+            if (isBossMob(def)) {
+              // ボス級の出現は豪華に: 追加バースト＋揺れ
+              fxEventsRef.current.push({ kind: "hit", x: placed.x, y: placed.y, sizeTiles: placed.size, color: MOB_FX_COLOR[def.id] });
+              shake = startShake(shake, 4, now);
             }
           }
-          const fleeing = now < r.fleeUntil;
-          const chasing = def.temperament === "hostile" && Math.hypot(player.x - r.wx, player.y - r.wy) < 5;
-          const speed = fleeing ? 1.7 : chasing ? 1.12 : 0.55;
+          // 思考: mob-behavior の状態機械（うろつき/追跡/予兆→攻撃→硬直/逃走/帰還）。
+          // ダメージは接触経路のみで、ここは動きと演出イベントだけを出す。
+          const bout = stepMobBehavior(r.behavior, {
+            def, now,
+            pos: { x: r.wx, y: r.wy },
+            anchor: { x: placed.x + 0.5, y: placed.y + 0.5 },
+            player: { x: player.x, y: player.y },
+            fleeing: now < r.fleeUntil,
+            provoked: now < r.provokedUntil,
+            hpFrac: hpNow.hp / def.hp,
+            rng: Math.random,
+          });
+          r.behavior = bout.state;
+          for (const ev of bout.events as BehaviorEvent[]) {
+            const pat = ev.pattern;
+            if (!pat) {
+              // 怒り: 赤いバースト＋揺れ
+              fxEventsRef.current.push({ kind: "hit", x: placed.x, y: placed.y, sizeTiles: placed.size, color: "#e2483a" });
+              shake = startShake(shake, 4, now);
+              continue;
+            }
+            const pd = PATTERN_DEF[pat];
+            if (ev.kind === "telegraph") {
+              mobTelegraphs.push({ pattern: pat, x: r.wx, y: r.wy, tx: r.behavior.tx, ty: r.behavior.ty, dirX: ev.dirX, dirY: ev.dirY, from: now, until: r.behavior.until, size: placed.size });
+            } else if (ev.kind === "strike") {
+              if (pd.kind === "projectile") {
+                mobProjectiles.push({ pattern: pat, x: r.wx, y: r.wy, tx: r.behavior.tx, ty: r.behavior.ty, from: now, until: now + 380, color: MOB_FX_COLOR[def.id] ?? "#ffffff" });
+              } else if (pd.kind === "burst") {
+                fxEventsRef.current.push({ kind: pat === "roar" || pat === "gust" || pat === "leaf_burst" ? "spawn" : "hit", x: placed.x, y: placed.y, sizeTiles: placed.size, color: pat === "breath_cone" ? "#e07c3c" : MOB_FX_COLOR[def.id] });
+                if (pat === "slam" || pat === "club_slam" || pat === "slam_big" || pat === "tail_sweep" || pat === "roar") shake = startShake(shake, isBossMob(def) ? 5 : 3, now);
+              }
+            }
+          }
+          if (bout.teleport) {
+            fxEventsRef.current.push({ kind: "spawn", x: placed.x, y: placed.y, sizeTiles: placed.size, color: MOB_FX_COLOR[def.id] });
+            r.wx = bout.teleport.x; r.wy = bout.teleport.y;
+          }
+          r.tx = bout.target.x; r.ty = bout.target.y;
+          const speed = bout.speed;
           const dx = r.tx - r.wx;
           const dy = r.ty - r.wy;
           const distT = Math.hypot(dx, dy);
-          // 敵対はプレイヤーに重ならない（手前で止まる）
-          const stopAt = chasing && !fleeing ? 0.85 : 0.05;
-          if (distT > stopAt) {
-            const step = Math.min(distT - (chasing && !fleeing ? stopAt : 0), speed * dt);
+          // 追跡中はプレイヤーに重ならない（手前で止まる）。strike の突進は止まらない
+          const stopAt = r.behavior.mode === "chase" ? 0.85 : 0.03;
+          r.lastSpeed = 0;
+          if (distT > stopAt && speed > 0) {
+            const step = Math.min(distT - stopAt, speed * dt);
             r.wx += (dx / distT) * step;
             r.wy += (dy / distT) * step;
             r.phase = advanceWalkPhase(r.phase, speed, dt);
+            r.lastSpeed = speed;
             if (dx < -0.02) r.face = -1;
             else if (dx > 0.02) r.face = 1;
           }
           r.kx *= Math.exp(-9 * dt);
           r.ky *= Math.exp(-9 * dt);
           mobDrawQueue.push({ placed, r, hpFrac: hpNow.hp / def.hp });
+        }
+      }
+
+      // ---- モブの予兆マーカー・投射物・糸跡（地面レイヤー、見た目のみ） ----
+      if (space === "world" || parseInstanceSpace(space)) {
+        for (let i = mobTelegraphs.length - 1; i >= 0; i--) {
+          const t = mobTelegraphs[i];
+          if (now > t.until) { mobTelegraphs.splice(i, 1); continue; }
+          const pd = PATTERN_DEF[t.pattern];
+          const total = Math.max(1, t.until - t.from);
+          const frac = Math.min(1, (now - t.from) / total);
+          const alpha = 0.16 + 0.20 * frac + 0.05 * Math.sin(now * 0.03);
+          ctx.fillStyle = `rgba(255,64,40,${alpha.toFixed(3)})`;
+          ctx.strokeStyle = `rgba(255,90,60,${(alpha + 0.25).toFixed(3)})`;
+          ctx.lineWidth = 2;
+          const gx = pd.kind === "dash" || pd.kind === "teleport" || pd.kind === "projectile" ? t.tx : t.x;
+          const gy = pd.kind === "dash" || pd.kind === "teleport" || pd.kind === "projectile" ? t.ty : t.y;
+          if (pd.telegraph === "circle") {
+            ctx.beginPath();
+            ctx.ellipse(toScreenX(gx), toScreenY(gy), pd.radius * TILE * (0.4 + 0.6 * frac), pd.radius * TILE * 0.45 * (0.4 + 0.6 * frac), 0, 0, Math.PI * 2);
+            ctx.fill(); ctx.stroke();
+          } else if (pd.telegraph === "ring") {
+            ctx.beginPath();
+            ctx.ellipse(toScreenX(t.x), toScreenY(t.y), pd.radius * TILE * frac, pd.radius * TILE * 0.45 * frac, 0, 0, Math.PI * 2);
+            ctx.stroke();
+          } else if (pd.telegraph === "line") {
+            const ex = t.x + t.dirX * pd.radius;
+            const ey = t.y + t.dirY * pd.radius;
+            ctx.lineWidth = Math.max(6, TILE * 0.5 * (0.5 + t.size * 0.2));
+            ctx.beginPath();
+            ctx.moveTo(toScreenX(t.x), toScreenY(t.y));
+            ctx.lineTo(toScreenX(ex), toScreenY(ey));
+            ctx.stroke();
+            ctx.lineWidth = 2;
+          } else if (pd.telegraph === "cone") {
+            const ang = Math.atan2(t.dirY, t.dirX);
+            ctx.beginPath();
+            ctx.moveTo(toScreenX(t.x), toScreenY(t.y));
+            ctx.arc(toScreenX(t.x), toScreenY(t.y), pd.radius * TILE, ang - 0.6, ang + 0.6);
+            ctx.closePath();
+            ctx.fill();
+          }
+        }
+        for (let i = mobWebs.length - 1; i >= 0; i--) {
+          const w = mobWebs[i];
+          if (now > w.until) { mobWebs.splice(i, 1); continue; }
+          const sx = toScreenX(w.x); const sy = toScreenY(w.y);
+          ctx.strokeStyle = "rgba(240,240,235,0.55)";
+          ctx.lineWidth = 1.5;
+          for (const [dx, dy] of [[-0.4, -0.2], [0.4, -0.2], [-0.4, 0.2], [0.4, 0.2], [0, -0.35], [0, 0.35]] as const) {
+            ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(sx + dx * TILE, sy + dy * TILE); ctx.stroke();
+          }
+        }
+        for (let i = mobProjectiles.length - 1; i >= 0; i--) {
+          const pr = mobProjectiles[i];
+          if (now > pr.until) {
+            mobProjectiles.splice(i, 1);
+            if (pr.pattern === "web_shot") mobWebs.push({ x: pr.tx, y: pr.ty, until: now + 2600 });
+            continue;
+          }
+          const f = Math.min(1, (now - pr.from) / Math.max(1, pr.until - pr.from));
+          const arc = pr.pattern === "rock_throw" ? Math.sin(f * Math.PI) * TILE * 1.1 : 0;
+          const sx = toScreenX(pr.x + (pr.tx - pr.x) * f);
+          const sy = toScreenY(pr.y + (pr.ty - pr.y) * f) - arc;
+          ctx.fillStyle = pr.pattern === "web_shot" ? "rgba(240,240,235,0.9)" : pr.color;
+          ctx.beginPath();
+          ctx.arc(sx, sy, Math.max(3, TILE * 0.14), 0, Math.PI * 2);
+          ctx.fill();
         }
       }
 
@@ -2970,29 +3080,6 @@ export default function WorldBoxClient() {
               o.track.entry.face, o.phase, Math.min(1, Math.hypot(o.track.entry.vx, o.track.entry.vy) / WALK_SPEED), o.track.entry.name || null, nationColor, oSwim,
             ),
         });
-      }
-      if (space === "world") {
-        for (const b of buildingsRef.current.buildings) {
-          const color = nationsRef.current.playerNations[b.ownerId]?.color ?? "#888888";
-          drawList.push({
-            y: b.y + 1,
-            draw: () => {
-              const ps = popScaleFor(`${b.x},${b.y}`, now);
-              if (ps === 1) {
-                drawBuilding(ctx, toScreenX(b.x), toScreenY(b.y), b.type, color);
-                return;
-              }
-              ctx.save();
-              const cxp = toScreenX(b.x) + TILE / 2;
-              const cyp = toScreenY(b.y) + TILE;
-              ctx.translate(cxp, cyp);
-              ctx.scale(ps, ps);
-              ctx.translate(-cxp, -cyp);
-              drawBuilding(ctx, toScreenX(b.x), toScreenY(b.y), b.type, color);
-              ctx.restore();
-            },
-          });
-        }
       }
       if (space !== "world") {
         const caveDraw = caveLayerNow();
@@ -3210,6 +3297,154 @@ export default function WorldBoxClient() {
       }
       drawParticles(false);
 
+      // 冒険役職の技演出: 段階遷移で粒を出し、形を描く
+      {
+        const inCaveFx = space !== "world";
+        const sx = (wx: number) => (inCaveFx ? Math.round(lobbyOx + wx * TILE) : toScreenX(wx));
+        const sy = (wy: number) => (inCaveFx ? Math.round(lobbyOy + wy * TILE) : toScreenY(wy));
+        skillFxRef.current = skillFxRef.current.filter((entry) => skillFxProgress(entry.effect, now) < 1);
+        for (const entry of skillFxRef.current) {
+          const eff = entry.effect;
+          const stage = skillFxStage(eff, now);
+          if (stage > entry.stage) {
+            entry.stage = stage;
+            spawnSkillFx(fxSys, eff, stage);
+            if (eff.kind === "meteor" && stage === 2) shake = startShake(shake, 8, now, 260);
+            if (eff.kind === "thunder_strike" && stage === 1) shake = startShake(shake, 5, now, 200);
+            if ((eff.kind === "sweep" || eff.kind === "whirlwind") && stage === 1) shake = startShake(shake, 3, now, 160);
+            if (eff.kind === "fireball" && stage === 1) shake = startShake(shake, 4, now, 180);
+          }
+          const prog = Math.max(0, skillFxProgress(eff, now));
+          const cxp = sx(eff.x);
+          const cyp = sy(eff.y);
+          ctx.save();
+          if (eff.kind === "heal_zone" || eff.kind === "poison_field") {
+            const rTiles = eff.kind === "heal_zone" ? 2.25 : 2.0;
+            const pulse = 1 + Math.sin(now / 160) * 0.05;
+            ctx.globalAlpha = 0.22 * (1 - prog * 0.5);
+            ctx.fillStyle = eff.kind === "heal_zone" ? "#7ed957" : "#9be15d";
+            ctx.beginPath();
+            ctx.ellipse(cxp, cyp, rTiles * TILE * pulse, rTiles * TILE * 0.45 * pulse, 0, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.globalAlpha = 0.7;
+            ctx.strokeStyle = eff.kind === "heal_zone" ? "#b6f26d" : "#7ac74f";
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.ellipse(cxp, cyp, rTiles * TILE * pulse, rTiles * TILE * 0.45 * pulse, 0, 0, Math.PI * 2);
+            ctx.stroke();
+          } else if (eff.kind === "sweep") {
+            const a0 = -Math.PI * 0.9 + prog * Math.PI * 1.1;
+            ctx.globalAlpha = 0.85 * (1 - prog);
+            ctx.strokeStyle = "#e8f4ff";
+            ctx.lineWidth = 5;
+            for (let k = 0; k < 3; k++) {
+              ctx.beginPath();
+              ctx.arc(sx(eff.fromX), sy(eff.fromY) - TILE * 0.4, (1.1 + k * 0.28) * TILE, a0 - k * 0.16, a0 + 0.9 - k * 0.16);
+              ctx.stroke();
+            }
+          } else if (eff.kind === "whirlwind") {
+            ctx.globalAlpha = 0.8 * (1 - prog * 0.6);
+            ctx.strokeStyle = "#dff3ff";
+            ctx.lineWidth = 4;
+            for (let k = 0; k < 3; k++) {
+              const rr = (0.9 + k * 0.5 + prog * 0.5) * TILE;
+              const a0 = prog * Math.PI * 6 + k * 0.7;
+              ctx.beginPath();
+              ctx.arc(sx(eff.fromX), sy(eff.fromY) - TILE * 0.3, rr, a0, a0 + Math.PI * 1.2);
+              ctx.stroke();
+            }
+          } else if (eff.kind === "fireball" || eff.kind === "ice_lance") {
+            const t01 = Math.min(1, prog / 0.4);
+            const px = eff.fromX + (eff.x - eff.fromX) * t01;
+            const py = eff.fromY - 0.4 + (eff.y - 0.4 - (eff.fromY - 0.4)) * t01;
+            ctx.globalAlpha = 0.95;
+            ctx.fillStyle = eff.kind === "fireball" ? "#ff9a3c" : "#bfe9ff";
+            ctx.beginPath();
+            ctx.arc(sx(px), sy(py), TILE * 0.22, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.globalAlpha = 0.5;
+            ctx.beginPath();
+            ctx.arc(sx(px), sy(py), TILE * 0.36, 0, Math.PI * 2);
+            ctx.fill();
+          } else if (eff.kind === "thunder_strike") {
+            if (stage === 0) {
+              ctx.globalAlpha = 0.25 + 0.2 * Math.sin(now / 60);
+              ctx.fillStyle = "#cfe8ff";
+              ctx.fillRect(cxp - 3, cyp - TILE * 5, 6, TILE * 5);
+            } else {
+              ctx.globalAlpha = stage === 1 ? 0.95 : 0.4;
+              ctx.strokeStyle = "#eaf6ff";
+              ctx.lineWidth = 3;
+              const pts = thunderBoltPoints(eff.seed, eff.x, eff.y - 5, eff.x, eff.y);
+              ctx.beginPath();
+              pts.forEach((pt, i) => {
+                const X = sx(pt.x);
+                const Y = sy(pt.y);
+                if (i === 0) ctx.moveTo(X, Y); else ctx.lineTo(X, Y);
+              });
+              ctx.stroke();
+            }
+          } else if (eff.kind === "meteor") {
+            if (stage === 0) {
+              ctx.globalAlpha = 0.5 + 0.3 * Math.sin(now / 70);
+              ctx.strokeStyle = "#ff6b4a";
+              ctx.lineWidth = 3;
+              ctx.beginPath();
+              ctx.ellipse(cxp, cyp, 2.5 * TILE, 2.5 * TILE * 0.45, 0, 0, Math.PI * 2);
+              ctx.stroke();
+            } else if (stage === 1) {
+              const t01 = (prog - 0.6) / 0.2;
+              const px = eff.x + 2.2 * (1 - t01);
+              const py = eff.y - 4.5 * (1 - t01);
+              ctx.globalAlpha = 0.95;
+              ctx.fillStyle = "#8a6f5c";
+              ctx.beginPath();
+              ctx.arc(sx(px), sy(py), TILE * 0.34, 0, Math.PI * 2);
+              ctx.fill();
+            }
+          } else if (eff.kind === "arrow_rain") {
+            ctx.globalAlpha = 0.5;
+            ctx.strokeStyle = "#ffd23e";
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.ellipse(cxp, cyp, 2.1 * TILE, 2.1 * TILE * 0.45, 0, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.globalAlpha = 0.85;
+            ctx.strokeStyle = "#e8e2d0";
+            for (let i = 0; i < 10; i++) {
+              const h = ((eff.seed * (i + 3) * 7919) % 100) / 100;
+              const ax = eff.x + (((eff.seed >> (i % 8)) % 40) / 10 - 2);
+              const ay = eff.y - 2.6 + ((prog * 3 + h) % 1) * 2.6;
+              ctx.beginPath();
+              ctx.moveTo(sx(ax), sy(ay));
+              ctx.lineTo(sx(ax) + 3, sy(ay) + TILE * 0.5);
+              ctx.stroke();
+            }
+          } else if (eff.kind === "taunt") {
+            ctx.globalAlpha = 0.7 * (1 - prog);
+            ctx.strokeStyle = "#ffd23e";
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.ellipse(sx(eff.fromX), sy(eff.fromY), (0.5 + prog * 3) * TILE, (0.5 + prog * 3) * TILE * 0.45, 0, 0, Math.PI * 2);
+            ctx.stroke();
+          }
+          ctx.restore();
+        }
+        // 薬師向け死亡マーカー
+        if (invRef.current?.role === "medic") {
+          for (const d of deathsRef.current) {
+            const mx = sx(d.x);
+            const my = sy(d.y);
+            ctx.save();
+            ctx.globalAlpha = 0.85;
+            ctx.fillStyle = "#ff5a4a";
+            ctx.fillRect(mx - 2, my - TILE * 0.7, 4, TILE * 0.5);
+            ctx.fillRect(mx - TILE * 0.18, my - TILE * 0.58, TILE * 0.36, 4);
+            ctx.restore();
+          }
+        }
+      }
+
       // 道具スイングと風切り（自分のタップへの応答）
       if (space === "world" || parseInstanceSpace(space)) {
         const sk = swingProgress(swing.startedAt, now);
@@ -3246,18 +3481,16 @@ export default function WorldBoxClient() {
       // 光る粒（蛍・ワープの光）は夜の色づけの上に出す
       if (space === "world") drawParticles(true);
 
-      // スティック（固定基点。建築モードでは入力ごと無効なので描かない）
-      if (!buildRef.current.active) {
-        const base = stickBase(cw, ch);
-        ctx.fillStyle = joy.active ? "rgba(255,255,255,0.16)" : "rgba(255,255,255,0.08)";
-        ctx.beginPath();
-        ctx.arc(base.x, base.y, 52, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.fillStyle = joy.active ? "rgba(255,255,255,0.45)" : "rgba(255,255,255,0.22)";
-        ctx.beginPath();
-        ctx.arc(base.x + joy.dx * 34, base.y + joy.dy * 34, 22, 0, Math.PI * 2);
-        ctx.fill();
-      }
+      // スティック（固定基点）
+      const base = stickBase(cw, ch);
+      ctx.fillStyle = joy.active ? "rgba(255,255,255,0.16)" : "rgba(255,255,255,0.08)";
+      ctx.beginPath();
+      ctx.arc(base.x, base.y, 52, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = joy.active ? "rgba(255,255,255,0.45)" : "rgba(255,255,255,0.22)";
+      ctx.beginPath();
+      ctx.arc(base.x + joy.dx * 34, base.y + joy.dy * 34, 22, 0, Math.PI * 2);
+      ctx.fill();
 
       // スタミナ（ゼルダ式の円形ゲージをキャラの左上に。満タンで放置すると消える）
       if (staminaGaugeVisible(stamina)) {
@@ -3302,14 +3535,6 @@ export default function WorldBoxClient() {
             mctx.fillStyle = n.color;
             mctx.fillRect(mx - 1, my - 1, 3, 3);
           }
-          // 建物は所有者の所属色（無所属は灰色）の小ドット
-          for (const b of buildingsRef.current.buildings) {
-            const mx = toMapX(b.x);
-            const my = toMapY(b.y);
-            if (mx < -2 || my < -2 || mx > mm.width + 2 || my > mm.height + 2) continue;
-            mctx.fillStyle = nationsRef.current.playerNations[b.ownerId]?.color ?? "#d8d8d8";
-            mctx.fillRect(mx, my, 2, 2);
-          }
           mctx.fillStyle = "#ffffff";
           for (const o of others.values()) {
             mctx.fillRect(Math.floor(toMapX(o.track.rx)) - 1, Math.floor(toMapY(o.track.ry)) - 1, 2, 2);
@@ -3338,14 +3563,6 @@ export default function WorldBoxClient() {
           bctx.imageSmoothingEnabled = false;
           bctx.drawImage(bigTerrainCanvas, 0, 0, bm.width, bm.height);
           bctx.imageSmoothingEnabled = true;
-          // 建物は所有者の所属色（無所属は灰色）の小ドット
-          for (const b of buildingsRef.current.buildings) {
-            const mx = toMapX(b.x);
-            const my = toMapY(b.y);
-            if (mx < -4 || my < -4 || mx > bm.width + 4 || my > bm.height + 4) continue;
-            bctx.fillStyle = nationsRef.current.playerNations[b.ownerId]?.color ?? "#d8d8d8";
-            bctx.fillRect(mx - 1, my - 1, 2.5, 2.5);
-          }
           // 首都（国の色の四角＋白枠）
           for (const n of nationsRef.current.nations) {
             const mx = toMapX(n.capital.x);
@@ -3507,12 +3724,6 @@ export default function WorldBoxClient() {
       run: () => setShowMap((v) => !v),
     },
     {
-      id: "nations",
-      label: showNations ? "建築を閉じる" : "建築",
-      show: spaceUi === "world",
-      run: () => setShowNations((v) => !v),
-    },
-    {
       id: "economy",
       label: showEconomy ? "経済を閉じる" : "経済",
       show: true,
@@ -3548,14 +3759,29 @@ export default function WorldBoxClient() {
             <p role="status" style={{ margin: 0 }}>
               ログインが必要
             </p>
-            <a
-              href="/api/auth/discord/authorize?next=/games/worldbox"
-              style={{
-                ...btn, textDecoration: "none", display: "inline-flex", alignItems: "center",
-              }}
-            >
-              Discordでログイン
-            </a>
+            {embedded ? (
+              // Activity 内では通常の OAuth 画面遷移が使えない（押すと白画面で
+              // 詰まる）。認証は GamesShell の SDK 認証が担うので、ここは
+              // ゲートの引き直しだけを置く。
+              <button
+                type="button"
+                onClick={() => setGateTry((t) => t + 1)}
+                style={{
+                  ...btn, display: "inline-flex", alignItems: "center",
+                }}
+              >
+                再試行
+              </button>
+            ) : (
+              <a
+                href="/api/auth/discord/authorize?next=/games/worldbox"
+                style={{
+                  ...btn, textDecoration: "none", display: "inline-flex", alignItems: "center",
+                }}
+              >
+                Discordでログイン
+              </a>
+            )}
             <Link href={`${prefix}/games`} style={{ color: "#9fd8e8", fontSize: 13 }}>
               ゲーム一覧へ
             </Link>
@@ -3788,22 +4014,6 @@ export default function WorldBoxClient() {
             }}
           />
         )}
-        {buildMode && (
-          <div
-            style={{
-              position: "absolute", left: 10, bottom: 10, display: "flex", gap: 8, alignItems: "center",
-              padding: "6px 8px 6px 12px", borderRadius: 10, background: "rgba(0,0,0,0.6)",
-              color: "#fff", fontSize: 13, maxWidth: "calc(100% - 20px)", boxSizing: "border-box",
-            }}
-          >
-            <span>
-              {buildTool === "demolish" ? "取り壊し：建物をタップ" : `建築：${BUILD_TOOL_LABEL[buildTool]}を置く場所をタップ`}
-            </span>
-            <button type="button" style={{ ...btn, minHeight: 32, padding: "2px 10px" }} onClick={endBuildMode}>
-              終了
-            </button>
-          </div>
-        )}
         {invProfile && (
           <div
             aria-label="HPと空腹度"
@@ -3816,7 +4026,7 @@ export default function WorldBoxClient() {
             <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
               <span style={{ color: "#ff8a7a", fontSize: 11, width: 28 }}>HP</span>
               <span style={{ flex: 1, height: 8, borderRadius: 4, background: "rgba(255,255,255,0.18)", overflow: "hidden" }}>
-                <span style={{ display: "block", width: `${Math.max(0, Math.min(100, (invProfile.hp / HP_MAX) * 100))}%`, height: "100%", background: invProfile.hp <= 25 ? "#e2483a" : "#7ed957" }} />
+                <span style={{ display: "block", width: `${Math.max(0, Math.min(100, (invProfile.hp / maxHpFor(invProfile)) * 100))}%`, height: "100%", background: invProfile.hp <= 25 ? "#e2483a" : "#7ed957" }} />
               </span>
               <strong style={{ color: "#fff", fontSize: 11 }}>{invProfile.hp}</strong>
             </div>
@@ -3830,6 +4040,40 @@ export default function WorldBoxClient() {
             {invProfile.status.some((e) => e.kind === "poison") && (
               <span style={{ color: "#b6f26d", fontSize: 11 }}>毒</span>
             )}
+            {invProfile.role !== "free" && (() => {
+              const role = roleById(invProfile.role);
+              const skill = activeSkillFor(invProfile);
+              const total = skill ? SKILLS[skill.id].cooldownMs : 0;
+              const left = skill ? skillCooldownLeft(invProfile, skill.id, Date.now()) : 0;
+              const frac = total > 0 ? left / total : 0;
+              return (
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <span
+                    aria-label={role.name}
+                    style={{
+                      position: "relative", display: "inline-flex", alignItems: "center", justifyContent: "center",
+                      width: 22, height: 22, borderRadius: 6, fontSize: 12, fontWeight: 700, overflow: "hidden",
+                      border: "1px solid rgba(255,255,255,0.4)", background: "rgba(255,255,255,0.1)",
+                    }}
+                  >
+                    {frac > 0 && (
+                      <span
+                        aria-hidden
+                        style={{
+                          position: "absolute", inset: 0,
+                          background: `conic-gradient(rgba(0,0,0,0.72) ${frac * 360}deg, transparent ${frac * 360}deg)`,
+                        }}
+                      />
+                    )}
+                    <span style={{ position: "relative" }}>{role.symbol}</span>
+                  </span>
+                  <span style={{ color: "#fff", fontSize: 11, letterSpacing: 2 }}>
+                    {"●".repeat(masteryRankOf(invProfile, invProfile.role))}
+                    <span style={{ opacity: 0.3 }}>{"●".repeat(5 - masteryRankOf(invProfile, invProfile.role))}</span>
+                  </span>
+                </div>
+              );
+            })()}
           </div>
         )}
         {spaceUi === "world" && invProfile && (
@@ -4088,46 +4332,6 @@ export default function WorldBoxClient() {
       )}
 
       {/* パネルの開閉は左上の ≡ メニューに統合（ボタン行は置かない） */}
-
-      {showNations && (
-        <div style={panelOverlay}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
-            <strong>建築</strong>
-            <span style={{ flex: 1 }} />
-            <button type="button" style={btn} onClick={() => setShowNations(false)}>
-              閉じる
-            </button>
-          </div>
-          {buildingsUi.loggedIn && (
-            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginTop: 12 }}>
-              <span className="muted" style={{ fontSize: 13 }}>建築</span>
-              <span className="muted" style={{ fontSize: 13 }}>
-                建物 {buildingsUi.buildings.filter((b) => b.mine).length}/{USER_BUILDING_CAP}
-              </span>
-              {(["house", "farm", "tower", "demolish"] as const).map((tool) => (
-                <button
-                  key={tool}
-                  type="button"
-                  style={{
-                    ...btn,
-                    ...(buildMode && buildTool === tool
-                      ? { background: "rgba(255,210,62,0.25)", border: "1px solid rgba(255,210,62,0.7)" }
-                      : {}),
-                  }}
-                  onClick={() => chooseBuildTool(tool)}
-                >
-                  {BUILD_TOOL_LABEL[tool]}
-                </button>
-              ))}
-              {buildMode && (
-                <button type="button" style={btn} onClick={endBuildMode}>
-                  建築を終わる
-                </button>
-              )}
-            </div>
-          )}
-        </div>
-      )}
 
       {showEconomy && <WorldBoxEconomyPanel space={spaceUi} station={stationUi} genre={stationGenre} onClose={() => setShowEconomy(false)} />}
       {casinoOpen && spaceUi === "lobby" && (
