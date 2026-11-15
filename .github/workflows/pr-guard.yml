@@ -53,11 +53,11 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-  - name: Install system audio deps
-  # ラジオ・録音テストが実バイナリを必要とする（本番 Pi には導入済み）
-  run: |
-  sudo apt-get update
-  sudo apt-get install -y ffmpeg libopus0
+      - name: Install system audio deps
+        # ラジオ・録音テストが実バイナリを必要とする（本番 Pi には導入済み）
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg libopus0
       - name: Install and test
         run: |
           pip install -r requirements.txt pytest
