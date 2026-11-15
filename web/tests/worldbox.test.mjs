@@ -36,12 +36,12 @@ async function loadBundle(files, exportNames) {
 }
 
 const wb = await loadBundle(
-  ["worldbox/blocks.ts", "worldbox/worldgen.ts", "worldbox/rules.ts", "worldbox/physics.ts", "worldbox/save.ts"],
+  ["worldbox/blocks.ts", "worldbox/items.ts", "worldbox/worldgen.ts", "worldbox/inventory.ts", "worldbox/physics.ts", "worldbox/rules.ts", "worldbox/daynight.ts", "worldbox/pickups.ts", "worldbox/enemies.ts", "worldbox/health.ts", "worldbox/craft.ts", "worldbox/collapse.ts", "worldbox/save.ts", "worldbox/save-source.ts"],
   [
     "AIR", "GRASS", "DIRT", "STONE", "WOOD", "LEAVES", "SAND", "COAL_ORE", "COPPER_ORE", "BEDROCK",
     "BLOCKS", "HOTBAR_BLOCKS", "canDigBlock",
     "WORLD_W", "WORLD_H", "generateWorld", "getTile", "findSpawn",
-    "digTile", "placeTile", "withinReach",
+    "digTile", "placeTile", "withinReach", "createInventory", "countOf",
     "createBody", "stepPlayer", "bodyCollides", "PLAYER_H", "PLAYER_W",
     "serializeSave", "parseSave",
   ],
@@ -118,12 +118,12 @@ test("生成: 鉱石は石の層の中だけにあり、石炭と銅の両方が
 
 test("掘る: 地表を掘ると所持品が増え、岩盤は掘れない", () => {
   const world = wb.generateWorld(7);
-  const inv = {};
+  const inv = wb.createInventory();
   const spawn = wb.findSpawn(world);
   const surf = world.surfaces[spawn.x];
   const got = wb.digTile(world, inv, spawn.x, surf);
   assert.ok(got === wb.GRASS || got === wb.SAND);
-  assert.equal(inv[got], 1);
+  assert.equal(wb.countOf(inv, got), 1);
   assert.equal(wb.getTile(world, spawn.x, surf), wb.AIR);
   // 空気は掘れない
   assert.equal(wb.digTile(world, inv, spawn.x, surf), null);
@@ -135,7 +135,7 @@ test("掘る: 地表を掘ると所持品が増え、岩盤は掘れない", () 
 
 test("置く: 占有セル・所持ゼロ・体と重なる場所には置けない", () => {
   const world = wb.generateWorld(7);
-  const inv = {};
+  const inv = wb.createInventory();
   const spawn = wb.findSpawn(world);
   const surf = world.surfaces[spawn.x];
   // 所持ゼロでは置けない
@@ -145,14 +145,14 @@ test("置く: 占有セル・所持ゼロ・体と重なる場所には置けな
   assert.ok(got !== null);
   // 占有済み（隣の地表）には置けない
   assert.equal(wb.placeTile(world, inv, spawn.x + 1, world.surfaces[spawn.x + 1], got), false);
-  assert.equal(inv[got], 1);
+  assert.equal(wb.countOf(inv, got), 1);
   // 体と重なる空セルには置けない
   const body = { x: spawn.x, y: surf - 3, w: wb.PLAYER_W, h: wb.PLAYER_H };
   assert.equal(wb.placeTile(world, inv, spawn.x, surf - 3, got, body), false);
-  assert.equal(inv[got], 1);
+  assert.equal(wb.countOf(inv, got), 1);
   // 空いた元地表セルには置けて、所持が減る
   assert.equal(wb.placeTile(world, inv, spawn.x, surf, got), true);
-  assert.equal(inv[got], 0);
+  assert.equal(wb.countOf(inv, got), 0);
   assert.equal(wb.getTile(world, spawn.x, surf), got);
 });
 
@@ -209,16 +209,18 @@ test("物理: 壁（原木）に横移動でぶつかって止まる", () => {
 
 test("保存: serialize → parse の往復で状態が一致する", () => {
   const world = wb.generateWorld(99);
-  const inv = {};
+  const inv = wb.createInventory();
   const got = wb.digTile(world, inv, 10, world.surfaces[10]);
   assert.ok(got !== null);
-  const state = { seed: 99, tiles: world.tiles, inventory: inv, player: { x: 12.5, y: 15.25 } };
+  const state = { seed: 99, tiles: world.tiles, inventory: inv, player: { x: 12.5, y: 15.25 }, hp: 8, dayPhase: 0.42 };
   const parsed = wb.parseSave(wb.serializeSave(state));
   assert.ok(parsed);
   assert.equal(parsed.seed, 99);
   assert.deepEqual(Array.from(parsed.tiles), Array.from(world.tiles));
   assert.deepEqual(parsed.inventory, inv);
   assert.deepEqual(parsed.player, { x: 12.5, y: 15.25 });
+  assert.equal(parsed.hp, 8);
+  assert.ok(Math.abs(parsed.dayPhase - 0.42) < 1e-9);
 });
 
 test("保存: 壊れたデータは null（新規ワールドへフォールバック）", () => {
