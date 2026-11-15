@@ -174,8 +174,8 @@ SUPPORT_GENRES = {
     "moderation": ("モデレーション", ""),
     "roles": ("ロール・認証", ""),
     "logs": ("履歴・ログ", ""),
-    "automation": ("自動化・通知", ""),
-    "rta": ("RTA設定", ""),
+    "automation": ("自動化", ""),
+    "notices": ("通知", ""),
     "boardnotify": ("boardNotify", ""),
     "sns": ("SNS通知", ""),
     "analysis": ("分析", ""),
@@ -183,7 +183,18 @@ SUPPORT_GENRES = {
 
 # 旧バージョンで保存されたショートカットを新しいジャンルへ移行する。
 # "assist" は再編で廃止した旧サーバーアシストジャンル（配下機能の大半の受け皿）。
-SUPPORT_GENRE_ALIASES = {"server": "roles", "notify": "automation", "bumprta": "rta", "sokunuke": "rta", "language": "automation", "event": "moderation", "assist": "automation"}
+# 導線最適化 U2: "rta" は 1件ジャンルだったため boardnotify へ吸収し、
+# "bumprta"/"sokunuke" の移行先も boardnotify へ寄せた。
+SUPPORT_GENRE_ALIASES = {"server": "roles", "notify": "automation", "bumprta": "boardnotify", "sokunuke": "boardnotify", "rta": "boardnotify", "language": "automation", "event": "moderation", "assist": "automation"}
+
+
+def support_genre_for_action(value: str) -> str | None:
+    """アクション値が属する現行ジャンルを返す（旧ジャンルで保存された
+    ショートカットを開くときの再導出用）。"""
+    for genre, items in SUPPORT_ACTIONS_BY_GENRE.items():
+        if any(item_value == value for _label, item_value in items):
+            return genre
+    return None
 
 _SUPPORT_ACTION_BY_VALUE = {choice.value: (choice.name, choice.value) for choice in SUPPORT_ACTIONS}
 
@@ -207,14 +218,12 @@ SUPPORT_ACTIONS_BY_GENRE = {
         "vc_log", "message_log", "moderation_log",
         "assist_serverlog", "assist_invites",
     ),
-    # 自動化・通知は36件あり、パネル側はページング（25件/ページ）で全件選べる。
-    # assist_warning_escalation / assist_application_review は、元機能
-    # （警告・応募フォーム）が moderation 側にあるが、preset 入口は
-    # 「自動化・通知」の分割としてここに置く（36件構成）。
+    # 自動化・通知は36件ありセレクト上限（25件）を超えて2ページ化していたため、
+    # 導線最適化 U2 で通知系14件を "notices" へ分離し、自動化22件・通知14件の
+    # 1ページ構成にした。assist_warning_escalation / assist_application_review は、
+    # 元機能（警告・応募フォーム）が moderation 側にあるが、preset 入口は
+    # 「自動化」の分割としてここに置く。
     "automation": _support_actions(
-        "binjou", "binjou_custom", "auto_react", "levelup_notify", "levelup_card_theme",
-        "voice_trigger", "quest_notify", "quest_manual", "earthquake", "news_notify", "language", "globalchat", "globalchat_mod",
-        "vc_auto_start",
         "assist_welcome", "assist_goodbye", "assist_starboard", "assist_tempvoice", "tempvoice_panel",
         "assist_suggestions",
         "assist_polls", "assist_autothread", "assist_stats", "assist_embed", "assist_embed_templates",
@@ -223,13 +232,18 @@ SUPPORT_ACTIONS_BY_GENRE = {
         "assist_customreplies",
         "assist_shiritori_resident", "assist_luna_ai", "assist_warning_escalation", "assist_application_review",
     ),
-    "rta": _support_actions(
-        "sokunuke_settings",
+    "notices": _support_actions(
+        "binjou", "binjou_custom", "auto_react", "levelup_notify", "levelup_card_theme",
+        "voice_trigger", "quest_notify", "quest_manual", "earthquake", "news_notify", "language", "globalchat", "globalchat_mod",
+        "vc_auto_start",
     ),
+    # 導線最適化 U2: 1件ジャンルだった "rta"（即抜けRTA設定）を吸収し、
+    # boardNotify サービス群とまとめて RTA 系11件にした。
     "boardnotify": _support_actions(
         "bumprta_bump", "bumprta_up", "bumprta_vote", "bumprta_takasumi",
         "bumprta_dicoall", "bumprta_dcafe", "bumprta_sharkbot", "bumprta_dsio",
         "bumprta_discom", "bumprta_settings",
+        "sokunuke_settings",
     ),
     "sns": _support_actions(
         "sns_youtube", "sns_x", "sns_github", "sns_rss", "sns_youtube_live",

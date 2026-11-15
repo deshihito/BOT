@@ -73,10 +73,10 @@ class CustomIdTest(unittest.TestCase):
         self.assertIn("panel:support:commit", child_ids(SupportPanelView(None, shortcut_mode=True)))
 
     def test_voice_panel(self):
-        # 機能再編: VCルート⇔support自動化 のジャンルワープボタンが常駐
+        # 機能再編: VCルート⇔support通知 のジャンルワープボタンが常駐
         self.assertEqual(child_ids(VoicePanelView(None)),
                          {"panel:vc:genre", "panel:vc:register",
-                          "panel:vc:warp_support_automation"})
+                          "panel:vc:warp_support_notices"})
         self.assertEqual(
             child_ids(VoicePanelView(None, genre="connection")),
             {"panel:vc:genre", "panel:vc:action", "panel:vc:register"},

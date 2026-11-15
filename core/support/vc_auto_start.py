@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""VC参加時の自動開始の設定パネル。元は /support「自動化・通知」から開く。"""
+"""VC参加時の自動開始の設定パネル。元は /support「通知」から開く。"""
 from __future__ import annotations
 
 from .common import *

@@ -53,8 +53,8 @@ class RegistryShapeTest(unittest.TestCase):
         self.assertEqual(len(SUPPORT_ACTIONS), 84)
         counts = {genre: len(items) for genre, items in SUPPORT_ACTIONS_BY_GENRE.items()}
         self.assertEqual(counts, {
-            "moderation": 17, "roles": 8, "logs": 5, "automation": 36,
-            "rta": 1, "boardnotify": 10, "sns": 5, "analysis": 2,
+            "moderation": 17, "roles": 8, "logs": 5, "automation": 22,
+            "notices": 14, "boardnotify": 11, "sns": 5, "analysis": 2,
         })
         values = {choice.value for choice in SUPPORT_ACTIONS}
         self.assertTrue(NEW_VALUES <= values)

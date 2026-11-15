@@ -15,9 +15,9 @@
   vc ハブも同様にジャンル未選択で開ける）。
 - ``scope="genre"``: ジャンルパネルにボタンを出すワープ。
 - ``scope="action"``: 特定アクション（``anchor``）に紐づくワープ。
-  ジャンルパネルには出さない。support の automation ジャンルは
+  ジャンルパネルには出さない。support の notices ジャンルは
   「ジャンル単位でワープ1本まで」（levelup の general:exp 行き）という
-  制約があるため、automation 起点の残りは action スコープで宣言だけする。
+  制約があるため、notices 起点の残りは action スコープで宣言だけする。
 """
 from __future__ import annotations
 
@@ -37,30 +37,30 @@ class PanelWarp:
 
 
 PANEL_WARPS: tuple[PanelWarp, ...] = (
-    # general:boardnotify_rta ⇔ support:boardnotify / support:rta
+    # general:boardnotify_rta ⇔ support:boardnotify
+    # （導線最適化 U2: 旧 support:rta は boardnotify へ吸収したため
+    #  rta 行きのワープは boardnotify の1本に統合）
     PanelWarp("support", "boardnotify", "general", "boardnotify_rta", "RTAランキングへ移動"),
     PanelWarp("general", "boardnotify_rta", "support", "boardnotify", "boardNotifyへ移動"),
-    PanelWarp("support", "rta", "general", "boardnotify_rta", "RTAランキングへ移動"),
-    PanelWarp("general", "boardnotify_rta", "support", "rta", "RTA設定へ移動"),
-    # support:automation(levelup) ⇔ general:exp
-    PanelWarp("support", "automation", "general", "exp", "EXP・レベルへ移動",
+    # support:notices(levelup) ⇔ general:exp
+    PanelWarp("support", "notices", "general", "exp", "EXP・レベルへ移動",
               anchor="levelup_notify"),
-    PanelWarp("general", "exp", "support", "automation", "レベルアップ通知へ移動",
+    PanelWarp("general", "exp", "support", "notices", "レベルアップ通知へ移動",
               anchor="levelup_notify"),
-    # vc:trigger ⇔ support:automation（voice_trigger）
-    PanelWarp("vc", "trigger", "support", "automation", "音声トリガー設定へ移動",
+    # vc:trigger ⇔ support:notices（voice_trigger）
+    PanelWarp("vc", "trigger", "support", "notices", "音声トリガー設定へ移動",
               anchor="voice_trigger"),
-    PanelWarp("support", "automation", "vc", "trigger", "音声トリガーへ移動",
+    PanelWarp("support", "notices", "vc", "trigger", "音声トリガーへ移動",
               scope="action", anchor="voice_trigger"),
-    # vc ハブ ⇔ support:automation（vc_auto_start）
-    PanelWarp("vc", None, "support", "automation", "VC自動参加設定へ移動",
+    # vc ハブ ⇔ support:notices（vc_auto_start）
+    PanelWarp("vc", None, "support", "notices", "VC自動参加設定へ移動",
               anchor="vc_auto_start"),
-    PanelWarp("support", "automation", "vc", None, "VCパネルへ移動",
+    PanelWarp("support", "notices", "vc", None, "VCパネルへ移動",
               scope="action", anchor="vc_auto_start"),
-    # support:automation(globalchat) ⇔ vc:gvc_rooms
-    PanelWarp("support", "automation", "vc", "gvc_rooms", "グローバルVCへ移動",
+    # support:notices(globalchat) ⇔ vc:gvc_rooms
+    PanelWarp("support", "notices", "vc", "gvc_rooms", "グローバルVCへ移動",
               scope="action", anchor="globalchat"),
-    PanelWarp("vc", "gvc_rooms", "support", "automation", "グローバルチャット設定へ移動",
+    PanelWarp("vc", "gvc_rooms", "support", "notices", "グローバルチャット設定へ移動",
               anchor="globalchat"),
     # general:money ⇔ general:boardnotify_rta
     PanelWarp("general", "money", "general", "boardnotify_rta", "RTAランキングへ移動"),
