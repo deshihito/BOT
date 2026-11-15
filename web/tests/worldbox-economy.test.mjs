@@ -209,7 +209,7 @@ test("クライアント配線: 経済パネルと API がつながっている"
 
 test("ショップはロビー空間でのみ開く（クライアントが空間を渡し、パネルが制限する）", () => {
   const client = fs.readFileSync(path.join(rootDir, "app/games/worldbox/WorldBoxClient.tsx"), "utf8");
-  assert.match(client, /<WorldBoxEconomyPanel space=\{spaceUi\} \/>/);
+  assert.match(client, /<WorldBoxEconomyPanel space=\{spaceUi\} onClose=\{\(\) => setShowEconomy\(false\)\} \/>/);
   const panel = fs.readFileSync(path.join(rootDir, "app/games/worldbox/WorldBoxEconomyPanel.tsx"), "utf8");
   assert.match(panel, /space === "lobby"/);
   assert.match(panel, /inLobby && tabBtn\("shop"/);

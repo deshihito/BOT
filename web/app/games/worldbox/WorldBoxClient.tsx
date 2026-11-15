@@ -477,6 +477,23 @@ export default function WorldBoxClient() {
   const [heldSlot, setHeldSlot] = useState<SlotRef | null>(null);
   const [seedPicker, setSeedPicker] = useState<{ x: number; y: number } | null>(null);
   const [tileMsg, setTileMsg] = useState("");
+  // Esc で開いているパネル/メニューを全部閉じる（パネル内に閉じ場所が無い状態への保険）
+  useEffect(() => {
+    const onEsc = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      setMenuOpen(false);
+      setShowNations(false);
+      setShowEconomy(false);
+      setMapView(false);
+      setCraftOpen(false);
+      setBoardOpen(false);
+      setStorageOpen(false);
+      setHeldSlot(null);
+      setSeedPicker(null);
+    };
+    window.addEventListener("keydown", onEsc);
+    return () => window.removeEventListener("keydown", onEsc);
+  }, []);
   const tilesRef = useRef<TileOverridesMap>({});
   const tilesVersionRef = useRef(0);
   /** 演出イベントの受け渡し（行為の成功→描画ループでパーティクル/揺れ/ポップに変換）。 */
@@ -2019,7 +2036,7 @@ export default function WorldBoxClient() {
           aria-expanded={menuOpen}
           onClick={() => setMenuOpen((v) => !v)}
           style={{
-            ...btn, position: "absolute", left: 10, top: 10, minHeight: 40, minWidth: 44,
+            ...btn, position: "absolute", left: 10, top: 10, minHeight: 40, minWidth: 44, zIndex: 7,
             padding: "4px 10px", fontSize: 18, lineHeight: 1, background: "rgba(0,0,0,0.55)", color: "#fff",
           }}
         >
@@ -2043,7 +2060,7 @@ export default function WorldBoxClient() {
           <div
             style={{
               position: "absolute", left: 10, top: 58, display: "grid", gap: 6, padding: 8,
-              borderRadius: 10, background: "rgba(0,0,0,0.72)", color: "#fff", zIndex: 5,
+              borderRadius: 10, background: "rgba(0,0,0,0.72)", color: "#fff", zIndex: 8,
             }}
           >
             {menuActions
@@ -2324,6 +2341,13 @@ export default function WorldBoxClient() {
 
       {showNations && (
         <div style={panelOverlay}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+            <strong>国</strong>
+            <span style={{ flex: 1 }} />
+            <button type="button" style={btn} onClick={() => setShowNations(false)}>
+              閉じる
+            </button>
+          </div>
           {(() => {
             const me = nationsUi.me;
             const myNation = me ? nationsUi.nations.find((n) => n.id === me.nationId) ?? null : null;
@@ -2471,7 +2495,7 @@ export default function WorldBoxClient() {
         </div>
       )}
 
-      {showEconomy && <WorldBoxEconomyPanel space={spaceUi} />}
+      {showEconomy && <WorldBoxEconomyPanel space={spaceUi} onClose={() => setShowEconomy(false)} />}
       </div>
     </div>
   );
