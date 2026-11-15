@@ -3,6 +3,7 @@ import Link from "next/link";
 import "./globals.css";
 import { SiteNav } from "./SiteNav";
 import SiteChrome from "./SiteChrome";
+import BuildStatusBanner from "./BuildStatusBanner";
 import PageChrome from "./PageChrome";
 import { FOOTER_GROUPS, SITE_URL } from "@/lib/site";
 import { GAME_COUNT, TOTAL_FUNCTIONS } from "@/lib/command-guides";
@@ -55,6 +56,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <SiteNav />
             </nav>
           </header>
+          {/* ビルド中だけ出る帯（ビルド中の PR 番号）。共通クローム内なので分離画面には出ない */}
+          <BuildStatusBanner />
         </SiteChrome>
         <main>{children}</main>
         {/* 公開ページ共通の最終CTA帯とスマホ下部固定CTAバー（出し分けは PageChrome 内） */}
