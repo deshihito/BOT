@@ -1,0 +1,69 @@
+name: pr-guard
+
+# Guards main against PRs cancelling each other by overwrite.
+# - web-tests: the full web test suite runs on the PR head. Because
+#   branch protection requires PRs to be up to date with main, this
+#   tests the actual merge result, not a stale snapshot.
+# - overwrite-guard: fails when a PR deletes substantive lines that
+#   recent PRs added (the stale whole-file snapshot failure mode).
+#   Intentional removals add the `confirm-removals` label instead.
+# - python-tests: informational for now (not a required check).
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+
+permissions:
+  contents: read
+
+jobs:
+  overwrite-guard:
+    name: overwrite-guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Run overwrite guard
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          SOFT: ${{ contains(github.event.pull_request.labels.*.name, 'confirm-removals') }}
+        run: |
+          if [ "$SOFT" = "true" ]; then
+            python3 tools/pr_overwrite_guard.py --base "$BASE_SHA" --head "$HEAD_SHA" --soft | tee guard-report.txt
+          else
+            python3 tools/pr_overwrite_guard.py --base "$BASE_SHA" --head "$HEAD_SHA" | tee guard-report.txt
+          fi
+          cat guard-report.txt >> "$GITHUB_STEP_SUMMARY"
+
+  web-tests:
+    name: web-tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Install and test
+        working-directory: web
+        run: |
+          npm ci
+          npm test
+
+  python-tests:
+    name: python-tests
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install and test
+        run: |
+          pip install -r requirements.txt pytest
+          python -m pytest tests -q
