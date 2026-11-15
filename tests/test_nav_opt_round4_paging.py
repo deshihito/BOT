@@ -64,15 +64,31 @@ class EconomyGenreSplitTest(unittest.TestCase):
             self.assertEqual(len(general_action_pages(genre)), 1, genre)
 
     def test_money_panel_has_no_pager(self):
+        # 導線最適化 U1: 通常モードのマネージャンルはマネーパネルの
+        # 6カテゴリ入口だけを出す（36件の個別アクションはパネル内の
+        # ボタンへ一本化）。レジストリ (GENERAL_ACTIONS) 側は不変。
+        from core.general.panel import MONEY_PANEL_ENTRIES
+
         panel = GeneralPanel(None, genre="money")
         select = _action_select(panel)
         self.assertEqual(
             [o.value for o in select.options],
-            [value for _label, value in GENERAL_ACTIONS["money"]])
+            [value for _label, value in MONEY_PANEL_ENTRIES])
         ids = set(_buttons(panel))
         self.assertNotIn("panel:general:action_prev", ids)
         self.assertNotIn("panel:general:action_next", ids)
         self.assertNotIn("panel:general:action_indicator", ids)
+
+    def test_money_genre_shortcut_mode_keeps_full_catalog(self):
+        # ショートカット作成モードではカタログ全体を出し、個別アクションへの
+        # 新規登録を残す（通常モードの統合とは別表示）。
+        panel = GeneralPanel(
+            None, genre="money", shortcut_mode=True,
+            shortcut_item={"action": {"genre": "money", "value": "clan"}})
+        select = _action_select(panel)
+        self.assertEqual(
+            [o.value for o in select.options],
+            [value for _label, value in GENERAL_ACTIONS["money"]])
 
     def test_saved_action_opens_first_page(self):
         panel = GeneralPanel(

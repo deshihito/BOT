@@ -263,11 +263,14 @@ def status_panel_png(status: dict, *, user_id: int | None = None,
 class MoneyPanelView(discord.ui.View):
     """カテゴリ切替つきの統合パネル。ボタンは既存の実行部へ委譲する。"""
 
-    def __init__(self, cog: "MoneyPanelCog", user_id: int):
+    def __init__(self, cog: "MoneyPanelCog", user_id: int,
+                 category: str = "home"):
         super().__init__(timeout=300)
         self.cog = cog
         self.user_id = user_id
-        self.category = "home"
+        # 導線最適化 U1: /general のマネージャンルからカテゴリ指定で
+        # 開けるようにした（未指定・不正値は従来どおり概要）。
+        self.category = category if category in CATEGORY_LABELS else "home"
         self.message: discord.Message | None = None
         self._v2 = None
         self._cached_embed: discord.Embed | None = None
@@ -835,8 +838,9 @@ class MoneyPanelCog(commands.Cog):
         return "逮捕されていません。"
 
     # ------------------------------------------------------------------ 入口
-    async def show_panel(self, interaction: discord.Interaction):
-        view = MoneyPanelView(self, interaction.user.id)
+    async def show_panel(self, interaction: discord.Interaction,
+                         category: str = "home"):
+        view = MoneyPanelView(self, interaction.user.id, category=category)
         view._cached_embed = await view.build_embed()
         view.refresh()
         files = view.panel_files()
