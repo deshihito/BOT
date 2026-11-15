@@ -74,6 +74,9 @@ const MINIMAP_COLOR: Record<number, string> = {
 };
 /** ミニマップ上の1タイルの大きさ（256px / 1024タイル）。 */
 const MINIMAP_SCALE = MINIMAP_SIZE / MAP_W;
+/** マップ表示モード（全体を大きく見る）のキャンバス解像度と縮尺。 */
+const BIGMAP_SIZE = 512;
+const BIGMAP_SCALE = BIGMAP_SIZE / MAP_W;
 
 type PlayerState = {
   x: number;
@@ -164,6 +167,11 @@ export default function WorldBoxClient() {
   const [nationsUi, setNationsUi] = useState<NationsResponse>(EMPTY_NATIONS);
   const [showNations, setShowNations] = useState(false);
   const [showEconomy, setShowEconomy] = useState(false);
+  // マップ表示モード（全体マップを大きく見る。描画ループは ref で見る）
+  const [mapView, setMapView] = useState(false);
+  const mapViewRef = useRef(false);
+  mapViewRef.current = mapView;
+  const bigMapRef = useRef<HTMLCanvasElement | null>(null);
   // 座標表示（タイル単位の整数。ループが毎フレーム書く playerPosRef から拾う）
   const [coords, setCoords] = useState({ x: Math.floor(MAP_W / 2), y: Math.floor(MAP_H / 2) });
   const [nationMsg, setNationMsg] = useState("");
@@ -376,6 +384,7 @@ export default function WorldBoxClient() {
     let disposed = false;
     let lastSaved = { x: player.x, y: player.y, at: 0 };
     let lastMinimapAt = 0;
+    let lastBigMapAt = 0;
 
     // ---- 保存（空間＋位置＋ワールド帰還点） ----
     const currentSave = () => serializeSave({ space, x: player.x, y: player.y, worldReturn });
@@ -563,6 +572,23 @@ export default function WorldBoxClient() {
         for (let y = 0; y < MINIMAP_SIZE; y++) {
           for (let x = 0; x < MINIMAP_SIZE; x++) {
             tctx.fillStyle = MINIMAP_COLOR[sampled[y * MINIMAP_SIZE + x]] ?? "#57a639";
+            tctx.fillRect(x, y, 1, 1);
+          }
+        }
+      }
+    }
+
+    // ---- マップ表示モード用地形（512×512 へ間引いて1回だけ描く） ----
+    const bigTerrainCanvas = document.createElement("canvas");
+    bigTerrainCanvas.width = BIGMAP_SIZE;
+    bigTerrainCanvas.height = BIGMAP_SIZE;
+    {
+      const tctx = bigTerrainCanvas.getContext("2d");
+      if (tctx) {
+        const sampled = sampleMinimapTiles(map, BIGMAP_SIZE);
+        for (let y = 0; y < BIGMAP_SIZE; y++) {
+          for (let x = 0; x < BIGMAP_SIZE; x++) {
+            tctx.fillStyle = MINIMAP_COLOR[sampled[y * BIGMAP_SIZE + x]] ?? "#57a639";
             tctx.fillRect(x, y, 1, 1);
           }
         }
@@ -1117,6 +1143,43 @@ export default function WorldBoxClient() {
           mctx.stroke();
         }
       }
+
+      // マップ表示モード（全体を大きく、約5Hz。ロビーでは出さない）
+      if (space === "world" && mapViewRef.current && now - lastBigMapAt > 200) {
+        lastBigMapAt = now;
+        const bm = bigMapRef.current;
+        const bctx = bm?.getContext("2d");
+        if (bm && bctx) {
+          bctx.clearRect(0, 0, bm.width, bm.height);
+          bctx.drawImage(bigTerrainCanvas, 0, 0);
+          // 建物は所有者の所属色（無所属は灰色）の小ドット
+          for (const b of buildingsRef.current.buildings) {
+            bctx.fillStyle = nationsRef.current.playerNations[b.ownerId]?.color ?? "#d8d8d8";
+            bctx.fillRect(b.x * BIGMAP_SCALE - 1, b.y * BIGMAP_SCALE - 1, 2.5, 2.5);
+          }
+          // 首都（国の色の四角＋白枠）
+          for (const n of nationsRef.current.nations) {
+            bctx.fillStyle = n.color;
+            bctx.strokeStyle = "rgba(255,255,255,0.85)";
+            bctx.fillRect(n.capital.x * BIGMAP_SCALE - 3, n.capital.y * BIGMAP_SCALE - 3, 7, 7);
+            bctx.strokeRect(n.capital.x * BIGMAP_SCALE - 3, n.capital.y * BIGMAP_SCALE - 3, 7, 7);
+          }
+          // 他のプレイヤー
+          bctx.fillStyle = "#ffffff";
+          for (const o of others.values()) {
+            bctx.beginPath();
+            bctx.arc(o.rx * BIGMAP_SCALE, o.ry * BIGMAP_SCALE, 2.6, 0, Math.PI * 2);
+            bctx.fill();
+          }
+          // 自分
+          bctx.fillStyle = "#ffd23e";
+          bctx.strokeStyle = "rgba(0,0,0,0.65)";
+          bctx.beginPath();
+          bctx.arc(player.x * BIGMAP_SCALE, player.y * BIGMAP_SCALE, 4.4, 0, Math.PI * 2);
+          bctx.fill();
+          bctx.stroke();
+        }
+      }
     };
     raf = requestAnimationFrame(loop);
 
@@ -1175,6 +1238,12 @@ export default function WorldBoxClient() {
       show: true,
       run: () => setShowEconomy((v) => !v),
     },
+    {
+      id: "mapview",
+      label: mapView ? "マップを閉じる" : "マップを見る",
+      show: spaceUi === "world",
+      run: () => setMapView((v) => !v),
+    },
     { id: "close", label: "閉じる", show: true, run: () => {} },
   ];
 
@@ -1231,6 +1300,7 @@ export default function WorldBoxClient() {
       </nav>
       <div className="page-heading compact-heading">
         <h1>AGO WORLD BOX</h1>
+        <p className="muted">見下ろしの共有ワールド。みんなで同じ世界を歩く。</p>
       </div>
 
       <p className="classic-status" role="status">
@@ -1410,17 +1480,38 @@ export default function WorldBoxClient() {
         </div>
       )}
 
-      <div style={{ display: "flex", gap: 8, justifyContent: "center", marginTop: 14, flexWrap: "wrap" }}>
-        <button type="button" style={btn} onClick={() => setShowMap((v) => !v)} aria-pressed={showMap}>
-          マップ{showMap ? "を隠す" : "を出す"}
-        </button>
-        <button type="button" style={btn} onClick={() => setShowNations((v) => !v)} aria-pressed={showNations}>
-          国{showNations ? "を閉じる" : ""}
-        </button>
-        <button type="button" style={btn} onClick={() => setShowEconomy((v) => !v)} aria-pressed={showEconomy}>
-          経済{showEconomy ? "を閉じる" : ""}
-        </button>
-      </div>
+      {mapView && (
+        <div
+          style={{
+            maxWidth: 640, margin: "12px auto 0", padding: 14, borderRadius: 12,
+            border: "1px solid rgba(255,255,255,0.18)", background: "rgba(255,255,255,0.04)", textAlign: "left",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <strong>マップ</strong>
+            <span className="muted">あなたの座標 X {coords.x} / Y {coords.y}</span>
+            <span style={{ flex: 1 }} />
+            <button type="button" style={btn} onClick={() => setMapView(false)}>
+              閉じる
+            </button>
+          </div>
+          <canvas
+            ref={bigMapRef}
+            width={BIGMAP_SIZE}
+            height={BIGMAP_SIZE}
+            aria-label="全体マップ（大きく表示）"
+            style={{
+              width: "100%", height: "auto", display: "block", marginTop: 10,
+              borderRadius: 10, border: "1px solid rgba(255,255,255,0.35)", background: "rgba(0,0,0,0.25)",
+            }}
+          />
+          <p className="muted" style={{ margin: "8px 0 0", fontSize: 12 }}>
+            黄色い丸 = あなた ・ 白い丸 = 他のプレイヤー ・ 色つき四角 = 首都 ・ 小さい点 = 建物
+          </p>
+        </div>
+      )}
+
+      {/* パネルの開閉は左上の ≡ メニューに統合（ボタン行は置かない） */}
 
       {showNations && (
         <div
@@ -1576,7 +1667,15 @@ export default function WorldBoxClient() {
         </div>
       )}
 
-      {showEconomy && <WorldBoxEconomyPanel />}
+      {showEconomy && <WorldBoxEconomyPanel space={spaceUi} />}
+
+      <p className="muted" style={{ textAlign: "center", fontSize: 13, maxWidth: 860, margin: "14px auto 0" }}>
+        PC: WASD・矢印キーで移動。タッチ: 画面左側のスティックで移動。
+        水・木・岩には入れません。歩いた場所は保存され、みんなと同じ世界にいます。
+        ログインすると、好きな場所に家・畑・塔を建てられます。建てた建物は、所属する国の繁栄度にも数えられます。
+        スポーン広場のワープパッドか ≡ メニューからロビーへ行けます。ロビーを出ると、入る前にいた場所へ戻ります。
+        国・経済・マップなどのパネルは、左上の ≡ メニューから開けます。経済パネルでは、働いてコインを稼ぎ、買い物・合成・steal ができます（ショップはロビーでのみ利用できます）。
+      </p>
     </div>
   );
 }
