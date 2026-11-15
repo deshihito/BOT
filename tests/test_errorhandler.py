@@ -100,6 +100,22 @@ class ClassifyTest(unittest.TestCase):
         self.assertEqual(eh.classify(error), (None, True))
         self.assertEqual(eh.classify(app_commands.CommandInvokeError(MagicMock(), KeyError("x"))), (None, True))
 
+    def test_unknown_interaction_is_silent(self):
+        def not_found(code):
+            class _Resp:
+                status = 404
+                reason = "Not Found"
+            return discord.NotFound(_Resp(), {"message": "x", "code": code})
+
+        # 応答期限切れ（10062）は想定内として無反応にする
+        self.assertEqual(eh.classify(not_found(10062)), (None, False))
+        wrapped = app_commands.CommandInvokeError(MagicMock(), not_found(10062))
+        self.assertEqual(eh.classify(wrapped), (None, False))
+        self.assertTrue(eh.is_unknown_interaction(wrapped))
+        # 別の 404 は今までどおり想定外
+        self.assertEqual(eh.classify(not_found(10008)), (None, True))
+        self.assertFalse(eh.is_unknown_interaction(not_found(10008)))
+
 
 class PrefixHandlerTest(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
@@ -192,6 +208,20 @@ class AppHandlerTest(unittest.IsolatedAsyncioTestCase):
         args, kwargs = interaction.followup.send.await_args
         self.assertIn("エラーID", args[0])
         self.assertNotIn("boom", args[0])
+
+    async def test_unknown_interaction_warns_and_sends_nothing(self):
+        class _Resp:
+            status = 404
+            reason = "Not Found"
+        original = discord.NotFound(_Resp(), {"message": "Unknown interaction", "code": 10062})
+        error = app_commands.CommandInvokeError(MagicMock(), original)
+        interaction = self.interaction()
+        with self.assertLogs("cogs.errorhandler", level=logging.WARNING) as logs:
+            await self.handler.on_app_command_error(interaction, error)
+        self.assertTrue(any("応答期限切れ" in line for line in logs.output))
+        self.assertFalse(any("Traceback" in line for line in logs.output))
+        interaction.response.send_message.assert_not_awaited()
+        interaction.followup.send.assert_not_awaited()
 
     async def test_respects_command_and_cog_handlers(self):
         @app_commands.command(name="x", description="x")
