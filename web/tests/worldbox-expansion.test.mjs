@@ -281,8 +281,8 @@ test("特殊オブジェクト: ルートは決定的で範囲内、再出現規
 });
 
 // ---------------------------------------------------------------- モブ
-test("モブ: 29種・ドロップ整合・出現は時間帯とバイオームで決まる", () => {
-  assert.equal(ob.MOBS.length, 29);
+test("モブ: 48種・ドロップ整合・出現は時間帯とバイオームで決まる", () => {
+  assert.equal(ob.MOBS.length, 48);
   assert.deepEqual(ob.validateMobs(), []);
   const day = ob.mobsForChunk(ml.MAP_SEED, 16, 16, false);
   const day2 = ob.mobsForChunk(ml.MAP_SEED, 16, 16, false);
