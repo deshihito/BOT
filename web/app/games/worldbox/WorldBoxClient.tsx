@@ -2065,6 +2065,9 @@ export default function WorldBoxClient() {
             style={{
               position: "absolute", left: 10, top: 58, display: "grid", gap: 6, padding: 8,
               borderRadius: 10, background: "rgba(0,0,0,0.72)", color: "#fff", zIndex: 8,
+              // 項目が増えてもステージ下端からはみ出さない（収まらない分はメニュー内スクロール）
+              maxHeight: "calc(100% - 68px)", maxWidth: "calc(100% - 20px)", boxSizing: "border-box",
+              overflowY: "auto", overscrollBehavior: "contain", touchAction: "pan-y",
             }}
           >
             {menuActions
