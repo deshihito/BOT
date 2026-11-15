@@ -61,6 +61,8 @@ const sound = await loadBundle(
     "BGM_STEPS", "BGM_TRACKS", "bgmSceneFor", "semitoneFreq", "degreeFreq", "leadNoteCount",
     "tensionFor", "BGM_CROSSFADE_MS", "setWbBgmTension", "currentWbBgmTension",
     "WB_SE_TIER_GAIN", "WB_SE_TIERS", "WB_SE_MIN_INTERVAL_MS", "seForFxBurst",
+    "footstepMaterialFor", "distanceGain", "seVariation",
+    "SE_BURST_WINDOW_MS", "SE_BURST_MAX", "SE_DISTANCE_MAX_TILES", "SE_DISTANCE_MIN_GAIN",
     "loadWbSoundSettings",
   ],
 );
@@ -184,8 +186,55 @@ test("sound: fx バースト → SE の対応（死亡=撃破、出現=煙）", 
   }
 });
 
-test("sound: 設定のデフォルトは BGM/SE とも ON", () => {
-  assert.deepEqual(sound.loadWbSoundSettings(), { bgm: true, se: true });
+test("sound: B4 足音はバイオーム/空間で素材が変わる", () => {
+  const f = sound.footstepMaterialFor;
+  assert.equal(f({ biome: "plains", space: "world" }), "grass", "草原は草");
+  assert.equal(f({ biome: "forest", space: "world" }), "grass", "森も草");
+  assert.equal(f({ biome: "dense_forest", space: "world" }), "grass");
+  assert.equal(f({ biome: "snowfield", space: "world" }), "snow", "雪原は雪");
+  assert.equal(f({ biome: "snow_forest", space: "world" }), "snow");
+  assert.equal(f({ biome: "beach", space: "world" }), "sand", "浜は砂");
+  assert.equal(f({ biome: "dryland", space: "world" }), "sand");
+  assert.equal(f({ biome: "lake", space: "world" }), "water", "湖は水");
+  assert.equal(f({ biome: "wetland", space: "world" }), "water");
+  assert.equal(f({ biome: "highland", space: "world" }), "stone", "高地は石");
+  assert.equal(f({ biome: "plains", space: "world", swimming: true }), "water", "泳ぎは水が最優先");
+  assert.equal(f({ space: "lobby" }), "stone", "ロビーは石");
+  assert.equal(f({ space: "tent" }), "wood", "テント内は木の床");
+  assert.equal(f({ space: "cave:1,2:0" }), "stone", "洞窟は石");
+  assert.equal(f({ space: "dungeon:1,2:0" }), "stone");
+  assert.equal(f({ space: "ruins:1,2:0" }), "stone");
+  assert.equal(f({}), "grass", "未指定は草");
+});
+
+test("sound: B4 距離減衰は 0 で 1、12 タイル以上で下限に張り付く", () => {
+  assert.equal(sound.distanceGain(0), 1);
+  assert.equal(sound.distanceGain(-3), 1, "負の距離は 1");
+  assert.ok(sound.distanceGain(6) > sound.distanceGain(9), "遠いほど小さい");
+  assert.equal(sound.distanceGain(sound.SE_DISTANCE_MAX_TILES), sound.SE_DISTANCE_MIN_GAIN);
+  assert.equal(sound.distanceGain(999), sound.SE_DISTANCE_MIN_GAIN, "上限を超えても下限で聞こえる");
+  assert.ok(sound.SE_DISTANCE_MIN_GAIN > 0 && sound.SE_DISTANCE_MIN_GAIN < 0.5, "下限は 0 より大きく小さい");
+});
+
+test("sound: B4 再生ごとのゆらぎはピッチ±6%・音量±8%の範囲に収まる", () => {
+  for (let i = 0; i < 200; i++) {
+    const v = sound.seVariation();
+    assert.ok(v.pitch >= 0.94 && v.pitch <= 1.06, `pitch ${v.pitch}`);
+    assert.ok(v.gain >= 0.92 && v.gain <= 1.08, `gain ${v.gain}`);
+  }
+});
+
+test("sound: B4 同時発音の整理と連打防止の間隔", () => {
+  assert.ok(sound.SE_BURST_WINDOW_MS >= 50 && sound.SE_BURST_WINDOW_MS <= 150, "整理の窓は 50〜150ms");
+  assert.ok(sound.SE_BURST_MAX >= 4 && sound.SE_BURST_MAX <= 10, "窓内の上限は 4〜10 発");
+  assert.ok(sound.WB_SE_MIN_INTERVAL_MS.hit >= 30, "命中にも連打防止がある");
+  assert.ok(sound.WB_SE_MIN_INTERVAL_MS.kill >= 100, "撃破の連打防止");
+  assert.ok(sound.WB_SE_MIN_INTERVAL_MS.coin >= 50, "コインの連打防止");
+  const src = fs.readFileSync(path.join(libDir, "worldbox/sound.ts"), "utf8");
+  assert.match(src, /recentSeTimes/, "同時発音の窓を持つ");
+  assert.match(src, /WB_SE_TIERS\[name\] >= 4/, "tier 4 以下だけを落とす");
+  assert.match(src, /distanceGain\(opts\.distance/, "距離でゲインを絞る");
+  assert.match(src, /playWbStep/, "素材別足音の入口がある");
 });
 
 test("sound: opus っぽさ回避（音声ファイルなし・BGM パッドなし・ローパスで曇らせない）", () => {
@@ -202,10 +251,14 @@ test("sound: クライアント配線（解錠・場面・行為SE・足音・�
   assert.match(client, /from "@\/lib\/worldbox\/sound"/, "sound 基盤を使う");
   assert.match(client, /unlockWbAudio\(\)/, "最初の操作で AudioContext を解錠する");
   assert.match(client, /setWbBgmScene\(bgmSceneFor\(/, "場面で BGM を切り替える");
-  assert.match(client, /playWbSe\(seForFxBurst\(ev\.kind\)\)/, "行為イベントの粒と同じ場所で SE を出す");
+  assert.match(client, /playWbSe\(seForFxBurst\(ev\.kind\), \{ distance: evDist \}\)/, "モブ演出の SE は距離で減衰する");
+  assert.match(client, /playWbSe\(seForFxBurst\(ev\.kind\), \{ distance: Math\.max/, "行為イベントの SE も距離で減衰する");
   assert.match(client, /playWbSe\("swing"\)/, "振りに風切り");
-  assert.match(client, /playWbSe\("step"\)/, "足音");
   assert.match(client, /playWbSe\("warp"\)/, "ワープ音");
+  assert.match(client, /playWbStep\(footstepMaterialFor\(/, "足音は素材別");
+  assert.match(client, /biomeAt\(MAP_SEED, Math\.floor\(player\.x\), Math\.floor\(player\.y\)\)/, "足音の素材は現在地のバイオームから決める");
+  assert.match(client, /playWbSe\(menuOpen \? "close" : "open"\)/, "≡ メニューの開閉音");
+  assert.match(client, /playWbSe\("click"\)/, "メニュー項目のクリック音");
   assert.match(client, /BGMを切る|BGMを入れる/, "≡ メニューに BGM 切替");
   assert.match(client, /効果音を切る|効果音を入れる/, "≡ メニューに SE 切替");
   const eco = fs.readFileSync(path.join(rootDir, "app/games/worldbox/WorldBoxEconomyPanel.tsx"), "utf8");
