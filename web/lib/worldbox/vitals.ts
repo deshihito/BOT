@@ -160,6 +160,10 @@ export function applyMobDamage(
   rng: () => number = Math.random,
 ): { profile: PlayerProfile; applied: boolean; died: boolean; poisoned: boolean } {
   const settled = stepVitals(profile, now).profile;
+  // スポーン保護中（新規プレイヤーの最初の数分）はモブのダメージを受けない
+  if ((settled.spawnProtectedUntil ?? 0) > now) {
+    return { profile: settled, applied: false, died: false, poisoned: false };
+  }
   if (now - settled.lastDamageAt < MOB_DAMAGE_COOLDOWN_MS || settled.hp <= 0) {
     return { profile: settled, applied: false, died: settled.hp <= 0, poisoned: false };
   }

@@ -435,6 +435,14 @@ export class NextResponse {
   }
 }
 `);
+const metricsOnlineStubUrl = dataUrl(`
+export async function recordPresenceMetric() {}
+export async function recordFirstStep() {}
+export async function bumpMetric() {}
+export async function loadDayMetrics() { return null; }
+export async function loadUserFirstSteps() { return null; }
+export async function loadEconDay() { return null; }
+`);
 const presenceRoute = await import(
   dataUrl(
     transpile("api/worldbox/presence/route.ts", rootDir + "/app")
@@ -445,7 +453,8 @@ const presenceRoute = await import(
       .replaceAll('"@/lib/worldbox/lobby-floors"', JSON.stringify(floorsUrl))
       .replaceAll('"@/lib/worldbox/tent"', JSON.stringify(tentUrl))
       .replaceAll('"@/lib/worldbox/presence-online"', JSON.stringify(presenceOnlineUrl))
-      .replaceAll('"@/lib/worldbox/presence"', JSON.stringify(presenceUrl)),
+      .replaceAll('"@/lib/worldbox/presence"', JSON.stringify(presenceUrl))
+      .replaceAll('"@/lib/worldbox/metrics-online"', JSON.stringify(metricsOnlineStubUrl)),
   ),
 );
 

@@ -525,6 +525,14 @@ export default function WorldBoxClient() {
   const staminaBoostRef = useRef(false);
   const [boardOpen, setBoardOpen] = useState(false);
   const [guildBoardOpen, setGuildBoardOpen] = useState(false);
+  /** 招待リンク（?union=<DiscordサーバーID>）の指定先。 */
+  const [inviteGuildId] = useState<string | null>(() => {
+    if (typeof window === "undefined") return null;
+    return new URLSearchParams(window.location.search).get("union");
+  });
+  useEffect(() => {
+    if (inviteGuildId) setGuildBoardOpen(true);
+  }, [inviteGuildId]);
   const [guildShopOpen, setGuildShopOpen] = useState(false);
   const [boardPosts, setBoardPosts] = useState<BoardPost[]>([]);
   const [boardLoggedIn, setBoardLoggedIn] = useState(false);
@@ -5551,6 +5559,7 @@ export default function WorldBoxClient() {
       )}
       {guildBoardOpen && spaceUi === "lobby" && (
         <WorldBoxGuildBoardPanel
+          inviteGuildId={inviteGuildId}
           nations={nationsUi}
           nationMsg={nationMsg}
           onNationAction={(body) => void nationAction(body)}
