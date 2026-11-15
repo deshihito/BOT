@@ -321,6 +321,17 @@ export async function loadTileOverrides() { return parseTileOverrides(store); }
 export async function loadTileOverride(x, y) { const v = store.get(x + "," + y); return v === undefined ? null : parseTileOverride(v); }
 export async function storeTileOverride(x, y, ov) { if (ov === null) store.delete(x + "," + y); else store.set(x + "," + y, JSON.stringify(ov)); return true; }
 `);
+const containersBundleUrl = bundleModule(
+  ["worldbox/items.ts", "worldbox/profile.ts", "worldbox/containers.ts"],
+  ["isContainerItem", "containerIsEmpty", "parseContainerState", "serializeContainerState"],
+);
+const containersOnlineStubUrl = dataUrl(`
+import { parseContainerState, serializeContainerState } from ${JSON.stringify(containersBundleUrl)};
+const store = (globalThis.__wbBlockContainers ??= new Map());
+export function isContainersEnabled() { return true; }
+export async function loadContainer(x, y, itemId) { const v = store.get(x + "," + y); return v === undefined ? null : parseContainerState(v, itemId); }
+export async function storeContainer(x, y, state) { if (state === null) store.delete(x + "," + y); else store.set(x + "," + y, serializeContainerState(state)); return true; }
+`);
 const nationsOnlineStubUrl = dataUrl(`
 export function isNationsEnabled() { return true; }
 export async function loadNationsState() { return globalThis.__wbBlockNations ?? { nations: {} }; }
@@ -351,6 +362,8 @@ const tilesRoute = await import(
       .replaceAll('"@/lib/worldbox/save-online"', JSON.stringify(saveOnlineStubUrl))
       .replaceAll('"@/lib/worldbox/tiles"', JSON.stringify(tilesUrl))
       .replaceAll('"@/lib/worldbox/tiles-online"', JSON.stringify(tilesOnlineStubUrl))
+      .replaceAll('"@/lib/worldbox/containers"', JSON.stringify(containersBundleUrl))
+      .replaceAll('"@/lib/worldbox/containers-online"', JSON.stringify(containersOnlineStubUrl))
       .replaceAll('"@/lib/worldbox/buildings"', JSON.stringify(buildingsBundleUrl))
       .replaceAll('"@/lib/worldbox/buildings-online"', JSON.stringify(buildingsOnlineStubUrl))
       .replaceAll('"@/lib/worldbox/nations-online"', JSON.stringify(nationsOnlineStubUrl)),
@@ -381,6 +394,7 @@ const KEY = T.tileKey(grassAt.x, grassAt.y);
 function resetStores() {
   globalThis.__wbBlockTiles.clear();
   globalThis.__wbBlockProfiles.clear();
+  globalThis.__wbBlockContainers?.clear();
   globalThis.__wbBlockPresence = [];
   globalThis.__wbBlockNations = { nations: {} };
   globalThis.__wbBlockBuildings = {};

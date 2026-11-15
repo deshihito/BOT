@@ -53,6 +53,9 @@ import {
 } from "@/lib/worldbox/tiles";
 import { CROPS, ITEMS, itemById } from "@/lib/worldbox/items";
 import { HP_MAX, HUNGER_MAX, countItem, type ItemSlot, type PlayerProfile, type SlotRef } from "@/lib/worldbox/profile";
+import {
+  containerCapacity, isContainerItem, type ContainerSlotRef,
+} from "@/lib/worldbox/containers";
 import { loadDungeonTiles, loadFarmSprites, loadLobbySprites, loadMobSprites, loadTextures } from "@/lib/worldbox/textures";
 import { isStickTouch, stickBase, stickVector } from "@/lib/worldbox/stick";
 import {
@@ -209,6 +212,9 @@ const TILE_ERROR_LABEL: Record<string, string> = {
   too_far: "遠すぎる",
   unauthorized: "ログインが必要",
   tiles_unavailable: "いま使えない",
+  not_empty: "中身が入っている",
+  no_container: "収納がない",
+  containers_unavailable: "いま使えない",
 };
 
 /** アイテムのドット絵アイコン（無いアイテムは名前ラベルのみで出す）。 */
@@ -636,6 +642,11 @@ export default function WorldBoxClient() {
   const [storageOpen, setStorageOpen] = useState(false);
   /** インベントリ整理で持ち上げ中のスロット（タップ→タップで移動）。 */
   const [heldSlot, setHeldSlot] = useState<SlotRef | null>(null);
+  /** 開いている収納コンテナ（自分の樽・宝箱）とその中身。 */
+  const [containerPanel, setContainerPanel] = useState<{ x: number; y: number; itemId: string } | null>(null);
+  const [containerSlots, setContainerSlots] = useState<ItemSlot[] | null>(null);
+  /** コンテナパネルで持ち上げ中のスロット（プロフィール側も含む）。 */
+  const [heldPanelSlot, setHeldPanelSlot] = useState<ContainerSlotRef | null>(null);
   const [seedPicker, setSeedPicker] = useState<{ x: number; y: number } | null>(null);
   const [tileMsg, setTileMsg] = useState("");
   // Esc で開いているパネル/メニューを全部閉じる（パネル内に閉じ場所が無い状態への保険）
@@ -652,6 +663,8 @@ export default function WorldBoxClient() {
       setStorageOpen(false);
       setHeldSlot(null);
       setSeedPicker(null);
+      setContainerPanel(null);
+      setHeldPanelSlot(null);
     };
     window.addEventListener("keydown", onEsc);
     return () => window.removeEventListener("keydown", onEsc);
@@ -885,6 +898,75 @@ export default function WorldBoxClient() {
     const from = heldSlot;
     setHeldSlot(null);
     void moveItem(from, { zone, index });
+  };
+
+  /** 自分の収納コンテナ（樽・宝箱）を開く。中身はサーバーが正。 */
+  const openContainer = async (x: number, y: number, itemId: string) => {
+    setStorageOpen(false);
+    setHeldSlot(null);
+    setHeldPanelSlot(null);
+    setContainerSlots(null);
+    setContainerPanel({ x, y, itemId });
+    try {
+      const res = await fetch(`/api/worldbox/containers?x=${x}&y=${y}`, {
+        headers: { Accept: "application/json" },
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        container?: { slots?: ItemSlot[] }; error?: string;
+      };
+      if (!res.ok) {
+        setContainerPanel(null);
+        setTileMsg(TILE_ERROR_LABEL[data.error ?? ""] ?? "開けない");
+        return;
+      }
+      setContainerSlots(data.container?.slots ?? null);
+    } catch {
+      setContainerPanel(null);
+      setTileMsg("開けない");
+    }
+  };
+  const openContainerRef = useRef(openContainer);
+  openContainerRef.current = openContainer;
+  /** コンテナ⇔プロフィール間のスロット移動（サーバー側 moveContainerSlot が正）。 */
+  const moveContainerItem = async (from: ContainerSlotRef, to: ContainerSlotRef) => {
+    if (!containerPanel) return;
+    try {
+      const res = await fetch("/api/worldbox/containers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "move", x: containerPanel.x, y: containerPanel.y, from, to,
+        }),
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        profile?: PlayerProfile; container?: { slots?: ItemSlot[] }; error?: string;
+      };
+      if (!res.ok) {
+        setTileMsg(TILE_ERROR_LABEL[data.error ?? ""] ?? "動かせない");
+        return;
+      }
+      if (data.profile) setInvProfile(data.profile);
+      if (data.container) setContainerSlots(data.container.slots ?? null);
+    } catch { /* noop */ }
+  };
+  /** コンテナパネルのスロットタップ: 持ち上げ → 置く/交換（インベントリ整理と同じ）。 */
+  const tapPanelSlot = (ref: ContainerSlotRef) => {
+    const slot = ref.side === "container"
+      ? (containerSlots?.[ref.index] ?? null)
+      : ref.side === "profile_hotbar"
+        ? (invProfile?.hotbar[ref.index] ?? null)
+        : (invProfile?.storage[ref.index] ?? null);
+    if (!heldPanelSlot) {
+      if (slot) setHeldPanelSlot(ref);
+      return;
+    }
+    if (heldPanelSlot.side === ref.side && heldPanelSlot.index === ref.index) {
+      setHeldPanelSlot(null);
+      return;
+    }
+    const from = heldPanelSlot;
+    setHeldPanelSlot(null);
+    void moveContainerItem(from, ref);
   };
 
   useEffect(() => {
@@ -1382,6 +1464,15 @@ export default function WorldBoxClient() {
           ...view.block,
           mine: selfIdRef.current !== null && ov?.block?.ownerId === selfIdRef.current,
         };
+      }
+      if (view.block && isContainerItem(view.block.itemId)) {
+        // 自分の樽・宝箱は採掘ではなく収納を開く。他人の収納は開けない。
+        if (view.block.mine) {
+          void openContainerRef.current(t.x, t.y, view.block.itemId);
+        } else {
+          setTileMsg(TILE_ERROR_LABEL.not_owner);
+        }
+        return true;
       }
       const act = actionForTile(view, {
         tool: selItem?.tool,
@@ -2817,6 +2908,43 @@ export default function WorldBoxClient() {
   const heldStack: ItemSlot = heldSlot && invProfile
     ? (heldSlot.zone === "hotbar" ? invProfile.hotbar[heldSlot.index] : invProfile.storage[heldSlot.index]) ?? null
     : null;
+  /** コンテナパネルの1枠（コンテナ側・プロフィール側共通、持ち上げ中は金枠）。 */
+  const renderPanelSlot = (side: ContainerSlotRef["side"], index: number, slot: ItemSlot) => {
+    const held = heldPanelSlot?.side === side && heldPanelSlot?.index === index;
+    return (
+      <button
+        key={`${side}-${index}`}
+        type="button"
+        aria-label={slot ? (itemById(slot.id)?.name ?? slot.id) : "空き枠"}
+        aria-pressed={held}
+        onClick={() => tapPanelSlot({ side, index })}
+        style={{
+          ...slotBox, width: "100%", height: 44,
+          ...(held ? { background: "rgba(255,210,62,0.30)", borderColor: "rgba(255,210,62,0.85)" } : {}),
+        }}
+      >
+        <SlotContent slot={slot} />
+      </button>
+    );
+  };
+  /** コンテナパネルで持ち上げ中のスタック（見出しの識別表示用）。 */
+  const heldPanelStack: ItemSlot = heldPanelSlot
+    ? heldPanelSlot.side === "container"
+      ? (containerSlots?.[heldPanelSlot.index] ?? null)
+      : heldPanelSlot.side === "profile_hotbar"
+        ? (invProfile?.hotbar[heldPanelSlot.index] ?? null)
+        : (invProfile?.storage[heldPanelSlot.index] ?? null)
+    : null;
+  /** コンテナ側グリッドの表示枠（容量ぶん、未読込は空き枠）。 */
+  const containerGridSlots: ItemSlot[] = containerPanel
+    ? Array.from(
+        { length: containerCapacity(containerPanel.itemId) },
+        (_, i) => containerSlots?.[i] ?? null,
+      )
+    : [];
+  const containerEmpty = containerPanel !== null
+    && containerSlots !== null
+    && containerSlots.every((s) => s === null);
 
   // ハンバーガーはアクションの集約場所。項目はデータ駆動のリストで持ち、
   // アクションの追加はここへ1件足すだけで済む。
@@ -3236,6 +3364,67 @@ export default function WorldBoxClient() {
           >
             {invProfile.hotbar.map((slot, i) => renderInvSlot("hotbar", i, slot))}
           </div>
+        </div>
+      )}
+
+      {containerPanel && invProfile && (
+        <div style={{ ...panelOverlay, width: "min(330px, calc(100% - 20px))" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <strong>{itemById(containerPanel.itemId)?.name ?? "収納"}</strong>
+            {heldPanelStack && (
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12 }}>
+                <ItemIcon id={heldPanelStack.id} size={18} />
+                {itemById(heldPanelStack.id)?.name ?? heldPanelStack.id}
+              </span>
+            )}
+            <span style={{ flex: 1 }} />
+            <button
+              type="button"
+              style={btn}
+              onClick={() => {
+                setContainerPanel(null);
+                setHeldPanelSlot(null);
+              }}
+            >
+              閉じる
+            </button>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 4, marginTop: 8 }}>
+            {containerGridSlots.map((slot, i) => renderPanelSlot("container", i, slot))}
+          </div>
+          <div
+            style={{
+              display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 4,
+              marginTop: 6, paddingTop: 6, borderTop: "1px solid rgba(255,255,255,0.18)",
+            }}
+          >
+            {invProfile.storage.map((slot, i) => renderPanelSlot("profile_storage", i, slot))}
+          </div>
+          <div
+            style={{
+              display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 4,
+              marginTop: 6, paddingTop: 6, borderTop: "1px solid rgba(255,255,255,0.18)",
+            }}
+          >
+            {invProfile.hotbar.map((slot, i) => renderPanelSlot("profile_hotbar", i, slot))}
+          </div>
+          {containerEmpty && (
+            <div style={{ marginTop: 8, display: "flex" }}>
+              <span style={{ flex: 1 }} />
+              <button
+                type="button"
+                style={btn}
+                onClick={() => {
+                  const p = containerPanel;
+                  setContainerPanel(null);
+                  setHeldPanelSlot(null);
+                  void postTileAction("mine_block", p.x, p.y);
+                }}
+              >
+                回収
+              </button>
+            </div>
+          )}
         </div>
       )}
 
