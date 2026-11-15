@@ -26,7 +26,7 @@ import {
   slashAlpha, spawnAmbient, spawnBurst, spawnMobFx, startShake, stepFx, swingProgress, weatherAmbientKind, weatherAt,
   type FxBurstKind, type FxShake, type FxSystem,
 } from "@/lib/worldbox/fx";
-import type { PresenceEntry } from "@/lib/worldbox/presence";
+import { clockOffsetEstimate, type PresenceEntry } from "@/lib/worldbox/presence";
 import {
   STAMINA_MAX, canDash, createStamina, createTapTracker, isStickDash, registerKeyTap, rescueStamina,
   staminaGaugeVisible, stepStamina, type StaminaState, type StaminaUse, type TapTracker,
@@ -959,6 +959,12 @@ export default function WorldBoxClient() {
     })();
 
     // ---- プレゼンス（空間ごとに分ける。他空間の者は受け取らない） ----
+    // エントリの ts はサーバー時刻。受信側の時計ずれを GET の now で補正してから
+    // 外挿に使う（ずれがそのまま描画位置のズレになるため）。
+    let clockOffsetMs = 0;
+    const presenceNow = () => Date.now() + clockOffsetMs;
+    /** ポーリングで連続して見えなかった回数（1回の欠落では消さない）。 */
+    const missedPolls = new Map<string, number>();
     const sendHeartbeat = () => {
       if (!loggedIn) return;
       fetch("/api/worldbox/presence", {
@@ -968,23 +974,37 @@ export default function WorldBoxClient() {
       }).catch(() => { /* noop */ });
     };
     const pollOthers = async () => {
+      const before = Date.now();
       try {
         const res = await fetch(`/api/worldbox/presence?space=${space}`, { headers: { Accept: "application/json" } });
         if (!res.ok) return;
-        const body = (await res.json()) as { players?: PresenceEntry[] };
+        const body = (await res.json()) as { players?: PresenceEntry[]; now?: number };
         if (disposed) return;
+        if (typeof body.now === "number") {
+          const sample = clockOffsetEstimate(body.now, before, Date.now());
+          clockOffsetMs = clockOffsetMs === 0 ? sample : clockOffsetMs + (sample - clockOffsetMs) * 0.3;
+        }
+        const now = presenceNow();
         const seen = new Set<string>();
         for (const entry of body.players ?? []) {
           seen.add(entry.id);
+          missedPolls.delete(entry.id);
           const cur = others.get(entry.id);
           if (!cur) {
-            others.set(entry.id, { track: createRemoteTrack(entry, Date.now(), activeMap()), phase: 0 });
+            others.set(entry.id, { track: createRemoteTrack(entry, now, activeMap()), phase: 0 });
           } else {
-            cur.track = updateRemoteTrack(cur.track, entry, Date.now(), activeMap());
+            cur.track = updateRemoteTrack(cur.track, entry, now, activeMap());
           }
         }
         for (const id of [...others.keys()]) {
-          if (!seen.has(id)) others.delete(id);
+          if (seen.has(id)) continue;
+          const missed = (missedPolls.get(id) ?? 0) + 1;
+          if (missed >= 2) {
+            others.delete(id);
+            missedPolls.delete(id);
+          } else {
+            missedPolls.set(id, missed);
+          }
         }
         setOthersCount(others.size);
       } catch { /* noop */ }
@@ -993,8 +1013,23 @@ export default function WorldBoxClient() {
       if (!loggedIn) return;
       fetch("/api/worldbox/presence", { method: "DELETE", keepalive: true }).catch(() => { /* noop */ });
     };
-    const heartbeatTimer = window.setInterval(sendHeartbeat, 1000);
-    const pollTimer = window.setInterval(pollOthers, 2000);
+    // ハートビートは適応間隔: 移動中は 500ms、静止中は 2s。
+    // ワープやノックバック等の大きなジャンプは間隔を待たず即送る。
+    let lastHeartbeatAt = 0;
+    let lastHeartbeatPos = { x: player.x, y: player.y };
+    const heartbeatTick = () => {
+      if (!loggedIn) return;
+      const now = performance.now();
+      const movedDist = Math.hypot(player.x - lastHeartbeatPos.x, player.y - lastHeartbeatPos.y);
+      const moving = Math.hypot(player.vx, player.vy) > 0.1 || movedDist > 0.05;
+      const interval = moving ? 500 : 2000;
+      if (movedDist <= 4 && now - lastHeartbeatAt < interval) return;
+      lastHeartbeatAt = now;
+      lastHeartbeatPos = { x: player.x, y: player.y };
+      sendHeartbeat();
+    };
+    const heartbeatTimer = window.setInterval(heartbeatTick, 250);
+    const pollTimer = window.setInterval(pollOthers, 1000);
     pollOthers();
 
     // ---- 入力 ----
@@ -1707,8 +1742,9 @@ export default function WorldBoxClient() {
 
       // 他プレイヤーの描画位置（スナップショット予測へバネでなめらかに寄せる）
       const nowMs = Date.now();
+      const presenceNowMs = presenceNow();
       for (const o of others.values()) {
-        o.track = stepRemoteTrack(o.track, nowMs, dt, activeMap());
+        o.track = stepRemoteTrack(o.track, presenceNowMs, dt, activeMap());
         const ospeed = Math.hypot(o.track.entry.vx, o.track.entry.vy);
         o.phase = advanceWalkPhase(o.phase, ospeed, dt);
       }
