@@ -815,14 +815,20 @@ class QuestSupportMixin:
         if self._quest is None or not _quest_feed_url():
             return
 
-        store = guild_settings.get_store()
-        await store.ensure_loaded()
+        try:
+            store = guild_settings.get_store()
+            await store.ensure_loaded()
 
-        targets = []
-        for guild in list(self.bot.guilds):
-            settings = get_quest_settings(store, guild.id)
-            if settings["enabled"] and settings["channel_id"]:
-                targets.append((guild, settings))
+            targets = []
+            for guild in list(self.bot.guilds):
+                settings = get_quest_settings(store, guild.id)
+                if settings["enabled"] and settings["channel_id"]:
+                    targets.append((guild, settings))
+        except Exception:
+            # 設定の読み込み・対象収集の失敗でループごと止まると Quest 通知が
+            # 無言で死ぬ。次周期に再試行できるよう、ここで吸収する。
+            logger.exception("Quest通知の巡回に失敗しました（設定の読み込み）")
+            return
         if not targets:
             return
 
