@@ -82,7 +82,7 @@ const USER_C = "discord:100000000000000003";
 
 test("nations: 空きマップでは中央が最初の首都になる", () => {
   const map = wb.generateMap();
-  assert.deepEqual(wb.findCapitalTile(map, []), { x: 64, y: 64 });
+  assert.deepEqual(wb.findCapitalTile(map, []), { x: 512, y: 512 });
 });
 
 test("nations: 2つ目の首都は領地が重ならない距離に置かれる", () => {
@@ -138,7 +138,7 @@ test("nations: 建国→王、参加→市民、二重所属と同名は却下",
   const map = wb.generateMap();
   const founded = wb.applyFound(wb.emptyNationsState(), KING_A, "あご王国", map, 1000);
   assert.equal(founded.ok, true);
-  assert.deepEqual(founded.nation.capital, { x: 64, y: 64 });
+  assert.deepEqual(founded.nation.capital, { x: 512, y: 512 });
   assert.equal(founded.state.members[KING_A].role, "king");
   assert.equal(founded.nation.color, wb.NATION_PALETTE[0]);
 
@@ -172,7 +172,7 @@ test("nations: 王の離脱規則と、解散で首都が空く", () => {
   assert.equal(disbanded.ok, true);
   assert.equal(disbanded.disbanded, true);
   assert.deepEqual(Object.keys(disbanded.state.nations), []);
-  assert.deepEqual(wb.findCapitalTile(map, Object.values(disbanded.state.nations)), { x: 64, y: 64 });
+  assert.deepEqual(wb.findCapitalTile(map, Object.values(disbanded.state.nations)), { x: 512, y: 512 });
 });
 
 test("nations: 保存形式の往復と、壊れた要素の除去", () => {
@@ -186,7 +186,7 @@ test("nations: 保存形式の往復と、壊れた要素の除去", () => {
   const dirty = wb.parseNationsState(
     JSON.stringify({
       bad1: { id: "bad1", name: "色が不正", color: "#000000", kingKey: KING_A, capital: { x: 1, y: 1 }, createdAt: 1 },
-      bad2: { id: "bad2", name: "首都が範囲外", color: wb.NATION_PALETTE[0], kingKey: KING_A, capital: { x: 999, y: 1 }, createdAt: 1 },
+      bad2: { id: "bad2", name: "首都が範囲外", color: wb.NATION_PALETTE[0], kingKey: KING_A, capital: { x: 9999, y: 1 }, createdAt: 1 },
     }),
     JSON.stringify({
       [KING_A]: { nationId: "bad1", role: "king" },
@@ -470,7 +470,7 @@ test("API(nations): 建国→王・参加→市民・王の離脱規則・解散
   assert.equal(found.status, 200);
   const foundBody = await found.json();
   assert.equal(foundBody.me.role, "king");
-  assert.deepEqual(foundBody.nation.capital, { x: 64, y: 64 });
+  assert.deepEqual(foundBody.nation.capital, { x: 512, y: 512 });
   assert.equal(foundBody.nation.members, 1);
   const nationId = foundBody.nation.id;
 
@@ -522,7 +522,7 @@ test("API(nations): 建国→王・参加→市民・王の離脱規則・解散
   // 解散で首都が空いたので、次の建国はまた中央
   const refound = await nationsRoute.POST(nationsRequest("POST", cookieC, { action: "found", name: "第二王国" }));
   assert.equal(refound.status, 200);
-  assert.deepEqual((await refound.json()).nation.capital, { x: 64, y: 64 });
+  assert.deepEqual((await refound.json()).nation.capital, { x: 512, y: 512 });
 });
 
 test("API(nations): 不正なアクションは 400、他オリジンは 403", async () => {
@@ -548,11 +548,12 @@ test("API(buildings): 個人所有の建築・繁栄度・所有者だけが取�
   assert.equal((await buildingsRoute.POST(buildingsRequest("POST", null, { action: "build", type: "house", x: 1, y: 1 }))).status, 401);
   assert.equal((await buildingsRoute.POST(buildingsRequest("POST", null, { action: "demolish", x: 1, y: 1 }))).status, 401);
 
-  // 建てられるタイルを探す（実マップ準拠: 草・土・砂、広場と首都を除く）
+  // 建てられるタイルを探す（実マップ準拠: 草・土・砂、広場と首都を除く。
+  // 温帯の中心付近を探す。北の雪原帯は建築対象タイルが無い）
   const map = wb.generateMap();
   const buildable = [];
-  for (let y = 6; y < 44 && buildable.length < 4; y++) {
-    for (let x = 6; x < 44 && buildable.length < 4; x++) {
+  for (let y = 480; y < 544 && buildable.length < 4; y++) {
+    for (let x = 480; x < 544 && buildable.length < 4; x++) {
       if (wb.isSpawnPlazaTile(map, x, y)) continue;
       const t = wb.mapTileAt(map, x, y);
       if (t === wb.T_GRASS || t === wb.T_DIRT || t === wb.T_SAND) buildable.push({ x, y });
@@ -586,7 +587,7 @@ test("API(buildings): 個人所有の建築・繁栄度・所有者だけが取�
   const onCapital = await buildingsRoute.POST(buildingsRequest("POST", cookieD, { action: "build", type: "house", x: capital.x, y: capital.y }));
   assert.equal(onCapital.status, 409);
   assert.equal((await onCapital.json()).error, "on_capital");
-  const onSpawn = await buildingsRoute.POST(buildingsRequest("POST", cookieD, { action: "build", type: "house", x: 62, y: 64 }));
+  const onSpawn = await buildingsRoute.POST(buildingsRequest("POST", cookieD, { action: "build", type: "house", x: 510, y: 512 }));
   assert.equal(onSpawn.status, 409);
   assert.equal((await onSpawn.json()).error, "on_spawn");
   const badType = await buildingsRoute.POST(buildingsRequest("POST", cookieD, { action: "build", type: "castle", x: t2.x, y: t2.y }));

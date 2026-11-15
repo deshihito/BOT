@@ -1,15 +1,15 @@
 "use client";
 // AGO WORLD BOX（見下ろし型・共有ワールド）。
-// 世界は固定シードから生成される 128×128 の1枚マップで、全員が同じ場所を歩く。
+// 世界は固定シードから生成される 1024×1024 の1枚マップで、全員が同じ場所を歩く。
 // 移動は8方向フリー（スティック＋WASD）、他プレイヤーはプレゼンス API 経由で
-// アバター＋名前つきで表示される（同時接続）。セーブは自分の位置だけ（v4）。
+// アバター＋名前つきで表示される（同時接続）。セーブは自分の位置だけ（v5）。
 // ゲームループと描画は canvas + refs で回し、React state は HUD 表示だけに使う。
 // 純粋ロジックは lib/worldbox/ に分離（生成・移動・プレゼンス・保存）。
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import {
-  MAP_H, MAP_SEED, MAP_W, T_DIRT, T_GRASS, T_ROCK, T_SAND, T_TREE, T_WATER,
-  generateMap, mapSpawn, mapTileAt, type TopDownMap,
+  MAP_H, MAP_SEED, MAP_W, MINIMAP_SIZE, T_DIRT, T_GRASS, T_ROCK, T_SAND, T_SNOW, T_SNOW_TREE, T_TREE, T_WATER,
+  generateMap, mapSpawn, mapTileAt, sampleMinimapTiles, type TopDownMap,
 } from "@/lib/worldbox/mapgen";
 import { WALK_SPEED, findFreeNear, stepMove } from "@/lib/worldbox/move";
 import { nightAmount, phaseAtTime } from "@/lib/worldbox/daynight";
@@ -22,7 +22,7 @@ import { chooseInitialSave } from "@/lib/worldbox/save-source";
 import { loadDungeonTiles, loadTextures } from "@/lib/worldbox/textures";
 import { useGamesNav } from "../GamesShell";
 
-const SAVE_KEY = "ago-worldbox-save-v4";
+const SAVE_KEY = "ago-worldbox-save-v5";
 /** 1タイルの表示サイズ（CSS px）。 */
 const TILE = 44;
 /** アバターの表示幅（タイル比）。 */
@@ -38,6 +38,8 @@ const TILE_DUNGEON: Record<number, string> = {
   [T_DIRT]: "dirt",
   [T_TREE]: "tree",
   [T_ROCK]: "rock",
+  [T_SNOW]: "snow",
+  [T_SNOW_TREE]: "snowTree",
 };
 const TILE_FALLBACK: Record<number, string> = {
   [T_GRASS]: "#57a639",
@@ -46,6 +48,8 @@ const TILE_FALLBACK: Record<number, string> = {
   [T_TREE]: "#57a639",
   [T_ROCK]: "#8d8d93",
   [T_DIRT]: "#8a5a2b",
+  [T_SNOW]: "#eef3f6",
+  [T_SNOW_TREE]: "#eef3f6",
 };
 /** ミニマップの地形色。 */
 const MINIMAP_COLOR: Record<number, string> = {
@@ -55,7 +59,11 @@ const MINIMAP_COLOR: Record<number, string> = {
   [T_TREE]: "#2f6121",
   [T_ROCK]: "#8d8d93",
   [T_DIRT]: "#8a5a2b",
+  [T_SNOW]: "#f4f8fa",
+  [T_SNOW_TREE]: "#9fc4bb",
 };
+/** ミニマップ上の1タイルの大きさ（256px / 1024タイル）。 */
+const MINIMAP_SCALE = MINIMAP_SIZE / MAP_W;
 
 type PlayerState = {
   x: number;
@@ -119,7 +127,7 @@ export default function WorldBoxClient() {
   showMapRef.current = showMap;
   // 国家レイヤー（描画ループは ref、パネルは state で同じデータを見る）
   const nationsRef = useRef<NationsResponse>(EMPTY_NATIONS);
-  const playerPosRef = useRef({ x: 64.5, y: 64.5 });
+  const playerPosRef = useRef({ x: MAP_W / 2 + 0.5, y: MAP_H / 2 + 0.5 });
   const [nationsUi, setNationsUi] = useState<NationsResponse>(EMPTY_NATIONS);
   const [showNations, setShowNations] = useState(false);
   const [nationName, setNationName] = useState("");
@@ -415,16 +423,18 @@ export default function WorldBoxClient() {
     };
     window.addEventListener("pagehide", onPageHide);
 
-    // ---- ミニマップ地形（1回だけ描く） ----
+    // ---- ミニマップ地形（1回だけ描く。1024×1024 を 256×256 へ間引いた
+    // オフスクリーンに描き、毎フレームはこれを転写するだけにする） ----
     const terrainCanvas = document.createElement("canvas");
-    terrainCanvas.width = MAP_W;
-    terrainCanvas.height = MAP_H;
+    terrainCanvas.width = MINIMAP_SIZE;
+    terrainCanvas.height = MINIMAP_SIZE;
     {
       const tctx = terrainCanvas.getContext("2d");
       if (tctx) {
-        for (let y = 0; y < MAP_H; y++) {
-          for (let x = 0; x < MAP_W; x++) {
-            tctx.fillStyle = MINIMAP_COLOR[mapTileAt(map, x, y)] ?? "#57a639";
+        const sampled = sampleMinimapTiles(map);
+        for (let y = 0; y < MINIMAP_SIZE; y++) {
+          for (let x = 0; x < MINIMAP_SIZE; x++) {
+            tctx.fillStyle = MINIMAP_COLOR[sampled[y * MINIMAP_SIZE + x]] ?? "#57a639";
             tctx.fillRect(x, y, 1, 1);
           }
         }
@@ -797,21 +807,21 @@ export default function WorldBoxClient() {
           // 首都
           for (const n of nationsRef.current.nations) {
             mctx.fillStyle = n.color;
-            mctx.fillRect(n.capital.x - 1, n.capital.y - 1, 3, 3);
+            mctx.fillRect(n.capital.x * MINIMAP_SCALE - 1, n.capital.y * MINIMAP_SCALE - 1, 3, 3);
           }
           // 建物は所有者の所属色（無所属は灰色）の小ドット
           for (const b of buildingsRef.current.buildings) {
             mctx.fillStyle = nationsRef.current.playerNations[b.ownerId]?.color ?? "#d8d8d8";
-            mctx.fillRect(b.x, b.y, 2, 2);
+            mctx.fillRect(b.x * MINIMAP_SCALE, b.y * MINIMAP_SCALE, 2, 2);
           }
           mctx.fillStyle = "#ffffff";
           for (const o of others.values()) {
-            mctx.fillRect(Math.floor(o.rx) - 1, Math.floor(o.ry) - 1, 2, 2);
+            mctx.fillRect(Math.floor(o.rx * MINIMAP_SCALE) - 1, Math.floor(o.ry * MINIMAP_SCALE) - 1, 2, 2);
           }
           mctx.fillStyle = "#ffd23e";
           mctx.strokeStyle = "rgba(0,0,0,0.6)";
           mctx.beginPath();
-          mctx.arc(player.x, player.y, 2.6, 0, Math.PI * 2);
+          mctx.arc(player.x * MINIMAP_SCALE, player.y * MINIMAP_SCALE, 2.6, 0, Math.PI * 2);
           mctx.fill();
           mctx.stroke();
         }
@@ -884,8 +894,8 @@ export default function WorldBoxClient() {
         {showMap && (
           <canvas
             ref={minimapRef}
-            width={MAP_W}
-            height={MAP_H}
+            width={MINIMAP_SIZE}
+            height={MINIMAP_SIZE}
             aria-label="全体マップ"
             style={{
               position: "absolute", right: 10, top: 10, width: 112, height: 112,

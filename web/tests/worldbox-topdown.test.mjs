@@ -3,7 +3,7 @@
 // - 移動と当たり判定（固体で止まる・壁ずり・マップ端）
 // - プレゼンス純粋ロジック（検証・鮮度・自己除外・上限・デッドレコニング）
 // - プレゼンス API（認証・往復・鮮度・自己除外・退室）
-// - セーブ v4（往復・旧バージョン破棄）
+// - セーブ v5（往復・旧バージョン破棄）
 // - クライアント配線（横スクロール層が残っていないこと）
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -62,6 +62,7 @@ const wb = await loadBundle(
   ],
   [
     "MAP_W", "MAP_H", "MAP_SEED", "T_GRASS", "T_WATER", "T_SAND", "T_TREE", "T_ROCK", "T_DIRT",
+    "T_SNOW", "T_SNOW_TREE", "MINIMAP_SIZE", "sampleMinimapTiles", "snowBoundaryAt",
     "generateMap", "isSolidMapTile", "mapTileAt", "mapSpawn",
     "WALK_SPEED", "PLAYER_RADIUS", "stepMove", "canStandAt", "findFreeNear", "circleHitsSolid",
     "PRESENCE_FRESH_MS", "PRESENCE_MAX_PLAYERS", "sanitizeHeartbeat", "parsePresenceEntry",
@@ -78,19 +79,26 @@ test("mapgen: 同じシードでは完全に同じマップ、別シードでは
   assert.deepEqual([...a.tiles], [...b.tiles]);
   const c = wb.generateMap(42);
   assert.notDeepEqual([...a.tiles], [...c.tiles]);
-  assert.equal(a.width, 128);
-  assert.equal(a.height, 128);
-  assert.equal(a.tiles.length, 128 * 128);
+  assert.equal(a.width, 1024);
+  assert.equal(a.height, 1024);
+  assert.equal(a.tiles.length, 1024 * 1024);
 });
 
-test("mapgen: タイル分布（草が最大、水・砂・森・岩・土がすべて存在する）", () => {
+test("mapgen: 生成時間の回帰ガード（実測は約130ms、1秒を超えたら劣化）", () => {
+  const t0 = performance.now();
+  wb.generateMap();
+  const ms = performance.now() - t0;
+  assert.ok(ms < 1000, `生成が遅すぎる ${ms.toFixed(0)}ms`);
+});
+
+test("mapgen: タイル分布（草が最大、水・砂・森・岩・土・雪がすべて存在する）", () => {
   const map = wb.generateMap();
   const counts = new Map();
   for (const t of map.tiles) counts.set(t, (counts.get(t) ?? 0) + 1);
   const total = map.tiles.length;
   const share = (id) => (counts.get(id) ?? 0) / total;
   for (const id of counts.keys()) {
-    assert.ok(id >= wb.T_GRASS && id <= wb.T_DIRT, `未知のタイル ${id}`);
+    assert.ok(id >= wb.T_GRASS && id <= wb.T_SNOW_TREE, `未知のタイル ${id}`);
   }
   assert.ok(share(wb.T_GRASS) > 0.3, `草が少なすぎる ${(share(wb.T_GRASS) * 100).toFixed(1)}%`);
   for (const [id, name] of [[wb.T_WATER, "水"], [wb.T_SAND, "砂"], [wb.T_TREE, "森"], [wb.T_DIRT, "土"]]) {
@@ -98,9 +106,81 @@ test("mapgen: タイル分布（草が最大、水・砂・森・岩・土がす
   }
   assert.ok(share(wb.T_WATER) < 0.3, `水が多すぎる ${(share(wb.T_WATER) * 100).toFixed(1)}%`);
   assert.ok(share(wb.T_ROCK) > 0.0005, "岩が無い");
+  // 雪原（北の帯）: 雪と雪の木が一定量ある
+  assert.ok(share(wb.T_SNOW) > 0.08, `雪が少なすぎる ${(share(wb.T_SNOW) * 100).toFixed(1)}%`);
+  assert.ok(share(wb.T_SNOW_TREE) > 0.01, `雪の木がほぼ無い ${(share(wb.T_SNOW_TREE) * 100).toFixed(2)}%`);
   // 草が最大シェア
-  const maxOther = Math.max(share(wb.T_WATER), share(wb.T_SAND), share(wb.T_TREE), share(wb.T_ROCK), share(wb.T_DIRT));
+  const maxOther = Math.max(
+    share(wb.T_WATER), share(wb.T_SAND), share(wb.T_TREE), share(wb.T_ROCK), share(wb.T_DIRT),
+    share(wb.T_SNOW), share(wb.T_SNOW_TREE),
+  );
   assert.ok(share(wb.T_GRASS) > maxOther);
+});
+
+test("mapgen: 雪原は北の帯だけにあり、境界は直線でない", () => {
+  const map = wb.generateMap();
+  const isSnow = (t) => t === wb.T_SNOW || t === wb.T_SNOW_TREE;
+  // 帯の南限（中心22%＋揺れ26）より南には雪は無い
+  const southLimit = Math.floor(wb.MAP_H * 0.35);
+  for (let y = southLimit; y < wb.MAP_H; y++) {
+    for (let x = 0; x < wb.MAP_W; x++) {
+      assert.ok(!isSnow(map.tiles[y * wb.MAP_W + x]), `南に雪がある (${x}, ${y})`);
+    }
+  }
+  // 北端の行には雪がある
+  let northSnow = 0;
+  for (let x = 0; x < wb.MAP_W; x++) if (isSnow(map.tiles[x])) northSnow++;
+  assert.ok(northSnow > wb.MAP_W * 0.3, `北端に雪が少ない ${northSnow}`);
+  // 境界は列ごとに揺れる（直線でない）
+  let min = Infinity;
+  let max = -Infinity;
+  for (let x = 0; x < wb.MAP_W; x++) {
+    const b = wb.snowBoundaryAt(wb.MAP_SEED, x);
+    if (b < min) min = b;
+    if (b > max) max = b;
+  }
+  assert.ok(max - min > 10, `雪原境界が直線すぎる spread=${(max - min).toFixed(1)}`);
+  assert.ok(min >= wb.MAP_H * 0.22 - 27 && max <= wb.MAP_H * 0.22 + 27, "境界が想定帯から外れている");
+  // 雪は歩行可、雪の木は固体
+  assert.equal(wb.isSolidMapTile(wb.T_SNOW), false);
+  assert.equal(wb.isSolidMapTile(wb.T_SNOW_TREE), true);
+});
+
+test("mapgen: 川は全列を横切り、スポーン広場は草地のまま", () => {
+  const map = wb.generateMap();
+  for (let x = 0; x < wb.MAP_W; x++) {
+    let hasWater = false;
+    for (let y = 0; y < wb.MAP_H; y++) {
+      if (map.tiles[y * wb.MAP_W + x] === wb.T_WATER) { hasWater = true; break; }
+    }
+    assert.ok(hasWater, `列 ${x} に水が無い（川が途切れている）`);
+  }
+});
+
+test("minimap: 間引きサンプリング（ブロック中心を代表値にする）", () => {
+  const tiles = new Uint8Array(8 * 8).fill(wb.T_GRASS);
+  tiles[2 * 8 + 2] = wb.T_WATER;
+  tiles[2 * 8 + 6] = wb.T_SAND;
+  tiles[6 * 8 + 2] = wb.T_ROCK;
+  tiles[6 * 8 + 6] = wb.T_SNOW;
+  const small = { seed: 0, width: 8, height: 8, tiles };
+  const sampled = wb.sampleMinimapTiles(small, 2);
+  assert.deepEqual([...sampled], [wb.T_WATER, wb.T_SAND, wb.T_ROCK, wb.T_SNOW]);
+  // 実マップ: 256×256 で、最北行に雪、最南行に雪は無い
+  const map = wb.generateMap();
+  const mm = wb.sampleMinimapTiles(map);
+  assert.equal(mm.length, wb.MINIMAP_SIZE * wb.MINIMAP_SIZE);
+  let topSnow = 0;
+  for (let x = 0; x < wb.MINIMAP_SIZE; x++) {
+    const t = mm[x];
+    assert.ok(t >= wb.T_GRASS && t <= wb.T_SNOW_TREE, `未知のタイル ${t}`);
+    if (t === wb.T_SNOW || t === wb.T_SNOW_TREE) topSnow++;
+  }
+  assert.ok(topSnow > 0, "ミニマップ最北行に雪が無い");
+  for (let x = 0; x < wb.MINIMAP_SIZE; x++) {
+    const t = mm[(wb.MINIMAP_SIZE - 1) * wb.MINIMAP_SIZE + x];
+    assert.ok(t !== wb.T_SNOW && t !== wb.T_SNOW_TREE, "ミニマップ最南行に雪がある");
+  }
 });
 
 test("mapgen: スポーン周辺は歩ける草地で、範囲外は岩（固体）", () => {
@@ -244,18 +324,19 @@ test("presence: ID は不透明で安定している", () => {
   assert.ok(!a.includes("123456789"));
 });
 
-// ---------- セーブ v4 ----------
+// ---------- セーブ v5 ----------
 
-test("save v4: 往復とクランプ、旧バージョンは破棄される", () => {
-  assert.equal(wb.SAVE_VERSION, 4);
+test("save v5: 往復とクランプ、旧バージョンは破棄される", () => {
+  assert.equal(wb.SAVE_VERSION, 5);
   const json = wb.serializeSave({ x: 10.5, y: 20.25 });
   assert.deepEqual(wb.parseSave(json), { x: 10.5, y: 20.25 });
-  const clamped = wb.parseSave(wb.serializeSave({ x: -3, y: 9999 }));
+  const clamped = wb.parseSave(wb.serializeSave({ x: -3, y: 99999 }));
   assert.ok(clamped.x >= 0.5 && clamped.y <= wb.MAP_H - 0.5);
-  // 横スクロール時代のセーブは読み込まない
+  // 128×128 時代（v4）と横スクロール時代のセーブは読み込まない
+  assert.equal(wb.parseSave(JSON.stringify({ version: 4, x: 64.5, y: 64.5 })), null);
   assert.equal(wb.parseSave(JSON.stringify({ version: 3, slots: [], player: { x: 1, y: 2 }, hp: 10 })), null);
   assert.equal(wb.parseSave(JSON.stringify({ version: 2, player: { x: 1, y: 2 } })), null);
-  assert.equal(wb.parseSave(JSON.stringify({ version: 4, x: "10", y: 5 })), null);
+  assert.equal(wb.parseSave(JSON.stringify({ version: 5, x: "10", y: 5 })), null);
   assert.equal(wb.parseSave("{壊れた"), null);
   assert.equal(wb.parseSave(null), null);
 });
@@ -428,6 +509,22 @@ test("クライアント: 地面タイルはダンジョン流用 PNG（grass/di
     assert.ok(fs.existsSync(file), `流用タイルが無い: ${name}.png`);
     const buf = fs.readFileSync(file);
     // PNG 署名 + IHDR の幅・高さ（16〜23バイト目、ビッグエンディアン）
+    assert.deepEqual([...buf.subarray(0, 8)], [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], `${name}.png が PNG でない`);
+    assert.equal(buf.readUInt32BE(16), 64, `${name}.png の幅が 64 でない`);
+    assert.equal(buf.readUInt32BE(20), 64, `${name}.png の高さが 64 でない`);
+  }
+});
+
+test("クライアント: 雪タイルもダンジョン流用 PNG（snow/snow-tree）を使う", () => {
+  const client = fs.readFileSync(path.join(rootDir, "app/games/worldbox/WorldBoxClient.tsx"), "utf8");
+  assert.ok(client.includes("sampleMinimapTiles"), "ミニマップの間引きを使っていない");
+  assert.ok(client.includes("T_SNOW"), "雪タイルを描画していない");
+  const textures = fs.readFileSync(path.join(libDir, "worldbox/textures.ts"), "utf8");
+  for (const name of ["snow", "snow-tree"]) {
+    assert.ok(textures.includes(`/img/worldbox/${name}.png`), `テクスチャ定義に ${name} が無い`);
+    const file = path.join(rootDir, "public/img/worldbox", `${name}.png`);
+    assert.ok(fs.existsSync(file), `流用タイルが無い: ${name}.png`);
+    const buf = fs.readFileSync(file);
     assert.deepEqual([...buf.subarray(0, 8)], [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], `${name}.png が PNG でない`);
     assert.equal(buf.readUInt32BE(16), 64, `${name}.png の幅が 64 でない`);
     assert.equal(buf.readUInt32BE(20), 64, `${name}.png の高さが 64 でない`);

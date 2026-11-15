@@ -20,6 +20,8 @@ export const DUNGEON_TILE_SRC: Record<string, string> = {
   dirt: "/img/worldbox/dirt.png",
   tree: "/img/worldbox/tree.png",
   rock: "/img/worldbox/rock.png",
+  snow: "/img/worldbox/snow.png",
+  snowTree: "/img/worldbox/snow-tree.png",
 };
 
 export function loadDungeonTiles(): Record<string, HTMLImageElement> {
