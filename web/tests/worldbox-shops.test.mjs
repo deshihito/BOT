@@ -1,6 +1,8 @@
 // AGO WORLD BOX ショップのジャンル分けの検証:
 // - ジャンル定義: 全アイテムカテゴリがちょうど1ジャンルに割り当たる
-// - 全アイテムがどこかの店で買える（itemsForGenre の和集合 = 全カタログ）
+// - レア品（特殊・ミスリル tier4・宝石ブロック = 26品）を除く全アイテムが
+//   どこかの店で買える（itemsForGenre の和集合 = カタログ − レア品）
+// - 購入の在庫検証（純粋関数 checkBuySold: レア品は not_sold）
 // - ロビーの全 shop オブジェクトに genre が付き、5ジャンルが揃う
 // - カウンター前のタイルから stationGenreNear で店のジャンルが引ける
 // - 購入のジャンル検証（純粋関数 checkBuyGenre: 不一致は wrong_shop）
@@ -58,7 +60,7 @@ async function loadBundle(files, exportNames) {
 
 const shops = await loadBundle(
   ["worldbox/items.ts", "worldbox/shops.ts"],
-  ["ITEMS", "SHOP_GENRES", "genreById", "genreForCategory", "genreOfItem", "itemsForGenre", "checkBuyGenre"],
+  ["ITEMS", "SHOP_GENRES", "genreById", "genreForCategory", "genreOfItem", "itemsForGenre", "checkBuyGenre", "isShopExcluded", "checkBuySold"],
 );
 const wb = await loadBundle(
   ["worldbox/rng.ts", "worldbox/mapgen.ts", "worldbox/lobby.ts"],
@@ -93,17 +95,61 @@ test("shops: ジャンル定義は想定の6種（鍛冶屋含む）", () => {
   assert.equal(shops.genreById(null), null);
 });
 
-test("shops: 全アイテムがどこかの店で買える", () => {
+// 店で売らないレア品（ユーザー決定）: 特殊18＋ミスリル tier4 の4＋宝石ブロック4 = 26品
+const EXCLUDED_IDS = [
+  // 特殊カテゴリ全品
+  "guard_charm", "thief_mask", "star_shard", "crown",
+  "ancient_coin", "ancient_relic", "dragon_scale", "ghost_tear",
+  "golden_key", "star_map", "slime_core", "wolf_fang",
+  "scepter", "tiara", "dragon_egg", "star_crown", "world_seed", "ago_emblem",
+  // 道具 tier 4（ミスリル）
+  "mithril_axe", "mithril_pickaxe", "mithril_sword", "mithril_hoe",
+  // 宝石ブロック
+  "diamond_block", "emerald_block", "ruby_block", "sapphire_block",
+];
+
+test("shops: レア品の除外集合はちょうど26品", () => {
+  const excluded = shops.ITEMS.filter((item) => shops.isShopExcluded(item)).map((item) => item.id);
+  assert.equal(EXCLUDED_IDS.length, 26);
+  assert.deepEqual([...excluded].sort(), [...EXCLUDED_IDS].sort());
+  // 除外しないもの: 宝石の素材・鉱石ブロック・合成品の高額品・ミスリルブロック
+  for (const id of ["ruby", "sapphire", "emerald", "diamond", "pearl", "diamond_ore_block", "gem_ring", "mithril_block", "wooden_axe"]) {
+    const item = shops.ITEMS.find((i) => i.id === id);
+    assert.ok(item, `${id} がカタログに無い`);
+    assert.equal(shops.isShopExcluded(item), false, `${id} が除外されている`);
+  }
+});
+
+test("shops: レアを除く全アイテムがどこかの店で買える", () => {
   const buyable = shops.SHOP_GENRES.flatMap((g) => shops.itemsForGenre(g.id));
-  assert.equal(buyable.length, shops.ITEMS.length, "どの店でも買えないアイテムがある");
+  assert.equal(buyable.length, shops.ITEMS.length - EXCLUDED_IDS.length, "レア以外で買えないアイテムがある");
   for (const item of shops.ITEMS) {
     assert.ok(shops.genreOfItem(item.id), `${item.id} のジャンルが無い`);
+    // どのジャンルの品目にもレア品は含まれない
+    for (const g of shops.SHOP_GENRES) {
+      assert.ok(!shops.itemsForGenre(g.id).some((i) => i.id === item.id && shops.isShopExcluded(i)), `${item.id} が ${g.id} の品目に残っている`);
+    }
   }
   // 代表例: 木材は種・素材屋、斧は道具屋、合成品は鍛冶屋
   assert.equal(shops.genreOfItem("wood"), "farm");
   assert.equal(shops.genreOfItem("wooden_axe"), "tools");
   assert.equal(shops.genreOfItem("carving"), "smith");
   assert.equal(shops.genreOfItem("no-such-item"), null);
+  // ジャンル割当て自体は不変（レア品もカテゴリ上のジャンルは持つ）
+  assert.equal(shops.genreOfItem("star_shard"), "smith");
+  assert.equal(shops.genreOfItem("mithril_axe"), "tools");
+  assert.equal(shops.genreOfItem("diamond_block"), "blocks");
+});
+
+test("shops: checkBuySold はレア品を not_sold にする", () => {
+  assert.equal(shops.checkBuySold("star_shard"), "not_sold"); // 特殊
+  assert.equal(shops.checkBuySold("mithril_sword"), "not_sold"); // tier 4
+  assert.equal(shops.checkBuySold("ruby_block"), "not_sold"); // 宝石ブロック
+  assert.equal(shops.checkBuySold("wood"), null);
+  assert.equal(shops.checkBuySold("ruby"), null); // 宝石の素材は売る
+  assert.equal(shops.checkBuySold("diamond_ore_block"), null); // 鉱石ブロックは売る
+  // 未知のアイテムは buyItem 側の unknown_item に委ねる
+  assert.equal(shops.checkBuySold("no-such-item"), null);
 });
 
 test("shops: checkBuyGenre はジャンル不一致を wrong_shop にする", () => {
@@ -150,10 +196,14 @@ test("配線: クライアントが genre を経済パネルへ渡し、API が�
   const panel = fs.readFileSync(path.join(rootDir, "app/games/worldbox/WorldBoxEconomyPanel.tsx"), "utf8");
   assert.ok(panel.includes("itemsForGenre"), "パネルが品目を選別していない");
   assert.ok(panel.includes("wrong_shop"), "パネルに wrong_shop のラベルが無い");
+  assert.ok(panel.includes("isShopExcluded"), "パネルが全品目フォールバック側でレア品を除外していない");
+  assert.ok(panel.includes("not_sold"), "パネルに not_sold のラベルが無い");
   const route = fs.readFileSync(path.join(rootDir, "app/api/worldbox/profile/route.ts"), "utf8");
   assert.match(route, /loadMyLobbyShopGenre/);
   assert.match(route, /checkBuyGenre/);
   assert.match(route, /wrong_shop|genreError/);
+  assert.match(route, /checkBuySold/);
+  assert.match(route, /not_sold|soldError/);
   const stationOnline = fs.readFileSync(path.join(libDir, "worldbox/station-online.ts"), "utf8");
   assert.match(stationOnline, /loadMyLobbyShopGenre/);
   assert.match(stationOnline, /stationGenreNear/);
