@@ -229,10 +229,6 @@ const authUrl = dataUrl(
 const auth = await import(authUrl);
 
 const presenceBundleUrl = bundleModule(["worldbox/presence.ts"], ["presenceIdFor"]);
-const buildingsBundleUrl = bundleModule(
-  ["worldbox/rng.ts", "worldbox/mapgen.ts", "worldbox/presence.ts", "worldbox/buildings.ts"],
-  ["applyBuild"],
-);
 const profileOnlineStubUrl = dataUrl(`
 import { parseProfile, serializeProfile } from ${JSON.stringify(invUrl)};
 const store = (globalThis.__wbContainerProfiles ??= new Map());
@@ -264,10 +260,6 @@ export async function storeContainer(x, y, state) { if (state === null) store.de
 const nationsOnlineStubUrl = dataUrl(`
 export function isNationsEnabled() { return true; }
 export async function loadNationsState() { return { nations: {} }; }
-`);
-const buildingsOnlineStubUrl = dataUrl(`
-export function isBuildingsEnabled() { return true; }
-export async function loadBuildings() { return {}; }
 `);
 const nextServerStubUrl = dataUrl(`
 export class NextResponse {
@@ -308,8 +300,6 @@ const tilesRoute = await routeImport("api/worldbox/tiles/route.ts", [
   ['"@/lib/worldbox/save-online"', saveOnlineStubUrl],
   ['"@/lib/worldbox/tiles"', tilesUrl],
   ['"@/lib/worldbox/tiles-online"', tilesOnlineStubUrl],
-  ['"@/lib/worldbox/buildings"', buildingsBundleUrl],
-  ['"@/lib/worldbox/buildings-online"', buildingsOnlineStubUrl],
   ['"@/lib/worldbox/nations-online"', nationsOnlineStubUrl],
   ['"@/lib/worldbox/containers"', containersUrl],
   ['"@/lib/worldbox/containers-online"', containersOnlineStubUrl],

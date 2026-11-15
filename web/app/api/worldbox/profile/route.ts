@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getRequestSession, publicOrigin, sessionOwnerKey } from "@/lib/auth";
 import {
-  buyItem, craftItem, doWork, eatItem, sellItem,
+  buyItem, craftItem, eatItem, sellItem,
   type CoinMovement, type EconomyError,
 } from "@/lib/worldbox/economy";
 import { buildEconomyOp, type EconomyOp } from "@/lib/worldbox/economy-bridge";
@@ -16,7 +16,7 @@ import { isProfileEnabled, loadProfile, storeProfile } from "@/lib/worldbox/prof
 
 export const runtime = "nodejs";
 
-// AGO WORLD BOX の経済（プロフィール＋かばん＋ショップ＋合成＋労働。steal は廃止済み）。
+// AGO WORLD BOX の経済（プロフィール＋かばん＋ショップ＋合成。steal・労働は廃止済み）。
 // 状態遷移の規則は lib/worldbox/economy（ボット側経済機能の写し）。
 // コインの正は AGO コイン本体: このルートは残高を書き換えず、遷移が
 // 返した coin を経済ブリッジ（bot_kv worldbox_economy）のオプとして
@@ -28,7 +28,7 @@ export const runtime = "nodejs";
 // POST { action: "eat", itemId }: かばんの食事を食べて空腹度を回復
 // POST { action: "craft", recipeId }: 合成
 //   （場所制約: ロビー鍛冶屋の作業台の前にいること。サーバー側で検証）
-// POST { action: "work" }: 労働（空腹度を消費し、報酬は earn オプ）
+// POST { action: "work" }: 労働は廃止（2026-11-16）。常に拒否する
 // POST { action: "steal", targetId }: steal は一旦廃止（2026-11-16）。常に拒否する
 // プロフィールの保存先は bot_kv（名前空間 worldbox_profiles、
 // キー = 所有者キー）。コインが動くアクションは Discord ログイン必須。
@@ -210,9 +210,8 @@ export async function POST(request: Request) {
         : {});
     }
     case "work": {
-      const gate = coinGate();
-      if ("response" in gate) return gate.response;
-      return saveWithCoin(doWork(current), gate.discordId);
+      // 労働は廃止（2026-11-16 ユーザー指示）。どの経路からも実行できない。
+      return errorResponse("work_disabled");
     }
     case "steal": {
       // steal は一旦廃止（2026-11-16 ユーザー指示）。どの経路からも実行できない。

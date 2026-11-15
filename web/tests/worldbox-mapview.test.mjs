@@ -1,6 +1,6 @@
 // AGO WORLD BOX マップ表示モードの配線検証:
 // - プレイヤー中心の周辺図を大きく描くキャンバスと、地形の事前描画がある
-// - ミニマップと同じマーカー（首都・建物・他プレイヤー・自分）を描く
+// - ミニマップと同じマーカー（首都・他プレイヤー・自分）を描く
 // - ボタンと ≡ メニューの両方から開ける
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -29,11 +29,12 @@ test("ミニマップもプレイヤー中心の周辺図（全体図ではな�
   assert.ok(!client.includes("全体マップ"), "全体マップ表記が残っている");
 });
 
-test("大きなマップにもマーカーを描く（首都・建物・他プレイヤー・自分）", () => {
+test("大きなマップにもマーカーを描く（首都・他プレイヤー・自分。建物マーカーは廃止）", () => {
   assert.match(client, /bigTerrainCanvas/);
   assert.match(client, /nationsRef\.current\.nations/);
-  assert.match(client, /buildingsRef\.current\.buildings/);
   assert.match(client, /others\.values\(\)/);
+  // 旧プレハブ建物のマーカーは建物システムの廃止に伴い撤去済み
+  assert.ok(!client.includes("buildingsRef"), "建物マーカーが残っている");
 });
 
 test("左上の ≡ メニューから開ける（ボタン行には統合済み）", () => {

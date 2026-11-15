@@ -295,7 +295,7 @@ test("fx: クライアント配線（イベント→粒/揺れ/ポップ、ス�
 
 test("fx2: クライアント配線（空振り・天候・時間帯・モブイベント）", () => {
   const client = fs.readFileSync(path.join(rootDir, "app/games/worldbox/WorldBoxClient.tsx"), "utf8");
-  // 失敗分岐（タイル行為と建築）が whiff を push する（成功バーストは出さない）
+  // 失敗分岐（タイル行為など）が whiff を push する（成功バーストは出さない）
   const whiffPushes = client.match(/fxEventsRef\.current\.push\(\{\s*kind: "whiff"|fxEventsRef\.current\.push\(\{\n\s*kind: "whiff"/g) ?? [];
   assert.ok(whiffPushes.length >= 2, `whiff の push が複数箇所にある (実測 ${whiffPushes.length})`);
   assert.match(client, /ev\.kind === "whiff"/, "ループが whiff を分岐する");

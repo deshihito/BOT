@@ -7,7 +7,6 @@ import {
 } from "@/lib/worldbox/nations";
 import { isNationsEnabled, loadNationsState, storeNationsState } from "@/lib/worldbox/nations-online";
 import { loadMyLobbyStation } from "@/lib/worldbox/station-online";
-import { loadBuildings } from "@/lib/worldbox/buildings-online";
 import { parseSave, serializeSave } from "@/lib/worldbox/save";
 import { loadWorldBoxSave, storeWorldBoxSave } from "@/lib/worldbox/save-online";
 import { putPresence } from "@/lib/worldbox/presence-online";
@@ -15,14 +14,13 @@ import { annotateMyGuilds, getUserGuilds, roleInGuild, type UserGuildsResult } f
 
 export const runtime = "nodejs";
 
-// AGO WORLD BOX の国家レイヤー（国 = Discord サーバー、所属区分のみ。建築は buildings ルート）。
+// AGO WORLD BOX の国家レイヤー（国 = Discord サーバー、所属区分のみ）。
 // GET: { nations, me, playerNations, loggedIn, myGuilds, guildsScopeRequired }
 //   （誰でも読める。ゲストは国一覧のみ。ログイン中は自分の参加サーバー一覧に
 //   国の有無と役職を付け、所属中の役職は Discord 権限から読み直して直す）
 // POST { action: "found", guildId } : 建国（サーバーオーナーのみ。国名はサーバー名）
 // POST { action: "join", guildId } : 参加（そのサーバーのメンバーのみ。役職は権限由来）
 // POST { action: "leave" } : 離脱。王は国民がいる間は離脱できず、一人なら解散。
-//   解散しても建物は個人所有なので残る。
 // POST { action: "travel" } : 所属国のユニオンマーク（首都）へ移動する。
 //   所属の検証はサーバー側で行い、移動はセーブとプレゼンスに反映する。
 //   料金・クールダウンは当面なし（定数は nations.ts の FAST_TRAVEL_*）。
@@ -30,7 +28,6 @@ export const runtime = "nodejs";
 //   プレゼンス＋stationNear。共有ノート「ギルドボード」「行動の場所制約」）。
 //   トラベルは移動そのものなので場所検証の対象外（≡ メニューから使う）。
 // 保存先は bot_kv（名前空間 worldbox_nations の "nations" / "members"）。
-// 繁栄度の算出にだけ建物（同名前空間の "buildings"）を読み込む。
 // Bot API 未設定なら 503（クライアントは国家なしで遊び続ける）。
 
 const NO_STORE = { "Cache-Control": "no-store, max-age=0" };
@@ -65,7 +62,6 @@ export async function GET(request: Request) {
   }
   const session = getRequestSession(request);
   let state = await loadNationsState();
-  const buildings = await loadBuildings();
   const selfKey = session ? sessionOwnerKey(session) : null;
 
   let myGuilds: MyGuildView[] = [];
@@ -93,7 +89,7 @@ export async function GET(request: Request) {
     }
   }
   return NextResponse.json(
-    buildNationsResponse(state, selfKey, buildings, { myGuilds, guildsScopeRequired }),
+    buildNationsResponse(state, selfKey, { myGuilds, guildsScopeRequired }),
     { headers: NO_STORE },
   );
 }
@@ -180,12 +176,11 @@ export async function POST(request: Request) {
   if (!stored) {
     return NextResponse.json({ error: "nations_failed" }, { status: 500, headers: NO_STORE });
   }
-  const buildings = await loadBuildings();
-  const view = result.nation ? nationViews(result.state, buildings).find((v) => v.id === result.nation!.guildId) ?? null : null;
+  const view = result.nation ? nationViews(result.state).find((v) => v.id === result.nation!.guildId) ?? null : null;
   return NextResponse.json(
     {
       ok: true,
-      me: buildNationsResponse(result.state, ownerKey, buildings).me,
+      me: buildNationsResponse(result.state, ownerKey).me,
       nation: view,
       disbanded: result.disbanded ?? false,
     },
