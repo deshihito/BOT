@@ -10,9 +10,8 @@ import {
   enqueueEconomyOp, isEconomyEnabled, readUserBalance,
 } from "@/lib/worldbox/economy-bridge-online";
 import { moveSlot, swapSlots, type PlayerProfile } from "@/lib/worldbox/profile";
-import { itemById } from "@/lib/worldbox/items";
 import { findPresenceOwnerKey, isPresenceEnabled } from "@/lib/worldbox/presence-online";
-import { checkBuyGenre, checkBuySold, checkDailyStock, dailyPriceFor, shopDayKeyOf } from "@/lib/worldbox/shops";
+import { checkBuyGenre, checkBuySold } from "@/lib/worldbox/shops";
 import { loadMyLobbyShopGenre, loadMyLobbyStation } from "@/lib/worldbox/station-online";
 import { isProfileEnabled, loadProfile, storeProfile } from "@/lib/worldbox/profile-online";
 import { withUserLock } from "@/lib/worldbox/user-lock";
@@ -182,21 +181,14 @@ async function handlePost(request: Request, session: AuthedSession) {
       if (place) return place;
       // 品目は店ごとに違う: いる店のジャンルと買うアイテムのジャンルが
       // 一致しなければ買えない（鍛冶屋はジャンル "smith"）
-      const myGenre = await loadMyLobbyShopGenre(ownerKey);
-      const genreError = checkBuyGenre(myGenre, data.itemId);
+      const genreError = checkBuyGenre(await loadMyLobbyShopGenre(ownerKey), data.itemId);
       if (genreError) return statusError(genreError, 409);
       // レア品（特殊・ミスリル tier4・宝石ブロック）はどの店でも売っていない
       const soldError = checkBuySold(data.itemId);
       if (soldError) return statusError(soldError, 409);
-      // 日次ローテーション: その日の品目に無いものは買えない（価格も日次）
-      const dayKey = shopDayKeyOf(Date.now());
-      const dailyError = checkDailyStock(myGenre, data.itemId, dayKey);
-      if (dailyError) return statusError(dailyError, 409);
       const balance = await readUserBalance(gate.discordId);
       if (balance === null) return statusError("economy_unavailable", 503);
-      const itemDef = itemById(data.itemId as string);
-      const unitPrice = myGenre && itemDef ? dailyPriceFor(itemDef, dayKey) : undefined;
-      return saveWithCoin(buyItem(current, data.itemId, data.count, balance, unitPrice), gate.discordId);
+      return saveWithCoin(buyItem(current, data.itemId, data.count, balance), gate.discordId);
     }
     case "sell": {
       const gate = coinGate();
