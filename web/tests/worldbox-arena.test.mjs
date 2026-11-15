@@ -147,6 +147,11 @@ const tentUrl = dataUrl(
     .replaceAll('"./mapgen"', JSON.stringify(mapgenUrl))
     .replaceAll('"./lobby"', JSON.stringify(lobbyUrl)),
 );
+const floorsUrl = dataUrl(
+  transpile("worldbox/lobby-floors.ts")
+    .replaceAll('"./mapgen"', JSON.stringify(mapgenUrl))
+    .replaceAll('"./lobby"', JSON.stringify(lobbyUrl)),
+);
 const saveUrl = dataUrl(
   transpile("worldbox/save.ts")
     .replaceAll('"./lobby"', JSON.stringify(lobbyUrl))
@@ -159,6 +164,7 @@ const saveOnlineUrl = dataUrl(
 const stationOnlineUrl = dataUrl(
   transpile("worldbox/station-online.ts")
     .replaceAll('"./lobby"', JSON.stringify(lobbyUrl))
+    .replaceAll('"./lobby-floors"', JSON.stringify(floorsUrl))
     .replaceAll('"./tent"', JSON.stringify(tentUrl))
     .replaceAll('"./presence-online"', JSON.stringify(presenceOnlineUrl))
     .replaceAll('"./save"', JSON.stringify(saveUrl))

@@ -415,6 +415,11 @@ const tentUrl = dataUrl(
     .replaceAll('"./mapgen"', JSON.stringify(mapgenUrl))
     .replaceAll('"./lobby"', JSON.stringify(lobbyUrl)),
 );
+const floorsUrl = dataUrl(
+  transpile("worldbox/lobby-floors.ts")
+    .replaceAll('"./mapgen"', JSON.stringify(mapgenUrl))
+    .replaceAll('"./lobby"', JSON.stringify(lobbyUrl)),
+);
 const presenceUrl = dataUrl(transpile("worldbox/presence.ts").replaceAll('"./mapgen"', JSON.stringify(mapgenUrl)));
 const presenceOnlineUrl = dataUrl(
   transpile("worldbox/presence-online.ts")
@@ -437,6 +442,7 @@ const presenceRoute = await import(
       .replaceAll('"@/lib/auth"', JSON.stringify(authUrl))
       .replaceAll('"@/lib/worldbox/mapgen"', JSON.stringify(mapgenUrl))
       .replaceAll('"@/lib/worldbox/lobby"', JSON.stringify(lobbyUrl))
+      .replaceAll('"@/lib/worldbox/lobby-floors"', JSON.stringify(floorsUrl))
       .replaceAll('"@/lib/worldbox/tent"', JSON.stringify(tentUrl))
       .replaceAll('"@/lib/worldbox/presence-online"', JSON.stringify(presenceOnlineUrl))
       .replaceAll('"@/lib/worldbox/presence"', JSON.stringify(presenceUrl)),
