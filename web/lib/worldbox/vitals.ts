@@ -69,6 +69,35 @@ export function curePoison(profile: PlayerProfile): PlayerProfile {
  * VITAL_SETTLE_CAP_MS で頭打ちにする。戻り値の died は精算で HP が 0 に
  * なったことを示す（死亡処理そのものは applyDeath が担う）。
  */
+/** 持続効果（バフ）の長さ（アイテム定義の minutes と一致させる）。 */
+export const BUFF_DURATION_MS: Record<"warm" | "alert", number> = {
+  warm: 10 * 60 * 1000,
+  alert: 5 * 60 * 1000,
+};
+/** warm の間、空腹の減りがこの倍率になる。 */
+export const WARM_HUNGER_MULT = 0.6;
+/** alert の間、満腹（50超）なら HP が回復する量（/秒）。 */
+export const ALERT_REGEN_PER_SEC = 0.2;
+
+/** バフを付ける（同種は付け直し）。 */
+export function applyBuff(
+  profile: PlayerProfile,
+  kind: "warm" | "alert",
+  now: number,
+): PlayerProfile {
+  const status = statusOf(profile).filter((e) => e.kind !== kind);
+  status.push({ kind, until: now + BUFF_DURATION_MS[kind] });
+  return { ...profile, status };
+}
+
+/** バフが精算窓 [vitalAt, now] と重なる秒数（過剰計算を避けるため毒と同じ窓方式）。 */
+function buffActiveSec(profile: PlayerProfile, kind: "warm" | "alert", now: number): number {
+  const e = statusOf(profile).find((x) => x.kind === kind);
+  if (!e) return 0;
+  const start = Math.max(profile.vitalAt, e.until - BUFF_DURATION_MS[kind]);
+  return Math.max(0, Math.min(e.until, now) - start) / 1000;
+}
+
 export function stepVitals(
   profile: PlayerProfile,
   now: number,
@@ -81,12 +110,20 @@ export function stepVitals(
   let hunger = profile.hunger;
   let hp = profile.hp;
   // 空腹の減少と、空腹0の間の飢えダメージ
+  // warm（温かい食事）の間は空腹の減りが緩やかになる
   const hungerBefore = hunger;
-  hunger = Math.max(0, hunger - HUNGER_DRAIN_PER_SEC * elapsedSec);
+  const warmSec = buffActiveSec(profile, "warm", now);
+  const drainSec = elapsedSec - warmSec + warmSec * WARM_HUNGER_MULT;
+  hunger = Math.max(0, hunger - HUNGER_DRAIN_PER_SEC * drainSec);
   const starveSec = hungerBefore <= 0
     ? elapsedSec
     : Math.max(0, elapsedSec - hungerBefore / HUNGER_DRAIN_PER_SEC);
   hp -= STARVE_HP_PER_SEC * starveSec;
+  // alert（はちみつティー等）の間、満腹なら少しずつ回復する
+  const alertSec = buffActiveSec(profile, "alert", now);
+  if (alertSec > 0 && hungerBefore > 50) {
+    hp = Math.min(maxHpFor(profile), hp + ALERT_REGEN_PER_SEC * alertSec);
+  }
   // 毒: 生存区間の tick 回数ぶん削り、期限切れは掃除する。
   // 毒の有効窓は [until - POISON_DURATION_MS, until] で、vitalAt は起点に
   // しない。罠は精算なしで毒を付けるため vitalAt が古いままになることが
@@ -147,9 +184,10 @@ export function applyMobDamage(
 export function consumeEffect(
   profile: PlayerProfile,
   itemId: string,
+  now: number = Date.now(),
 ): { profile: PlayerProfile; hungerGain: number; hpGain: number; cured: boolean } | null {
   const item = itemById(itemId);
-  if (!item || (!item.hunger && !item.heal && !item.curePoison)) return null;
+  if (!item || (!item.hunger && !item.heal && !item.curePoison && !item.buff)) return null;
   let next = profile;
   let cured = false;
   if (item.curePoison) {
@@ -160,6 +198,7 @@ export function consumeEffect(
   const healAmount = item.heal ? item.heal * (next.role === "medic" ? MEDIC_HEAL_MULT : 1) : 0;
   const hpGain = item.heal ? Math.min(maxHpFor(next), next.hp + healAmount) - next.hp : 0;
   next = { ...next, hunger: next.hunger + hungerGain, hp: next.hp + hpGain };
+  if (item.buff) next = applyBuff(next, item.buff.kind, now);
   return { profile: next, hungerGain, hpGain, cured };
 }
 

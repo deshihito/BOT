@@ -88,7 +88,7 @@ async function stateResponse(ownerKey: string, discordId: string) {
     {
       balance,
       effectiveBalance: balance === null ? null : balance - pending,
-      attack: playerAttack(profile.items),
+      attack: playerAttack(profile.items, profile.enhance),
       queued: myIndex >= 0,
       queuePosition: myIndex >= 0 ? myIndex + 1 : null,
       duel: duel ? publicPvpView(duel, discordId) : null,
@@ -138,7 +138,7 @@ async function handlePost(request: Request, session: AuthedSession) {
     const mine = await effectiveBalanceOf(ownerKey, discordId);
     if (mine === null || mine < PVP_FEE) return errorResponse("insufficient_balance", 409);
     const profile = await loadProfile(ownerKey);
-    queue = [...queue, { ownerKey, discordId, attack: playerAttack(profile.items), queuedAt: Date.now() }];
+    queue = [...queue, { ownerKey, discordId, attack: playerAttack(profile.items, profile.enhance), queuedAt: Date.now() }];
     // 先頭2人で組める限り組む。片方が払えなくなっていたら待ちから外す。
     for (;;) {
       const matched = tryMatch(queue, Date.now());

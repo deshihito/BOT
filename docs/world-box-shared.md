@@ -268,3 +268,17 @@ AGO WORLD BOX（web/app/games/worldbox）に関わる作業をする Muse は、
   切り株の上には従来どおり設置できない。
 - バイオームは12種に: 洞窟層 `cave_deep` と遺跡帯 `ruins_belt` を追加
   （maplogic.ts の BIOMES + biomeForInstanceSpace が正）。
+
+## 道具強化と食事/装飾品の効果差（バッチ8b-1、2026-11-16）
+
+- 道具強化: profile.enhance（アイテム ID → レベル 0..3）。鍛冶の前で
+  profile ルートの enhance アクション（素材は tier ごと: 木2/石2/鉄1/
+  ミスリル1、コイン 150×(レベル+1)、spend tool_enhance）。効果は攻撃力:
+  playerAttack が最良の剣の tier に強化レベルを加算する（モブ戦闘・
+  闘技場・PvP・役職スキルの全経路に適用）。
+- 食事の持続効果（バフ）: StatusKind に warm / alert を追加。
+  シチュー → warm 10分（空腹の減り ×0.6）、はちみつティー → alert 5分
+  （満腹時に HP が少しずつ回復）。精算は vitals.stepVitals が窓方式で
+  過剰計算しない（毒と同じ方式）。数値はユーザーに表示しない。
+- 装飾品の持続効果: 金のアクセサリー所持中は売却額 +10%（economy.sellItem）。
+  所持で効く明かり（松明/ランプ）と同じ流儀。

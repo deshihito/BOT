@@ -27,14 +27,17 @@ export const ARENA_PLAYER_HP = 100;
 /** セッションの有効期限。これを過ぎた試合は無効（参加費は戻らない）。 */
 export const ARENA_SESSION_TTL_MS = 10 * 60 * 1000;
 
-/** プレイヤーの攻撃力: 素手 8 + 所持する最良の剣の tier × 4。 */
-export function playerAttack(inventory: Readonly<Record<string, number>>): number {
+/** プレイヤーの攻撃力: 素手 8 + 所持する最良の剣の（tier + 強化レベル）× 4。 */
+export function playerAttack(
+  inventory: Readonly<Record<string, number>>,
+  enhance?: Readonly<Record<string, number>>,
+): number {
   let bestTier = 0;
   for (const [itemId, count] of Object.entries(inventory)) {
     if (count <= 0) continue;
     const m = /^(wooden|stone|iron|mithril)_sword$/.exec(itemId);
     if (!m) continue;
-    const tier = { wooden: 1, stone: 2, iron: 3, mithril: 4 }[m[1]] ?? 0;
+    const tier = ({ wooden: 1, stone: 2, iron: 3, mithril: 4 }[m[1]] ?? 0) + (enhance?.[itemId] ?? 0);
     if (tier > bestTier) bestTier = tier;
   }
   return 8 + bestTier * 4;

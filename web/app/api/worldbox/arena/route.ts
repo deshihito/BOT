@@ -79,7 +79,7 @@ async function stateResponse(ownerKey: string, discordId: string) {
     {
       balance,
       effectiveBalance: balance === null ? null : balance - pending,
-      attack: playerAttack(profile.items),
+      attack: playerAttack(profile.items, profile.enhance),
       tiers: ARENA_TIERS,
       session: session ? publicArenaView(session) : null,
     },
@@ -175,7 +175,7 @@ async function handlePost(request: Request, session: AuthedSession) {
       s.state = "fighting";
     }
     const profile = await loadProfile(ownerKey);
-    const result = arenaStep(s, move as ArenaActionKind, playerAttack(profile.items), rng);
+    const result = arenaStep(s, move as ArenaActionKind, playerAttack(profile.items, profile.enhance), rng);
     const next: ArenaSession = {
       ...result.session,
       log: [...result.events, ...s.log].slice(0, 6),

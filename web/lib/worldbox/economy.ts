@@ -69,17 +69,19 @@ export function sellItem(profile: PlayerProfile, itemId: unknown, countRaw?: unk
   if (count === null) return { ok: false, error: "invalid_count" };
   const removed = removeItem(profile, item.id, count);
   if (!removed) return { ok: false, error: "not_enough_items" };
+  // 金のアクセサリーを持っていると売却額が1割増える（装飾品の持続効果）
+  const bonus = (removed.items["accessory"] ?? 0) > 0 || (profile.items["accessory"] ?? 0) > 0 ? 1.1 : 1;
   return {
     ok: true,
     profile: removed,
-    coin: { kind: "earn", amount: sellPrice(item) * count, reason: "shop_sale" },
+    coin: { kind: "earn", amount: Math.floor(sellPrice(item) * count * bonus), reason: "shop_sale" },
   };
 }
 
 /** かばんの食事・飲み物を消費して空腹度を回復する。 */
-export function eatItem(profile: PlayerProfile, itemId: unknown): Transition<{ item: ItemDef }> {
+export function eatItem(profile: PlayerProfile, itemId: unknown, now: number = Date.now()): Transition<{ item: ItemDef }> {
   const item = itemById(itemId);
-  if (!item || (!item.hunger && !item.heal && !item.curePoison)) return { ok: false, error: "unknown_item" };
+  if (!item || (!item.hunger && !item.heal && !item.curePoison && !item.buff)) return { ok: false, error: "unknown_item" };
   const poisoned = Array.isArray(profile.status) && profile.status.some((e) => e.kind === "poison");
   if (
     profile.hunger >= HUNGER_MAX
@@ -90,6 +92,14 @@ export function eatItem(profile: PlayerProfile, itemId: unknown): Transition<{ i
   }
   const removed = removeItem(profile, item.id, 1);
   if (!removed) return { ok: false, error: "not_enough_items" };
+  let status = item.curePoison && Array.isArray(removed.status) ? removed.status.filter((e) => e.kind !== "poison") : removed.status;
+  if (item.buff) {
+    const base = Array.isArray(status) ? status : [];
+    status = [
+      ...base.filter((e) => e.kind !== item.buff!.kind),
+      { kind: item.buff.kind, until: now + item.buff.minutes * 60_000 },
+    ];
+  }
   return {
     ok: true,
     item,
@@ -101,7 +111,7 @@ export function eatItem(profile: PlayerProfile, itemId: unknown): Transition<{ i
         (typeof removed.hp === "number" ? removed.hp : HP_MAX) +
           (item.heal ?? 0) * (removed.role === "medic" ? MEDIC_HEAL_MULT : 1),
       ),
-      status: item.curePoison && Array.isArray(removed.status) ? removed.status.filter((e) => e.kind !== "poison") : removed.status,
+      status,
     },
   };
 }
