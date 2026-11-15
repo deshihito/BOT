@@ -26,9 +26,13 @@ class Round5HubTest(unittest.TestCase):
         self.assertEqual(len(flat), len(set(flat)))
 
     def test_party_genre_paginates(self):
-        pages = game_select_pages("party")
-        self.assertEqual([len(p) for p in pages], [25, 5])
-        flat = {item for page in pages for item in page}
+        # 導線最適化 U3: party 30件がセレクト上限25件を超えて2ページ化していたため、
+        # 言葉・推理系16件を「word」に分けた。どちらのジャンルも1ページに収まる。
+        party_pages = game_select_pages("party")
+        self.assertEqual([len(p) for p in party_pages], [14])
+        word_pages = game_select_pages("word")
+        self.assertEqual([len(p) for p in word_pages], [16])
+        flat = {item for page in party_pages + word_pages for item in page}
         for game_id in ROUND5_GAMES:
             self.assertIn(game_id, flat)
 
