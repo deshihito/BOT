@@ -282,6 +282,15 @@ class TestEarn(WorkerCase):
         self.assertEqual(record["status"], "done")
         self.assertEqual(record["appliedAmount"], 120)
 
+    async def test_earn_arena_pvp_prize_reason(self):
+        # 闘技場PvP の賞金（バッチ7c）: ホワイトリストに無いと invalid_reason で落ちる
+        self.store.pool = 5000
+        op = self.add_op(kind="earn", amount=240, reason="arena_pvp_prize")
+        await self.worker.poll_once()
+        record = self.record(op["id"])
+        self.assertEqual(record["status"], "done")
+        self.assertEqual(record["appliedAmount"], 240)
+
     async def test_earn_work_reason_rejected(self):
         # 労働は廃止（2026-11-16）: earn の許可リストから外れたため適用しない
         self.store.pool = 5000

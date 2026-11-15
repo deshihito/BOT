@@ -58,6 +58,7 @@ export const EARN_REASONS: ReadonlySet<string> = new Set([
   "harvest",
   "guild_shop_sale",
   "arena_prize",
+  "arena_pvp_prize",
   "shop_sale",
   "guild_request_reward",
   "guild_request_refund",
