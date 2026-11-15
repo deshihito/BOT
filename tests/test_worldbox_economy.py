@@ -648,3 +648,32 @@ def test_apply_metric_aggregates_by_reason():
     assert rec["earn"]["casino_payout"] == 450
     assert "gift" not in rec["earn"] and "gift" not in rec["spend"]
     assert rec["bankroll"] == 4800  # None では更新しない
+
+
+def test_wbstate_lines_format():
+    from core.support.worldbox.state import build_state_lines
+
+    lines = build_state_lines(
+        user_id="123",
+        balance=1500,
+        profile={
+            "hp": 80, "hunger": 55, "role": "blade",
+            "mastery": {"blade": {"xp": 90}},
+            "items": {"wood": 5, "iron_sword": 1, "stone": 3},
+        },
+        presence={"space": "world", "x": 10.5, "y": -3.2},
+        save=None,
+        nation_name="テスト国",
+        nation_role="king",
+    )
+    text = "\n".join(lines)
+    assert "1,500" in text
+    assert "HP 80" in text and "剣士" in text and "ランク 3" in text
+    assert "計 9 個" in text
+    assert "world" in text
+    assert "テスト国" in text
+    empty = build_state_lines(
+        user_id="999", balance=None, profile=None, presence=None,
+        save=None, nation_name=None, nation_role=None,
+    )
+    assert "未プレイ" in "\n".join(empty)

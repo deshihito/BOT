@@ -349,6 +349,7 @@ _FEATURE_MODULES = (
     ("terminal", "core.support.terminal.cog"),
     ("ticket", "core.support.ticket.cog"),
     ("usage_stats", "core.support.usage_stats.cog"),
+    ("worldbox", "core.support.worldbox.cog"),
 )
 
 

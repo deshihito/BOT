@@ -17,6 +17,7 @@ import { containerIsEmpty, isContainerItem } from "@/lib/worldbox/containers";
 import { isMachineItem, machineBufferCount } from "@/lib/worldbox/machines";
 import { deleteMachine, loadMachine } from "@/lib/worldbox/machines-online";
 import { bumpMetric, recordFirstStep } from "@/lib/worldbox/metrics-online";
+import { appendTileJournal, loadFrozen } from "@/lib/worldbox/ops-online";
 import { loadContainer, storeContainer } from "@/lib/worldbox/containers-online";
 import { withUserLock } from "@/lib/worldbox/user-lock";
 import {
@@ -129,6 +130,10 @@ export async function POST(request: Request) {
   }
   const fields = (body ?? {}) as { action?: unknown; x?: unknown; y?: unknown; seedId?: unknown; itemId?: unknown };
   const ownerKey = sessionOwnerKey(session);
+  // 運用凍結中はタイルの書き換えを止める（荒らし対策）
+  if (await loadFrozen()) {
+    return NextResponse.json({ error: "world_frozen" }, { status: 423, headers: NO_STORE });
+  }
 
   // 隣接検証（本人の位置がサーバー側で分かる場合だけ）
   if (typeof fields.x === "number" && typeof fields.y === "number") {
@@ -231,6 +236,10 @@ export async function POST(request: Request) {
         if (!(await storeTileOverride(tx, ty, result.override))) {
           return NextResponse.json({ error: "tiles_failed" }, { status: 500, headers: NO_STORE });
         }
+        // 差分ジャーナル（巻き戻し用、ベストエフォート）
+        void appendTileJournal({
+          key: tileKey(tx, ty), prev: current, next: result.override, actor: ownerKey, at: Date.now(),
+        });
         if (!(await storeProfile(ownerKey, result.profile))) {
           return NextResponse.json({ error: "tiles_failed" }, { status: 500, headers: NO_STORE });
         }
