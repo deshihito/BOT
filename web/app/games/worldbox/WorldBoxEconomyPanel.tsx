@@ -1,8 +1,10 @@
 "use client";
-// AGO WORLD BOX の経済パネル（かばん・ショップ・合成・steal・労働・銀行）。
+// AGO WORLD BOX の経済パネル（かばん・ショップ・合成・労働・銀行）。
 // 売買・合成・送金は場所制約つき: それぞれの施設の前にいる間だけタブが出る。
-// Discord ボット側の経済機能（items / workshop craft / circulation steal）の
-// 規則をそのまま使い、かばん・空腹度は /api/worldbox/profile が正とする。
+// Discord ボット側の経済機能（items / workshop craft）の規則をそのまま使い、
+// かばん・空腹度は /api/worldbox/profile が正とする。
+// steal は一旦廃止（2026-11-16）: タブ・ルート・オプ生成・ワーカー適用の
+// すべてで止めてある（履歴表示のラベルだけ残る）。
 // コインの正は AGO コイン本体: 残高と移動履歴は経済ブリッジ
 // （/api/worldbox/economy）が返し、移動は Bot 本体が数十秒で適用する。
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -20,22 +22,17 @@ const ACTION_SE: Record<string, WbSeName> = {
   craft: "craft",
   eat: "harvest",
   work: "coin",
-  steal: "coin",
 };
 
-type Tab = "bag" | "shop" | "craft" | "steal" | "bank";
+type Tab = "bag" | "shop" | "craft" | "bank";
 type LoadState = "loading" | "ready" | "guest" | "unavailable";
-type StealTarget = { id: string; name: string };
 
 const ERROR_LABEL: Record<string, string> = {
   not_enough_coins: "コインが足りません",
   not_enough_items: "アイテムが足りません",
   hunger_full: "もう満腹です",
   too_tired: "空腹度が足りません。食べてから働きましょう",
-  steal_cooldown: "steal はクールダウン中です",
-  target_protected: "その相手からは盗めません（所持金が少ないか、防犯チャームで保護されています）",
-  target_recently_stolen: "その相手は最近盗まれたばかりで保護されています",
-  self_target: "自分からは盗めません",
+  steal_disabled: "steal は廃止されました",
   unauthorized: "ログインが必要です",
   discord_required: "コインの移動には Discord ログインが必要です",
   economy_unavailable: "いま経済ブリッジを使えません",
@@ -107,7 +104,6 @@ export default function WorldBoxEconomyPanel({ space, station, onClose }: { spac
   const [profile, setProfile] = useState<PlayerProfile | null>(null);
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [tab, setTab] = useState<Tab>("bag");
-  const [targets, setTargets] = useState<StealTarget[]>([]);
   const [msg, setMsg] = useState("");
   const [busy, setBusy] = useState(false);
   const [balance, setBalance] = useState<number | null>(null);
@@ -149,26 +145,14 @@ export default function WorldBoxEconomyPanel({ space, station, onClose }: { spac
     }
   }, []);
 
-  const refreshTargets = useCallback(async () => {
-    try {
-      const res = await fetch("/api/worldbox/presence", { headers: { Accept: "application/json" } });
-      if (!res.ok) return;
-      const data = (await res.json()) as { players?: StealTarget[] };
-      if (aliveRef.current && Array.isArray(data.players)) {
-        setTargets(data.players.map((p) => ({ id: p.id, name: p.name })));
-      }
-    } catch { /* 対象が読めなくても他の機能は使える */ }
-  }, []);
-
   useEffect(() => {
     aliveRef.current = true;
     void refreshProfile();
-    void refreshTargets();
     void refreshBridge();
     return () => {
       aliveRef.current = false;
     };
-  }, [refreshProfile, refreshTargets, refreshBridge]);
+  }, [refreshProfile, refreshBridge]);
 
   const act = async (payload: Record<string, unknown>, describe: (data: Record<string, unknown>) => string) => {
     setBusy(true);
@@ -240,7 +224,7 @@ export default function WorldBoxEconomyPanel({ space, station, onClose }: { spac
   );
   if (loadState === "loading") return panelHead("読み込み中…");
   if (loadState === "guest") {
-    return panelHead("経済機能（かばん・ショップ・合成・steal）を使うにはログインが必要です。");
+    return panelHead("経済機能（かばん・ショップ・合成）を使うにはログインが必要です。");
   }
   if (loadState === "unavailable" || !profile) {
     return panelHead("いまは経済機能を使えません。");
@@ -290,7 +274,6 @@ export default function WorldBoxEconomyPanel({ space, station, onClose }: { spac
         {tabBtn("bag", "かばん")}
         {atShop && tabBtn("shop", "ショップ")}
         {atWorkbench && tabBtn("craft", "合成")}
-        {tabBtn("steal", "steal")}
         {atBank && tabBtn("bank", "銀行")}
       </div>
       {activeTab === "bag" && (
@@ -363,34 +346,6 @@ export default function WorldBoxEconomyPanel({ space, station, onClose }: { spac
               </div>
             );
           })}
-        </div>
-      )}
-
-      {activeTab === "steal" && (
-        <div style={{ marginTop: 6 }}>
-          <p className="muted" style={{ margin: "4px 0" }}>
-            いま歩いている相手からコインを盗みます。成功率40%、失敗すると罰金20コイン。
-            所持金50未満の相手と防犯チャーム持ちは保護されます。実行後は10分間できません。
-          </p>
-          <button type="button" style={btn} disabled={busy} onClick={() => void refreshTargets()}>
-            対象を更新
-          </button>
-          {targets.length === 0 && <p className="muted">いま対象にできる相手がいません。</p>}
-          {targets.map((t) => (
-            <div key={t.id} style={row}>
-              <strong>{t.name}</strong>
-              <span style={{ flex: 1 }} />
-              <button type="button" style={btn} disabled={busy}
-                onClick={() => void act(
-                  { action: "steal", targetId: t.id },
-                  (data) => data.success
-                    ? `${t.name}から ${data.amount} コインを盗んだ！`
-                    : `失敗… ${t.name}に罰金 ${data.amount} コインを払った`,
-                )}>
-                steal
-              </button>
-            </div>
-          ))}
         </div>
       )}
 
