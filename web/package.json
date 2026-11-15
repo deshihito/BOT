@@ -21,7 +21,8 @@
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "three": "^0.187.0",
-    "upng-js": "^2.1.0"
+    "upng-js": "^2.1.0",
+    "ws": "^8.23.0"
   },
   "overrides": {
     "@discord/embedded-app-sdk": {

@@ -56,6 +56,16 @@ mkdir -p "$RELEASE/.next/static"
 cp -a "$BUILD/.next/static/." "$RELEASE/.next/static/"
 cp -a "$BUILD/public" "$RELEASE/public"
 
+# リアルタイム中継ラッパーを設置する（standalone の server.js を内包し、
+# /api/worldbox/realtime の WebSocket だけをラッパーが受ける）。
+# ラッパーが落ちても systemd が従来どおり再起動し、クライアントは
+# REST プレゼンスのポーリングへ戻る。
+mv "$RELEASE/server.js" "$RELEASE/next-server.js"
+cp -a "$BUILD/realtime-server.js" "$RELEASE/server.js"
+cp -a "$BUILD/realtime" "$RELEASE/realtime"
+mkdir -p "$RELEASE/node_modules/ws"
+cp -a "$BUILD/node_modules/ws/." "$RELEASE/node_modules/ws/"
+
 # current を新しいリリースへ原子的に切り替えて再起動
 ln -sfn "$RELEASE" "$ROOT/current"
 sudo systemctl restart agobot-web
