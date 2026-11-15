@@ -77,7 +77,7 @@ import {
 } from "@/lib/worldbox/affordance";
 import {
   bgmSceneFor, loadWbSoundSettings, playWbSe, saveWbSoundSettings, seForFxBurst, setWbBgmScene,
-  stopWbBgm, unlockWbAudio, type WbSoundSettings,
+  setWbBgmTension, stopWbBgm, tensionFor, unlockWbAudio, type WbSoundSettings,
 } from "@/lib/worldbox/sound";
 import { useGamesNav } from "../GamesShell";
 import WorldBoxCasinoPanel from "./WorldBoxCasinoPanel";
@@ -488,6 +488,8 @@ export default function WorldBoxClient() {
   // 音響（BGM/SE）: 設定は lib/worldbox/sound が localStorage に持つ。
   // AudioContext は最初のユーザー操作でだけ作れるため、解錠は pointerdown/keydown で行う。
   const [soundSettings, setSoundSettings] = useState<WbSoundSettings>({ bgm: true, se: true });
+  // BGM 緊張レイヤー: 描画ループが 500ms ごとに更新し、1秒ごとの場面判定が読む。
+  const dangerRef = useRef(false);
   useEffect(() => {
     setSoundSettings(loadWbSoundSettings());
     const unlock = () => unlockWbAudio();
@@ -501,10 +503,14 @@ export default function WorldBoxClient() {
   }, []);
   // BGM の場面は 1 秒ごとに判定し直す（昼夜は共有時計で勝手に進むため）。
   useEffect(() => {
-    const applyScene = () =>
+    const applyScene = () => {
       setWbBgmScene(bgmSceneFor({
         space: spaceUi, night: nightAmount(phaseAtTime(Date.now() / 1000)), casinoOpen,
       }));
+      // 緊張レイヤーはフィールド（ワールド/インスタンス）でのみ。ロビー・テントでは切る。
+      const inField = spaceUi === "world" || parseInstanceSpace(spaceUi) !== null;
+      setWbBgmTension(inField && dangerRef.current);
+    };
     applyScene();
     const timer = setInterval(applyScene, 1000);
     return () => clearInterval(timer);
@@ -1616,6 +1622,8 @@ export default function WorldBoxClient() {
     /** 接触中のモブ（個体キー）と、敵対ノックバックを最後に発火した時刻。 */
     let contactMobKeyNow: string | null = null;
     let contactFiredAt = 0;
+    /** BGM 緊張レイヤーの最終判定時刻（500ms ごとに更新）。 */
+    let dangerCheckedAt = 0;
     /** ノックバックの残り速度（タイル/秒）。接触で初速を与え、stepMove で滑らかに減衰させる（瞬間移動にしない）。 */
     let kbVel = { x: 0, y: 0 };
     // スタミナとダッシュ（キーの2度押し / スティックの強い倒し）
@@ -2913,6 +2921,28 @@ export default function WorldBoxClient() {
             });
             shake = startShake(shake, 2, now);
           }
+        }
+        // BGM 緊張レイヤー: 500ms ごとに敵対モブの接近と HP を見る（曲は変えず心拍だけ重ねる）。
+        if (now - dangerCheckedAt >= 500) {
+          dangerCheckedAt = now;
+          const prof = invRef.current;
+          const hpFrac = prof ? prof.hp / maxHpFor(prof) : 1;
+          let hostileNear = false;
+          if (hpFrac > 0.25) {
+            const ptx2 = Math.floor(player.x);
+            const pty2 = Math.floor(player.y);
+            for (const placed of mobCache) {
+              const def = mobById(placed.mobId);
+              if (!def || def.temperament !== "hostile") continue;
+              const r = mobRenders.get(mobKeyFor(placed));
+              if (!r) continue;
+              if (mobDistance(ptx2, pty2, { x: Math.floor(r.wx), y: Math.floor(r.wy), size: placed.size }) <= 6) {
+                hostileNear = true;
+                break;
+              }
+            }
+          }
+          dangerRef.current = tensionFor({ hostileNear, hpFrac });
         }
       }
       checkTileTriggers();

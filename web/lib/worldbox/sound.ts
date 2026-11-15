@@ -16,7 +16,7 @@ import type { FxBurstKind } from "./fx";
 /* ================= 純粋ロジック: BGM の譜面 ================= */
 
 /** BGM の場面。ワールド昼/夜、ロビー、カジノで曲が切り替わる。 */
-export type WbBgmScene = "field-day" | "field-night" | "lobby" | "casino" | "cave" | "dungeon";
+export type WbBgmScene = "field-day" | "field-night" | "lobby" | "casino" | "cave" | "dungeon" | "ruins";
 
 /**
  * 現在の状況から BGM の場面を決める。優先順位は カジノ > 屋内 > 夜 > 昼。
@@ -31,6 +31,7 @@ export function bgmSceneFor(input: {
   if (input.casinoOpen) return "casino";
   if (input.space.startsWith("cave:")) return "cave";
   if (input.space.startsWith("dungeon:")) return "dungeon";
+  if (input.space.startsWith("ruins:")) return "ruins";
   if (input.space !== "world") return "lobby";
   return input.night > 0.5 ? "field-night" : "field-day";
 }
@@ -149,8 +150,8 @@ export const BGM_TRACKS: Record<WbBgmScene, WbBgmTrack> = {
       3, null, null, null, 4, null, null, 5,
       null, null, null, null, 2, null, null, null,
     ],
-    hat: [],
-    kick: [],
+    hat: hatEvery(),
+    kick: hatEvery(),
   },
   // ダンジョン: D マイナーペンタ。洞窟より速く、キックで緊張を刻む。
   dungeon: {
@@ -164,8 +165,23 @@ export const BGM_TRACKS: Record<WbBgmScene, WbBgmTrack> = {
       2, null, 2, null, 3, null, 4, null,
       null, null, 3, null, 2, null, null, null,
     ],
-    hat: [],
+    hat: hatEvery(),
     kick: barSteps([0, 4]),
+  },
+  // 遺跡: E マイナーペンタ。洞窟より少し明るく、謎めいた疎な打音。キックなし。
+  ruins: {
+    bpm: 84,
+    root: 164.81, // E3
+    scale: MINOR_PENT,
+    bass: bassLine([0, 10, 5, 8]),
+    lead: [
+      4, null, null, null, null, null, 3, null,
+      null, null, 2, null, null, null, null, null,
+      5, null, null, null, 4, null, null, null,
+      3, null, null, null, 2, null, null, null,
+    ],
+    hat: barSteps([3, 7]),
+    kick: hatEvery(),
   },
   // カジノ: D メジャーペンタ。速く跳ねるベースと毎ステップのハット。
   casino: {
@@ -193,6 +209,11 @@ export const BGM_TRACKS: Record<WbBgmScene, WbBgmTrack> = {
 /** 場面ごとの「賑やかさ」（リードの音数）。夜が一番静かであることの検証用。 */
 export function leadNoteCount(track: WbBgmTrack): number {
   return track.lead.filter((n) => n !== null).length;
+}
+
+/** 緊張レイヤーの条件（B3）: 敵対モブが近くにいるか、HP が 25% 以下。曲は変えず心拍だけ重ねる。 */
+export function tensionFor(input: { hostileNear: boolean; hpFrac: number }): boolean {
+  return input.hostileNear || input.hpFrac <= 0.25;
 }
 
 /* ================= 純粋ロジック: SE の語彙と対応表 ================= */
@@ -284,7 +305,11 @@ export function saveWbSoundSettings(next: WbSoundSettings): void {
 
 let ctx: AudioContext | null = null;
 let seBus: GainNode | null = null;
-let bgmBus: GainNode | null = null;
+/** マスターバス（B3）: SE と BGM（各声）をここで統一してから出力へ出す。 */
+let masterBus: GainNode | null = null;
+
+/** 場面遷移のクロスフェード時間（ms）。旧声を絞りつつ新声を上げる。 */
+export const BGM_CROSSFADE_MS = 1200;
 
 function ensureCtx(): AudioContext | null {
   if (typeof window === "undefined") return null;
@@ -292,13 +317,12 @@ function ensureCtx(): AudioContext | null {
     const AC = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
     if (!AC) return null;
     ctx = new AC();
+    masterBus = ctx.createGain();
+    masterBus.gain.value = 1;
+    masterBus.connect(ctx.destination);
     seBus = ctx.createGain();
     seBus.gain.value = settings.se ? SE_VOLUME : 0;
-    seBus.connect(ctx.destination);
-    bgmBus = ctx.createGain();
-    bgmBus.gain.value = 0;
-    // BGM はローパスで曇らせない（opus っぽさ回避）。素のまま出す。
-    bgmBus.connect(ctx.destination);
+    seBus.connect(masterBus);
   }
   if (ctx.state === "suspended") void ctx.resume().catch(() => {});
   return ctx;
@@ -308,18 +332,18 @@ function ensureCtx(): AudioContext | null {
 export function unlockWbAudio(): void {
   loadWbSoundSettings();
   if (!ensureCtx()) return;
-  if (settings.bgm && currentScene) startBgm(currentScene);
+  if (settings.bgm && currentScene && !activeVoice) startVoice(currentScene);
 }
 
 function applySettings(): void {
-  if (!ctx || !seBus || !bgmBus) return;
+  if (!ctx || !seBus) return;
   seBus.gain.setTargetAtTime(settings.se ? SE_VOLUME : 0, ctx.currentTime, 0.03);
   if (settings.bgm) {
-    if (currentScene) startBgm(currentScene);
+    if (currentScene && !activeVoice) startVoice(currentScene);
   } else {
     // 場面は覚えたまま止める（再び ON にしたら同じ場面から再開できる）
-    stopBgmTimer();
-    bgmBus.gain.setTargetAtTime(0, ctx.currentTime, 0.1);
+    fadeOutVoice(activeVoice);
+    activeVoice = null;
   }
 }
 
@@ -390,10 +414,10 @@ function noise(opts: {
 }
 
 /** 打鍵音（マリンバ風）: 三角波＋倍音の短い減衰。BGM のリードは全部これで鳴らす。 */
-function pluck(freq: number, at: number, gain: number, dur = 0.32): void {
-  if (!ctx || !bgmBus) return;
-  tone({ freq, dur, type: "triangle", gain, at, dest: bgmBus });
-  tone({ freq: freq * 2, dur: dur * 0.5, type: "sine", gain: gain * 0.35, at, dest: bgmBus });
+function pluck(freq: number, at: number, gain: number, dest: AudioNode, dur = 0.32): void {
+  if (!ctx) return;
+  tone({ freq, dur, type: "triangle", gain, at, dest });
+  tone({ freq: freq * 2, dur: dur * 0.5, type: "sine", gain: gain * 0.35, at, dest });
 }
 
 /* --- SE レシピ（素材の音を作り分ける） --- */
@@ -556,67 +580,109 @@ export function playWbSe(name: WbSeName): void {
 
 /** 再生すべき場面（希望）。AudioContext が無くても保持する。 */
 let currentScene: WbBgmScene | null = null;
-/** シーケンサが実際に鳴らしている場面。場面切替の判定はこっちで見る。 */
-let playingScene: WbBgmScene | null = null;
-let bgmTimer: ReturnType<typeof setInterval> | null = null;
-let bgmStep = 0;
-let bgmNextStepAt = 0;
+/** BGM の1声: 場面ごとのバス＋シーケンサ。クロスフェード中は2声が重なる。 */
+type BgmVoice = {
+  scene: WbBgmScene;
+  gain: GainNode;
+  timer: ReturnType<typeof setInterval> | null;
+  step: number;
+  nextStepAt: number;
+};
+let activeVoice: BgmVoice | null = null;
+/** 緊張レイヤー（心拍）の ON/OFF。クライアントが 1 秒ごとに更新する。 */
+let tensionOn = false;
 let bgmWasPlayingBeforeHidden = false;
 
-function scheduleStep(track: WbBgmTrack, step: number, at: number): void {
-  if (!ctx || !bgmBus) return;
+/** 緊張レイヤーの ON/OFF。次のステップから心拍が重なる。 */
+export function setWbBgmTension(on: boolean): void {
+  tensionOn = on;
+}
+
+/** 緊張レイヤーが今 ON か（テスト/表示用）。 */
+export function currentWbBgmTension(): boolean {
+  return tensionOn;
+}
+
+function scheduleStep(track: WbBgmTrack, step: number, at: number, dest: AudioNode, tension: boolean): void {
+  if (!ctx) return;
   const bassSemi = track.bass[step];
   if (bassSemi !== null) {
-    tone({ freq: semitoneFreq(track.root / 2, bassSemi), dur: 0.34, type: "triangle", gain: 0.16, at, dest: bgmBus });
+    tone({ freq: semitoneFreq(track.root / 2, bassSemi), dur: 0.34, type: "triangle", gain: 0.16, at, dest });
   }
   const leadDegree = track.lead[step];
   if (leadDegree !== null) {
-    pluck(degreeFreq(track, leadDegree), at, 0.14);
+    pluck(degreeFreq(track, leadDegree), at, 0.14, dest);
   }
   if (track.hat[step]) {
-    noise({ dur: 0.03, gain: 0.028, at, type: "highpass", filterFrom: 6500, dest: bgmBus });
+    noise({ dur: 0.03, gain: 0.028, at, type: "highpass", filterFrom: 6500, dest });
   }
   if (track.kick[step]) {
-    tone({ freq: 120, freqEnd: 42, dur: 0.12, type: "sine", gain: 0.2, at, dest: bgmBus });
+    tone({ freq: 120, freqEnd: 42, dur: 0.12, type: "sine", gain: 0.2, at, dest });
+  }
+  // 緊張レイヤー: 1小節に2打の低い心拍（lub-dub）。曲そのものは変えない。
+  // 短い減衰のサイン波サンプで、パッド wash でもローパスでもない。
+  if (tension) {
+    if (step % 8 === 0) {
+      tone({ freq: 92, freqEnd: 44, dur: 0.16, type: "sine", gain: 0.2, at, dest });
+    } else if (step % 8 === 3) {
+      tone({ freq: 82, freqEnd: 40, dur: 0.13, type: "sine", gain: 0.14, at, dest });
+    }
   }
 }
 
-function startBgm(scene: WbBgmScene): void {
-  if (!ctx || !bgmBus) return;
-  if (bgmTimer && playingScene === scene) return;
-  stopBgmTimer();
-  currentScene = scene;
-  playingScene = scene;
+function startVoice(scene: WbBgmScene): void {
+  if (!ctx || !masterBus) return;
   const track = BGM_TRACKS[scene];
-  bgmBus.gain.setTargetAtTime(BGM_VOLUME, ctx.currentTime, 0.3);
-  bgmStep = 0;
-  bgmNextStepAt = ctx.currentTime + 0.06;
+  const gain = ctx.createGain();
+  gain.gain.value = 0;
+  gain.connect(masterBus);
+  const voice: BgmVoice = { scene, gain, timer: null, step: 0, nextStepAt: ctx.currentTime + 0.06 };
   const stepSec = 60 / track.bpm / 2;
-  bgmTimer = setInterval(() => {
+  voice.timer = setInterval(() => {
     if (!ctx) return;
-    while (bgmNextStepAt < ctx.currentTime + 0.28) {
-      scheduleStep(track, bgmStep % BGM_STEPS, bgmNextStepAt);
-      bgmStep += 1;
-      bgmNextStepAt += stepSec;
+    // タイマーが遅れた分は飛ばす（過去のステップを束で鳴らさない）。
+    // step を進めて位相を保つので、ループの継ぎ目で段差が出ない。
+    if (voice.nextStepAt < ctx.currentTime - stepSec) {
+      const missed = Math.ceil((ctx.currentTime - voice.nextStepAt) / stepSec);
+      voice.step += missed;
+      voice.nextStepAt += missed * stepSec;
+    }
+    while (voice.nextStepAt < ctx.currentTime + 0.28) {
+      scheduleStep(track, voice.step % BGM_STEPS, voice.nextStepAt, voice.gain, tensionOn);
+      voice.step += 1;
+      voice.nextStepAt += stepSec;
     }
   }, 110);
+  // 新声は 0 から立ち上げる（クロスフェードの上がり側。BGM バスにローパスは掛けない）。
+  gain.gain.setTargetAtTime(BGM_VOLUME, ctx.currentTime, BGM_CROSSFADE_MS / 3000);
+  activeVoice = voice;
 }
 
-function stopBgmTimer(): void {
-  if (bgmTimer) {
-    clearInterval(bgmTimer);
-    bgmTimer = null;
+function fadeOutVoice(voice: BgmVoice | null): void {
+  if (!voice || !ctx) return;
+  if (voice.timer) {
+    clearInterval(voice.timer);
+    voice.timer = null;
   }
-  playingScene = null;
+  voice.gain.gain.setTargetAtTime(0, ctx.currentTime, BGM_CROSSFADE_MS / 3000);
+  // フェードが終わったらバスを外す（次の切替で古い声が残らない）。
+  const gain = voice.gain;
+  setTimeout(() => {
+    try {
+      gain.disconnect();
+    } catch {
+      // 既に外れていてもよい
+    }
+  }, BGM_CROSSFADE_MS + 400);
 }
 
 export function stopWbBgm(): void {
-  stopBgmTimer();
+  fadeOutVoice(activeVoice);
+  activeVoice = null;
   currentScene = null;
-  if (ctx && bgmBus) bgmBus.gain.setTargetAtTime(0, ctx.currentTime, 0.15);
 }
 
-/** 場面を切り替える。同じ場面なら何もしない。null で停止。 */
+/** 場面を切り替える。同じ場面なら何もしない。null で停止。旧声を絞りつつ新声を上げるクロスフェード。 */
 export function setWbBgmScene(scene: WbBgmScene | null): void {
   loadWbSoundSettings();
   if (scene === currentScene) return;
@@ -625,8 +691,10 @@ export function setWbBgmScene(scene: WbBgmScene | null): void {
     return;
   }
   currentScene = scene;
-  if (!settings.bgm || !ctx || !bgmBus) return;
-  startBgm(scene);
+  if (!settings.bgm || !ctx || !masterBus) return;
+  fadeOutVoice(activeVoice);
+  activeVoice = null;
+  startVoice(scene);
 }
 
 /** 現在の BGM 場面（テスト/表示用）。 */
@@ -638,12 +706,12 @@ export function currentWbBgmScene(): WbBgmScene | null {
 if (typeof document !== "undefined") {
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) {
-      bgmWasPlayingBeforeHidden = bgmTimer !== null;
-      stopBgmTimer();
-      if (ctx && bgmBus) bgmBus.gain.setTargetAtTime(0, ctx.currentTime, 0.1);
+      bgmWasPlayingBeforeHidden = activeVoice !== null;
+      fadeOutVoice(activeVoice);
+      activeVoice = null;
     } else if (bgmWasPlayingBeforeHidden) {
       bgmWasPlayingBeforeHidden = false;
-      if (settings.bgm && currentScene && ctx) startBgm(currentScene);
+      if (settings.bgm && currentScene && ctx) startVoice(currentScene);
     }
   });
 }

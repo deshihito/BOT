@@ -59,12 +59,13 @@ const sound = await loadBundle(
   ["worldbox/sound.ts"],
   [
     "BGM_STEPS", "BGM_TRACKS", "bgmSceneFor", "semitoneFreq", "degreeFreq", "leadNoteCount",
+    "tensionFor", "BGM_CROSSFADE_MS", "setWbBgmTension", "currentWbBgmTension",
     "WB_SE_TIER_GAIN", "WB_SE_TIERS", "WB_SE_MIN_INTERVAL_MS", "seForFxBurst",
     "loadWbSoundSettings",
   ],
 );
 
-const SCENES = ["field-day", "field-night", "lobby", "casino"];
+const SCENES = ["field-day", "field-night", "lobby", "casino", "cave", "dungeon", "ruins"];
 
 test("sound: 全曲が32ステップで、度数と半音が範囲内に収まる", () => {
   for (const scene of SCENES) {
@@ -96,6 +97,44 @@ test("sound: 場面選択は カジノ > ロビー > 夜 > 昼", () => {
   assert.equal(sound.bgmSceneFor({ space: "tent", night: 0.9, casinoOpen: false }), "lobby", "テント内装は屋内としてロビー曲");
   assert.equal(sound.bgmSceneFor({ space: "lobby", night: 0, casinoOpen: true }), "casino");
   assert.equal(sound.bgmSceneFor({ space: "world", night: 0.9, casinoOpen: true }), "casino");
+  assert.equal(sound.bgmSceneFor({ space: "cave:10,20:0", night: 0, casinoOpen: false }), "cave");
+  assert.equal(sound.bgmSceneFor({ space: "dungeon:10,20:0", night: 0, casinoOpen: false }), "dungeon");
+  assert.equal(sound.bgmSceneFor({ space: "ruins:10,20:0", night: 0, casinoOpen: false }), "ruins", "遺跡は専用曲");
+  assert.equal(sound.bgmSceneFor({ space: "ruins:10,20:0", night: 0, casinoOpen: true }), "casino", "カジノが最優先");
+});
+
+test("sound: 緊張レイヤーは敵の接近か HP25%以下で入る（遺跡は洞窟より速くキックなし）", () => {
+  assert.equal(sound.tensionFor({ hostileNear: true, hpFrac: 1 }), true, "敵が近い");
+  assert.equal(sound.tensionFor({ hostileNear: false, hpFrac: 0.25 }), true, "HP25%");
+  assert.equal(sound.tensionFor({ hostileNear: false, hpFrac: 0.1 }), true, "HP10%");
+  assert.equal(sound.tensionFor({ hostileNear: false, hpFrac: 0.26 }), false, "HP26%は平常");
+  assert.equal(sound.tensionFor({ hostileNear: false, hpFrac: 1 }), false, "平常");
+  const ruins = sound.BGM_TRACKS.ruins;
+  assert.ok(ruins.bpm > sound.BGM_TRACKS.cave.bpm, "遺跡は洞窟より速い");
+  assert.ok(ruins.kick.every((k) => !k), "遺跡はキックなし");
+  assert.ok(sound.leadNoteCount(ruins) < sound.leadNoteCount(sound.BGM_TRACKS["field-day"]), "遺跡のリードは昼より疎ら");
+});
+
+test("sound: 場面遷移はクロスフェードで、SE/BGM はマスターで統一する", () => {
+  const src = fs.readFileSync(path.join(libDir, "worldbox/sound.ts"), "utf8");
+  assert.ok(sound.BGM_CROSSFADE_MS >= 800 && sound.BGM_CROSSFADE_MS <= 2000, "クロスフェードは 0.8〜2 秒");
+  assert.match(src, /fadeOutVoice\(activeVoice\)/, "旧声を絞る");
+  assert.match(src, /gain\.gain\.setTargetAtTime\(BGM_VOLUME/, "新声を 0 から立ち上げる");
+  assert.match(src, /masterBus/, "マスターバスがある");
+  assert.match(src, /seBus\.connect\(masterBus\)/, "SE はマスター経由");
+  assert.match(src, /gain\.connect\(masterBus\)/, "BGM の声はマスター経由");
+  // タイマー遅延時は過去のステップを束で鳴らさない（ループ継ぎ目の段差を消す）
+  assert.match(src, /nextStepAt < ctx\.currentTime - stepSec/, "遅延分の飛ばしがある");
+  assert.equal(sound.currentWbBgmTension(), false, "初期状態は平常");
+  sound.setWbBgmTension(true);
+  assert.equal(sound.currentWbBgmTension(), true, "ON にできる");
+  sound.setWbBgmTension(false);
+  assert.equal(sound.currentWbBgmTension(), false, "OFF に戻せる");
+  assert.match(src, /step % 8 === 0/, "心拍は小節単位");
+  const client = fs.readFileSync(path.join(rootDir, "app/games/worldbox/WorldBoxClient.tsx"), "utf8");
+  assert.match(client, /setWbBgmTension\(/, "場面判定で緊張レイヤーを更新する");
+  assert.match(client, /tensionFor\(\{ hostileNear, hpFrac \}\)/, "敵の接近と HP で危険度を決める");
+  assert.match(client, /dangerRef/, "危険度は描画ループからの ref で渡す");
 });
 
 test("sound: 夜が一番静かで、カジノが一番速い", () => {

@@ -88,7 +88,16 @@ const rngUrl = dataUrl(transpile("worldbox/rng.ts"));
 const mapgenUrl = dataUrl(transpile("worldbox/mapgen.ts").replaceAll('"./rng"', JSON.stringify(rngUrl)));
 const lobbyUrl = dataUrl(transpile("worldbox/lobby.ts").replaceAll('"./mapgen"', JSON.stringify(mapgenUrl)));
 const itemsUrl = dataUrl(transpile("worldbox/items.ts"));
-const shopsUrl = dataUrl(transpile("worldbox/shops.ts").replaceAll('"./items"', JSON.stringify(itemsUrl)));
+const shopsRealUrl = dataUrl(transpile("worldbox/shops.ts").replaceAll('"./items"', JSON.stringify(itemsUrl)));
+// 日次ローテーションは日付依存なので、この場所ゲートテストでは中立化する。
+const shopsUrl = dataUrl(`
+import * as real from ${JSON.stringify(shopsRealUrl)};
+export const checkBuyGenre = real.checkBuyGenre;
+export const checkBuySold = real.checkBuySold;
+export function checkDailyStock() { return null; }
+export function dailyPriceFor(item) { return item.price; }
+export function shopDayKeyOf() { return "test-day"; }
+`);
 const profileUrl = dataUrl(transpile("worldbox/profile.ts").replaceAll('"./items"', JSON.stringify(itemsUrl)));
 const economyLogicUrl = dataUrl(
   transpile("worldbox/economy.ts").replaceAll('"./items"', JSON.stringify(itemsUrl)).replaceAll('"./profile"', JSON.stringify(profileUrl)),
@@ -166,6 +175,7 @@ const profileRoute = await import(
       .replaceAll('"@/lib/worldbox/profile"', JSON.stringify(profileUrl))
       .replaceAll('"@/lib/worldbox/presence-online"', JSON.stringify(presenceOnlineUrl))
       .replaceAll('"@/lib/worldbox/shops"', JSON.stringify(shopsUrl))
+      .replaceAll('"@/lib/worldbox/items"', JSON.stringify(itemsUrl))
       .replaceAll('"@/lib/worldbox/station-online"', JSON.stringify(stationOnlineUrl))
       .replaceAll('"@/lib/worldbox/profile-online"', JSON.stringify(profileOnlineUrl))
       .replaceAll('"@/lib/worldbox/user-lock"', JSON.stringify(userLockUrl))

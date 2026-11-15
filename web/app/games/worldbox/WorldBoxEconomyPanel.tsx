@@ -11,7 +11,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { EconomyOp } from "@/lib/worldbox/economy-bridge";
 import { ITEMS, RECIPES, itemById, sellPrice } from "@/lib/worldbox/items";
-import { genreById, isShopExcluded, itemsForGenre, type ShopGenreId } from "@/lib/worldbox/shops";
+import { dailyPriceFor, dailyStockForGenre, genreById, isShopExcluded, itemsForGenre, shopDayKeyOf, type ShopGenreId } from "@/lib/worldbox/shops";
 import type { LobbyStation } from "@/lib/worldbox/lobby";
 import type { PlayerProfile } from "@/lib/worldbox/profile";
 import type { SaveSpace } from "@/lib/worldbox/save";
@@ -238,7 +238,11 @@ export default function WorldBoxEconomyPanel({ space, station, genre, onClose }:
 
   const owned = ITEMS.filter((item) => (profile.items[item.id] ?? 0) > 0);
   // この店で売られている品目（ジャンル選別。レア品はどの店でも売らない）
-  const shopItems = shopGenre ? itemsForGenre(shopGenre) : ITEMS.filter((item) => !isShopExcluded(item));
+  // 品目と価格は日次ローテーション（サーバー側の購入検証と同じ式）
+  const shopDayKey = shopDayKeyOf(Date.now());
+  const shopItems = shopGenre ? dailyStockForGenre(shopGenre, shopDayKey) : ITEMS.filter((item) => !isShopExcluded(item));
+  const priceOf = (item: (typeof ITEMS)[number]): number =>
+    shopGenre ? dailyPriceFor(item, shopDayKey) : item.price;
   // 施設の前にいないタブを開いたままにしない（その施設へ行くと使える）
   const tabAllowed = (t: Tab): boolean =>
     t === "shop" ? atShop : t === "craft" ? atWorkbench : t === "bank" ? atBank : true;
@@ -324,7 +328,7 @@ export default function WorldBoxEconomyPanel({ space, station, genre, onClose }:
               <span className="muted">{item.desc}</span>
               {item.hunger ? <span className="muted">空腹度 +{item.hunger}</span> : null}
               <span style={{ flex: 1 }} />
-              <span>{item.price} コイン</span>
+              <span>{priceOf(item)} コイン</span>
               <button type="button" style={btn} disabled={busy}
                 onClick={() => void act({ action: "buy", itemId: item.id }, () => `${item.name}を買った`)}>
                 買う

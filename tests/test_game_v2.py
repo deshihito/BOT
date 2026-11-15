@@ -53,16 +53,22 @@ class Round4RegistrationTest(unittest.TestCase):
             self.assertIn(game, GAME_GUIDES)
 
     def test_party_genre_paginates(self):
-        # ラウンド5で party が25件を超えたため、ジャンル絞り込み時も
-        # ページ分割される（ハブのページング一般化）。
+        # 導線最適化 U3: ラウンド5で party が25件を超えたためジャンル絞り込み時も
+        # ページ分割されていたが、言葉・推理系16件を「word」に分けたため
+        # どちらのジャンルも1ページに収まる（ジャンル未選択の全47件表示だけが
+        # 引き続き2ページ）。
         from cogs.game import GAME_GENRE_BY_GAME, game_select_pages
         party = [g for g in GAME_ORDER if GAME_GENRE_BY_GAME[g] == "party"]
-        self.assertEqual(len(party), 30)
+        word = [g for g in GAME_ORDER if GAME_GENRE_BY_GAME[g] == "word"]
+        self.assertEqual(len(party), 14)
+        self.assertEqual(len(word), 16)
         pages = game_select_pages()
         self.assertEqual(sum(len(p) for p in pages), 47)
         self.assertTrue(all(len(p) <= 25 for p in pages))
         party_pages = game_select_pages("party")
-        self.assertEqual([len(p) for p in party_pages], [25, 5])
+        self.assertEqual([len(p) for p in party_pages], [14])
+        word_pages = game_select_pages("word")
+        self.assertEqual([len(p) for p in word_pages], [16])
 
     def test_ranked_games_known(self):
         from core.game.game import party_ranking
