@@ -1456,81 +1456,9 @@
         },
         {
           "key": "automation",
-          "label": "自動化・通知",
+          "label": "自動化",
           "description": "",
           "functions": [
-            {
-              "id": "support:binjou",
-              "value": "binjou",
-              "title": "絵文字便乗設定（binjou）",
-              "description": ""
-            },
-            {
-              "id": "support:binjou_custom",
-              "value": "binjou_custom",
-              "title": "カスタム便乗ルール",
-              "description": ""
-            },
-            {
-              "id": "support:language",
-              "value": "language",
-              "title": "言語設定",
-              "description": ""
-            },
-            {
-              "id": "support:globalchat",
-              "value": "globalchat",
-              "title": "グローバルチャット",
-              "description": ""
-            },
-            {
-              "id": "support:globalchat_mod",
-              "value": "globalchat_mod",
-              "title": "グローバルチャット モデレーション",
-              "description": ""
-            },
-            {
-              "id": "support:auto_react",
-              "value": "auto_react",
-              "title": "Auto react設定",
-              "description": ""
-            },
-            {
-              "id": "support:earthquake",
-              "value": "earthquake",
-              "title": "地震情報",
-              "description": ""
-            },
-            {
-              "id": "support:news_notify",
-              "value": "news_notify",
-              "title": "ニュース通知",
-              "description": ""
-            },
-            {
-              "id": "support:quest_notify",
-              "value": "quest_notify",
-              "title": "Quest通知（Discord Orbs）",
-              "description": ""
-            },
-            {
-              "id": "support:quest_manual",
-              "value": "quest_manual",
-              "title": "Quest手動投稿",
-              "description": ""
-            },
-            {
-              "id": "support:levelup_notify",
-              "value": "levelup_notify",
-              "title": "レベルアップ通知（EXP）",
-              "description": ""
-            },
-            {
-              "id": "support:levelup_card_theme",
-              "value": "levelup_card_theme",
-              "title": "レベルアップカードテーマ",
-              "description": ""
-            },
             {
               "id": "support:assist_welcome",
               "value": "assist_welcome",
@@ -1662,6 +1590,85 @@
               "value": "assist_application_review",
               "title": "応募審査",
               "description": ""
+            }
+          ]
+        },
+        {
+          "key": "notices",
+          "label": "通知",
+          "description": "",
+          "functions": [
+            {
+              "id": "support:binjou",
+              "value": "binjou",
+              "title": "絵文字便乗設定（binjou）",
+              "description": ""
+            },
+            {
+              "id": "support:binjou_custom",
+              "value": "binjou_custom",
+              "title": "カスタム便乗ルール",
+              "description": ""
+            },
+            {
+              "id": "support:language",
+              "value": "language",
+              "title": "言語設定",
+              "description": ""
+            },
+            {
+              "id": "support:globalchat",
+              "value": "globalchat",
+              "title": "グローバルチャット",
+              "description": ""
+            },
+            {
+              "id": "support:globalchat_mod",
+              "value": "globalchat_mod",
+              "title": "グローバルチャット モデレーション",
+              "description": ""
+            },
+            {
+              "id": "support:auto_react",
+              "value": "auto_react",
+              "title": "Auto react設定",
+              "description": ""
+            },
+            {
+              "id": "support:earthquake",
+              "value": "earthquake",
+              "title": "地震情報",
+              "description": ""
+            },
+            {
+              "id": "support:news_notify",
+              "value": "news_notify",
+              "title": "ニュース通知",
+              "description": ""
+            },
+            {
+              "id": "support:quest_notify",
+              "value": "quest_notify",
+              "title": "Quest通知（Discord Orbs）",
+              "description": ""
+            },
+            {
+              "id": "support:quest_manual",
+              "value": "quest_manual",
+              "title": "Quest手動投稿",
+              "description": ""
+            },
+            {
+              "id": "support:levelup_notify",
+              "value": "levelup_notify",
+              "title": "レベルアップ通知（EXP）",
+              "description": ""
+            },
+            {
+              "id": "support:levelup_card_theme",
+              "value": "levelup_card_theme",
+              "title": "レベルアップカードテーマ",
+              "description": ""
             },
             {
               "id": "support:voice_trigger",
@@ -1673,19 +1680,6 @@
               "id": "support:vc_auto_start",
               "value": "vc_auto_start",
               "title": "VC参加時の自動開始",
-              "description": ""
-            }
-          ]
-        },
-        {
-          "key": "rta",
-          "label": "RTA設定",
-          "description": "",
-          "functions": [
-            {
-              "id": "support:sokunuke_settings",
-              "value": "sokunuke_settings",
-              "title": "即抜けRTA設定",
               "description": ""
             }
           ]
@@ -1753,6 +1747,12 @@
               "id": "support:bumprta_settings",
               "value": "bumprta_settings",
               "title": "boardNotify設定（共通）",
+              "description": ""
+            },
+            {
+              "id": "support:sokunuke_settings",
+              "value": "sokunuke_settings",
+              "title": "即抜けRTA設定",
               "description": ""
             }
           ]

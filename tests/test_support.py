@@ -55,8 +55,9 @@ class FakeMember:
 class SupportRoleBulkTest(unittest.IsolatedAsyncioTestCase):
     def test_language_has_its_own_support_genre(self):
         # 導線最適化 S7 で仕様変更: 1件ジャンル「言語」は「自動化・通知」に吸収。
+        # 導線最適化 U2 で通知系は "notices" へ分離。
         self.assertNotIn("language", SUPPORT_ACTIONS_BY_GENRE)
-        self.assertIn("language", [value for _, value in SUPPORT_ACTIONS_BY_GENRE["automation"]])
+        self.assertIn("language", [value for _, value in SUPPORT_ACTIONS_BY_GENRE["notices"]])
         self.assertNotIn("language", [value for _, value in SUPPORT_ACTIONS_BY_GENRE["roles"]])
 
     async def test_adds_only_members_without_role(self):
@@ -262,7 +263,7 @@ class SupportAutoReactTest(unittest.IsolatedAsyncioTestCase):
 
     def test_auto_react_is_a_server_support_action(self):
         self.assertIn("auto_react", [choice.value for choice in SUPPORT_ACTIONS])
-        self.assertIn("auto_react", [value for _, value in SUPPORT_ACTIONS_BY_GENRE["automation"]])
+        self.assertIn("auto_react", [value for _, value in SUPPORT_ACTIONS_BY_GENRE["notices"]])
         view = AutoReactSettingsView({"channels": {"8": ["🎉"]}})
         self.assertIn("< #8>".replace(" ", ""), view.embed().description)
 

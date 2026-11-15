@@ -1,6 +1,6 @@
 """グローバルチャットの /support 移植（2026-11-07）のテスト。
 
-- レジストリ登録（support:globalchat、automation ジャンル、AI 代理実行なし）
+- レジストリ登録（support:globalchat、notices ジャンル、AI 代理実行なし）
 - 登録/解除が GlobalChatCog の保存先（active_channels + save_channels）を
   そのまま使うこと
 - 設定パネルの表示とトグル、荒らし対策モーダルの保存先
@@ -43,15 +43,16 @@ def _guild(channel_ids=(55,)):
 
 
 class RegistryTest(unittest.TestCase):
-    def test_action_registered_in_automation_genre(self):
-        values = [value for _label, value in SUPPORT_ACTIONS_BY_GENRE["automation"]]
+    def test_action_registered_in_notices_genre(self):
+        # 導線最適化 U2: 通知系は automation から notices へ分離。
+        values = [value for _label, value in SUPPORT_ACTIONS_BY_GENRE["notices"]]
         self.assertIn("globalchat", values)
         self.assertIn("globalchat", [c.value for c in SUPPORT_ACTIONS])
 
     def test_registry_spec(self):
         spec = action_registry.default_registry().by_id("support:globalchat")
         self.assertIsNotNone(spec)
-        self.assertEqual(spec.genre, "automation")
+        self.assertEqual(spec.genre, "notices")
         # 設定の状態変更系なので AI 代理実行には出さない（他設定パネルと同扱い）。
         self.assertNotIn("aitools", spec.surfaces)
 

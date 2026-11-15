@@ -25,12 +25,16 @@ class GlobalVcGenreTest(unittest.TestCase):
 
 
 class SupportScopeLabelTest(unittest.TestCase):
-    """R2-2: /support の RTA ジャンルは「設定」側であることをラベルで示す。"""
+    """R2-2 → 導線最適化 U2: /support の RTA ジャンルは 1件だったため
+    boardnotify へ吸収し、ジャンル自体が無くなった。"""
 
-    def test_rta_genre_label(self):
-        from cogs.support import SUPPORT_GENRES
+    def test_rta_genre_absorbed_into_boardnotify(self):
+        from cogs.support import SUPPORT_ACTIONS_BY_GENRE, SUPPORT_GENRES
 
-        self.assertEqual(SUPPORT_GENRES["rta"][0], "RTA設定")
+        self.assertNotIn("rta", SUPPORT_GENRES)
+        boardnotify = [v for _l, v in SUPPORT_ACTIONS_BY_GENRE["boardnotify"]]
+        self.assertIn("sokunuke_settings", boardnotify)
+        self.assertEqual(SUPPORT_GENRES["boardnotify"][0], "boardNotify")
 
 
 

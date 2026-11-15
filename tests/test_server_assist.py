@@ -173,15 +173,11 @@ class ServerAssistPanelTest(unittest.IsolatedAsyncioTestCase):
             self.assertIn(value, values)
             self.assertIn(value, [v for _label, v in SUPPORT_ACTIONS_BY_GENRE[genre]])
         for genre, items in SUPPORT_ACTIONS_BY_GENRE.items():
-            # 機能数再編: automation は34件になり25件を超える。パネルは
-            # ページング（core/support/panel.py の support_action_pages）で
-            # 全件選べることが前提（tests/test_panel_warps.py が固定）。
-            # 地震情報の追加で 35件、ニュース通知の追加で 36件
-            # （ページング前提は変わらない）。
-            if genre == "automation":
-                self.assertEqual(len(items), 36, genre)
-            else:
-                self.assertLessEqual(len(items), 25, genre)
+            # 導線最適化 U2: automation 36件を通知14件へ分離し、全ジャンルが
+            # 25件以下・1ページに収まる（ページング前提は廃止）。
+            self.assertLessEqual(len(items), 25, genre)
+        self.assertEqual(len(SUPPORT_ACTIONS_BY_GENRE["automation"]), 22)
+        self.assertEqual(len(SUPPORT_ACTIONS_BY_GENRE["notices"]), 14)
         # 旧ハブ値の権限エントリは互換分岐（案内のみ）のために残る。
         self.assertEqual(SupportCog.SUPPORT_REQUIRED_PERMISSIONS["server_assist"], "manage_guild")
 
