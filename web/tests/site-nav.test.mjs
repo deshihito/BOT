@@ -90,8 +90,8 @@ test("isNavActive は配下ページで親を現在地とし、紛らわしい�
 
 // ---- U4（Web IA 再構築）: パンくずの網羅と名称一致 ----
 // 公開ページはパンくずで親へ1クリックで戻れる。独立シェル（/games/worldbox・
-// /one-prompter・/viewslopper・/folio）とアプリ画面（/dashboard・/login）、
-// 死蔵ページ（/nation・/map＝U5 棚卸し対象）はこの網羅の対象外。
+// /one-prompter・/viewslopper・/folio）とアプリ画面（/dashboard・/login）は
+// この網羅の対象外。死蔵ページ /nation・/map は U5 で削除済み（下の回帰テスト参照）。
 const appRoot = path.join(import.meta.dirname, "..", "app");
 const readPage = (rel) => fs.readFileSync(path.join(appRoot, rel), "utf8");
 
@@ -163,4 +163,24 @@ test("人狼 役職図鑑は人狼の詳細ヘッダーから1クリックで届
   const chromeSrc = readPage("games/GamesChrome.tsx");
   assert.ok(chromeSrc.includes("game.guide"), "詳細ヘッダーが guide 導線を描画していない");
   assert.ok(chromeSrc.includes("game.guide.href"), "詳細ヘッダーが guide の行き先を使っていない");
+});
+
+test("U5: 死蔵ページ /nation・/map は削除され、参照も残っていない", () => {
+  for (const rel of ["nation", "map"]) {
+    assert.ok(!fs.existsSync(path.join(appRoot, rel)), `app/${rel} が残っている`);
+  }
+  for (const lib of ["lib/nation.ts", "lib/nation-map.ts"]) {
+    assert.ok(!fs.existsSync(path.join(import.meta.dirname, "..", lib)), `${lib} が残っている`);
+  }
+  const chromeSrc = fs.readFileSync(
+    path.join(import.meta.dirname, "..", "lib", "site-chrome.ts"),
+    "utf8",
+  );
+  assert.ok(!chromeSrc.includes('"/map"'), "site-chrome.ts に /map が残っている");
+  assert.ok(!chromeSrc.includes('"/nation"'), "site-chrome.ts に /nation が残っている");
+  const routes = JSON.parse(
+    fs.readFileSync(path.join(import.meta.dirname, "..", "public", "manus-routes.json"), "utf8"),
+  ).routes.map((r) => r.path);
+  assert.ok(!routes.includes("/map"), "manus-routes.json に /map が残っている");
+  assert.ok(!routes.includes("/nation"), "manus-routes.json に /nation が残っている");
 });
