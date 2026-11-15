@@ -965,6 +965,94 @@ export default function WorldBoxClient() {
     const presenceNow = () => Date.now() + clockOffsetMs;
     /** ポーリングで連続して見えなかった回数（1回の欠落では消さない）。 */
     const missedPolls = new Map<string, number>();
+    /** 受信したエントリを他プレイヤーのトラックへ反映する（ポーリングと WS で共用）。 */
+    const applyPresenceEntry = (entry: PresenceEntry, now: number) => {
+      const cur = others.get(entry.id);
+      if (!cur) {
+        others.set(entry.id, { track: createRemoteTrack(entry, now, activeMap()), phase: 0 });
+      } else {
+        cur.track = updateRemoteTrack(cur.track, entry, now, activeMap());
+      }
+    };
+    /** サーバー時刻とのずれサンプルを取り込む（急な振れを抑えるため平滑化する）。 */
+    const absorbClockSample = (serverNow: number, before: number, after: number) => {
+      const sample = clockOffsetEstimate(serverNow, before, after);
+      clockOffsetMs = clockOffsetMs === 0 ? sample : clockOffsetMs + (sample - clockOffsetMs) * 0.3;
+    };
+    // ---- リアルタイム中継（WebSocket）。繋がらない間は REST ポーリングが正 ----
+    let rtSocket: WebSocket | null = null;
+    let rtToken: string | null = null;
+    let rtTokenAt = 0;
+    let rtRetryAt = 0;
+    let rtBackoffMs = 1000;
+    let rtReconnectTimer: number | undefined;
+    /** WS 経由のハートビート送信（中継は REST と同じ整形規則で受ける）。 */
+    const sendWsHeartbeat = () => {
+      if (!rtSocket || rtSocket.readyState !== WebSocket.OPEN) return;
+      try {
+        rtSocket.send(JSON.stringify({ t: "hb", x: player.x, y: player.y, vx: player.vx, vy: player.vy, face: player.face, space }));
+      } catch { /* noop */ }
+    };
+    /** 中継への接続（トークン取得→接続→受信→再接続）。失敗してもポーリングが続く。 */
+    const connectRealtime = async () => {
+      if (disposed || !loggedIn || rtSocket) return;
+      try {
+        if (!rtToken || Date.now() - rtTokenAt > 8 * 60 * 1000) {
+          const res = await fetch("/api/worldbox/realtime-token", { method: "POST", headers: { Accept: "application/json" } });
+          if (!res.ok) throw new Error("token");
+          const body = (await res.json()) as { token?: string };
+          if (!body.token) throw new Error("token");
+          rtToken = body.token;
+          rtTokenAt = Date.now();
+        }
+        if (disposed) return;
+        const proto = location.protocol === "https:" ? "wss:" : "ws:";
+        const ws = new WebSocket(`${proto}//${location.host}/api/worldbox/realtime?t=${encodeURIComponent(rtToken)}`);
+        rtSocket = ws;
+        ws.onopen = () => {
+          rtBackoffMs = 1000;
+          sendWsHeartbeat();
+        };
+        ws.onmessage = (ev) => {
+          const arrivedAt = Date.now();
+          let msg: { t?: string; now?: number; p?: PresenceEntry; players?: PresenceEntry[]; id?: string };
+          try {
+            msg = JSON.parse(String(ev.data));
+          } catch {
+            return;
+          }
+          if (typeof msg.now === "number") absorbClockSample(msg.now, arrivedAt, arrivedAt);
+          const now = presenceNow();
+          if (msg.t === "snap") {
+            for (const entry of msg.players ?? []) {
+              missedPolls.delete(entry.id);
+              applyPresenceEntry(entry, now);
+            }
+            setOthersCount(others.size);
+          } else if (msg.t === "up" && msg.p) {
+            missedPolls.delete(msg.p.id);
+            applyPresenceEntry(msg.p, now);
+            setOthersCount(others.size);
+          } else if (msg.t === "bye" && msg.id) {
+            others.delete(msg.id);
+            missedPolls.delete(msg.id);
+            setOthersCount(others.size);
+          }
+        };
+        const onGone = () => {
+          if (rtSocket === ws) rtSocket = null;
+          if (disposed) return;
+          rtRetryAt = Date.now() + rtBackoffMs;
+          rtBackoffMs = Math.min(10_000, rtBackoffMs * 2);
+          rtReconnectTimer = window.setTimeout(() => void connectRealtime(), rtBackoffMs);
+        };
+        ws.onclose = onGone;
+        ws.onerror = onGone;
+      } catch {
+        rtRetryAt = Date.now() + rtBackoffMs;
+        rtBackoffMs = Math.min(10_000, rtBackoffMs * 2);
+      }
+    };
     const sendHeartbeat = () => {
       if (!loggedIn) return;
       fetch("/api/worldbox/presence", {
@@ -980,21 +1068,13 @@ export default function WorldBoxClient() {
         if (!res.ok) return;
         const body = (await res.json()) as { players?: PresenceEntry[]; now?: number };
         if (disposed) return;
-        if (typeof body.now === "number") {
-          const sample = clockOffsetEstimate(body.now, before, Date.now());
-          clockOffsetMs = clockOffsetMs === 0 ? sample : clockOffsetMs + (sample - clockOffsetMs) * 0.3;
-        }
+        if (typeof body.now === "number") absorbClockSample(body.now, before, Date.now());
         const now = presenceNow();
         const seen = new Set<string>();
         for (const entry of body.players ?? []) {
           seen.add(entry.id);
           missedPolls.delete(entry.id);
-          const cur = others.get(entry.id);
-          if (!cur) {
-            others.set(entry.id, { track: createRemoteTrack(entry, now, activeMap()), phase: 0 });
-          } else {
-            cur.track = updateRemoteTrack(cur.track, entry, now, activeMap());
-          }
+          applyPresenceEntry(entry, now);
         }
         for (const id of [...others.keys()]) {
           if (seen.has(id)) continue;
@@ -1019,14 +1099,18 @@ export default function WorldBoxClient() {
     let lastHeartbeatPos = { x: player.x, y: player.y };
     const heartbeatTick = () => {
       if (!loggedIn) return;
+      // 中継が未接続なら再接続を試みる（再試行時刻を過ぎたときだけ）
+      if (!rtSocket && Date.now() >= rtRetryAt) void connectRealtime();
       const now = performance.now();
       const movedDist = Math.hypot(player.x - lastHeartbeatPos.x, player.y - lastHeartbeatPos.y);
       const moving = Math.hypot(player.vx, player.vy) > 0.1 || movedDist > 0.05;
-      const interval = moving ? 500 : 2000;
+      const wsOpen = rtSocket?.readyState === WebSocket.OPEN;
+      const interval = wsOpen ? (moving ? 100 : 1000) : moving ? 500 : 2000;
       if (movedDist <= 4 && now - lastHeartbeatAt < interval) return;
       lastHeartbeatAt = now;
       lastHeartbeatPos = { x: player.x, y: player.y };
-      sendHeartbeat();
+      if (wsOpen) sendWsHeartbeat();
+      else sendHeartbeat();
     };
     const heartbeatTimer = window.setInterval(heartbeatTick, 250);
     const pollTimer = window.setInterval(pollOthers, 1000);
@@ -2493,6 +2577,11 @@ export default function WorldBoxClient() {
       cancelAnimationFrame(raf);
       window.clearInterval(heartbeatTimer);
       window.clearInterval(pollTimer);
+      if (rtReconnectTimer !== undefined) window.clearTimeout(rtReconnectTimer);
+      try {
+        rtSocket?.close();
+      } catch { /* noop */ }
+      rtSocket = null;
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("keyup", onKeyUp);
       window.removeEventListener("resize", resize);
