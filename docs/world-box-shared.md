@@ -241,3 +241,17 @@ AGO WORLD BOX（web/app/games/worldbox）に関わる作業をする Muse は、
   ループは持たない。回収は所有者がパネルから。バッファが残っている間は
   掘り出せない（コンテナと同じ not_empty 規則）。
 - 装置のタップは採掘ではなく専用パネルを開く（自分のものだけ）。
+
+## ギルドショップ（バッチ7残件、2026-11-16）
+
+- 区画はロビー屋台グリッドの6つ（カウンター中心が GUILD_PLOT_ANCHORS）。
+  状態は bot_kv `worldbox_guild_shop`（キー "state"）、検証と遷移は
+  `web/lib/worldbox/guild-shop.ts`、ルートは全体ロックで直列化する。
+- 登録/撤去は国王・大臣のみ。登録料 500（spend guild_plot_fee、決定的 ID
+  gshop-fee-<discordId>-<seq> で冪等）。撤去時は残りの出品を売り手へ返却。
+- 出品は所属員のみ（アイテムはエスクローでプロフィールから引く、1区画12件まで）。
+  購入は区画カウンターから 3.5 タイル以内（プレゼンス/セーブ検証）。
+  購入 spend guild_shop_buy、売り手 earn guild_shop_sale（ホワイトリスト済み）、
+  オプ ID は gshop-buy-/gshop-sale-<listingId>-<累計販売数> で冪等。
+- 手数料は暫定 5%: 売り手の取り分は floor(価格×個数×0.95) で、差額は
+  積まない（= 国庫シンク相当）。
