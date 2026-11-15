@@ -53,7 +53,7 @@ const combatUrl = bundleModule(
     "mobById", "MOBS",
     "mobKeyOf", "parseMobKey", "parseMobState", "parseMobStates", "mobHpNow",
     "visibleMobs", "mobExistsAt", "mobDistance", "applyMobAttack", "MOB_RESPAWN_MS",
-    "attackTarget", "playerAttack",
+    "attackTarget", "playerAttack", "resolveMobPosition", "MOB_REPORT_LEASH",
     "MOB_SPRITE", "MOB_SPRITE_FALLBACK", "validateMobSprites", "mobHasVisual",
     "mobRespawnDelayMs", "MOB_RESPAWN_JITTER_MS",
     "MOB_CHUNK_CAP", "MOB_MIN_ANCHOR_DISTANCE", "MOB_SPAWN_EXCLUSION_RADIUS", "isNearWorldSpawn", "WORLD_SPAWN_TILE", "mobsForChunk",
@@ -171,9 +171,12 @@ test("attackTarget: 照準でなく範囲で当たる（タップがモブから
   assert.equal(combat.attackTarget(100, 100, 101, 99, [slime]), slime);
   // タップが自分のマスでも、範囲内のモブに当たる
   assert.equal(combat.attackTarget(100, 100, 100, 100, [slime]), slime);
-  // 範囲外（2マス先）のモブには当たらない
-  const far = { mobId: "slime", x: 102, y: 100, size: 1 };
-  assert.equal(combat.attackTarget(100, 100, 102, 100, [far]), null);
+  // 剣の範囲は2マス先まで届く（2026-11-16: 1→2 に拡大）
+  const reach = { mobId: "slime", x: 102, y: 100, size: 1 };
+  assert.equal(combat.attackTarget(100, 100, 102, 100, [reach]), reach);
+  // 範囲外（3マス先）のモブには当たらない
+  const far = { mobId: "slime", x: 103, y: 100, size: 1 };
+  assert.equal(combat.attackTarget(100, 100, 103, 100, [far]), null);
   // 複数いる場合はタップを含む個体を優先する
   const a = { mobId: "slime", x: 101, y: 100, size: 1 };
   const b = { mobId: "chicken", x: 99, y: 100, size: 1 };
@@ -181,6 +184,21 @@ test("attackTarget: 照準でなく範囲で当たる（タップがモブから
   // 大型は占有範囲で判定する（中心から離れた占有マスでも範囲内）
   const bear = { mobId: "bear", x: 103, y: 100, size: 3 }; // 占有 102..104
   assert.equal(combat.attackTarget(101, 100, 100, 100, [bear]), bear);
+});
+
+test("resolveMobPosition: 申告タイルはリーシュ内でのみ採用する", () => {
+  const anchor = { mobId: "slime", x: 100, y: 100, size: 1 };
+  // 申告なし・不正値はアンカー
+  assert.equal(combat.resolveMobPosition(anchor, null), anchor);
+  assert.equal(combat.resolveMobPosition(anchor, { x: Number.NaN, y: 100 }), anchor);
+  // 追跡で 8 マス離れた現在タイルは採用される（足元まで来たモブに当たる）
+  const roamed = combat.resolveMobPosition(anchor, { x: 108, y: 103 });
+  assert.equal(roamed.x, 108);
+  assert.equal(roamed.y, 103);
+  // リーシュ（13）を大きく外れた申告は採用しない
+  const tooFar = combat.resolveMobPosition(anchor, { x: 140, y: 100 });
+  assert.equal(tooFar.x, 100);
+  assert.equal(tooFar.y, 100);
 });
 
 test("API ルート: 実在検証・距離検証・闘技場式ダメージ・状態保存が配線されている", () => {
@@ -195,6 +213,14 @@ test("API ルート: 実在検証・距離検証・闘技場式ダメージ・�
   // S4: 攻撃は個体単位ロックで直列化し、復活時刻はサーバーの正を返す
   assert.ok(route.includes("withUserLock(`mob:${key}`"), "攻撃が個体単位で直列化されていない（S4）");
   assert.ok(route.includes("deadUntil: result.state.deadUntil"), "攻撃応答にサーバーの deadUntil が無い（S4）");
+  // 距離検証はアンカーでなく申告された現在タイル（見た目位置）で測る
+  assert.ok(route.includes("resolveMobPosition"), "モブ現在位置の解決を使っていない");
+  assert.ok(route.includes("fields.mx"), "モブ現在タイルの申告を受けていない");
+  // 技の対象解決も同じ実位置で行う
+  const rolesRoute = fs.readFileSync(path.join(rootDir, "app/api/worldbox/roles/route.ts"), "utf8");
+  assert.ok(rolesRoute.includes("resolveMobPosition"), "技の対象解決が実位置を使っていない");
+  assert.ok(rolesRoute.includes("fields.mobs"), "技がモブ現在タイルの申告を受けていない");
+  assert.ok(rolesRoute.includes("MOB_REPORT_LEASH"), "技の候補取得がリーシュ分広がっていない");
   const online = fs.readFileSync(path.join(rootDir, "lib/worldbox/mobs-online.ts"), "utf8");
   assert.ok(online.includes('"worldbox_mobs"'), "bot_kv 名前空間が違う");
 });
@@ -208,6 +234,16 @@ test("クライアント: モブ描画・タップ攻撃・モーションが配
   assert.ok(client.includes('selDef?.tool === "sword"'), "剣選択時の自由振り分岐が無い");
   assert.ok(client.includes('"/api/worldbox/mobs"'), "攻撃 API を呼んでいない");
   assert.ok(client.includes("refreshMobs"), "個体状態の取得が無い");
+  // 攻撃・技はモブの現在タイルを申告する（サーバーの距離検証を画面に合わせる）
+  assert.ok(client.includes("mx: curTile.x"), "攻撃がモブの現在タイルを申告していない");
+  assert.ok(client.includes("mobTilesRef"), "モブ現在タイルのスナップショットが無い");
+  assert.ok(client.includes("mobs: mobsReport"), "技がモブの現在タイルを申告していない");
+  // ダブルタップは 450ms 判定で、サーバーに弾かれたら無言で通常タップに化けない
+  assert.ok(client.includes("nowTap - lastTap.at <= 450"), "ダブルタップ判定が 450ms でない");
+  assert.ok(client.includes('"denied"'), "技の失敗が denied として扱われていない");
+  // 左隅の技チャージゲージ（クールタイム表示の一本化先）
+  assert.ok(client.includes("技チャージ中"), "技チャージゲージが無い");
+  assert.ok(client.includes("gaugeSkill"), "ゲージが発動技を見ていない");
   // S4: 復活時刻はサーバーの deadUntil を使い、ダンジョンの状態も取り直す
   assert.ok(client.includes("data.deadUntil"), "攻撃応答のサーバー deadUntil を使っていない（S4）");
   assert.ok(client.includes("dungeonSpace"), "refreshMobs にダンジョン分岐が無い（S4）");
