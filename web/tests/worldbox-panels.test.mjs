@@ -55,7 +55,10 @@ test("Esc で開いているパネルとメニューを全部閉じる", () => {
 });
 
 test("既存パネルの閉じるボタンが残っている", () => {
-  for (const setter of ["setStorageOpen(false)", "setBoardOpen(false)", "setCraftOpen(false)", "setMapView(false)"]) {
+  // クラフトは PR #903 で独立パネルを廃止し経済パネルの「合成」タブへ
+  // 一本化したため、setCraftOpen は存在しないのが正しい状態。
+  for (const setter of ["setStorageOpen(false)", "setBoardOpen(false)", "setMapView(false)"]) {
     assert.ok(client.includes(setter), `${setter} が無い`);
   }
+  assert.ok(economy.includes('tabBtn("craft", "合成")'), "合成タブが経済パネルに無い");
 });
