@@ -265,6 +265,14 @@ export default function WorldBoxEconomyPanel({ space, station, genre, onClose }:
           </span>
           <strong>{profile.hunger}</strong>
         </span>
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+          HP
+          <span style={{ width: 90, height: 10, borderRadius: 5, background: "rgba(255,255,255,0.12)", overflow: "hidden", display: "inline-block" }}>
+            <span style={{ display: "block", width: `${profile.hp}%`, height: "100%", background: profile.hp <= 25 ? "#e2483a" : "#7ed957" }} />
+          </span>
+          <strong>{profile.hp}</strong>
+        </span>
+        {profile.status.some((e) => e.kind === "poison") && <span style={{ color: "#b6f26d" }}>毒</span>}
         <span style={{ flex: 1 }} />
         <button
           type="button"
@@ -293,10 +301,14 @@ export default function WorldBoxEconomyPanel({ space, station, genre, onClose }:
               <span className="muted">× {profile.items[item.id]}</span>
               <span className="muted">{item.desc}</span>
               <span style={{ flex: 1 }} />
-              {item.hunger && (
+              {(item.hunger || item.heal || item.curePoison) && (
                 <button type="button" style={btn} disabled={busy}
-                  onClick={() => void act({ action: "eat", itemId: item.id }, () => `${item.name}を食べて空腹度が回復した`)}>
-                  食べる（+{item.hunger}）
+                  onClick={() => void act({ action: "eat", itemId: item.id }, () => `${item.name}を使った`)}>
+                  {item.heal && !item.hunger ? "使う" : "食べる"}
+                  {item.hunger ? `（空腹+${item.hunger}` : ""}
+                  {item.heal ? `${item.hunger ? "・" : "（"}HP+${item.heal}` : ""}
+                  {item.curePoison ? "・解毒" : ""}
+                  {(item.hunger || item.heal) ? "）" : ""}
                 </button>
               )}
               {atShop && (

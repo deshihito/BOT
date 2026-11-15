@@ -8,6 +8,9 @@ import {
 import { addItem } from "@/lib/worldbox/profile";
 import { loadProfile, storeProfile } from "@/lib/worldbox/profile-online";
 import { loadMyLobbyStation } from "@/lib/worldbox/station-online";
+import { parseSave } from "@/lib/worldbox/save";
+import { loadWorldBoxSave } from "@/lib/worldbox/save-online";
+import { applyRest } from "@/lib/worldbox/vitals";
 
 export const runtime = "nodejs";
 
@@ -94,7 +97,13 @@ export async function POST(request: Request) {
       });
     }
     await kvSet(REST_NAMESPACE, key, String(now));
-    return NextResponse.json({ ok: true, stamina: true }, { headers: NO_STORE });
+    // 休憩は HP 全回復＋毒消去も兼ね、戻り先（ワールド座標）を最後の休憩地点として記録する
+    const saved = parseSave(await loadWorldBoxSave(ownerKey));
+    const restPoint = saved?.worldReturn ?? (saved && saved.space === "world" ? { x: saved.x, y: saved.y } : null);
+    const profile = await loadProfile(ownerKey);
+    const rested = applyRest(profile, restPoint, now);
+    await storeProfile(ownerKey, rested);
+    return NextResponse.json({ ok: true, stamina: true, profile: rested }, { headers: NO_STORE });
   }
 
   return errorResponse("bad_action", 400);

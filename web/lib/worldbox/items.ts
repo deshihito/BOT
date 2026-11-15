@@ -22,6 +22,10 @@ export type ItemDef = {
   price: number;
   /** 食べたときの空腹度回復量（food / crop のみ）。 */
   hunger?: number;
+  /** 食べた・使ったときの HP 回復量（食事の一部と薬）。 */
+  heal?: number;
+  /** 使うと毒を治す（薬・一部の飲み物）。 */
+  curePoison?: boolean;
   /** 道具の種類（tool のみ）。 */
   tool?: ToolKind;
   /** 道具の素材段位 1=木 2=石 3=鉄（tool のみ）。 */
@@ -51,10 +55,10 @@ export const ITEMS: readonly ItemDef[] = [
   { id: "bread", name: "パン", desc: "軽くつまむ", category: "food", price: 10, hunger: 20 },
   { id: "onigiri", name: "おにぎり", desc: "手軽な携行食", category: "food", price: 15, hunger: 30 },
   { id: "energy_drink", name: "エナジードリンク", desc: "すばやく回復", category: "food", price: 25, hunger: 15 },
-  { id: "meal", name: "定食", desc: "しっかり食べる", category: "food", price: 30, hunger: 55 },
+  { id: "meal", name: "定食", desc: "しっかり食べる", category: "food", price: 30, hunger: 55, heal: 8 },
   { id: "cake", name: "ケーキ", desc: "甘いごほうび", category: "food", price: 40, hunger: 45 },
   { id: "bento", name: "幕の内弁当", desc: "品数たっぷり", category: "food", price: 45, hunger: 80 },
-  { id: "feast", name: "フルコース", desc: "満腹まで食べる", category: "food", price: 50, hunger: 100 },
+  { id: "feast", name: "フルコース", desc: "満腹まで食べる", category: "food", price: 50, hunger: 100, heal: 20 },
   // ---- 素材（合成の材料） ---------------------------------------------
   { id: "wood", name: "木材", desc: "基本の素材", category: "material", price: 8, placesBlock: "oak_log" },
   { id: "stone", name: "石材", desc: "基本の素材", category: "material", price: 8, placesBlock: "stone_block" },
@@ -68,11 +72,13 @@ export const ITEMS: readonly ItemDef[] = [
   { id: "carving", name: "木彫りの置物", desc: "木材を彫った工芸品", category: "crafted", price: 45 },
   { id: "lantern", name: "石のランタン", desc: "石とガラスの明かり", category: "crafted", price: 60 },
   { id: "blanket", name: "毛布", desc: "布を重ねた防寒具", category: "crafted", price: 56 },
-  { id: "potion", name: "薬草ポーション", desc: "飲むと空腹度が大きく回復", category: "crafted", price: 76, hunger: 60 },
+  { id: "potion", name: "薬草ポーション", desc: "飲むと空腹度とHPが回復し、毒も治す", category: "crafted", price: 76, hunger: 60, heal: 35, curePoison: true },
+  { id: "antidote", name: "解毒薬", desc: "毒を治す薬", category: "crafted", price: 95, heal: 5, curePoison: true },
+  { id: "bandage", name: "包帯", desc: "巻くとHPが回復する", category: "crafted", price: 60, heal: 25 },
   { id: "toolbox", name: "鉄の道具箱", desc: "鉄と木の実用品", category: "crafted", price: 85 },
   { id: "tent", name: "テント", desc: "布と木の野営道具", category: "crafted", price: 110, facility: true },
   { id: "accessory", name: "金のアクセサリー", desc: "金とガラスの装飾品", category: "crafted", price: 140 },
-  { id: "special_course", name: "特上コース料理", desc: "定食を超える一品", category: "crafted", price: 130, hunger: 100 },
+  { id: "special_course", name: "特上コース料理", desc: "定食を超える一品", category: "crafted", price: 130, hunger: 100, heal: 20 },
   // ---- 特殊（所持しているだけで効く） ---------------------------------
   { id: "guard_charm", name: "防犯チャーム", desc: "持っていると steal されなくなる", category: "special", price: 200 },
   { id: "thief_mask", name: "怪盗マスク", desc: "持っていると steal の成功率が上がる", category: "special", price: 200 },
@@ -226,11 +232,11 @@ export const ITEMS: readonly ItemDef[] = [
   { id: "berry", name: "木の実", desc: "茂みで取れる果物", category: "food", price: 11, hunger: 10 },
   { id: "fish", name: "サカナ", desc: "水辺で取れる食材", category: "food", price: 16, hunger: 15 },
   { id: "cookie", name: "クッキー", desc: "甘い焼き菓子", category: "food", price: 75, hunger: 18 },
-  { id: "grilled_meat", name: "焼き肉", desc: "焼いた肉", category: "food", price: 38, hunger: 40 },
+  { id: "grilled_meat", name: "焼き肉", desc: "焼いた肉", category: "food", price: 38, hunger: 40, heal: 6 },
   { id: "grilled_fish", name: "焼き魚", desc: "焼いた魚", category: "food", price: 30, hunger: 30 },
   { id: "omelette", name: "オムレツ", desc: "たまご料理", category: "food", price: 32, hunger: 35 },
   { id: "baked_potato", name: "ベイクドポテト", desc: "焼いたジャガイモ", category: "food", price: 20, hunger: 25 },
-  { id: "stew", name: "シチュー", desc: "具だくさんの煮込み", category: "food", price: 70, hunger: 65 },
+  { id: "stew", name: "シチュー", desc: "具だくさんの煮込み", category: "food", price: 70, hunger: 65, heal: 10 },
   // ---- 種（追加分） -------------------------------------------------------
   { id: "onion_seed", name: "タマネギの種", desc: "畑に植える種", category: "seed", price: 8 },
   { id: "soybean_seed", name: "大豆の種", desc: "畑に植える種", category: "seed", price: 8 },
@@ -309,7 +315,7 @@ export const ITEMS: readonly ItemDef[] = [
   { id: "pickles", name: "漬物", desc: "塩漬けの野菜", category: "food", price: 35, hunger: 18 },
   { id: "fruit_punch", name: "フルーツポンチ", desc: "果物の盛り合わせ", category: "food", price: 88, hunger: 38 },
   { id: "veggie_soup", name: "野菜スープ", desc: "温かいスープ", category: "food", price: 64, hunger: 36 },
-  { id: "honey_tea", name: "はちみつティー", desc: "甘い温かい飲み物", category: "food", price: 75, hunger: 16 },
+  { id: "honey_tea", name: "はちみつティー", desc: "甘い温かい飲み物。毒も流す", category: "food", price: 75, hunger: 16, heal: 5, curePoison: true },
   { id: "cheese", name: "チーズ", desc: "発酵した乳製品", category: "food", price: 46, hunger: 20 },
   // ---- 合成品（追加分2） -------------------------------------------------------
   { id: "ceramic_vase", name: "陶器の壺", desc: "焼き物の壺", category: "crafted", price: 125 },
@@ -360,7 +366,7 @@ export const ITEMS: readonly ItemDef[] = [
   { id: "apple_pie", name: "アップルパイ", desc: "甘い焼き菓子", category: "food", price: 48, hunger: 40 },
   { id: "grape_juice", name: "ブドウジュース", desc: "果実の飲み物", category: "food", price: 75, hunger: 25 },
   { id: "peach_juice", name: "桃ジュース", desc: "果実の飲み物", category: "food", price: 82, hunger: 25 },
-  { id: "curry", name: "カレーライス", desc: "畑の実りのカレー", category: "food", price: 88, hunger: 70 },
+  { id: "curry", name: "カレーライス", desc: "畑の実りのカレー", category: "food", price: 88, hunger: 70, heal: 12 },
   { id: "miso_soup", name: "味噌汁", desc: "温かい汁物", category: "food", price: 44, hunger: 30 },
   { id: "tofu", name: "豆腐", desc: "大豆の白い塊", category: "food", price: 62, hunger: 30 },
   { id: "fruit_salad", name: "フルーツサラダ", desc: "果実の盛り合わせ", category: "food", price: 102, hunger: 45 },
@@ -373,7 +379,7 @@ export const ITEMS: readonly ItemDef[] = [
   { id: "dried_fruit", name: "ドライフルーツ", desc: "乾かした果実", category: "food", price: 72, hunger: 30 },
   { id: "tomato_soup", name: "トマトスープ", desc: "温かいスープ", category: "food", price: 48, hunger: 35 },
   { id: "melon_bread", name: "メロンパン", desc: "甘い焼きパン", category: "food", price: 95, hunger: 50 },
-  { id: "deluxe_meal", name: "贅沢御膳", desc: "品数たっぷりの御膳", category: "food", price: 115, hunger: 100 },
+  { id: "deluxe_meal", name: "贅沢御膳", desc: "品数たっぷりの御膳", category: "food", price: 115, hunger: 100, heal: 20 },
   { id: "fishing_rod", name: "釣り竿", desc: "糸を垂らす道具", category: "crafted", price: 34 },
   { id: "bow", name: "弓", desc: "矢を放つ道具", category: "crafted", price: 34 },
   { id: "arrow", name: "矢", desc: "弓で放つ矢", category: "crafted", price: 12 },
@@ -521,6 +527,8 @@ export const RECIPES: readonly Recipe[] = [
   { id: "lantern", inputs: { stone: 2, glass: 1 }, output: "lantern", outputCount: 1 },
   { id: "blanket", inputs: { cloth: 2 }, output: "blanket", outputCount: 1 },
   { id: "potion", inputs: { herb: 2, glass: 1 }, output: "potion", outputCount: 1, rareItem: "star_shard", rareChance: 0.05 },
+  { id: "antidote", inputs: { herb: 2, honey: 1 }, output: "antidote", outputCount: 1 },
+  { id: "bandage", inputs: { cloth: 2 }, output: "bandage", outputCount: 1 },
   { id: "toolbox", inputs: { iron_ore: 2, wood: 1 }, output: "toolbox", outputCount: 1 },
   { id: "tent", inputs: { cloth: 3, wood: 2 }, output: "tent", outputCount: 1 },
   { id: "accessory", inputs: { gold_ore: 1, glass: 1 }, output: "accessory", outputCount: 1, rareItem: "star_shard", rareChance: 0.08 },
