@@ -15,9 +15,8 @@ import { WALK_SPEED, findFreeNear, stepMove } from "@/lib/worldbox/move";
 import { nightAmount, phaseAtTime } from "@/lib/worldbox/daynight";
 import { advanceWalkPhase, damp, moveLean, walkBob, walkSquashY } from "@/lib/worldbox/anim";
 import { SNAP_DISTANCE, predictPosition, type PresenceEntry } from "@/lib/worldbox/presence";
-import {
-  TERRITORY_RADIUS, type BuildingType, type NationRole, type NationView, type NationsResponse,
-} from "@/lib/worldbox/nations";
+import type { NationRole, NationView, NationsResponse } from "@/lib/worldbox/nations";
+import { USER_BUILDING_CAP, isSpawnPlazaTile, type BuildingType, type BuildingView } from "@/lib/worldbox/buildings";
 import { parseSave, serializeSave } from "@/lib/worldbox/save";
 import { chooseInitialSave } from "@/lib/worldbox/save-source";
 import { loadDungeonTiles, loadTextures } from "@/lib/worldbox/textures";
@@ -79,22 +78,6 @@ function texReady(img: HTMLImageElement | undefined): img is HTMLImageElement {
   return !!img && img.complete && img.naturalWidth > 0;
 }
 
-/** "#rrggbb" + alpha → rgba() 文字列。 */
-function hexA(hex: string, alpha: number): string {
-  const r = parseInt(hex.slice(1, 3), 16);
-  const g = parseInt(hex.slice(3, 5), 16);
-  const b = parseInt(hex.slice(5, 7), 16);
-  return `rgba(${r},${g},${b},${alpha})`;
-}
-
-/** そのタイルを含む領地の国（描画用に線形探索。国の数は少ない前提）。 */
-function territoryAt(nations: NationView[], x: number, y: number): NationView | null {
-  for (const n of nations) {
-    if (Math.max(Math.abs(x - n.capital.x), Math.abs(y - n.capital.y)) <= TERRITORY_RADIUS) return n;
-  }
-  return null;
-}
-
 const ROLE_LABEL: Record<NationRole, string> = { king: "王", minister: "大臣", citizen: "国民" };
 
 /** 建築ツール（建物3種＋取り壊し）。 */
@@ -110,14 +93,20 @@ const NATION_ERROR_LABEL: Record<string, string> = {
   not_in_nation: "国に所属していません",
   king_must_transfer_or_disband: "国民がいる間、王は離脱できません",
   unauthorized: "ログインが必要です",
-  not_your_territory: "自国の領地内だけに建てられます",
   tile_blocked: "そこには建てられません",
   cap_reached: "建築上限に達しています",
   forbidden: "その権限がありません",
   invalid_type: "建物の種類が不正です",
+  not_owner: "自分の建物だけ取り壊せます",
+  on_capital: "首都には建てられません",
+  on_spawn: "スポーン広場には建てられません",
 };
 
-const EMPTY_NATIONS: NationsResponse = { nations: [], buildings: [], me: null, playerNations: {}, loggedIn: false };
+const EMPTY_NATIONS: NationsResponse = { nations: [], me: null, playerNations: {}, loggedIn: false };
+
+/** 建物データ（建物は個人所有で、国家データとは別 API から取る）。 */
+type BuildingsData = { buildings: BuildingView[]; loggedIn: boolean };
+const EMPTY_BUILDINGS: BuildingsData = { buildings: [], loggedIn: false };
 
 export default function WorldBoxClient() {
   const { prefix } = useGamesNav();
@@ -139,7 +128,7 @@ export default function WorldBoxClient() {
   const [buildMode, setBuildMode] = useState(false);
   const [buildTool, setBuildTool] = useState<BuildTool>("house");
   const buildRef = useRef<{ active: boolean; tool: BuildTool }>({ active: false, tool: "house" });
-  /** 建物の当たり判定（"x,y" の集合）。国家データの更新に合わせて作り直す。 */
+  /** 建物の当たり判定（"x,y" の集合）。建物データの更新に合わせて作り直す。 */
   const blockedRef = useRef<ReadonlySet<string>>(new Set());
   const buildActionRef = useRef<(tool: BuildTool, x: number, y: number) => void>(() => {});
 
@@ -153,10 +142,12 @@ export default function WorldBoxClient() {
     buildRef.current.active = false;
   };
 
+  // 建物レイヤー（描画ループは ref、パネルは state で同じデータを見る）
+  const buildingsRef = useRef<BuildingsData>(EMPTY_BUILDINGS);
+  const [buildingsUi, setBuildingsUi] = useState<BuildingsData>(EMPTY_BUILDINGS);
+
   const applyNationsData = (data: NationsResponse) => {
     nationsRef.current = data;
-    blockedRef.current = new Set(data.buildings.map((b) => `${b.x},${b.y}`));
-    if (!data.me && buildRef.current.active) endBuildMode();
     setNationsUi(data);
   };
   const refreshNations = async () => {
@@ -165,6 +156,19 @@ export default function WorldBoxClient() {
       if (!res.ok) return;
       applyNationsData((await res.json()) as NationsResponse);
     } catch { /* 国家が読めなくても歩き続けられる */ }
+  };
+  const applyBuildingsData = (data: BuildingsData) => {
+    buildingsRef.current = data;
+    blockedRef.current = new Set(data.buildings.map((b) => `${b.x},${b.y}`));
+    if (!data.loggedIn && buildRef.current.active) endBuildMode();
+    setBuildingsUi(data);
+  };
+  const refreshBuildings = async () => {
+    try {
+      const res = await fetch("/api/worldbox/buildings", { headers: { Accept: "application/json" } });
+      if (!res.ok) return;
+      applyBuildingsData((await res.json()) as BuildingsData);
+    } catch { /* 建物が読めなくても歩き続けられる */ }
   };
   const nationAction = async (body: Record<string, unknown>) => {
     setNationMsg("");
@@ -185,15 +189,37 @@ export default function WorldBoxClient() {
       setNationMsg("失敗しました");
     }
   };
+  const buildingAction = async (body: Record<string, unknown>) => {
+    setNationMsg("");
+    try {
+      const res = await fetch("/api/worldbox/buildings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) {
+        setNationMsg(NATION_ERROR_LABEL[data.error ?? ""] ?? "失敗しました");
+        return;
+      }
+      await refreshBuildings();
+    } catch {
+      setNationMsg("失敗しました");
+    }
+  };
   const buildAction = (tool: BuildTool, x: number, y: number) => {
-    if (tool === "demolish") void nationAction({ action: "demolish", x, y });
-    else void nationAction({ action: "build", type: tool, x, y });
+    if (tool === "demolish") void buildingAction({ action: "demolish", x, y });
+    else void buildingAction({ action: "build", type: tool, x, y });
   };
   buildActionRef.current = buildAction;
 
   useEffect(() => {
     void refreshNations();
-    const timer = window.setInterval(() => void refreshNations(), 15000);
+    void refreshBuildings();
+    const timer = window.setInterval(() => {
+      void refreshNations();
+      void refreshBuildings();
+    }, 15000);
     return () => window.clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -510,7 +536,7 @@ export default function WorldBoxClient() {
       c.fillRect(sx - nw / 2, ly + 3, nw, 2.5);
     };
 
-    // ---- 建物（平たい紙風。家=壁+三角屋根、畑=畝と作物、塔=石積み+国色の旗） ----
+    // ---- 建物（平たい紙風。家=壁+三角屋根、畑=畝と作物、塔=石積み+所属色の旗） ----
     const drawBuilding = (c: CanvasRenderingContext2D, sx: number, sy: number, type: BuildingType, color: string) => {
       c.fillStyle = "rgba(20,30,16,0.28)";
       c.beginPath();
@@ -583,22 +609,18 @@ export default function WorldBoxClient() {
 
     /** 建築モードの可否プレビュー（サーバー判定の鏡像。最終判定はサーバー）。 */
     const buildValidity = (tx: number, ty: number): boolean => {
-      const data = nationsRef.current;
-      const me = data.me;
-      if (!me) return false;
+      const data = buildingsRef.current;
+      if (!data.loggedIn) return false;
       if (buildRef.current.tool === "demolish") {
         const b = data.buildings.find((v) => v.x === tx && v.y === ty);
-        return !!b && b.nationId === me.nationId && (me.role === "king" || me.role === "minister");
+        return !!b && b.mine;
       }
-      const myNation = data.nations.find((n) => n.id === me.nationId);
-      if (!myNation) return false;
-      if (territoryAt(data.nations, tx, ty)?.id !== me.nationId) return false;
-      if (myNation.capital.x === tx && myNation.capital.y === ty) return false;
+      if (nationsRef.current.nations.some((n) => n.capital.x === tx && n.capital.y === ty)) return false;
+      if (isSpawnPlazaTile(map, tx, ty)) return false;
       const t = mapTileAt(map, tx, ty);
       if (t !== T_GRASS && t !== T_DIRT && t !== T_SAND) return false;
       if (data.buildings.some((v) => v.x === tx && v.y === ty)) return false;
-      const cap = 10 + 10 * myNation.members;
-      if (data.buildings.filter((v) => v.nationId === me.nationId).length >= cap) return false;
+      if (data.buildings.filter((v) => v.mine).length >= USER_BUILDING_CAP) return false;
       return true;
     };
 
@@ -696,22 +718,6 @@ export default function WorldBoxClient() {
             ctx.fillStyle = TILE_FALLBACK[id] ?? "#57a639";
             ctx.fillRect(sx, sy, TILE + 1, TILE + 1);
           }
-          // 領地ティント（国色の薄塗り＋境界の強調）
-          const terr = territoryAt(nationsRef.current.nations, tx, ty);
-          if (terr) {
-            ctx.fillStyle = hexA(terr.color, 0.15);
-            ctx.fillRect(sx, sy, TILE + 1, TILE + 1);
-            // 建築モードでは自国領地をさらに浮かせる
-            if (buildRef.current.active && nationsRef.current.me?.nationId === terr.id) {
-              ctx.fillStyle = hexA(terr.color, 0.16);
-              ctx.fillRect(sx, sy, TILE + 1, TILE + 1);
-            }
-            ctx.fillStyle = hexA(terr.color, 0.6);
-            if (territoryAt(nationsRef.current.nations, tx, ty - 1) !== terr) ctx.fillRect(sx, sy, TILE + 1, 3);
-            if (territoryAt(nationsRef.current.nations, tx, ty + 1) !== terr) ctx.fillRect(sx, sy + TILE - 2, TILE + 1, 3);
-            if (territoryAt(nationsRef.current.nations, tx - 1, ty) !== terr) ctx.fillRect(sx, sy, 3, TILE + 1);
-            if (territoryAt(nationsRef.current.nations, tx + 1, ty) !== terr) ctx.fillRect(sx + TILE - 2, sy, 3, TILE + 1);
-          }
         }
       }
 
@@ -747,8 +753,8 @@ export default function WorldBoxClient() {
             drawAvatar(ctx, toScreenX(o.rx), toScreenY(o.ry), o.entry.face, o.phase, Math.min(1, Math.hypot(o.entry.vx, o.entry.vy) / WALK_SPEED), o.entry.name || null, nationColor),
         });
       }
-      for (const b of nationsRef.current.buildings) {
-        const color = nationsRef.current.nations.find((n) => n.id === b.nationId)?.color ?? "#888888";
+      for (const b of buildingsRef.current.buildings) {
+        const color = nationsRef.current.playerNations[b.ownerId]?.color ?? "#888888";
         drawList.push({
           y: b.y + 1,
           draw: () => drawBuilding(ctx, toScreenX(b.x), toScreenY(b.y), b.type, color),
@@ -788,21 +794,14 @@ export default function WorldBoxClient() {
         if (mm && mctx) {
           mctx.clearRect(0, 0, mm.width, mm.height);
           mctx.drawImage(terrainCanvas, 0, 0);
-          // 領地と首都
+          // 首都
           for (const n of nationsRef.current.nations) {
-            mctx.fillStyle = hexA(n.color, 0.45);
-            mctx.fillRect(
-              n.capital.x - TERRITORY_RADIUS, n.capital.y - TERRITORY_RADIUS,
-              TERRITORY_RADIUS * 2 + 1, TERRITORY_RADIUS * 2 + 1,
-            );
             mctx.fillStyle = n.color;
             mctx.fillRect(n.capital.x - 1, n.capital.y - 1, 3, 3);
           }
-          // 建物は国色の小ドット
-          for (const b of nationsRef.current.buildings) {
-            const color = nationsRef.current.nations.find((n) => n.id === b.nationId)?.color;
-            if (!color) continue;
-            mctx.fillStyle = color;
+          // 建物は所有者の所属色（無所属は灰色）の小ドット
+          for (const b of buildingsRef.current.buildings) {
+            mctx.fillStyle = nationsRef.current.playerNations[b.ownerId]?.color ?? "#d8d8d8";
             mctx.fillRect(b.x, b.y, 2, 2);
           }
           mctx.fillStyle = "#ffffff";
@@ -933,15 +932,6 @@ export default function WorldBoxClient() {
             const me = nationsUi.me;
             const myNation = me ? nationsUi.nations.find((n) => n.id === me.nationId) ?? null : null;
             if (me && myNation) {
-              const myBuildings = nationsUi.buildings.filter((b) => b.nationId === myNation.id);
-              const cap = 10 + 10 * myNation.members;
-              const canDemolish = me.role === "king" || me.role === "minister";
-              const toolBtn = (tool: BuildTool) => ({
-                ...btn,
-                ...(buildMode && buildTool === tool
-                  ? { background: "rgba(255,210,62,0.25)", border: "1px solid rgba(255,210,62,0.7)" }
-                  : {}),
-              });
               return (
                 <div>
                   <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
@@ -950,7 +940,6 @@ export default function WorldBoxClient() {
                     <span>{ROLE_LABEL[me.role]}</span>
                     <span className="muted">国民 {myNation.members}人</span>
                     <span className="muted">繁栄度 {myNation.prosperity}</span>
-                    <span className="muted">建物 {myBuildings.length}/{cap}</span>
                     <span style={{ flex: 1 }} />
                     <button
                       type="button"
@@ -959,24 +948,6 @@ export default function WorldBoxClient() {
                     >
                       {me.role === "king" && myNation.members <= 1 ? "解散" : "離脱"}
                     </button>
-                  </div>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
-                    <span className="muted" style={{ fontSize: 13 }}>建築</span>
-                    {(["house", "farm", "tower"] as const).map((tool) => (
-                      <button key={tool} type="button" style={toolBtn(tool)} onClick={() => chooseBuildTool(tool)}>
-                        {BUILD_TOOL_LABEL[tool]}
-                      </button>
-                    ))}
-                    {canDemolish && (
-                      <button type="button" style={toolBtn("demolish")} onClick={() => chooseBuildTool("demolish")}>
-                        {BUILD_TOOL_LABEL.demolish}
-                      </button>
-                    )}
-                    {buildMode && (
-                      <button type="button" style={btn} onClick={endBuildMode}>
-                        建築を終わる
-                      </button>
-                    )}
                   </div>
                 </div>
               );
@@ -1037,6 +1008,34 @@ export default function WorldBoxClient() {
               </div>
             );
           })()}
+          {buildingsUi.loggedIn && (
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginTop: 12 }}>
+              <span className="muted" style={{ fontSize: 13 }}>建築</span>
+              <span className="muted" style={{ fontSize: 13 }}>
+                建物 {buildingsUi.buildings.filter((b) => b.mine).length}/{USER_BUILDING_CAP}
+              </span>
+              {(["house", "farm", "tower", "demolish"] as const).map((tool) => (
+                <button
+                  key={tool}
+                  type="button"
+                  style={{
+                    ...btn,
+                    ...(buildMode && buildTool === tool
+                      ? { background: "rgba(255,210,62,0.25)", border: "1px solid rgba(255,210,62,0.7)" }
+                      : {}),
+                  }}
+                  onClick={() => chooseBuildTool(tool)}
+                >
+                  {BUILD_TOOL_LABEL[tool]}
+                </button>
+              ))}
+              {buildMode && (
+                <button type="button" style={btn} onClick={endBuildMode}>
+                  建築を終わる
+                </button>
+              )}
+            </div>
+          )}
           {nationMsg && (
             <p role="status" style={{ margin: "10px 0 0" }}>{nationMsg}</p>
           )}
@@ -1046,7 +1045,7 @@ export default function WorldBoxClient() {
       <p className="muted" style={{ textAlign: "center", fontSize: 13, maxWidth: 860, margin: "14px auto 0" }}>
         PC: WASD・矢印キーで移動。タッチ: 画面左側のスティックで移動。
         水・木・岩には入れません。歩いた場所は保存され、みんなと同じ世界にいます。
-        国に所属すると、領地に家・畑・塔を建てて繁栄度を競えます。
+        ログインすると、好きな場所に家・畑・塔を建てられます。建てた建物は、所属する国の繁栄度にも数えられます。
       </p>
     </div>
   );
