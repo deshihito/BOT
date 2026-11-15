@@ -5,7 +5,7 @@
 import type { WorldBoxState } from "./save";
 
 export type InitialSaveChoice = {
-  /** 採用する状態。新規ワールドなら null。 */
+  /** 採用する状態。新規プレイヤーなら null（マップ中央スポーン）。 */
   state: WorldBoxState | null;
   source: "online" | "local" | "new";
   /** ローカルを採用した場合にオンラインへ移行保存すべきか。 */

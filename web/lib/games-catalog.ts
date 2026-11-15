@@ -903,19 +903,10 @@ export const WEB_GAMES: WebGame[] = [
     slug: "worldbox",
     title: "AGO WORLD BOX",
     description:
-      "横スクロールの2Dサンドボックス。生成された世界を歩いて地面を掘り、集めたブロックを置いて自分の世界を作ります。掘った世界はそのまま保存され、続きから遊べます。",
+      "見下ろし型の共有ワールド。全員が同じ一つの世界を同時に歩き回り、すれ違う人と出会えます。歩いた場所は保存され、次も同じ場所から。国が育っていく世界の土台です。",
     status: "playable",
     activity: true,
-    players: "1人",
-  },
-  {
-    slug: "worldbox",
-    title: "AGO WORLD BOX",
-    description:
-      "横スクロールの2Dサンドボックス。生成された世界を歩いて地面を掘り、集めたブロックを置いて自分の世界を作ります。掘った世界はそのまま保存され、続きから遊べます。",
-    status: "playable",
-    activity: true,
-    players: "1人",
+    players: "みんな（同時接続）",
   },
   {
     slug: "kwordle",
