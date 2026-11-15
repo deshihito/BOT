@@ -38,8 +38,9 @@ import {
   L_PLAZA, L_SAND, L_VOID,
   LOBBY_ENTRY, LOBBY_FLOOR_FALLBACK, LOBBY_FLOOR_SPRITE, LOBBY_STAIRS_DOWN, LOBBY_STAIRS_UP,
   LOBBY_DOWN_LANDING, LOBBY_UP_LANDING, LOBBY_WARP_PAD, WORLD_WARP_PAD,
-  buildLobby, lobbyTileAt, stationNear, type LobbyObject, type LobbyStation,
+  buildLobby, lobbyTileAt, stationNear, type LobbyData, type LobbyObject, type LobbyStation,
 } from "@/lib/worldbox/lobby";
+import { TENT_ENTRY, TENT_EXIT, buildTent, tentTileAt } from "@/lib/worldbox/tent";
 import type { BoardPost } from "@/lib/worldbox/board";
 import { parseSave, serializeSave, type SaveSpace } from "@/lib/worldbox/save";
 import { chooseInitialSave } from "@/lib/worldbox/save-source";
@@ -836,6 +837,9 @@ export default function WorldBoxClient() {
 
     const map: TopDownMap = generateMap(MAP_SEED);
     const lobby = buildLobby();
+    const tent = buildTent();
+    /** 現在の室内空間（ロビー/テント）のデータ。ワールドでは lobby を返す（使われない）。 */
+    const indoorData = (): LobbyData => (space === "tent" ? tent : lobby);
     const textures = loadTextures();
     const dungeon = loadDungeonTiles();
     const lobbySprites = loadLobbySprites();
@@ -877,11 +881,11 @@ export default function WorldBoxClient() {
     // 空間（ワールド / ロビー）。ロビーでは建物・国家・ミニマップは扱わない。
     let space: SaveSpace = "world";
     let worldReturn: { x: number; y: number } | null = null;
-    const activeMap = (): TopDownMap => (space === "lobby" ? lobby.moveMap : effMap);
+    const activeMap = (): TopDownMap => (space === "world" ? effMap : indoorData().moveMap);
     // モブ占有を差し引いた今フレームの固体集合（モブの真上に立つ間の救済用）
     let mobFrameBlocked: ReadonlySet<string> | undefined;
     const activeBlocked = (): ReadonlySet<string> | undefined =>
-      mobFrameBlocked ?? (space === "lobby" ? lobby.blocked : blockedRef.current);
+      mobFrameBlocked ?? (space === "world" ? blockedRef.current : indoorData().blocked);
     const keys = new Set<string>();
     // 固定式スティック: 基点は左下の固定位置（lib/worldbox/stick）。
     // 基点を持ち歩くのは「スティックが起動したか」と倒し量だけ。
@@ -997,7 +1001,7 @@ export default function WorldBoxClient() {
       }
       if (choice.pushLocalToOnline) saveNow();
       else lastSaved = { x: player.x, y: player.y, at: performance.now() };
-      setStatusText(space === "lobby" ? "ロビー" : "共有ワールド");
+      setStatusText(space === "lobby" ? "ロビー" : space === "tent" ? "テント" : "共有ワールド");
     })();
 
     // ---- プレゼンス（空間ごとに分ける。他空間の者は受け取らない） ----
@@ -1652,6 +1656,14 @@ export default function WorldBoxClient() {
         setBoardOpen(false);
         setGuildBoardOpen(false);
         placePlayer(LOBBY_ENTRY.x, LOBBY_ENTRY.y);
+      } else if (target === "tent") {
+        worldReturn = { x: player.x, y: player.y };
+        space = "tent";
+        setSpaceUi("tent");
+        setStatusText("テント");
+        setBoardOpen(false);
+        setGuildBoardOpen(false);
+        placePlayer(TENT_ENTRY.x, TENT_ENTRY.y);
       } else {
         space = "world";
         setSpaceUi("world");
@@ -1679,6 +1691,11 @@ export default function WorldBoxClient() {
       lastTileKey = key;
       if (space === "world") {
         if (tx === WORLD_WARP_PAD.x && ty === WORLD_WARP_PAD.y) doWarp("lobby");
+        else if (tilesRef.current[tileKey(tx, ty)]?.block?.itemId === "tent") doWarp("tent");
+        return;
+      }
+      if (space === "tent") {
+        if (tx === TENT_EXIT.x && ty === TENT_EXIT.y) doWarp("world");
         return;
       }
       if (tx === LOBBY_WARP_PAD.x && ty === LOBBY_WARP_PAD.y) {
@@ -1843,8 +1860,8 @@ export default function WorldBoxClient() {
         }
       }
       checkTileTriggers();
-      if (space === "lobby") {
-        const st = stationNear(lobby.objects, Math.floor(player.x), Math.floor(player.y));
+      if (space !== "world") {
+        const st = stationNear(indoorData().objects, Math.floor(player.x), Math.floor(player.y));
         if (st !== lastStation) {
           lastStation = st;
           setStationUi(st);
@@ -2087,14 +2104,15 @@ export default function WorldBoxClient() {
           }
           ctx.imageSmoothingEnabled = true;
         };
+        const indoor = indoorData();
         const lx0 = Math.max(0, Math.floor(cam.x - cw / TILE / 2 - 1));
-        const lx1 = Math.min(lobby.width - 1, Math.ceil(cam.x + cw / TILE / 2 + 1));
+        const lx1 = Math.min(indoor.width - 1, Math.ceil(cam.x + cw / TILE / 2 + 1));
         const ly0 = Math.max(0, Math.floor(cam.y - ch / TILE / 2 - 1));
-        const ly1 = Math.min(lobby.height - 1, Math.ceil(cam.y + ch / TILE / 2 + 1));
+        const ly1 = Math.min(indoor.height - 1, Math.ceil(cam.y + ch / TILE / 2 + 1));
         ctx.imageSmoothingEnabled = false;
         for (let ty = ly0; ty <= ly1; ty++) {
           for (let tx = lx0; tx <= lx1; tx++) {
-            const id = lobbyTileAt(lobby.tiles, tx, ty);
+            const id = space === "tent" ? tentTileAt(indoor.tiles, tx, ty) : lobbyTileAt(indoor.tiles, tx, ty);
             if (id === L_VOID) continue; // 図形の外は背景のまま
             const sx = lobbyOx + tx * TILE;
             const sy = lobbyOy + ty * TILE;
@@ -2113,7 +2131,7 @@ export default function WorldBoxClient() {
           }
         }
         // 平置きオブジェクト（ワープパッド・階段・タペストリー）は足元レイヤー
-        for (const o of lobby.objects) {
+        for (const o of indoor.objects) {
           if (!FLAT_LOBBY_SPRITES.has(o.sprite)) continue;
           if (o.x + o.w < lx0 || o.x > lx1 || o.y + o.h < ly0 || o.y > ly1) continue;
           drawLobbySprite(o);
@@ -2339,9 +2357,9 @@ export default function WorldBoxClient() {
           draw: () =>
             drawAvatar(
               ctx,
-              space === "lobby" ? Math.round(lobbyOx + o.track.rx * TILE) : toScreenX(o.track.rx),
+              space !== "world" ? Math.round(lobbyOx + o.track.rx * TILE) : toScreenX(o.track.rx),
               // 足元は当たり円の底（中心 + 半径）に合わせる（中心に置くと手前で止まって見える）
-              space === "lobby" ? Math.round(lobbyOy + o.track.ry * TILE) + TILE * PLAYER_RADIUS : toScreenY(o.track.ry) + TILE * PLAYER_RADIUS,
+              space !== "world" ? Math.round(lobbyOy + o.track.ry * TILE) + TILE * PLAYER_RADIUS : toScreenY(o.track.ry) + TILE * PLAYER_RADIUS,
               o.track.entry.face, o.phase, Math.min(1, Math.hypot(o.track.entry.vx, o.track.entry.vy) / WALK_SPEED), o.track.entry.name || null, nationColor, oSwim,
             ),
         });
@@ -2369,8 +2387,8 @@ export default function WorldBoxClient() {
           });
         }
       }
-      if (space === "lobby") {
-        for (const o of lobby.objects) {
+      if (space !== "world") {
+        for (const o of indoorData().objects) {
           if (FLAT_LOBBY_SPRITES.has(o.sprite)) continue;
           const sx = lobbyOx + o.x * TILE;
           const sy = lobbyOy + o.y * TILE;
@@ -2378,7 +2396,7 @@ export default function WorldBoxClient() {
           drawList.push({ y: o.y + o.h, draw: () => drawLobbySprite(o) });
         }
         // 店員NPC（あごむに。静止・当たり判定なし）
-        for (const n of lobby.npcs) {
+        for (const n of indoorData().npcs) {
           drawList.push({
             y: n.y + 1,
             draw: () => drawAvatar(ctx, Math.round(lobbyOx + (n.x + 0.5) * TILE), Math.round(lobbyOy + (n.y + 1) * TILE), 1, 0, 0, null),
@@ -2393,9 +2411,9 @@ export default function WorldBoxClient() {
         draw: () =>
           drawAvatar(
             ctx,
-            space === "lobby" ? Math.round(lobbyOx + player.x * TILE) : toScreenX(player.x),
+            space !== "world" ? Math.round(lobbyOx + player.x * TILE) : toScreenX(player.x),
             // 足元は当たり円の底（中心 + 半径）に合わせる（中心に置くと手前で止まって見える）
-            space === "lobby" ? Math.round(lobbyOy + player.y * TILE) + TILE * PLAYER_RADIUS : toScreenY(player.y) + TILE * PLAYER_RADIUS,
+            space !== "world" ? Math.round(lobbyOy + player.y * TILE) + TILE * PLAYER_RADIUS : toScreenY(player.y) + TILE * PLAYER_RADIUS,
             player.face, player.phase, speedRatio, null, null, playerSwimming,
           ),
       });
@@ -2424,8 +2442,8 @@ export default function WorldBoxClient() {
         for (const p of fxSys.particles) {
           const isGlow = p.shape === "glow";
           if (isGlow !== glowPass) continue;
-          const sx = space === "lobby" ? Math.round(lobbyOx + p.x * TILE) : toScreenX(p.x);
-          const sy = space === "lobby" ? Math.round(lobbyOy + p.y * TILE) : toScreenY(p.y);
+          const sx = space !== "world" ? Math.round(lobbyOx + p.x * TILE) : toScreenX(p.x);
+          const sy = space !== "world" ? Math.round(lobbyOy + p.y * TILE) : toScreenY(p.y);
           if (sx < -TILE || sy < -TILE || sx > cw + TILE || sy > ch + TILE) continue;
           const ratio = fxLifeRatio(p);
           const sizePx = Math.max(1.5, p.size * TILE);
@@ -2555,8 +2573,8 @@ export default function WorldBoxClient() {
 
       // スタミナ（ゼルダ式の円形ゲージをキャラの左上に。満タンで放置すると消える）
       if (staminaGaugeVisible(stamina)) {
-        const px = space === "lobby" ? Math.round(lobbyOx + player.x * TILE) : toScreenX(player.x);
-        const py = space === "lobby" ? Math.round(lobbyOy + player.y * TILE) : toScreenY(player.y);
+        const px = space !== "world" ? Math.round(lobbyOx + player.x * TILE) : toScreenX(player.x);
+        const py = space !== "world" ? Math.round(lobbyOy + player.y * TILE) : toScreenY(player.y);
         const size = TILE * AVATAR_TILES;
         const gx = px - size * 0.72;
         const gy = py - size * 0.80;
@@ -2907,7 +2925,7 @@ export default function WorldBoxClient() {
             </Link>
           </div>
         )}
-        {spaceUi === "lobby" && stationUi && (
+        {spaceUi !== "world" && stationUi && (
           <div
             style={{
               position: "absolute", left: "50%", bottom: 10, transform: "translateX(-50%)",

@@ -339,6 +339,9 @@ const auth = await import(authUrl);
 const rngUrl = dataUrl(transpile("worldbox/rng.ts"));
 const mapgenUrl = dataUrl(transpile("worldbox/mapgen.ts").replaceAll('"./rng"', JSON.stringify(rngUrl)));
 const lobbyModUrl = dataUrl(transpile("worldbox/lobby.ts").replaceAll('"./mapgen"', JSON.stringify(mapgenUrl)));
+const tentModUrl = dataUrl(
+  transpile("worldbox/tent.ts").replaceAll('"./mapgen"', JSON.stringify(mapgenUrl)).replaceAll('"./lobby"', JSON.stringify(lobbyModUrl)),
+);
 const presenceUrl = dataUrl(transpile("worldbox/presence.ts"));
 const presenceOnlineUrl = dataUrl(
   transpile("worldbox/presence-online.ts")
@@ -367,6 +370,7 @@ const presenceRoute = await import(
       .replaceAll('"@/lib/auth"', JSON.stringify(authUrl))
       .replaceAll('"@/lib/worldbox/mapgen"', JSON.stringify(mapgenUrl))
       .replaceAll('"@/lib/worldbox/lobby"', JSON.stringify(lobbyModUrl))
+      .replaceAll('"@/lib/worldbox/tent"', JSON.stringify(tentModUrl))
       .replaceAll('"@/lib/worldbox/presence-online"', JSON.stringify(presenceOnlineUrl))
       .replaceAll('"@/lib/worldbox/presence"', JSON.stringify(presenceUrl)),
   ),
@@ -507,7 +511,7 @@ test("クライアント: ロビー描画はピクセル固定（整数カメラ
   assert.ok(client.includes('showMap && spaceUi === "world"'), "ミニマップがロビーでも出る");
   assert.ok(client.includes('space === "world" && showMapRef.current'), "ミニマップ描画がロビーでも走る");
   assert.ok(client.includes("loadLobbySprites"), "ロビースプライトを読み込んでいない");
-  assert.ok(client.includes("lobby.npcs"), "店員NPCを描いていない");
+  assert.ok(client.includes("indoorData().npcs"), "店員NPCを描いていない");
 });
 
 test("クライアント: プレゼンスは空間つきで送受信し、掲示板パネルがある", () => {
