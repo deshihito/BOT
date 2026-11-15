@@ -20,6 +20,8 @@ const TOKEN_TTL_MS = 10 * 60 * 1000;
 /** ワールドは実質無制限のため、ここには有限空間の矩形だけを置く。 */
 const SPACE_BOUNDS = {
   lobby: { width: 56, height: 64 },
+  lobby2: { width: 40, height: 28 }, // ロビー2Fラウンジ（lobby-floors.ts の LOBBY2_W/H）
+  lobby3: { width: 32, height: 24 }, // ロビー3F展望（lobby-floors.ts の LOBBY3_W/H）
   tent: { width: 22, height: 17 }, // テント拡張の最大段階（tier 2）に合わせる
 };
 /** ワールド座標の上限（presence.ts の PRESENCE_COORD_LIMIT / mapgen.ts の WORLD_COORD_LIMIT と一致）。 */
@@ -33,7 +35,7 @@ const ROLE_IDS = ["blade", "guard", "scout", "miner", "medic"];
 
 /** 空間の座標範囲（min/max 形式）。ワールドは実質無制限。 */
 function boundsForSpace(space) {
-  if (space === "lobby" || space === "tent") {
+  if (SPACE_BOUNDS[space]) {
     const b = SPACE_BOUNDS[space];
     return { minX: 0, maxX: b.width, minY: 0, maxY: b.height };
   }
@@ -49,7 +51,7 @@ function boundsForSpace(space) {
 }
 
 function sanitizeSpace(raw) {
-  if (raw === "lobby" || raw === "tent") return raw;
+  if (raw === "lobby" || raw === "lobby2" || raw === "lobby3" || raw === "tent") return raw;
   if (typeof raw === "string" && INSTANCE_SPACE_RE.test(raw)) return raw;
   return "world";
 }

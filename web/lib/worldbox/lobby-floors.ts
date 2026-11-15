@@ -4,7 +4,8 @@
 // ギルドショップ区画 y48-63）は残置する: ギルドショップは feat タスクの
 // F4 が触るため、今夜は移設しない。2F はラウンジ＋休憩、3F は展望＋休憩。
 // 3F 北の本棚 2 つは L5 の隠し部屋の入口アンカー候補（今はただの家具）。
-// 階段の遷移（クライアント配線）は L2b で WorldBoxClient.tsx に載せる。
+// 階段の遷移は L2b で配線済み: 判定はこのファイルの floorWarpAt（純粋ロジック）、
+// 実行（フェード遷移）は WorldBoxClient.tsx の doFloorWarp が担う。
 // アーケード筐体（L3 第1弾6台・L6 第2弾20台）は新規スプライト arcade_<id>.png を使う（textures.ts に登録）。
 // 筐体パネル・ルーム起動の配線は L4（station はまだ付けない）。
 import { T_GRASS, T_ROCK, tilesSource, type TopDownMap } from "./mapgen";
@@ -14,6 +15,8 @@ import {
   L_PLAZA,
   L_WALL,
   L_WOOD,
+  LOBBY_2F_LANDING,
+  LOBBY_STAIRS_2F,
   isSolidLobbyTile,
   type LobbyData,
   type LobbyObject,
@@ -149,7 +152,7 @@ export const LOBBY2_OBJECTS: readonly LobbyObject[] = objects2;
 
 /** 1F の階段を上がった先の着地点（2F 北踊り場）。 */
 export const LOBBY2_ENTRY = { x: 19.5, y: 6.5 };
-/** 2F の階段タイル（踏むと 1F へ。遷移は L2b のクライアント配線）。 */
+/** 2F の階段タイル（踏むと 1F へ）。 */
 export const LOBBY2_STAIRS_DOWN: readonly { x: number; y: number }[] = [{ x: 19, y: 4 }, { x: 20, y: 4 }];
 /** 2F の階段タイル（踏むと 3F へ）。 */
 export const LOBBY2_STAIRS_UP: readonly { x: number; y: number }[] = [{ x: 19, y: 24 }, { x: 20, y: 24 }];
@@ -313,7 +316,7 @@ export const LOBBY3_OBJECTS: readonly LobbyObject[] = objects3;
 
 /** 2F の階段を上がった先の着地点（3F 北デッキ）。 */
 export const LOBBY3_ENTRY = { x: 15.5, y: 5.5 };
-/** 3F の階段タイル（踏むと 2F へ。遷移は L2b のクライアント配線）。 */
+/** 3F の階段タイル（踏むと 2F へ）。 */
 export const LOBBY3_STAIRS_DOWN: readonly { x: number; y: number }[] = [{ x: 15, y: 3 }, { x: 16, y: 3 }];
 /** 3F の階段を下りた先の着地点（2F 南踊り場）。 */
 export const LOBBY3_DOWN_LANDING = { x: 19.5, y: 22.5 };
@@ -366,4 +369,38 @@ export function buildLobby3(): LobbyData {
     moveMap: tilesSource(0, LOBBY3_W, LOBBY3_H, moveTiles),
   };
   return cached3;
+}
+
+// ---------- 階段遷移（L2b） ----------
+
+/** ロビーの階（1F / 2F / 3F）。 */
+export type LobbyFloorSpace = "lobby" | "lobby2" | "lobby3";
+
+/** 階段を踏んだときの遷移先。着地点は行き先の階段の前（再発火しないタイル）。 */
+export type FloorWarp = { to: LobbyFloorSpace; entry: { x: number; y: number } };
+
+const onTiles = (tiles: readonly { x: number; y: number }[], tx: number, ty: number): boolean =>
+  tiles.some((t) => t.x === tx && t.y === ty);
+
+/**
+ * その空間・タイルが階段なら遷移先を返す。階段でなければ null。
+ * 1F の階段はギルドショップ区画（擬似2F）の東の階段室の続き（LOBBY_STAIRS_2F）。
+ * 擬似2F内の階段（LOBBY_STAIRS_UP / DOWN）とワープパッドは同一空間内の
+ * 移動なのでここでは扱わない（クライアント側の従来処理のまま）。
+ */
+export function floorWarpAt(space: string, tx: number, ty: number): FloorWarp | null {
+  if (space === "lobby") {
+    if (onTiles(LOBBY_STAIRS_2F, tx, ty)) return { to: "lobby2", entry: LOBBY2_ENTRY };
+    return null;
+  }
+  if (space === "lobby2") {
+    if (onTiles(LOBBY2_STAIRS_DOWN, tx, ty)) return { to: "lobby", entry: LOBBY_2F_LANDING };
+    if (onTiles(LOBBY2_STAIRS_UP, tx, ty)) return { to: "lobby3", entry: LOBBY3_ENTRY };
+    return null;
+  }
+  if (space === "lobby3") {
+    if (onTiles(LOBBY3_STAIRS_DOWN, tx, ty)) return { to: "lobby2", entry: LOBBY2_UP_LANDING };
+    return null;
+  }
+  return null;
 }

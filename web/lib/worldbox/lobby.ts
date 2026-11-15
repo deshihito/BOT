@@ -254,6 +254,8 @@ put("chair", 4, 60, { station: "rest" });
 put("table_round", 4, 61, { station: "rest" });
 put("planter", 18, 49);
 put("lamp", 3, 49);
+put("stairs", 17, 50, { solid: false }); // 本物の2F（ラウンジ）への階段（L2b）。1階への階段と同じ東の階段室の続き
+put("stairs", 18, 50, { solid: false });
 put("stairs", 17, 62, { solid: false }); // 1階への階段
 put("stairs", 18, 62, { solid: false });
 
@@ -277,6 +279,10 @@ export const LOBBY_STAIRS_DOWN: readonly { x: number; y: number }[] = [{ x: 17, 
 export const LOBBY_UP_LANDING = { x: 17.5, y: 60.5 };
 /** 階段を下りた先の着地点。 */
 export const LOBBY_DOWN_LANDING = { x: 17.5, y: 27.5 };
+/** 本物の2F（ラウンジ、空間 "lobby2"）への階段タイル（ギルドショップ区画の北東）。 */
+export const LOBBY_STAIRS_2F: readonly { x: number; y: number }[] = [{ x: 17, y: 50 }, { x: 18, y: 50 }];
+/** 2F から下りてきた先の着地点（LOBBY_STAIRS_2F の南隣）。 */
+export const LOBBY_2F_LANDING = { x: 17.5, y: 51.5 };
 
 export type LobbyData = {
   width: number;
