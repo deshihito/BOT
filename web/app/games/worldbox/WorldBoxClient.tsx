@@ -511,7 +511,6 @@ export default function WorldBoxClient() {
     }
   };
   const respawnActionRef = useRef<(point: { x: number; y: number }) => void>(() => {});
-  const instanceWarpRef = useRef<(target: string, entry: { x: number; y: number }) => void>(() => {});
   const bedKeyRef = useRef<string>("");
   const [casinoOpen, setCasinoOpen] = useState(false);
   const [arenaOpen, setArenaOpen] = useState(false);
