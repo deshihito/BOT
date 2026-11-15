@@ -111,7 +111,7 @@ function floorAt(x: number, y: number): number {
 
 // ---------- オブジェクト配置 ----------
 
-export type LobbyStation = "board" | "shop" | "bank" | "casino" | "arena" | "smith" | "guild";
+export type LobbyStation = "board" | "shop" | "bank" | "casino" | "arena" | "smith" | "guild" | "fountain" | "rest";
 
 export type LobbyObject = {
   sprite: string;
@@ -146,7 +146,7 @@ function col(sprite: string, x: number, y0: number, y1: number, opts: { solid?: 
 }
 
 // --- 中央広場 ---
-put("fountain", 27, 23, { w: 3, h: 3 }); // 噴水（3×3・固体）
+put("fountain", 27, 23, { w: 3, h: 3, station: "fountain" }); // 噴水（3×3・固体、コイン投げ）
 row("bulletin_board", 27, 29, 15, { station: "board" }); // 掲示板は広場の北縁
 row("guild_board", 24, 25, 15, { station: "guild" }); // ギルドボードは掲示板の西隣（依頼・役職）
 put("warp_pad", 28, 34, { solid: false }); // ワープパッドは広場の南縁（踏むとワールドへ）
@@ -233,12 +233,12 @@ for (const y of [51, 57]) {
     put("sign_board", x0 + 3, y);
   }
 }
-row("bookshelf", 3, 5, 54);
+row("bookshelf", 3, 5, 54, { station: "rest" });
 row("item_shelf", 8, 10, 54, { station: "shop" });
-row("bookshelf", 13, 15, 54);
-put("sofa", 3, 60);
-put("chair", 4, 60);
-put("table_round", 4, 61);
+row("bookshelf", 13, 15, 54, { station: "rest" });
+put("sofa", 3, 60, { station: "rest" });
+put("chair", 4, 60, { station: "rest" });
+put("table_round", 4, 61, { station: "rest" });
 put("planter", 18, 49);
 put("lamp", 3, 49);
 put("stairs", 17, 62, { solid: false }); // 1階への階段

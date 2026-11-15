@@ -160,9 +160,27 @@ test("設置: 更地（草・土・砂・雪）に置け、アイテムを1つ�
   }
 });
 
+test("設置: 基本素材（木材・石材）はそのままブロックとして置ける", () => {
+  // 木材 → オークの原木として設置され、消費は木材
+  const p = withItems({ wood: 2 });
+  const ok = place(null, p, ME_KEY, grassAt, "wood");
+  assert.equal(ok.ok, true);
+  assert.equal(ok.override.block.itemId, "oak_log");
+  assert.equal(ok.view.block.itemId, "oak_log");
+  assert.equal(inv.countItem(ok.profile, "wood"), 1);
+  // 石材 → 石ブロック
+  const p2 = withItems({ stone: 1 });
+  const ok2 = place(null, p2, ME_KEY, dirtAt, "stone");
+  assert.equal(ok2.ok, true);
+  assert.equal(ok2.override.block.itemId, "stone_block");
+  assert.equal(inv.countItem(ok2.profile, "stone"), 0);
+  // 在庫がなければ置けない
+  assert.equal(place(null, withItems({}), ME_KEY, grassAt, "wood").error, "not_enough_items");
+});
+
 test("設置: ブロック以外・在庫なし・置けない地形は拒む", () => {
-  const p = withItems({ wood: 3, dirt_block: 1 });
-  assert.equal(place(null, p, ME_KEY, grassAt, "wood").error, "unknown_block");
+  const p = withItems({ herb: 3, dirt_block: 1 });
+  assert.equal(place(null, p, ME_KEY, grassAt, "herb").error, "unknown_block");
   assert.equal(place(null, p, ME_KEY, grassAt, "nope").error, "unknown_block");
   assert.equal(place(null, withItems({}), ME_KEY, grassAt, "dirt_block").error, "not_enough_items");
   for (const at of [waterAt, rockAt, treeAt]) {
@@ -504,6 +522,27 @@ test("クライアント: アイコン・設置ブロック描画・固体化が
   const panel = fs.readFileSync(path.join(rootDir, "app/games/worldbox/WorldBoxEconomyPanel.tsx"), "utf8");
   assert.ok(panel.includes("ItemIcon"), "経済パネルにアイコンが無い");
   assert.ok(panel.includes(".icon"), "経済パネルが icon を見ていない");
+});
+
+test("家具は全種 facility で置ける（柵・生け垣も設置対象）", () => {
+  const furniture = inv.ITEMS.filter((i) => i.category === "furniture");
+  assert.ok(furniture.length > 0);
+  for (const item of furniture) {
+    assert.equal(item.facility, true, `${item.id} に facility が無い（置けない家具）`);
+    const placed = place(null, withItems({ [item.id]: 1 }), ME_KEY, grassAt, item.id);
+    assert.equal(placed.ok, true, `${item.id} が設置できない: ${placed.error ?? ""}`);
+  }
+});
+
+test("クライアント: 設置できないタップは無反応で終わらず、置けるタイルを光らせる", () => {
+  const client = fs.readFileSync(path.join(rootDir, "app/games/worldbox/WorldBoxClient.tsx"), "utf8");
+  // 隣接タップで行為が無いときは理由（断片）を出す
+  assert.ok(client.includes("TILE_ERROR_LABEL.tile_blocked"), "行為なしタップへのフィードバックが無い");
+  // ブロック選択中の遠いタップは「遠すぎる」を出す
+  assert.ok(client.includes("TILE_ERROR_LABEL.too_far"), "遠い設置タップへのフィードバックが無い");
+  // ブロック/施設の選択中は置ける隣接タイルをハイライトする
+  assert.ok(client.includes("置ける隣接タイルを薄く光らせる"), "設置先ハイライトが無い");
+  assert.ok(client.includes('actionForTile(v, { blockId: selDef.id })'), "ハイライトが設置可否判定と一致していない");
 });
 
 test("クライアント: 全パネルはステージ内オーバーレイで、スロットはスプライトのみ", () => {

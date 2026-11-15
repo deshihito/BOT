@@ -21,7 +21,7 @@ export const PRESENCE_FRESH_MS = 10_000;
 /** 一度に返すプレイヤー数の上限。 */
 export const PRESENCE_MAX_PLAYERS = 32;
 /** デッドレコニングで外挿してよい上限（秒）。これ以上は止めて待つ。 */
-export const EXTRAPOLATE_CAP_SEC = 1.5;
+export const EXTRAPOLATE_CAP_SEC = 2;
 /** 描画位置が予測位置からこの距離（タイル）以上ずれたら即座に合わせる。 */
 export const SNAP_DISTANCE = 6;
 /** 速度の絶対値上限（タイル/秒）。歩行速度 4.4 の十分な余裕分だけ許可する。 */
@@ -113,6 +113,16 @@ export function parsePresenceEntry(id: string, raw: unknown): PresenceEntry | nu
   const hb = sanitizeHeartbeat(v, fallbackBounds());
   if (!hb) return null;
   return { ...hb, id, ts: v.ts };
+}
+
+/**
+ * サーバー時刻とクライアント時刻のずれ（ミリ秒）の推定。
+ * エントリの ts はサーバー受信時刻なので、受信側の時計がずれていると
+ * 外挿の dt がそのまま狂う。往復の中点を受信時刻とみなす（NTP と同じ考え方）:
+ * 戻り値をクライアントの Date.now() に足すとサーバー時刻に近づく。
+ */
+export function clockOffsetEstimate(serverNow: number, clientBefore: number, clientAfter: number): number {
+  return serverNow - (clientBefore + clientAfter) / 2;
 }
 
 /** 鮮度判定（未来時刻の多少のずれは許容する）。 */

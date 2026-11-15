@@ -41,7 +41,8 @@ export async function GET(request: Request) {
     space: e.space,
     ts: e.ts,
   }));
-  return NextResponse.json({ players }, { headers: NO_STORE });
+  // now はクライアント側の時計ずれ補正用（エントリ ts はサーバー時刻のため）
+  return NextResponse.json({ players, now: Date.now() }, { headers: NO_STORE });
 }
 
 export async function PUT(request: Request) {

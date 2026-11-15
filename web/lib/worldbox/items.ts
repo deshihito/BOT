@@ -34,6 +34,11 @@ export type ItemDef = {
    * プレイヤーは通過できる。固体ブロックとの区別はこのデータで持つ。
    */
   facility?: boolean;
+  /**
+   * この素材はそのままこのブロックとして置ける（基本素材の直接設置）。
+   * 消費は素材側、設置されるブロックは placesBlock の定義で描画・耐久・回収される。
+   */
+  placesBlock?: string;
   /** 硬いブロック（耐久50以上）を掘るのに要る道具（block のみ）。 */
   mineTool?: "axe" | "pickaxe";
   /** ドット絵アイコンのパス（public 配下）。無いアイテムは文字で出す。 */
@@ -51,8 +56,8 @@ export const ITEMS: readonly ItemDef[] = [
   { id: "bento", name: "幕の内弁当", desc: "品数たっぷり", category: "food", price: 45, hunger: 80 },
   { id: "feast", name: "フルコース", desc: "満腹まで食べる", category: "food", price: 50, hunger: 100 },
   // ---- 素材（合成の材料） ---------------------------------------------
-  { id: "wood", name: "木材", desc: "基本の素材", category: "material", price: 8 },
-  { id: "stone", name: "石材", desc: "基本の素材", category: "material", price: 8 },
+  { id: "wood", name: "木材", desc: "基本の素材", category: "material", price: 8, placesBlock: "oak_log" },
+  { id: "stone", name: "石材", desc: "基本の素材", category: "material", price: 8, placesBlock: "stone_block" },
   { id: "herb", name: "薬草", desc: "薬の素材になる草", category: "material", price: 12 },
   { id: "cloth", name: "布", desc: "織物の素材", category: "material", price: 16 },
   { id: "glass", name: "ガラス", desc: "透明な素材", category: "material", price: 18 },
@@ -164,11 +169,11 @@ export const ITEMS: readonly ItemDef[] = [
   { id: "bench", name: "ベンチ", desc: "座れる家具", category: "furniture", price: 30, facility: true },
   { id: "chair", name: "椅子", desc: "座れる家具", category: "furniture", price: 30, facility: true },
   { id: "sign_board", name: "看板", desc: "目印の板", category: "furniture", price: 35, facility: true },
-  { id: "hedge", name: "生け垣", desc: "緑の仕切り", category: "furniture", price: 35 },
+  { id: "hedge", name: "生け垣", desc: "緑の仕切り", category: "furniture", price: 35, facility: true },
   { id: "planter", name: "プランター", desc: "花を植える箱", category: "furniture", price: 38, facility: true },
   { id: "barrel", name: "樽", desc: "物を入れる樽", category: "furniture", price: 45, facility: true },
   { id: "crate", name: "木箱", desc: "物を入れる箱", category: "furniture", price: 45, facility: true },
-  { id: "fence_wood", name: "木の柵", desc: "区切りの柵", category: "furniture", price: 45 },
+  { id: "fence_wood", name: "木の柵", desc: "区切りの柵", category: "furniture", price: 45, facility: true },
   { id: "lamp", name: "ランプ", desc: "明かり", category: "furniture", price: 50, facility: true },
   { id: "item_shelf", name: "棚", desc: "物を並べる棚", category: "furniture", price: 55, facility: true },
   { id: "table_round", name: "丸テーブル", desc: "囲める机", category: "furniture", price: 60, facility: true },
@@ -315,8 +320,8 @@ export const ITEMS: readonly ItemDef[] = [
   { id: "slime_core", name: "スライムコア", desc: "スライムの核", category: "special", price: 160 },
   { id: "wolf_fang", name: "狼の牙", desc: "狼が落とす牙", category: "special", price: 190 },
   // ---- 家具（追加分2） -----------------------------------------------------------
-  { id: "stone_fence", name: "石の柵", desc: "石の区切り", category: "furniture", price: 55 },
-  { id: "iron_fence", name: "鉄の柵", desc: "鉄の区切り", category: "furniture", price: 128 },
+  { id: "stone_fence", name: "石の柵", desc: "石の区切り", category: "furniture", price: 55, facility: true },
+  { id: "iron_fence", name: "鉄の柵", desc: "鉄の区切り", category: "furniture", price: 128, facility: true },
   { id: "wooden_gate", name: "木の門", desc: "出入りの門", category: "furniture", price: 65, facility: true },
   { id: "rug", name: "じゅうたん", desc: "敷く布", category: "furniture", price: 76, facility: true },
 

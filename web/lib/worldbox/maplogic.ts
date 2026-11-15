@@ -10,6 +10,10 @@ import {
 } from "./mapgen";
 import { makeRng } from "./rng";
 
+// チャンク一辺は mapgen の定義が正。利用側（combat 等）がこのモジュール経由で
+// 参照してきた経緯があるため再公開する。
+export { CHUNK_SIZE };
+
 // ---------------------------------------------------------------- バイオーム
 export type BiomeId =
   | "lake" | "beach" | "plains" | "forest" | "dense_forest"

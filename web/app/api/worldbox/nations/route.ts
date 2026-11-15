@@ -6,6 +6,7 @@ import {
   type MyGuildView, type NationActionResult, type NationsState,
 } from "@/lib/worldbox/nations";
 import { isNationsEnabled, loadNationsState, storeNationsState } from "@/lib/worldbox/nations-online";
+import { loadMyLobbyStation } from "@/lib/worldbox/station-online";
 import { loadBuildings } from "@/lib/worldbox/buildings-online";
 import { parseSave, serializeSave } from "@/lib/worldbox/save";
 import { loadWorldBoxSave, storeWorldBoxSave } from "@/lib/worldbox/save-online";
@@ -25,6 +26,9 @@ export const runtime = "nodejs";
 // POST { action: "travel" } : 所属国のユニオンマーク（首都）へ移動する。
 //   所属の検証はサーバー側で行い、移動はセーブとプレゼンスに反映する。
 //   料金・クールダウンは当面なし（定数は nations.ts の FAST_TRAVEL_*）。
+//   役職まわりの操作は全部ギルドボードの前でのみ（依頼と同じ場所検証:
+//   プレゼンス＋stationNear。共有ノート「ギルドボード」「行動の場所制約」）。
+//   トラベルは移動そのものなので場所検証の対象外（≡ メニューから使う）。
 // 保存先は bot_kv（名前空間 worldbox_nations の "nations" / "members"）。
 // 繁栄度の算出にだけ建物（同名前空間の "buildings"）を読み込む。
 // Bot API 未設定なら 503（クライアントは国家なしで遊び続ける）。
@@ -114,6 +118,11 @@ export async function POST(request: Request) {
   const action = (body as { action?: unknown } | null)?.action;
   const ownerKey = sessionOwnerKey(session);
   const fields = body as { guildId?: unknown };
+  // 場所制約: 役職の操作（建国・参加・離脱）はギルドボードの前でのみ。
+  // ファストトラベルは移動そのものなので対象外。
+  if (action !== "travel" && (await loadMyLobbyStation(ownerKey)) !== "guild") {
+    return errorResponse("not_at_guild_board");
+  }
   const state = await loadNationsState();
 
   if (action === "travel") {

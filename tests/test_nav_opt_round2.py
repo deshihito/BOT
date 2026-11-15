@@ -18,10 +18,10 @@ class GlobalVcGenreTest(unittest.TestCase):
         self.assertIn("global_stop", rooms)
         self.assertEqual(VOICE_GENRES["community"][0], "ランダム通話")
         # /vc パネル総数（テーマ変更・メンバー確認の追加で 35 → 37、機能数再編の
-        # vc ルート拡張（音楽6件＋グロチャ自動接続1件）で 37 → 44、言語設定で 44 → 45。
-        # 常設作成は ! コマンド化）
+        # vc ルート拡張（音楽6件＋グロチャ自動接続1件）で 37 → 44、言語設定で 44 → 45、
+        # 音楽の自動再生追加で 45 → 46。常設作成は ! コマンド化）
         total = sum(len(items) for items in VOICE_ACTIONS_BY_GENRE.values())
-        self.assertEqual(total, 45)
+        self.assertEqual(total, 46)
 
 
 class SupportScopeLabelTest(unittest.TestCase):

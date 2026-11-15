@@ -329,14 +329,14 @@ test("presence: parse と鮮度・自己除外・上限", () => {
   assert.ok(!visible.some((p) => p.id === "stale"), "古いエントリが含まれている");
 });
 
-test("presence: デッドレコニング（外挿は1.5秒で頭打ち、範囲内に丸める）", () => {
+test("presence: デッドレコニング（外挿は2秒で頭打ち、範囲内に丸める）", () => {
   const bounds = wb.rectBounds(128, 128);
   const e = { id: "a", name: "n", x: 10, y: 10, vx: 2, vy: -1, face: 1, ts: 1000 };
   assert.deepEqual(wb.predictPosition(e, 1000, bounds), { x: 10, y: 10 });
   const p1 = wb.predictPosition(e, 2000, bounds);
   assert.ok(Math.abs(p1.x - 12) < 1e-9 && Math.abs(p1.y - 9) < 1e-9);
   const p2 = wb.predictPosition(e, 11_000, bounds);
-  assert.ok(Math.abs(p2.x - 13) < 1e-9, `外挿が頭打ちでない x=${p2.x}`);
+  assert.ok(Math.abs(p2.x - 14) < 1e-9, `外挿が頭打ちでない x=${p2.x}`);
   const p3 = wb.predictPosition({ ...e, x: 127.5, vx: 16 }, 3000, bounds);
   assert.equal(p3.x, 128);
 });

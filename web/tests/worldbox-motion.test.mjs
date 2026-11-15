@@ -241,8 +241,8 @@ test("remote: 歩行中の更新では描画位置が飛ばず、なめらかに
     prevX = tr.rx;
   }
   assert.ok(maxStep < 0.35, `1フレームで飛びすぎ: ${maxStep}`);
-  // 外挿は1.5秒で頭打ち → 目標は 10 + 4.4*1.5 = 16.6
-  assert.ok(Math.abs(tr.rx - 16.6) < 0.6, `外挿目標へ寄っていない: ${tr.rx}`);
+  // 外挿は2秒で頭打ち → 目標は 10 + 4.4*2 = 18.8（目標が動き続けるため寄せは緩めに見る）
+  assert.ok(Math.abs(tr.rx - 18.8) < 0.9, `外挿目標へ寄っていない: ${tr.rx}`);
   // 新しいスナップショット（2秒時点で 18.8）を受けても描画位置はその場で動かない
   const before = tr.rx;
   tr = rm.updateRemoteTrack(tr, entry(18.8, 10, 4.4, 0, 2000), 2000, BOUNDS);
@@ -266,8 +266,8 @@ test("remote: 大きく離れた更新（ワープ）は即座に合わせる", 
 test("remote: 外挿は頭打ちになり、止まった相手はその場に収まる", () => {
   let tr = rm.createRemoteTrack(entry(10, 10, 4.4, 0, 0), 0, BOUNDS);
   for (let i = 0; i < 120; i++) tr = rm.stepRemoteTrack(tr, 10_000, 1 / 60, BOUNDS);
-  assert.ok(Math.abs(tr.rx - 16.6) < 0.3, `頭打ち位置に収まっていない: ${tr.rx}`);
-  assert.ok(tr.rx < 17);
+  assert.ok(Math.abs(tr.rx - 18.8) < 0.3, `頭打ち位置に収まっていない: ${tr.rx}`);
+  assert.ok(tr.rx < 19.1);
 });
 
 test("remote: 向きはスナップショットの face がそのまま使われる", () => {

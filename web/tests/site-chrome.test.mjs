@@ -24,6 +24,17 @@ test("ポートフォリオ枠（/folio 配下）では共通クロームを出�
   assert.equal(m.showsCtaBand("/folio/deshihito"), false);
 });
 
+test("WORLD BOX（/games/worldbox）では共通クロームを出さない", () => {
+  assert.equal(m.isChromelessPath("/games/worldbox"), true);
+  assert.equal(m.isChromelessPath("/games/worldbox/"), true);
+  assert.equal(m.isChromelessPath("/games/worldboxx"), false);
+  assert.equal(m.showsCtaBand("/games/worldbox"), false);
+  // ゲームハブや他のゲーム詳細では従来どおり出す
+  assert.equal(m.isChromelessPath("/games"), false);
+  assert.equal(m.isChromelessPath("/games/chess"), false);
+  assert.equal(m.showsCtaBand("/games/chess"), true);
+});
+
 test("それ以外のページでは共通クロームを出す", () => {
   assert.equal(m.isChromelessPath("/"), false);
   assert.equal(m.isChromelessPath("/games"), false);

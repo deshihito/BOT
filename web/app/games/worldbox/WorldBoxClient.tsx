@@ -16,14 +16,19 @@ import {
 } from "@/lib/worldbox/mapgen";
 import { pickRandomSpawn } from "@/lib/worldbox/spawn";
 import { DASH_SPEED, SWIM_DASH_SPEED, SWIM_SPEED, WALK_SPEED, findFreeNear, isWaterAt, stepMove } from "@/lib/worldbox/move";
-import { nightAmount, phaseAtTime } from "@/lib/worldbox/daynight";
+import { isNightPhase, nightAmount, phaseAtTime } from "@/lib/worldbox/daynight";
+import { mobById, mobOccupiesTile, type PlacedMob } from "@/lib/worldbox/mobs";
+import {
+  MOB_ATTACK_RANGE, MOB_RESPAWN_MS, attackTarget, knockbackTarget, mobBlockedTiles, mobDistance, mobFootprintTiles,
+  mobHpNow, mobKeyOf, visibleMobs, type MobState,
+} from "@/lib/worldbox/combat";
 import { advanceWalkPhase, attackSwingAngle, damp, moveLean, stepBeatIndex, walkBob, walkSquashY } from "@/lib/worldbox/anim";
 import {
-  ambientKindFor, createFxSystem, createShake, fxLifeRatio, popProgress, popScale, shakeOffsetAt,
-  slashAlpha, spawnAmbient, spawnBurst, startShake, stepFx, swingProgress,
+  WHIFF_ALPHA_SCALE, createFxSystem, createShake, fxLifeRatio, phaseKind, popProgress, popScale, shakeOffsetAt,
+  slashAlpha, spawnAmbient, spawnBurst, spawnMobFx, startShake, stepFx, swingProgress, weatherAmbientKind, weatherAt,
   type FxBurstKind, type FxShake, type FxSystem,
 } from "@/lib/worldbox/fx";
-import type { PresenceEntry } from "@/lib/worldbox/presence";
+import { clockOffsetEstimate, type PresenceEntry } from "@/lib/worldbox/presence";
 import {
   STAMINA_MAX, canDash, createStamina, createTapTracker, isStickDash, registerKeyTap, rescueStamina,
   staminaGaugeVisible, stepStamina, type StaminaState, type StaminaUse, type TapTracker,
@@ -50,6 +55,7 @@ import { loadDungeonTiles, loadFarmSprites, loadLobbySprites, loadTextures } fro
 import { isStickTouch, stickBase, stickVector } from "@/lib/worldbox/stick";
 import { useGamesNav } from "../GamesShell";
 import WorldBoxCasinoPanel from "./WorldBoxCasinoPanel";
+import WorldBoxArenaPanel from "./WorldBoxArenaPanel";
 import WorldBoxEconomyPanel from "./WorldBoxEconomyPanel";
 import WorldBoxGuildBoardPanel from "./WorldBoxGuildBoardPanel";
 
@@ -141,6 +147,7 @@ const NATION_ERROR_LABEL: Record<string, string> = {
   nation_not_found: "国が見つかりません",
   not_in_nation: "国に所属していません",
   king_must_transfer_or_disband: "国民がいる間、王は離脱できません",
+  not_at_guild_board: "ギルドボードの前で操作してください",
   unauthorized: "ログインが必要です",
   tile_blocked: "そこには建てられません",
   cap_reached: "建築上限に達しています",
@@ -150,6 +157,38 @@ const NATION_ERROR_LABEL: Record<string, string> = {
 };
 
 /** タイル行為の失敗ラベル（断片のみ）。 */
+/** モブの描画色（本体色）と特徴。スプライトの代わりに図形で描くための表。 */
+const MOB_STYLE: Record<string, { body: string; sub?: string; feature?: "ears" | "snout" | "comb" | "horns" | "shell" | "wings" | "blob" | "bones" }> = {
+  mouse: { body: "#9a8f85", feature: "ears" },
+  chicken: { body: "#f2ede2", sub: "#e2483a", feature: "comb" },
+  rabbit: { body: "#e8e2d6", feature: "ears" },
+  frog: { body: "#69a84f", feature: "blob" },
+  crab: { body: "#d96b4a", feature: "shell" },
+  bee: { body: "#e8c33c", sub: "#4a3b28", feature: "wings" },
+  slime: { body: "#6fc46a", feature: "blob" },
+  pig: { body: "#e8a0b4", feature: "snout" },
+  sheep: { body: "#ddd6c8", feature: "blob" },
+  cow: { body: "#efe9dd", sub: "#6b543f", feature: "horns" },
+  deer: { body: "#b0824f", feature: "horns" },
+  horse: { body: "#8a6844", feature: "ears" },
+  boar: { body: "#7a5c40", feature: "snout" },
+  wolf: { body: "#8d939e", feature: "ears" },
+  spider: { body: "#4c4453", feature: "blob" },
+  skeleton: { body: "#e9e6da", feature: "bones" },
+  bear: { body: "#6f5138", feature: "ears" },
+  golem: { body: "#8d9291", feature: "shell" },
+  treant: { body: "#5d7a3c", sub: "#7a5c40", feature: "horns" },
+  sea_serpent: { body: "#3f7f9e", feature: "blob" },
+  giant_golem: { body: "#7c8382", feature: "shell" },
+  giant: { body: "#c9a186", feature: "blob" },
+  ancient_turtle: { body: "#5f7f5a", feature: "shell" },
+  world_dragon: { body: "#7a4a8c", feature: "wings" },
+};
+/** モブ被弾/死亡エフェクトの色（本体色に寄せる）。 */
+const MOB_FX_COLOR: Record<string, string> = Object.fromEntries(
+  Object.entries(MOB_STYLE).map(([id, s]) => [id, s.body]),
+);
+
 const TILE_ERROR_LABEL: Record<string, string> = {
   tool_required: "道具が必要",
   tile_blocked: "そこではできない",
@@ -246,6 +285,8 @@ const STATION_LABEL: Record<LobbyStation, string> = {
   casino: "カジノ",
   arena: "闘技場",
   smith: "鍛冶屋",
+  fountain: "噴水",
+  rest: "休憩",
 };
 
 export default function WorldBoxClient() {
@@ -379,6 +420,9 @@ export default function WorldBoxClient() {
     }
   };
   const [casinoOpen, setCasinoOpen] = useState(false);
+  const [arenaOpen, setArenaOpen] = useState(false);
+  const [plazaMsg, setPlazaMsg] = useState("");
+  const staminaBoostRef = useRef(false);
   const [boardOpen, setBoardOpen] = useState(false);
   const [guildBoardOpen, setGuildBoardOpen] = useState(false);
   const [boardPosts, setBoardPosts] = useState<BoardPost[]>([]);
@@ -427,7 +471,42 @@ export default function WorldBoxClient() {
   useEffect(() => {
     if (stationUi !== "board") setBoardOpen(false);
     if (stationUi !== "casino") setCasinoOpen(false);
+    if (stationUi !== "guild") setGuildBoardOpen(false);
+    if (stationUi !== "arena") setArenaOpen(false);
+    setPlazaMsg("");
   }, [stationUi]);
+
+  // 噴水・休憩の小施設アクション（場所検証はサーバー側、回復はここで適用）
+  const plazaAction = async (action: "fountain" | "rest") => {
+    try {
+      const res = await fetch("/api/worldbox/plaza", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ action }),
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        error?: string; item?: string | null; retryAfterSec?: number;
+      };
+      if (!res.ok) {
+        setPlazaMsg(
+          data.error === "insufficient_balance" ? "コインが足りません"
+          : data.error === "rest_cooldown" ? `まだ休めません（あと ${data.retryAfterSec ?? "?"} 秒）`
+          : data.error === "unauthorized" ? "ログインが必要です"
+          : "受け付けられませんでした",
+        );
+        return;
+      }
+      staminaBoostRef.current = true;
+      if (action === "fountain") {
+        const itemName = data.item ? itemById(data.item)?.name ?? data.item : null;
+        setPlazaMsg(itemName ? `スタミナが回復した。${itemName} を手に入れた` : "スタミナが回復した");
+      } else {
+        setPlazaMsg("スタミナが回復した");
+      }
+    } catch {
+      setPlazaMsg("受け付けられませんでした");
+    }
+  };
 
   const applyNationsData = (data: NationsResponse) => {
     nationsRef.current = data;
@@ -483,6 +562,12 @@ export default function WorldBoxClient() {
       const data = (await res.json().catch(() => ({}))) as { error?: string };
       if (!res.ok) {
         setNationMsg(BUILDING_ERROR_LABEL[data.error ?? ""] ?? "失敗しました");
+        // 失敗は空振りで返す（風切りだけ・成功の粒は出さない）
+        fxEventsRef.current.push({
+          kind: "whiff",
+          x: typeof body.x === "number" ? body.x : Math.floor(playerPosRef.current.x),
+          y: typeof body.y === "number" ? body.y : Math.floor(playerPosRef.current.y),
+        });
         return;
       }
       if (typeof body.x === "number" && typeof body.y === "number") {
@@ -531,8 +616,9 @@ export default function WorldBoxClient() {
   }, []);
   const tilesRef = useRef<TileOverridesMap>({});
   const tilesVersionRef = useRef(0);
-  /** 演出イベントの受け渡し（行為の成功→描画ループでパーティクル/揺れ/ポップに変換）。 */
-  const fxEventsRef = useRef<{ kind: FxBurstKind; x: number; y: number }[]>([]);
+  /** 演出イベントの受け渡し（行為の成功/失敗→描画ループでパーティクル/揺れ/ポップに変換）。
+   * whiff は空振り（風切りのみ、粒なし）。hit/death/spawn はモブ演出用（sizeTiles/color 任意）。 */
+  const fxEventsRef = useRef<{ kind: FxBurstKind | "whiff"; x: number; y: number; sizeTiles?: number; color?: string }[]>([]);
   /** 自分の不透明 ID（プレゼンス ID）。自分のブロック判定に使う。 */
   const selfIdRef = useRef<string | null>(null);
   /** タイル上書きから設置ブロックの固体集合を作り直す（施設は占有のみで固体にしない）。 */
@@ -594,6 +680,8 @@ export default function WorldBoxClient() {
       };
       if (!res.ok) {
         setTileMsg(TILE_ERROR_LABEL[data.error ?? ""] ?? "できませんでした");
+        // 失敗は空振りで返す（風切りだけ・成功の粒は出さない）
+        fxEventsRef.current.push({ kind: "whiff", x, y });
         return;
       }
       // 成功した行為は演出で返す（粒・揺れ・出現ポップは描画ループ側で出す）
@@ -613,10 +701,72 @@ export default function WorldBoxClient() {
       if (data.profile) setInvProfile(data.profile);
     } catch {
       setTileMsg("できませんでした");
+      fxEventsRef.current.push({ kind: "whiff", x, y });
     }
   };
   const postTileActionRef = useRef(postTileAction);
   postTileActionRef.current = postTileAction;
+  /** モブ個体状態（傷/死亡がある個体だけサーバーから受ける）。 */
+  const mobStatesRef = useRef<Record<string, MobState>>({});
+  const refreshMobs = async () => {
+    try {
+      const px = Math.floor(playerPosRef.current.x);
+      const py = Math.floor(playerPosRef.current.y);
+      const x0 = px - 64;
+      const y0 = py - 64;
+      const res = await fetch(
+        `/api/worldbox/mobs?x0=${x0}&y0=${y0}&x1=${x0 + 127}&y1=${y0 + 127}`,
+        { headers: { Accept: "application/json" } },
+      );
+      if (!res.ok) return;
+      const data = (await res.json()) as { states?: Record<string, MobState> };
+      const next: Record<string, MobState> = { ...mobStatesRef.current };
+      for (const key of Object.keys(next)) {
+        const m = /@(-?\d+),(-?\d+)$/.exec(key);
+        if (!m) continue;
+        const x = Number(m[1]);
+        const y = Number(m[2]);
+        if (x >= x0 && x <= x0 + 127 && y >= y0 && y <= y0 + 127) delete next[key];
+      }
+      Object.assign(next, data.states ?? {});
+      mobStatesRef.current = next;
+    } catch { /* 読めなくても歩き続けられる */ }
+  };
+  /** モブへの攻撃（サーバーが配置・距離・HP の正）。結果は演出で返す。 */
+  const attackMob = async (placed: PlacedMob) => {
+    const key = mobKeyOf(placed);
+    const def = mobById(placed.mobId);
+    try {
+      const res = await fetch("/api/worldbox/mobs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "attack", mobId: placed.mobId, x: placed.x, y: placed.y }),
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        error?: string; hp?: number; dead?: boolean; profile?: PlayerProfile;
+      };
+      if (!res.ok) {
+        if (data.error === "too_far") setTileMsg(TILE_ERROR_LABEL.too_far);
+        fxEventsRef.current.push({ kind: "whiff", x: placed.x, y: placed.y });
+        return;
+      }
+      const next = { ...mobStatesRef.current };
+      if (data.dead) next[key] = { hp: 0, deadUntil: Date.now() + MOB_RESPAWN_MS };
+      else if (typeof data.hp === "number") next[key] = { hp: data.hp };
+      mobStatesRef.current = next;
+      fxEventsRef.current.push({
+        kind: data.dead ? "death" : "hit",
+        x: placed.x, y: placed.y,
+        sizeTiles: placed.size,
+        color: def ? MOB_FX_COLOR[def.id] : undefined,
+      });
+      if (data.profile) setInvProfile(data.profile);
+    } catch {
+      fxEventsRef.current.push({ kind: "whiff", x: placed.x, y: placed.y });
+    }
+  };
+  const attackMobRef = useRef(attackMob);
+  attackMobRef.current = attackMob;
   /** インベントリ整理: 任意スロット間の移動（サーバー側 moveSlot が正）。 */
   const moveItem = async (from: SlotRef, to: SlotRef) => {
     try {
@@ -651,11 +801,13 @@ export default function WorldBoxClient() {
     void refreshBuildings();
     void refreshInv();
     void refreshTiles();
+    void refreshMobs();
     const timer = window.setInterval(() => {
       void refreshNations();
       void refreshBuildings();
       void refreshInv();
       void refreshTiles();
+      void refreshMobs();
     }, 15000);
     return () => window.clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -725,13 +877,29 @@ export default function WorldBoxClient() {
     let worldReturn: { x: number; y: number } | null = null;
     const activeMap = (): TopDownMap => (space === "lobby" ? lobby.moveMap : worldMap);
     const activeBounds = () => (space === "lobby" ? rectBounds(LOBBY_W, LOBBY_H) : worldBounds());
+    // モブ占有を差し引いた今フレームの固体集合（モブの真上に立つ間の救済用）
+    let mobFrameBlocked: ReadonlySet<string> | undefined;
     const activeBlocked = (): ReadonlySet<string> | undefined =>
-      space === "lobby" ? lobby.blocked : blockedRef.current;
+      mobFrameBlocked ?? (space === "lobby" ? lobby.blocked : blockedRef.current);
     const keys = new Set<string>();
     // 固定式スティック: 基点は左下の固定位置（lib/worldbox/stick）。
     // 基点を持ち歩くのは「スティックが起動したか」と倒し量だけ。
     const joy = { active: false, pointerId: -1, dx: 0, dy: 0 };
     const others = new Map<string, OtherRender>();
+    /** モブの見た目状態（現在位置・被弾フラッシュ・ノックバック・歩行位相）。
+     * 配置と HP/死亡は決定的配置＋サーバー状態が正で、ここは動きの表現だけを持つ。 */
+    type MobRender = {
+      ax: number; ay: number; wx: number; wy: number;
+      tx: number; ty: number; nextThink: number; phase: number; face: 1 | -1;
+      flashAt: number; kx: number; ky: number; seenAt: number; fleeUntil: number;
+    };
+    const mobRenders = new Map<string, MobRender>();
+    let mobCacheKey = "";
+    let mobCache: PlacedMob[] = [];
+    let lastAttackAt = 0;
+    /** 接触中のモブ（個体キー）と、敵対ノックバックを最後に発火した時刻。 */
+    let contactMobKeyNow: string | null = null;
+    let contactFiredAt = 0;
     // スタミナとダッシュ（キーの2度押し / スティックの強い倒し）
     let stamina: StaminaState = createStamina();
     let tapTracker: TapTracker = createTapTracker();
@@ -749,14 +917,16 @@ export default function WorldBoxClient() {
     const fxSys: FxSystem = createFxSystem((Date.now() % 2147483646) + 1);
     if (reducedMotion) fxSys.intensity = 0.35;
     let shake: FxShake = createShake();
-    /** 道具スイング（タップ即時応答）。itemId のアイコンを振る。 */
-    let swing = { startedAt: 0, itemId: null as string | null, face: 1 as 1 | -1 };
+    /** 道具スイング（タップ即時応答）。itemId のアイコンを振る。whiff は空振り（風切りのみ）。 */
+    let swing = { startedAt: 0, itemId: null as string | null, face: 1 as 1 | -1, whiff: false };
     /** 出現ポップ中タイル "x,y" → 開始時刻。 */
     const pops = new Map<string, number>();
     let lastBeat = 0;
     let lastDashFxAt = 0;
     let lastSwimFxAt = 0;
     let lastAmbientAt = 0;
+    /** 直前フレームの時間帯（切り替わった瞬間に環境粒を足す）。 */
+    let lastPhaseKind = "";
     const popScaleFor = (key: string, nowMs: number): number => {
       const started = pops.get(key);
       if (started === undefined) return 1;
@@ -828,6 +998,100 @@ export default function WorldBoxClient() {
     })();
 
     // ---- プレゼンス（空間ごとに分ける。他空間の者は受け取らない） ----
+    // エントリの ts はサーバー時刻。受信側の時計ずれを GET の now で補正してから
+    // 外挿に使う（ずれがそのまま描画位置のズレになるため）。
+    let clockOffsetMs = 0;
+    const presenceNow = () => Date.now() + clockOffsetMs;
+    /** ポーリングで連続して見えなかった回数（1回の欠落では消さない）。 */
+    const missedPolls = new Map<string, number>();
+    /** 受信したエントリを他プレイヤーのトラックへ反映する（ポーリングと WS で共用）。 */
+    const applyPresenceEntry = (entry: PresenceEntry, now: number) => {
+      const cur = others.get(entry.id);
+      if (!cur) {
+        others.set(entry.id, { track: createRemoteTrack(entry, now, activeBounds()), phase: 0 });
+      } else {
+        cur.track = updateRemoteTrack(cur.track, entry, now, activeBounds());
+      }
+    };
+    /** サーバー時刻とのずれサンプルを取り込む（急な振れを抑えるため平滑化する）。 */
+    const absorbClockSample = (serverNow: number, before: number, after: number) => {
+      const sample = clockOffsetEstimate(serverNow, before, after);
+      clockOffsetMs = clockOffsetMs === 0 ? sample : clockOffsetMs + (sample - clockOffsetMs) * 0.3;
+    };
+    // ---- リアルタイム中継（WebSocket）。繋がらない間は REST ポーリングが正 ----
+    let rtSocket: WebSocket | null = null;
+    let rtToken: string | null = null;
+    let rtTokenAt = 0;
+    let rtRetryAt = 0;
+    let rtBackoffMs = 1000;
+    let rtReconnectTimer: number | undefined;
+    /** WS 経由のハートビート送信（中継は REST と同じ整形規則で受ける）。 */
+    const sendWsHeartbeat = () => {
+      if (!rtSocket || rtSocket.readyState !== WebSocket.OPEN) return;
+      try {
+        rtSocket.send(JSON.stringify({ t: "hb", x: player.x, y: player.y, vx: player.vx, vy: player.vy, face: player.face, space }));
+      } catch { /* noop */ }
+    };
+    /** 中継への接続（トークン取得→接続→受信→再接続）。失敗してもポーリングが続く。 */
+    const connectRealtime = async () => {
+      if (disposed || !loggedIn || rtSocket) return;
+      try {
+        if (!rtToken || Date.now() - rtTokenAt > 8 * 60 * 1000) {
+          const res = await fetch("/api/worldbox/realtime-token", { method: "POST", headers: { Accept: "application/json" } });
+          if (!res.ok) throw new Error("token");
+          const body = (await res.json()) as { token?: string };
+          if (!body.token) throw new Error("token");
+          rtToken = body.token;
+          rtTokenAt = Date.now();
+        }
+        if (disposed) return;
+        const proto = location.protocol === "https:" ? "wss:" : "ws:";
+        const ws = new WebSocket(`${proto}//${location.host}/api/worldbox/realtime?t=${encodeURIComponent(rtToken)}`);
+        rtSocket = ws;
+        ws.onopen = () => {
+          rtBackoffMs = 1000;
+          sendWsHeartbeat();
+        };
+        ws.onmessage = (ev) => {
+          const arrivedAt = Date.now();
+          let msg: { t?: string; now?: number; p?: PresenceEntry; players?: PresenceEntry[]; id?: string };
+          try {
+            msg = JSON.parse(String(ev.data));
+          } catch {
+            return;
+          }
+          if (typeof msg.now === "number") absorbClockSample(msg.now, arrivedAt, arrivedAt);
+          const now = presenceNow();
+          if (msg.t === "snap") {
+            for (const entry of msg.players ?? []) {
+              missedPolls.delete(entry.id);
+              applyPresenceEntry(entry, now);
+            }
+            setOthersCount(others.size);
+          } else if (msg.t === "up" && msg.p) {
+            missedPolls.delete(msg.p.id);
+            applyPresenceEntry(msg.p, now);
+            setOthersCount(others.size);
+          } else if (msg.t === "bye" && msg.id) {
+            others.delete(msg.id);
+            missedPolls.delete(msg.id);
+            setOthersCount(others.size);
+          }
+        };
+        const onGone = () => {
+          if (rtSocket === ws) rtSocket = null;
+          if (disposed) return;
+          rtRetryAt = Date.now() + rtBackoffMs;
+          rtBackoffMs = Math.min(10_000, rtBackoffMs * 2);
+          rtReconnectTimer = window.setTimeout(() => void connectRealtime(), rtBackoffMs);
+        };
+        ws.onclose = onGone;
+        ws.onerror = onGone;
+      } catch {
+        rtRetryAt = Date.now() + rtBackoffMs;
+        rtBackoffMs = Math.min(10_000, rtBackoffMs * 2);
+      }
+    };
     const sendHeartbeat = () => {
       if (!loggedIn) return;
       fetch("/api/worldbox/presence", {
@@ -837,23 +1101,29 @@ export default function WorldBoxClient() {
       }).catch(() => { /* noop */ });
     };
     const pollOthers = async () => {
+      const before = Date.now();
       try {
         const res = await fetch(`/api/worldbox/presence?space=${space}`, { headers: { Accept: "application/json" } });
         if (!res.ok) return;
-        const body = (await res.json()) as { players?: PresenceEntry[] };
+        const body = (await res.json()) as { players?: PresenceEntry[]; now?: number };
         if (disposed) return;
+        if (typeof body.now === "number") absorbClockSample(body.now, before, Date.now());
+        const now = presenceNow();
         const seen = new Set<string>();
         for (const entry of body.players ?? []) {
           seen.add(entry.id);
-          const cur = others.get(entry.id);
-          if (!cur) {
-            others.set(entry.id, { track: createRemoteTrack(entry, Date.now(), activeBounds()), phase: 0 });
-          } else {
-            cur.track = updateRemoteTrack(cur.track, entry, Date.now(), activeBounds());
-          }
+          missedPolls.delete(entry.id);
+          applyPresenceEntry(entry, now);
         }
         for (const id of [...others.keys()]) {
-          if (!seen.has(id)) others.delete(id);
+          if (seen.has(id)) continue;
+          const missed = (missedPolls.get(id) ?? 0) + 1;
+          if (missed >= 2) {
+            others.delete(id);
+            missedPolls.delete(id);
+          } else {
+            missedPolls.set(id, missed);
+          }
         }
         setOthersCount(others.size);
       } catch { /* noop */ }
@@ -862,8 +1132,27 @@ export default function WorldBoxClient() {
       if (!loggedIn) return;
       fetch("/api/worldbox/presence", { method: "DELETE", keepalive: true }).catch(() => { /* noop */ });
     };
-    const heartbeatTimer = window.setInterval(sendHeartbeat, 1000);
-    const pollTimer = window.setInterval(pollOthers, 2000);
+    // ハートビートは適応間隔: 移動中は 500ms、静止中は 2s。
+    // ワープやノックバック等の大きなジャンプは間隔を待たず即送る。
+    let lastHeartbeatAt = 0;
+    let lastHeartbeatPos = { x: player.x, y: player.y };
+    const heartbeatTick = () => {
+      if (!loggedIn) return;
+      // 中継が未接続なら再接続を試みる（再試行時刻を過ぎたときだけ）
+      if (!rtSocket && Date.now() >= rtRetryAt) void connectRealtime();
+      const now = performance.now();
+      const movedDist = Math.hypot(player.x - lastHeartbeatPos.x, player.y - lastHeartbeatPos.y);
+      const moving = Math.hypot(player.vx, player.vy) > 0.1 || movedDist > 0.05;
+      const wsOpen = rtSocket?.readyState === WebSocket.OPEN;
+      const interval = wsOpen ? (moving ? 100 : 1000) : moving ? 500 : 2000;
+      if (movedDist <= 4 && now - lastHeartbeatAt < interval) return;
+      lastHeartbeatAt = now;
+      lastHeartbeatPos = { x: player.x, y: player.y };
+      if (wsOpen) sendWsHeartbeat();
+      else sendHeartbeat();
+    };
+    const heartbeatTimer = window.setInterval(heartbeatTick, 250);
+    const pollTimer = window.setInterval(pollOthers, 1000);
     pollOthers();
 
     // ---- 入力 ----
@@ -902,12 +1191,82 @@ export default function WorldBoxClient() {
       };
     };
     /** 道具タップ: 選択中の道具/種と隣接タイルの状態で行為が決まる。 */
+    /** モブのタップ = 攻撃。タイル行為より優先する（モブがいるマスは殴る）。 */
+    const handleMobTap = (t: { x: number; y: number }): boolean => {
+      if (!invRef.current) return false;
+      const nowMs = Date.now();
+      const px = Math.floor(player.x);
+      const py = Math.floor(player.y);
+      const selSlotItem = invRef.current.hotbar[selSlotRef.current] ?? null;
+      const selDef = selSlotItem ? itemById(selSlotItem.id) : null;
+      // 剣は照準方式でなく範囲方式: 振ること自体は常に応答し、範囲内のモブに当たる。
+      // 狙いはタップ方向へ向け、対象は attackTarget が「タップを含む個体→近い個体」で選ぶ。
+      if (selDef?.tool === "sword") {
+        if (t.x !== px || t.y !== py) player.face = t.x + 0.5 >= player.x ? 1 : -1;
+        swing = { startedAt: performance.now(), itemId: selDef.id, face: player.face, whiff: false };
+        const candidates: { mobId: string; x: number; y: number; size: number; placed: PlacedMob }[] = [];
+        for (const placed of mobCache) {
+          const def = mobById(placed.mobId);
+          if (!def) continue;
+          const key = mobKeyOf(placed);
+          if (!mobHpNow(def, mobStatesRef.current[key] ?? null, nowMs).alive) continue;
+          const r = mobRenders.get(key);
+          candidates.push({
+            mobId: placed.mobId,
+            x: r ? Math.floor(r.wx) : placed.x,
+            y: r ? Math.floor(r.wy) : placed.y,
+            size: placed.size,
+            placed,
+          });
+        }
+        const target = attackTarget(px, py, t.x, t.y, candidates);
+        if (target) {
+          if (nowMs - lastAttackAt >= 350) {
+            lastAttackAt = nowMs;
+            void attackMobRef.current(target.placed);
+          }
+          return true;
+        }
+        return false; // 空振り（スイングは出した。タイル行為は通常どおり続く）
+      }
+      for (const placed of mobCache) {
+        const def = mobById(placed.mobId);
+        if (!def) continue;
+        const key = mobKeyOf(placed);
+        if (!mobHpNow(def, mobStatesRef.current[key] ?? null, nowMs).alive) continue;
+        const r = mobRenders.get(key);
+        const cx = r ? Math.floor(r.wx) : placed.x;
+        const cy = r ? Math.floor(r.wy) : placed.y;
+        if (!mobOccupiesTile(placed.size, cx, cy, t.x, t.y)) continue;
+        if (mobDistance(px, py, { x: cx, y: cy, size: placed.size }) > MOB_ATTACK_RANGE) {
+          setTileMsg(TILE_ERROR_LABEL.too_far);
+          return true;
+        }
+        // 向きをモブへ向けて即時に振る（HP と粒はサーバー応答で返す）
+        player.face = cx + 0.5 >= player.x ? 1 : -1;
+        const slot = invRef.current.hotbar[selSlotRef.current] ?? null;
+        swing = { startedAt: performance.now(), itemId: slot?.id ?? null, face: player.face, whiff: false };
+        if (nowMs - lastAttackAt >= 350) {
+          lastAttackAt = nowMs;
+          void attackMobRef.current(placed);
+        }
+        return true;
+      }
+      return false;
+    };
     const handleTileTap = (t: { x: number; y: number }): boolean => {
       const prof = invRef.current;
       if (!prof) return false;
+      const slot = prof.hotbar[selSlotRef.current] ?? null;
+      const selItem = slot ? itemById(slot.id) : null;
+      const wantsPlace = !!selItem && (selItem.category === "block" || selItem.facility === true || !!selItem.placesBlock);
       const px = Math.floor(player.x);
       const py = Math.floor(player.y);
-      if (Math.max(Math.abs(t.x - px), Math.abs(t.y - py)) > 1) return false;
+      if (Math.max(Math.abs(t.x - px), Math.abs(t.y - py)) > 1) {
+        // ブロック選択中の遠いタップは設置のつもりなので、無反応で終わらせない
+        if (wantsPlace) setTileMsg(TILE_ERROR_LABEL.too_far);
+        return false;
+      }
       const view = tileView(terrainMap, tilesRef.current, t.x, t.y, Date.now(), null);
       // 自分のブロックかどうかは、サーバーが返した自分の ID で判定する
       if (view.block) {
@@ -917,20 +1276,23 @@ export default function WorldBoxClient() {
           mine: selfIdRef.current !== null && ov?.block?.ownerId === selfIdRef.current,
         };
       }
-      const slot = prof.hotbar[selSlotRef.current] ?? null;
-      const selItem = slot ? itemById(slot.id) : null;
       const act = actionForTile(view, {
         tool: selItem?.tool,
         seedId: selItem && selItem.category === "seed" ? selItem.id : undefined,
-        blockId: selItem && (selItem.category === "block" || selItem.facility) ? selItem.id : undefined,
+        blockId: selItem && (selItem.category === "block" || selItem.facility || selItem.placesBlock) ? selItem.id : undefined,
       });
-      if (!act) return false;
+      if (!act) {
+        // 隣接タップで何も起きない場合は理由を出す（素材は置けない・その地形には置けない等）。
+        // 剣の空振りは通常の応答なので理由は出さない
+        if (selItem && selItem.tool !== "sword") setTileMsg(TILE_ERROR_LABEL.tile_blocked);
+        return false;
+      }
       if (act.action === "plant-picker") {
         setSeedPicker({ x: t.x, y: t.y });
         return true;
       }
       // 入力への即時応答として道具を振る（結果の粒は成功時に別で出す）
-      swing = { startedAt: performance.now(), itemId: selItem?.id ?? null, face: player.face };
+      swing = { startedAt: performance.now(), itemId: selItem?.id ?? null, face: player.face, whiff: false };
       void postTileActionRef.current(act.action, t.x, t.y, act.seedId, act.itemId);
       return true;
     };
@@ -953,7 +1315,10 @@ export default function WorldBoxClient() {
         canvas.setPointerCapture(e.pointerId);
         return;
       }
-      if (space === "world") handleTileTap(toTile(e));
+      if (space === "world") {
+        const t = toTile(e);
+        if (!handleMobTap(t)) handleTileTap(t);
+      }
     };
     const onPointerMove = (e: PointerEvent) => {
       if (buildRef.current.active && space === "world") {
@@ -1333,6 +1698,33 @@ export default function WorldBoxClient() {
         ix /= ilen;
         iy /= ilen;
       }
+      // 実効タイルは effTileAt が上書きを都度読むため、タイル配列の同期は不要。
+      // モブ占有: 現在位置の footprint を移動の当たり判定へ合成する。
+      // 占有の真上に立っている間は、そのモブの占有だけ通す（閉じ込め防止）。
+      mobFrameBlocked = undefined;
+      if (space === "world" && mobRenders.size > 0) {
+        const frameMobs: { key: string; size: number; x: number; y: number }[] = [];
+        let standingKey: string | null = null;
+        const ptx = Math.floor(player.x);
+        const pty = Math.floor(player.y);
+        for (const placed of mobCache) {
+          const key = mobKeyOf(placed);
+          const r = mobRenders.get(key);
+          if (!r) continue;
+          const cur = { key, size: placed.size, x: Math.floor(r.wx), y: Math.floor(r.wy) };
+          frameMobs.push(cur);
+          if (mobOccupiesTile(cur.size, cur.x, cur.y, ptx, pty)) standingKey = key;
+        }
+        if (frameMobs.length > 0) {
+          const merged = new Set<string>(blockedRef.current);
+          for (const k of mobBlockedTiles(frameMobs)) merged.add(k);
+          if (standingKey) {
+            const sm = frameMobs.find((m) => m.key === standingKey);
+            if (sm) for (const k of mobFootprintTiles(sm.size, sm.x, sm.y)) merged.delete(k);
+          }
+          mobFrameBlocked = merged;
+        }
+      }
       // ダッシュ（キーの2度押しを持ち続け / スティックの強い倒し）と泳ぎで速さと消費が変わる
       const swimming = space === "world" && isWaterAt(worldMap, player.x, player.y);
       const wantDash =
@@ -1362,6 +1754,11 @@ export default function WorldBoxClient() {
         wasSwimming = inWaterNow;
       }
       stamina = stepStamina(stamina, staminaUse, dt).state;
+      if (staminaBoostRef.current) {
+        // 噴水・休憩の回復（サーバー許可済み）
+        stamina = createStamina();
+        staminaBoostRef.current = false;
+      }
       playerSwimming = inWaterNow;
       if (inWaterNow && stamina.value <= 0) {
         stamina = rescueStamina(stamina);
@@ -1376,6 +1773,48 @@ export default function WorldBoxClient() {
         splashes.push({ x: player.x, y: player.y, at: now });
         spawnBurst(fxSys, "warp", player.x, player.y - 0.3);
         saveNow();
+      }
+      // モブ接触: 占有範囲までチェビシェフ距離1以内を接触とする。
+      // 敵対は接触開始時（継続中は1秒間隔）だけ軽いノックバック＋hit バースト。
+      // ダメージは与えない（プレイヤー HP は未実装のまま）。
+      if (space === "world") {
+        let contact: { placed: PlacedMob; key: string; dist: number; cx: number; cy: number } | null = null;
+        const ptx = Math.floor(player.x);
+        const pty = Math.floor(player.y);
+        for (const placed of mobCache) {
+          const key = mobKeyOf(placed);
+          const r = mobRenders.get(key);
+          if (!r) continue;
+          const cx = Math.floor(r.wx);
+          const cy = Math.floor(r.wy);
+          const dist = mobDistance(ptx, pty, { x: cx, y: cy, size: placed.size });
+          if (dist <= 1 && (!contact || dist < contact.dist)) contact = { placed, key, dist, cx, cy };
+        }
+        if (!contact) {
+          contactMobKeyNow = null;
+        } else {
+          const isNew = contact.key !== contactMobKeyNow;
+          contactMobKeyNow = contact.key;
+          const def = mobById(contact.placed.mobId);
+          if (def?.temperament === "hostile" && (isNew || now - contactFiredAt >= 1000)) {
+            contactFiredAt = now;
+            const target = knockbackTarget({ x: contact.cx, y: contact.cy, size: contact.placed.size }, player);
+            const free = findFreeNear(activeMap(), target.x, target.y, activeBlocked(), { swim: true });
+            player.x = free.x;
+            player.y = free.y;
+            prevX = player.x;
+            prevY = player.y;
+            cam.x = player.x;
+            cam.y = player.y;
+            fxEventsRef.current.push({
+              kind: "hit",
+              x: contact.placed.x, y: contact.placed.y,
+              sizeTiles: contact.placed.size,
+              color: MOB_FX_COLOR[def.id],
+            });
+            shake = startShake(shake, 2, now);
+          }
+        }
       }
       checkTileTriggers();
       if (space === "lobby") {
@@ -1395,6 +1834,32 @@ export default function WorldBoxClient() {
 
       // ---- 演出の更新（行為イベントの消化・粒の前進・移動の副産物） ----
       for (const ev of fxEventsRef.current.splice(0)) {
+        if (ev.kind === "whiff") {
+          // 空振り: 風切りだけのスイングを再生する（粒も道具アイコンも出さない）
+          swing = { startedAt: now, itemId: null, face: player.face, whiff: true };
+          continue;
+        }
+        if (ev.kind === "hit" || ev.kind === "death" || ev.kind === "spawn") {
+          // モブ演出: 大きさに応じて粒をスケール。死亡は小さな揺れ、出現はポップも併用
+          spawnMobFx(fxSys, ev.kind, ev.x + 0.5, ev.y + 0.5, { sizeTiles: ev.sizeTiles, color: ev.color });
+          if (ev.kind === "death") shake = startShake(shake, 3, now);
+          if (ev.kind === "spawn") pops.set(`${ev.x},${ev.y}`, now);
+          if (ev.kind === "hit") {
+            // 被弾した個体は白フラッシュ＋ノックバック。敵対でなければ逃げる
+            for (const [mkey, r] of mobRenders) {
+              if (r.ax !== ev.x || r.ay !== ev.y) continue;
+              r.flashAt = now;
+              const dx = r.wx - player.x;
+              const dy = r.wy - player.y;
+              const len = Math.hypot(dx, dy) || 1;
+              r.kx += (dx / len) * TILE * 0.20;
+              r.ky += (dy / len) * TILE * 0.20;
+              const mdef = mobById(mkey.split("@")[0]);
+              if (mdef && mdef.temperament !== "hostile") r.fleeUntil = now + 900;
+            }
+          }
+          continue;
+        }
         spawnBurst(fxSys, ev.kind, ev.x + 0.5, ev.y + 0.5);
         if (ev.kind === "chop" || ev.kind === "mine") shake = startShake(shake, 2, now);
         else if (ev.kind === "debris" || ev.kind === "build") shake = startShake(shake, 3, now);
@@ -1428,8 +1893,9 @@ export default function WorldBoxClient() {
 
       // 他プレイヤーの描画位置（スナップショット予測へバネでなめらかに寄せる）
       const nowMs = Date.now();
+      const presenceNowMs = presenceNow();
       for (const o of others.values()) {
-        o.track = stepRemoteTrack(o.track, nowMs, dt, activeBounds());
+        o.track = stepRemoteTrack(o.track, presenceNowMs, dt, activeBounds());
         const ospeed = Math.hypot(o.track.entry.vx, o.track.entry.vy);
         o.phase = advanceWalkPhase(o.phase, ospeed, dt);
       }
@@ -1522,6 +1988,30 @@ export default function WorldBoxClient() {
         }
       }
 
+      // ブロック/施設を選択中は、置ける隣接タイルを薄く光らせる（置ける場所を構造で示す）
+      if (!buildRef.current.active) {
+        const prof = invRef.current;
+        const slot = prof?.hotbar[selSlotRef.current] ?? null;
+        const selDef = slot ? itemById(slot.id) : null;
+        if (prof && selDef && (selDef.category === "block" || selDef.facility === true || !!selDef.placesBlock)) {
+          const px = Math.floor(player.x);
+          const py = Math.floor(player.y);
+          for (let dy = -1; dy <= 1; dy++) {
+            for (let dx = -1; dx <= 1; dx++) {
+              const vx = px + dx;
+              const vy = py + dy;
+              const v = tileView(terrainMap, tilesRef.current, vx, vy, nowMs, null);
+              if (actionForTile(v, { blockId: selDef.id })?.action !== "place_block") continue;
+              ctx.fillStyle = "rgba(140,255,150,0.20)";
+              ctx.fillRect(toScreenX(vx), toScreenY(vy), TILE, TILE);
+              ctx.strokeStyle = "rgba(225,255,225,0.55)";
+              ctx.lineWidth = 1.5;
+              ctx.strokeRect(toScreenX(vx) + 1, toScreenY(vy) + 1, TILE - 2, TILE - 2);
+            }
+          }
+        }
+      }
+
       ctx.imageSmoothingEnabled = true;
 
       // 建築モード: 狙っているタイルの可否ハイライト
@@ -1595,6 +2085,214 @@ export default function WorldBoxClient() {
         ctx.imageSmoothingEnabled = true;
       }
 
+      // ---- モブ: 配置は決定的、HP/死亡はサーバー状態、動きは見た目だけここで作る ----
+      const mobDrawQueue: { placed: PlacedMob; r: MobRender; hpFrac: number }[] = [];
+      const drawMob = (placed: PlacedMob, r: MobRender, hpFrac: number) => {
+        const def = mobById(placed.mobId);
+        if (!def) return;
+        const style = MOB_STYLE[def.id] ?? {
+          body: def.temperament === "hostile" ? "#a04a4a" : "#b8b0a2",
+          feature: "blob" as const,
+        };
+        const sizePx = TILE * Math.max(1, placed.size) * 0.94;
+        const bob = walkBob(r.phase) * TILE * 0.045;
+        const cxp = toScreenX(r.wx) + r.kx;
+        const baseY = toScreenY(r.wy) + r.ky;
+        const cy = baseY - bob;
+        const flash = now - r.flashAt < 130;
+        const pop = popScale(popProgress(r.seenAt, now));
+        ctx.save();
+        if (pop !== 1) {
+          ctx.translate(cxp, baseY);
+          ctx.scale(pop, pop);
+          ctx.translate(-cxp, -baseY);
+        }
+        // 影
+        ctx.fillStyle = "rgba(20,26,20,0.25)";
+        ctx.beginPath();
+        ctx.ellipse(cxp, baseY + sizePx * 0.30, sizePx * 0.34, sizePx * 0.12, 0, 0, Math.PI * 2);
+        ctx.fill();
+        // 本体（丸みのある塊。特徴は耳・鼻・トサカ・角・甲羅・羽・骨で描き分ける）
+        const w = sizePx * 0.76;
+        const h = sizePx * 0.60;
+        const by = cy - h / 2;
+        ctx.fillStyle = flash ? "#ffffff" : style.body;
+        ctx.beginPath();
+        ctx.ellipse(cxp, cy, w / 2, h / 2, 0, 0, Math.PI * 2);
+        ctx.fill();
+        if (style.sub && !flash) {
+          ctx.fillStyle = style.sub;
+          ctx.globalAlpha = 0.55;
+          ctx.beginPath();
+          ctx.ellipse(cxp - w * 0.16, cy + h * 0.08, w * 0.20, h * 0.24, 0, 0, Math.PI * 2);
+          ctx.ellipse(cxp + w * 0.22, cy - h * 0.10, w * 0.13, h * 0.16, 0, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.globalAlpha = 1;
+        }
+        ctx.fillStyle = flash ? "#ffffff" : style.body;
+        if (style.feature === "ears") {
+          for (const s of [-1, 1]) {
+            ctx.beginPath();
+            ctx.ellipse(cxp + s * w * 0.26, by - h * 0.06, w * 0.10, h * 0.20, s * 0.25, 0, Math.PI * 2);
+            ctx.fill();
+          }
+        } else if (style.feature === "horns") {
+          ctx.strokeStyle = flash ? "#ffffff" : "#e8e0cc";
+          ctx.lineWidth = Math.max(2, sizePx * 0.045);
+          for (const s of [-1, 1]) {
+            ctx.beginPath();
+            ctx.arc(cxp + s * w * 0.30, by + h * 0.02, w * 0.13, Math.PI * (s > 0 ? 1.15 : 0.55), Math.PI * (s > 0 ? 1.85 : 1.45));
+            ctx.stroke();
+          }
+        } else if (style.feature === "comb") {
+          ctx.fillStyle = flash ? "#ffffff" : (style.sub ?? "#e2483a");
+          for (const o of [-0.14, 0, 0.14]) {
+            ctx.beginPath();
+            ctx.arc(cxp + o * w, by + h * 0.02, w * 0.075, 0, Math.PI * 2);
+            ctx.fill();
+          }
+          // くちばし
+          ctx.fillStyle = flash ? "#ffffff" : "#e8a33c";
+          ctx.beginPath();
+          ctx.ellipse(cxp + r.face * w * 0.30, cy + h * 0.05, w * 0.10, h * 0.09, 0, 0, Math.PI * 2);
+          ctx.fill();
+        } else if (style.feature === "snout") {
+          ctx.fillStyle = flash ? "#ffffff" : "rgba(255,255,255,0.35)";
+          ctx.beginPath();
+          ctx.ellipse(cxp + r.face * w * 0.14, cy + h * 0.10, w * 0.17, h * 0.15, 0, 0, Math.PI * 2);
+          ctx.fill();
+        } else if (style.feature === "shell") {
+          ctx.strokeStyle = "rgba(30,30,30,0.28)";
+          ctx.lineWidth = Math.max(1.5, sizePx * 0.03);
+          for (const rr of [0.30, 0.20]) {
+            ctx.beginPath();
+            ctx.ellipse(cxp, cy, w * rr, h * rr, 0, 0, Math.PI * 2);
+            ctx.stroke();
+          }
+        } else if (style.feature === "wings") {
+          const flap = Math.sin(r.phase * 2.2) * 0.35;
+          ctx.fillStyle = flash ? "#ffffff" : "rgba(240,240,235,0.75)";
+          for (const s of [-1, 1]) {
+            ctx.beginPath();
+            ctx.ellipse(cxp + s * w * 0.52, cy - h * 0.12 + flap * h * 0.2, w * 0.20, h * 0.13, s * (0.5 + flap), 0, Math.PI * 2);
+            ctx.fill();
+          }
+        } else if (style.feature === "bones") {
+          ctx.strokeStyle = "rgba(70,66,58,0.5)";
+          ctx.lineWidth = Math.max(1.5, sizePx * 0.03);
+          for (const o of [-0.16, 0, 0.16]) {
+            ctx.beginPath();
+            ctx.moveTo(cxp + o * w, cy - h * 0.22);
+            ctx.lineTo(cxp + o * w, cy + h * 0.22);
+            ctx.stroke();
+          }
+        } else {
+          // blob: 光沢
+          ctx.fillStyle = "rgba(255,255,255,0.35)";
+          ctx.beginPath();
+          ctx.ellipse(cxp - w * 0.16, cy - h * 0.18, w * 0.14, h * 0.11, -0.5, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        // 目（向き側に寄せる）
+        ctx.fillStyle = def.temperament === "hostile" && !flash ? "#c22e2e" : "#26221e";
+        for (const s of [-1, 1]) {
+          ctx.beginPath();
+          ctx.arc(cxp + r.face * w * 0.10 + s * w * 0.13, cy - h * 0.06, Math.max(1.8, sizePx * 0.045), 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.restore();
+        // HP バー（傷ついた個体だけ）
+        if (hpFrac < 1) {
+          const bw = Math.max(26, w * 0.9);
+          const bh2 = 4;
+          const bxHp = cxp - bw / 2;
+          const byHp = by - 9;
+          ctx.fillStyle = "rgba(12,14,12,0.55)";
+          ctx.fillRect(bxHp - 1, byHp - 1, bw + 2, bh2 + 2);
+          ctx.fillStyle = hpFrac > 0.5 ? "#7ed957" : hpFrac > 0.25 ? "#f2c53c" : "#e2483a";
+          ctx.fillRect(bxHp, byHp, bw * Math.max(0, hpFrac), bh2);
+        }
+      };
+      if (space === "world") {
+        const nowMs = Date.now();
+        const isNight = isNightPhase(phaseAtTime(nowMs / 1000));
+        const vx0 = Math.floor(cam.x - cw / TILE / 2) - 3;
+        const vy0 = Math.floor(cam.y - ch / TILE / 2) - 3;
+        const vx1 = Math.ceil(cam.x + cw / TILE / 2) + 3;
+        const vy1 = Math.ceil(cam.y + ch / TILE / 2) + 3;
+        const cacheKey = `${vx0 >> 5},${vy0 >> 5},${vx1 >> 5},${vy1 >> 5},${isNight ? 1 : 0}`;
+        if (cacheKey !== mobCacheKey) {
+          mobCacheKey = cacheKey;
+          mobCache = visibleMobs(MAP_SEED, vx0, vy0, vx1, vy1, isNight);
+          const keys = new Set(mobCache.map((m) => mobKeyOf(m)));
+          for (const k of [...mobRenders.keys()]) if (!keys.has(k)) mobRenders.delete(k);
+        }
+        for (const placed of mobCache) {
+          const def = mobById(placed.mobId);
+          if (!def) continue;
+          const key = mobKeyOf(placed);
+          const hpNow = mobHpNow(def, mobStatesRef.current[key] ?? null, nowMs);
+          if (!hpNow.alive) {
+            // 死んでいる間は見た目状態を捨てる（復活時はアンカーでポップして出る）
+            mobRenders.delete(key);
+            continue;
+          }
+          let r = mobRenders.get(key);
+          if (!r) {
+            r = {
+              ax: placed.x, ay: placed.y, wx: placed.x + 0.5, wy: placed.y + 0.5,
+              tx: placed.x + 0.5, ty: placed.y + 0.5, nextThink: 0,
+              phase: Math.random() * 6, face: 1, flashAt: 0, kx: 0, ky: 0, seenAt: now, fleeUntil: 0,
+            };
+            mobRenders.set(key, r);
+            fxEventsRef.current.push({ kind: "spawn", x: placed.x, y: placed.y, sizeTiles: placed.size, color: MOB_FX_COLOR[def.id] });
+          }
+          // 思考: うろつき / 敵対は接近 / 被弾直後の非敵対は逃げる
+          if (now >= r.nextThink) {
+            r.nextThink = now + 1400 + Math.random() * 1800;
+            const fleeing = now < r.fleeUntil;
+            const distP = Math.hypot(player.x - r.wx, player.y - r.wy);
+            if (fleeing) {
+              const dx = r.wx - player.x;
+              const dy = r.wy - player.y;
+              const len = Math.hypot(dx, dy) || 1;
+              r.tx = placed.x + 0.5 + (dx / len) * 2;
+              r.ty = placed.y + 0.5 + (dy / len) * 2;
+            } else if (def.temperament === "hostile" && distP < 5 && placed.size < 4) {
+              r.tx = player.x;
+              r.ty = player.y;
+            } else if (placed.size < 4) {
+              const ang = Math.random() * Math.PI * 2;
+              const rad = Math.random() * 1.3;
+              r.tx = placed.x + 0.5 + Math.cos(ang) * rad;
+              r.ty = placed.y + 0.5 + Math.sin(ang) * rad;
+            } else {
+              r.tx = placed.x + 0.5;
+              r.ty = placed.y + 0.5;
+            }
+          }
+          const fleeing = now < r.fleeUntil;
+          const chasing = def.temperament === "hostile" && Math.hypot(player.x - r.wx, player.y - r.wy) < 5;
+          const speed = fleeing ? 1.7 : chasing ? 1.12 : 0.55;
+          const dx = r.tx - r.wx;
+          const dy = r.ty - r.wy;
+          const distT = Math.hypot(dx, dy);
+          // 敵対はプレイヤーに重ならない（手前で止まる）
+          const stopAt = chasing && !fleeing ? 0.85 : 0.05;
+          if (distT > stopAt) {
+            const step = Math.min(distT - (chasing && !fleeing ? stopAt : 0), speed * dt);
+            r.wx += (dx / distT) * step;
+            r.wy += (dy / distT) * step;
+            r.phase = advanceWalkPhase(r.phase, speed, dt);
+            if (dx < -0.02) r.face = -1;
+            else if (dx > 0.02) r.face = 1;
+          }
+          r.kx *= Math.exp(-9 * dt);
+          r.ky *= Math.exp(-9 * dt);
+          mobDrawQueue.push({ placed, r, hpFrac: hpNow.hp / def.hp });
+        }
+      }
+
       // プレイヤー群（y 順で奥行き感）
       const drawList: { y: number; draw: () => void }[] = [];
       for (const o of others.values()) {
@@ -1649,6 +2347,9 @@ export default function WorldBoxClient() {
             draw: () => drawAvatar(ctx, Math.round(lobbyOx + (n.x + 0.5) * TILE), Math.round(lobbyOy + (n.y + 1) * TILE), 1, 0, 0, null),
           });
         }
+      }
+      for (const q of mobDrawQueue) {
+        drawList.push({ y: q.r.wy, draw: () => drawMob(q.placed, q.r, q.hpFrac) });
       }
       drawList.push({
         y: player.y,
@@ -1741,12 +2442,28 @@ export default function WorldBoxClient() {
           }
         }
       };
-      // 環境パーティクル（雪原=雪、森=落葉、夜=蛍、それ以外=花粉。ワールドのみ）
+      // 環境パーティクル（雪原=雪、雨天=雨、森=落葉、夜=蛍、それ以外=花粉。ワールドのみ）
+      // 天候は fx.ts の決定的サイクルで全員一致。時間帯が切り替わったフレームは数粒追加で出す
       if (space === "world" && now - lastAmbientAt > 150 && !reducedMotion) {
         lastAmbientAt = now;
         const ptile = mapTileAt(worldMap, Math.floor(player.x), Math.floor(player.y));
-        const kind = ambientKindFor(ptile, ptile === T_TREE || ptile === T_SNOW_TREE, nightAmount(phaseAtTime(nowMs / 1000)));
-        spawnAmbient(fxSys, kind, cam.x - cw / TILE / 2 - 1, cam.x + cw / TILE / 2 + 1, cam.y - ch / TILE / 2 - 1);
+        const nowSec = nowMs / 1000;
+        const phase = phaseAtTime(nowSec);
+        const kind = weatherAmbientKind(weatherAt(nowSec), ptile, ptile === T_TREE || ptile === T_SNOW_TREE, nightAmount(phase));
+        const ax0 = cam.x - cw / TILE / 2 - 1;
+        const ax1 = cam.x + cw / TILE / 2 + 1;
+        const ay0 = cam.y - ch / TILE / 2 - 1;
+        const pk = phaseKind(phase);
+        if (lastPhaseKind !== "" && pk !== lastPhaseKind) {
+          for (let i = 0; i < 4; i++) spawnAmbient(fxSys, kind, ax0, ax1, ay0);
+        }
+        lastPhaseKind = pk;
+        spawnAmbient(fxSys, kind, ax0, ax1, ay0);
+        if (kind === "rain") {
+          // 雨は密度を上げる（速く落ちるので数を足しても上限に触れない）
+          spawnAmbient(fxSys, kind, ax0, ax1, ay0);
+          spawnAmbient(fxSys, kind, ax0, ax1, ay0);
+        }
       }
       drawParticles(false);
 
@@ -1760,14 +2477,14 @@ export default function WorldBoxClient() {
           ctx.save();
           ctx.translate(cxp, cyp);
           ctx.scale(swing.face, 1);
-          // 風切り（振り抜きの瞬間だけ出る弧）
-          ctx.strokeStyle = `rgba(255,255,255,${(slashAlpha(sk) * 0.85).toFixed(3)})`;
-          ctx.lineWidth = 3;
+          // 風切り（振り抜きの瞬間だけ出る弧。空振りは薄く・細く）
+          ctx.strokeStyle = `rgba(255,255,255,${(slashAlpha(sk) * 0.85 * (swing.whiff ? WHIFF_ALPHA_SCALE : 1)).toFixed(3)})`;
+          ctx.lineWidth = swing.whiff ? 1.5 : 3;
           ctx.beginPath();
           ctx.arc(0, 0, TILE * 0.78, ang - 1.15, ang + 0.35);
           ctx.stroke();
-          // 道具アイコンを振る（無い道具は弧だけ）
-          const img = swing.itemId ? itemIcons[swing.itemId] : undefined;
+          // 道具アイコンを振る（空振りと、無い道具は弧だけ）
+          const img = !swing.whiff && swing.itemId ? itemIcons[swing.itemId] : undefined;
           if (texReady(img)) {
             ctx.rotate(ang);
             ctx.drawImage(img, TILE * 0.30, -TILE * 0.30, TILE * 0.62, TILE * 0.62);
@@ -1919,6 +2636,11 @@ export default function WorldBoxClient() {
       cancelAnimationFrame(raf);
       window.clearInterval(heartbeatTimer);
       window.clearInterval(pollTimer);
+      if (rtReconnectTimer !== undefined) window.clearTimeout(rtReconnectTimer);
+      try {
+        rtSocket?.close();
+      } catch { /* noop */ }
+      rtSocket = null;
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("keyup", onKeyUp);
       window.removeEventListener("resize", resize);
@@ -2025,35 +2747,38 @@ export default function WorldBoxClient() {
   ];
 
   // 入場ゲート: Discord ログインが確認できるまではワールドを描画しない。
+  // ゲートも独立シェル（100svh・中央寄せ）で完結させる。
   if (!gateOk) {
     return (
-      <div>
-        <nav className="breadcrumbs" aria-label="パンくず">
-          <Link href={`${prefix}/games`}>ゲーム</Link>
-          <span> / </span>
-          <span>AGO WORLD BOX</span>
-        </nav>
-        <div className="page-heading compact-heading">
-          <h1>AGO WORLD BOX</h1>
-        </div>
+      <div
+        className="wb-shell"
+        style={{
+          display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+          gap: 14, padding: 20, boxSizing: "border-box", textAlign: "center",
+        }}
+      >
+        <h1 style={{ fontSize: 28, margin: 0 }}>AGO WORLD BOX</h1>
         {gate === "checking" ? (
-          <p className="classic-status" role="status">
+          <p role="status" style={{ margin: 0 }}>
             読み込み中…
           </p>
         ) : (
-          <div style={{ textAlign: "center", marginTop: 24 }}>
-            <p className="classic-status" role="status">
+          <>
+            <p role="status" style={{ margin: 0 }}>
               ログインが必要
             </p>
             <a
               href="/api/auth/discord/authorize?next=/games/worldbox"
               style={{
-                ...btn, textDecoration: "none", display: "inline-flex", alignItems: "center", marginTop: 12,
+                ...btn, textDecoration: "none", display: "inline-flex", alignItems: "center",
               }}
             >
               Discordでログイン
             </a>
-          </div>
+            <Link href={`${prefix}/games`} style={{ color: "#9fd8e8", fontSize: 13 }}>
+              ゲーム一覧へ
+            </Link>
+          </>
         )}
       </div>
     );
@@ -2061,8 +2786,10 @@ export default function WorldBoxClient() {
 
   return (
     <div
+      className="wb-shell"
       onContextMenu={(e) => e.preventDefault()}
       style={{
+        display: "flex", flexDirection: "column",
         WebkitTouchCallout: "none",
         WebkitUserSelect: "none",
         MozUserSelect: "none",
@@ -2070,27 +2797,12 @@ export default function WorldBoxClient() {
         userSelect: "none",
       }}
     >
-      <nav className="breadcrumbs" aria-label="パンくず">
-        <Link href={`${prefix}/games`}>ゲーム</Link>
-        <span> / </span>
-        <span>AGO WORLD BOX</span>
-      </nav>
-      <div className="page-heading compact-heading">
-        <h1>AGO WORLD BOX</h1>
-      </div>
-
-      <p className="classic-status" role="status">
-        {statusText}
-        {othersCount > 0 ? ` ・ いま ${othersCount} 人が歩いている` : ""}
-        {` ・ 座標 X ${coords.x} / Y ${coords.y}`}
-      </p>
-
       <div
         ref={stageRef}
         style={{
-          position: "relative", margin: "0 auto", touchAction: "none",
-          maxWidth: isFullscreen ? undefined : 960,
-          ...(isFullscreen ? { width: "100%", height: "100%", background: "#0b0e14" } : {}),
+          position: "relative", touchAction: "none",
+          width: "100%", flex: "1 1 auto", minHeight: 0,
+          ...(isFullscreen ? { height: "100%", background: "#0b0e14" } : {}),
         }}
       >
         <canvas
@@ -2098,11 +2810,24 @@ export default function WorldBoxClient() {
           onContextMenu={(e) => e.preventDefault()}
           aria-label="AGO WORLD BOX の見下ろしマップ。スティックか WASD で歩けます"
           style={{
-            width: "100%", height: isFullscreen ? "100%" : "min(62vh, 560px)", minHeight: isFullscreen ? 0 : 340, display: "block",
-            borderRadius: isFullscreen ? 0 : 16, border: "2px solid rgba(255,255,255,0.15)",
+            width: "100%", height: "100%", display: "block",
             touchAction: "none", userSelect: "none", WebkitUserSelect: "none", WebkitTouchCallout: "none", WebkitTapHighlightColor: "transparent",
           }}
         />
+        <div
+          role="status"
+          style={{
+            position: "absolute", top: 10, left: "50%", transform: "translateX(-50%)",
+            padding: "4px 12px", borderRadius: 10, background: "rgba(0,0,0,0.55)", color: "#fff",
+            fontSize: 12, lineHeight: 1.5, whiteSpace: "nowrap", pointerEvents: "none", zIndex: 4,
+            maxWidth: "calc(100% - 176px)", boxSizing: "border-box",
+            overflow: "hidden", textOverflow: "ellipsis",
+          }}
+        >
+          {statusText}
+          {othersCount > 0 ? ` ・ いま ${othersCount} 人が歩いている` : ""}
+          {` ・ 座標 X ${coords.x} / Y ${coords.y}`}
+        </div>
         <button
           type="button"
           aria-label="メニュー"
@@ -2151,6 +2876,15 @@ export default function WorldBoxClient() {
                   {a.label}
                 </button>
               ))}
+            <Link
+              href={`${prefix}/games`}
+              style={{
+                ...btn, background: "rgba(255,255,255,0.10)", color: "#fff",
+                textDecoration: "none", textAlign: "center",
+              }}
+            >
+              ゲーム一覧へ
+            </Link>
           </div>
         )}
         {spaceUi === "lobby" && stationUi && (
@@ -2189,6 +2923,43 @@ export default function WorldBoxClient() {
                 {guildBoardOpen ? "閉じる" : "開く"}
               </button>
             )}
+            {(stationUi === "shop" || stationUi === "bank" || stationUi === "smith") && (
+              <button
+                type="button"
+                style={{ ...btn, minHeight: 32, padding: "2px 10px" }}
+                onClick={() => setShowEconomy(true)}
+              >
+                開く
+              </button>
+            )}
+            {stationUi === "arena" && (
+              <button
+                type="button"
+                style={{ ...btn, minHeight: 32, padding: "2px 10px" }}
+                onClick={() => setArenaOpen((v) => !v)}
+              >
+                {arenaOpen ? "閉じる" : "戦う"}
+              </button>
+            )}
+            {stationUi === "fountain" && (
+              <button
+                type="button"
+                style={{ ...btn, minHeight: 32, padding: "2px 10px" }}
+                onClick={() => void plazaAction("fountain")}
+              >
+                コインを投げる（10）
+              </button>
+            )}
+            {stationUi === "rest" && (
+              <button
+                type="button"
+                style={{ ...btn, minHeight: 32, padding: "2px 10px" }}
+                onClick={() => void plazaAction("rest")}
+              >
+                休む
+              </button>
+            )}
+            {plazaMsg && <span role="status">{plazaMsg}</span>}
           </div>
         )}
         {showMap && spaceUi === "world" && (
@@ -2459,6 +3230,9 @@ export default function WorldBoxClient() {
       {showEconomy && <WorldBoxEconomyPanel space={spaceUi} station={stationUi} onClose={() => setShowEconomy(false)} />}
       {casinoOpen && spaceUi === "lobby" && (
         <WorldBoxCasinoPanel onClose={() => setCasinoOpen(false)} />
+      )}
+      {arenaOpen && spaceUi === "lobby" && (
+        <WorldBoxArenaPanel onClose={() => setArenaOpen(false)} />
       )}
       {guildBoardOpen && spaceUi === "lobby" && (
         <WorldBoxGuildBoardPanel
