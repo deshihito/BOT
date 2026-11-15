@@ -9,6 +9,7 @@ import { useEffect, useRef, useState } from "react";
 const TouchNumberScene3D = dynamic(() => import("./TouchNumberScene3D"), { ssr: false });
 import { createTouchGame, isCleared, tapCell, touchColumns, type TouchState } from "@/lib/touchnumber";
 import { sfxPop, sfxTap, sfxWin, sfxWrong } from "@/lib/sfx";
+import { tappableProps } from "@/lib/gesture";
 import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
@@ -77,6 +78,8 @@ export default function TouchNumberClient() {
 
   const onTap = (index: number) => {
     if (state.status !== "playing") return;
+    // 旧ボタンの disabled={cleared} と同等：済みのマスは no-op。
+    if (isCleared(state, index)) return;
     if (startRef.current === null) startRef.current = Date.now();
     const next = tapCell(state, index);
     if (next.misses > state.misses) {
@@ -111,13 +114,19 @@ export default function TouchNumberClient() {
           const cleared = isCleared(state, i);
           const isNext = value === state.next && state.status === "playing";
           return (
-            <button
+            <div
               key={i}
-              type="button"
               role="gridcell"
-              disabled={cleared}
+              tabIndex={cleared ? -1 : 0}
+              aria-disabled={cleared || undefined}
               className={wrongIndex === i ? "juice-shake" : cleared ? "juice-pop" : undefined}
               onClick={() => onTap(i)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  onTap(i);
+                }
+              }}
               aria-label={`数字 ${value}`}
               style={{
                 minHeight: size === 50 ? 40 : 52,
@@ -133,7 +142,7 @@ export default function TouchNumberClient() {
               }}
             >
               {value}
-            </button>
+            </div>
           );
         })}
       </div>
@@ -153,15 +162,14 @@ export default function TouchNumberClient() {
 
       <div className="classic-controls" role="group" aria-label="サイズ">
         {SIZES.map((s) => (
-          <button
+          <div
             key={s}
-            type="button"
+            {...tappableProps(() => restart(s))}
             className={size === s ? "classic-btn classic-btn-active" : "classic-btn"}
             aria-pressed={size === s}
-            onClick={() => restart(s)}
           >
             1〜{s}
-          </button>
+          </div>
         ))}
         <button type="button" className="classic-btn" onClick={() => restart(size)}>
           もう一度

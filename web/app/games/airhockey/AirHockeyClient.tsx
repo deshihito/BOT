@@ -22,6 +22,7 @@ import {
   type AirHockeyState,
 } from "@/lib/airhockey";
 import { sfxCorrect, sfxLose, sfxWin, sfxWrong } from "@/lib/sfx";
+import { tappableProps } from "@/lib/gesture";
 import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
@@ -46,6 +47,8 @@ export default function AirHockeyClient() {
   const puckRef = useRef<SVGCircleElement | null>(null);
   const playerRef = useRef<SVGCircleElement | null>(null);
   const cpuRef = useRef<SVGCircleElement | null>(null);
+  // ダブルタップ=ポーズ判定用（pong と同じ位置ガード付き）。
+  const lastFieldTapRef = useRef<{ t: number; y: number } | null>(null);
 
   const [webglFailed, setWebglFailed] = useState(false);
   const [phase, setPhaseState] = useState<Phase>("ready");
@@ -71,6 +74,60 @@ export default function AirHockeyClient() {
     phaseRef.current = p;
     setPhaseState(p);
   }, []);
+
+  const togglePlayPause = useCallback(() => {
+    if (phaseRef.current === "ready" || phaseRef.current === "paused") setPhase("playing");
+    else if (phaseRef.current === "playing") setPhase("paused");
+  }, [setPhase]);
+
+  // フィールドのタップ=開始・再開、素早い2回タップ（同じ高さ）=一時停止。
+  // パドル操作は pointerdown の即時性が本質のため useGesture には寄せていない
+  // （pong のダブルタップ=ポーズと同じ意図的な例外）。
+  const onFieldPointerDown = useCallback(
+    (e: { clientY: number }) => {
+      const now = Date.now();
+      const p = phaseRef.current;
+      if (p === "ready" || p === "paused") {
+        setPhase("playing");
+        lastFieldTapRef.current = null;
+        return;
+      }
+      if (p !== "playing") return;
+      const last = lastFieldTapRef.current;
+      if (last && now - last.t <= 320 && Math.abs(e.clientY - last.y) <= 48) {
+        setPhase("paused");
+        lastFieldTapRef.current = null;
+      } else {
+        lastFieldTapRef.current = { t: now, y: e.clientY };
+      }
+    },
+    [setPhase],
+  );
+
+  // Space / Enter / P でも開始・一時停止・再開（div 側のハンドラと二重発火
+  // しないよう、Space / Enter 分岐の中だけで data-airhockey-ui を見る）。
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (
+        t &&
+        (t.tagName === "INPUT" ||
+          t.tagName === "TEXTAREA" ||
+          t.tagName === "SELECT" ||
+          t.isContentEditable)
+      )
+        return;
+      if (e.key === " " || e.key === "Enter") {
+        if (t?.closest?.("[data-airhockey-ui]")) return;
+        e.preventDefault();
+        togglePlayPause();
+      } else if (e.key === "p" || e.key === "P") {
+        togglePlayPause();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [togglePlayPause]);
 
   useEffect(() => {
     try {
@@ -176,7 +233,7 @@ export default function AirHockeyClient() {
       ? "あなたの勝ち！"
       : "CPUの勝ち…"
     : phase === "ready"
-      ? `先に ${AIR_WIN_SCORE} 点で勝ち。スタートを押して開始。`
+      ? `先に ${AIR_WIN_SCORE} 点で勝ち。フィールドをタップして開始。`
       : phase === "paused"
         ? "一時停止中です。"
         : "対戦中";
@@ -203,7 +260,7 @@ export default function AirHockeyClient() {
         onPointerMove={(e) => onPointer(e.clientX, e.clientY)}
         onPointerDown={(e) => {
           onPointer(e.clientX, e.clientY);
-          if (phase === "ready") setPhase("playing");
+          onFieldPointerDown(e);
         }}
       >
         <svg
@@ -240,18 +297,18 @@ export default function AirHockeyClient() {
 
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }} role="group" aria-label="難易度">
         {DIFFS.map((d) => (
-          <button
+          <div
             key={d.key}
-            type="button"
-            style={difficulty === d.key ? activeBtn : btn}
-            aria-pressed={difficulty === d.key}
-            onClick={() => {
+            {...tappableProps(() => {
               setDifficulty(d.key);
               newGame(d.key);
-            }}
+            })}
+            data-airhockey-ui=""
+            style={difficulty === d.key ? activeBtn : btn}
+            aria-pressed={difficulty === d.key}
           >
             {d.label}
-          </button>
+          </div>
         ))}
       </div>
 
@@ -261,7 +318,7 @@ export default function AirHockeyClient() {
       </p>
 
 {webglFailed ? board2d : (
-        <div style={{ maxWidth: 400, margin: "0 auto" }}>
+        <div style={{ maxWidth: 400, margin: "0 auto" }} onPointerDown={(e) => onFieldPointerDown(e)}>
           <AirHockeyScene3D
             getState={() => stateRef.current}
             onTarget={(x, y) => { targetRef.current = { x, y }; }}
@@ -273,25 +330,17 @@ export default function AirHockeyClient() {
       )}
 
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center", marginTop: 14 }}>
-        {!finished && phase !== "playing" ? (
-          <button type="button" style={activeBtn} onClick={() => setPhase("playing")}>
-            {phase === "paused" ? "再開" : "スタート"}
-          </button>
-        ) : !finished ? (
-          <button type="button" style={btn} onClick={() => setPhase("paused")}>
-            ポーズ
-          </button>
-        ) : null}
         <button
           type="button"
           style={btn}
+          data-airhockey-ui=""
           onClick={() => newGame(difficulty)}
         >
           もう一度
         </button>
       </div>
       <p className="muted" style={{ textAlign: "center", fontSize: 13 }}>
-        パドルを速く動かして打つと、速いシュートになります。
+        パドルを速く動かして打つと、速いシュートになります。フィールドのダブルタップで一時停止します。
       </p>
 
       {finished && (

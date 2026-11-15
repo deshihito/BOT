@@ -18,6 +18,7 @@ import {
   type PegState,
 } from "@/lib/peg";
 import { sfxLose, sfxPlace, sfxSlide, sfxTap, sfxWin } from "@/lib/sfx";
+import { useGesture } from "@/lib/gesture";
 import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
@@ -56,6 +57,30 @@ export default function PegClient() {
     setSelected(null);
   };
 
+  // 盤面の左スワイプ=もどす（solitaire / freecell と同じ）。
+  // U キーでも同じ操作ができる（履歴が空なら無音 no-op）。
+  const boardGesture = useGesture({
+    onSwipe: (dir) => {
+      if (dir === "left") undo();
+    },
+  });
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (
+        t &&
+        (t.tagName === "INPUT" ||
+          t.tagName === "TEXTAREA" ||
+          t.tagName === "SELECT" ||
+          t.isContentEditable)
+      )
+        return;
+      if (e.key === "u" || e.key === "U") undo();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [history]);
+
   const onCell = (index: number) => {
     if (state.status !== "playing") return;
     if (selected !== null && destSet.has(index)) {
@@ -92,6 +117,7 @@ export default function PegClient() {
   // 2D 盤（WebGL が使えない場合のフォールバックとしてそのまま使う）。
   const board2d = (
       <div
+        {...boardGesture}
         role="grid"
         aria-label="ペグソリティアの盤"
         style={{
@@ -104,6 +130,7 @@ export default function PegClient() {
           borderRadius: 14,
           background: "#8a5a2b",
           border: "2px solid #6e4520",
+          touchAction: "none",
         }}
       >
         {state.cells.map((cell, index) => {
@@ -116,16 +143,22 @@ export default function PegClient() {
           const isSelected = selected === index;
           const hasPeg = cell === 1;
           return (
-            <button
+            <div
               key={index}
-              type="button"
               role="gridcell"
+              tabIndex={0}
               aria-label={
                 hasPeg
                   ? `${r + 1}行${c + 1}列のペグ${isSelected ? "（選択中）" : ""}`
                   : `${r + 1}行${c + 1}列の空き穴${isDest ? "（移動できます）" : ""}`
               }
               onClick={() => onCell(index)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  onCell(index);
+                }
+              }}
               className={isSelected ? "juice-pulse" : undefined}
               style={{
                 aspectRatio: "1",
@@ -172,7 +205,7 @@ export default function PegClient() {
                   }}
                 />
               )}
-            </button>
+            </div>
           );
         })}
       </div>
@@ -188,7 +221,7 @@ export default function PegClient() {
       <div className="page-heading compact-heading">
         <h1>ペグソリティア</h1>
         <p className="muted">
-          残りペグの少なさを競う一人パズル。最後まで動けなくても、残した数で評価が出ます。
+          残りペグの少なさを競う一人パズル。最後まで動けなくても、残した数で評価が出ます。左スワイプ（Uキー）で1手もどせます。
         </p>
       </div>
 
@@ -197,7 +230,7 @@ export default function PegClient() {
       </p>
 
       {webglFailed ? board2d : (
-        <div style={{ width: "min(92vw, 440px)", margin: "0 auto" }}>
+        <div {...boardGesture} style={{ width: "min(92vw, 440px)", margin: "0 auto", touchAction: "none" }}>
           <PegScene3D
             cells={state.cells}
             selected={selected}
@@ -211,9 +244,6 @@ export default function PegClient() {
       )}
 
       <div className="classic-controls">
-        <button type="button" className="classic-btn" onClick={undo} disabled={history.length === 0}>
-          1手もどす
-        </button>
         <button type="button" className="classic-btn" onClick={restart}>
           もう一度
         </button>

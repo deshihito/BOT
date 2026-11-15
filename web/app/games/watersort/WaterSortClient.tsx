@@ -14,6 +14,7 @@ import {
   type WsState,
 } from "@/lib/watersort";
 import { sfxPlace, sfxSlide, sfxTap, sfxWin } from "@/lib/sfx";
+import { tappableProps, useGesture } from "@/lib/gesture";
 import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
@@ -73,6 +74,38 @@ export default function WaterSortClient() {
     setResultPrevBest(null);
   };
 
+  // 戻す操作（旧ボタンの disabled 条件と同等：履歴が空なら無音 no-op）。
+  const doUndo = () => {
+    if (state.history.length === 0) return;
+    sfxSlide();
+    setState((s) => undoWaterSort(s));
+    setSelected(null);
+  };
+
+  // 盤面の左スワイプ=戻す（solitaire / freecell と同じ）。
+  // U キーでも同じ操作ができる。
+  const boardGesture = useGesture({
+    onSwipe: (dir) => {
+      if (dir === "left") doUndo();
+    },
+  });
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (
+        t &&
+        (t.tagName === "INPUT" ||
+          t.tagName === "TEXTAREA" ||
+          t.tagName === "SELECT" ||
+          t.isContentEditable)
+      )
+        return;
+      if (e.key === "u" || e.key === "U") doUndo();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [state]);
+
   const onBottle = (index: number) => {
     if (state.status !== "playing") return;
     if (selected === null) {
@@ -111,6 +144,7 @@ export default function WaterSortClient() {
   const board2d = (
     <>
       <div
+        {...boardGesture}
         style={{
           display: "flex",
           gap: 10,
@@ -118,6 +152,7 @@ export default function WaterSortClient() {
           flexWrap: "wrap",
           maxWidth: 520,
           margin: "0 auto",
+          touchAction: "none",
         }}
         role="group"
         aria-label="ボトル"
@@ -134,13 +169,12 @@ export default function WaterSortClient() {
           const isComplete =
             bottle.length === state.capacity && bottle.every((c) => c === bottle[0]);
           return (
-            <button
+            <div
               key={i}
-              type="button"
+              {...tappableProps(() => onBottle(i))}
               className={isComplete ? "juice-pop" : undefined}
               aria-pressed={isSel}
               aria-label={`ボトル ${i + 1}（${bottle.length} 層、一番上は ${topName}）${isSel ? " 選択中" : ""}`}
-              onClick={() => onBottle(i)}
               style={{
                 width: 52,
                 minHeight: 132,
@@ -170,7 +204,7 @@ export default function WaterSortClient() {
                   }}
                 />
               ))}
-            </button>
+            </div>
           );
         })}
       </div>
@@ -187,24 +221,12 @@ export default function WaterSortClient() {
       </nav>
       <div className="page-heading compact-heading">
         <h1>ウォーターソート</h1>
-        <p className="muted">ボトルを選んで注ぎ分けます。間違えたら「1手戻す」で戻せます。</p>
+        <p className="muted">ボトルを選んで注ぎ分けます。間違えたら左スワイプ（Uキー）で1手戻せます。</p>
       </div>
 
       <div className="classic-controls" role="group" aria-label="操作">
         <button type="button" className="classic-btn" onClick={restart}>
           もう一度
-        </button>
-        <button
-          type="button"
-          className="classic-btn"
-          disabled={state.history.length === 0}
-          onClick={() => {
-            sfxSlide();
-            setState((s) => undoWaterSort(s));
-            setSelected(null);
-          }}
-        >
-          1手戻す
         </button>
       </div>
 
@@ -213,7 +235,7 @@ export default function WaterSortClient() {
       </p>
 
 {webglFailed ? board2d : (
-        <div style={{ maxWidth: 520, margin: "0 auto" }}>
+        <div {...boardGesture} style={{ maxWidth: 520, margin: "0 auto", touchAction: "none" }}>
           <WaterSortScene3D
             state={state}
             selected={selected}
