@@ -332,7 +332,7 @@ const STATION_LABEL: Record<LobbyStation, string> = {
 };
 
 export default function WorldBoxClient() {
-  const { prefix } = useGamesNav();
+  const { prefix, embedded, identity } = useGamesNav();
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const minimapRef = useRef<HTMLCanvasElement | null>(null);
   const [statusText, setStatusText] = useState("読み込み中…");
@@ -419,6 +419,7 @@ export default function WorldBoxClient() {
 
   // 入場ゲート（Discord ログイン必須。許可されるまでワールドは描画しない）
   const [gate, setGate] = useState<"checking" | "ok" | "denied">("checking");
+  const [gateTry, setGateTry] = useState(0);
   const gateOk = gate === "ok";
   useEffect(() => {
     let cancelled = false;
@@ -434,7 +435,29 @@ export default function WorldBoxClient() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [gateTry]);
+  // Activity 内では GamesShell の SDK 認証が完了するとセッションが張られる。
+  // 本人情報が届いた時点でゲートを引き直す（初回チェックが認証より先に
+  // 走って denied になっても、押せないログインリンクで詰まらないように）。
+  const identityId = identity?.id;
+  useEffect(() => {
+    if (identityId) setGateTry((t) => t + 1);
+  }, [identityId]);
+  // 認証完了の通知を取りこぼした場合の保険: Activity 内で denied の間は
+  // しばらく自動で引き直す。
+  useEffect(() => {
+    if (!embedded || gate !== "denied") return;
+    let count = 0;
+    const timer = window.setInterval(() => {
+      count += 1;
+      if (count > 24) {
+        window.clearInterval(timer);
+        return;
+      }
+      setGateTry((t) => t + 1);
+    }, 2500);
+    return () => window.clearInterval(timer);
+  }, [embedded, gate]);
   // 空間（ワールド / ロビー）とハンバーガーメニュー、ステーション、掲示板
   const [spaceUi, setSpaceUi] = useState<SaveSpace>("world");
   const [menuOpen, setMenuOpen] = useState(false);
@@ -3567,14 +3590,29 @@ export default function WorldBoxClient() {
             <p role="status" style={{ margin: 0 }}>
               ログインが必要
             </p>
-            <a
-              href="/api/auth/discord/authorize?next=/games/worldbox"
-              style={{
-                ...btn, textDecoration: "none", display: "inline-flex", alignItems: "center",
-              }}
-            >
-              Discordでログイン
-            </a>
+            {embedded ? (
+              // Activity 内では通常の OAuth 画面遷移が使えない（押すと白画面で
+              // 詰まる）。認証は GamesShell の SDK 認証が担うので、ここは
+              // ゲートの引き直しだけを置く。
+              <button
+                type="button"
+                onClick={() => setGateTry((t) => t + 1)}
+                style={{
+                  ...btn, display: "inline-flex", alignItems: "center",
+                }}
+              >
+                再試行
+              </button>
+            ) : (
+              <a
+                href="/api/auth/discord/authorize?next=/games/worldbox"
+                style={{
+                  ...btn, textDecoration: "none", display: "inline-flex", alignItems: "center",
+                }}
+              >
+                Discordでログイン
+              </a>
+            )}
             <Link href={`${prefix}/games`} style={{ color: "#9fd8e8", fontSize: 13 }}>
               ゲーム一覧へ
             </Link>
