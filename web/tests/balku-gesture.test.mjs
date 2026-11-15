@@ -62,7 +62,7 @@ test("廃止した操作部品がクライアントに残っていない", () =>
 test("全 GameAction がジェスチャ経路から到達できる", () => {
   assert.ok(client.includes('source: "bundle"'));
   assert.ok(client.includes('"submit-open"') && client.includes('"submit-down"'));
-  assert.ok(client.includes("submitSelected(zone === \"submit-open\")"));
+  assert.ok(client.includes("submitSelected(zone === \"submit-open\", true)"));
   assert.ok(client.includes('source: "market-material"'));
   assert.ok(client.includes('type: "buyMaterial"'));
   assert.ok(client.includes('type: "sellCards"'));
@@ -252,29 +252,31 @@ test("施工シート: ステージ上の重なりで、TSX のクラスに CSS 
 });
 
 test("ムーブの受け付け: 判定は広め・近接とフリックの救済・タップ代替（桜井 #223）", () => {
-  // ドロップ判定はゾーン矩形より四方 24px 広い
-  assert.ok(client.includes("const DROP_PAD = 24"), "ドロップ判定の拡大がない");
+  // ドロップ判定はゾーン矩形より四方 44px 広い（第4弾で 24→44 に拡大）
+  assert.ok(client.includes("const DROP_PAD = 44"), "ドロップ判定の拡大がない");
   assert.ok(client.includes("r.left - DROP_PAD"), "zoneAt が判定を広げていない");
   // ゾーン外でも近くのゾーンへ寄せる近接解決があり、フリックより先に試す
   assert.ok(client.includes("const nearestZone"), "近接解決がない");
-  assert.ok(client.includes("const DROP_NEAR = 96"), "近接解決の距離がない");
+  assert.ok(client.includes("const DROP_NEAR = 160"), "近接解決の距離がない");
   const endIdx = client.indexOf("const endDrag");
   const endBlock = client.slice(endIdx, client.indexOf("const cancelDrag", endIdx));
   assert.ok(endBlock.indexOf("nearestZone(") > 0 && endBlock.indexOf("nearestZone(") < endBlock.indexOf("flickZone("), "近接→フリックの順で救済していない");
-  // フリックの閾値は緩い方に固定（速さ 0.35 / 向き 0.5、引き寄せ 40px）
-  assert.ok(client.includes("speed < 0.35"), "フリック速度の閾値が緩んでいない");
-  assert.ok(client.includes("dot > 0.5"), "フリック方向の閾値が緩んでいない");
-  assert.ok(client.includes("dy > 40 && vy > 0.05"), "BALKU 引き寄せの閾値が緩んでいない");
+  // フリックの閾値は緩い方に固定（速さ 0.28 / 向き 0.42、引き寄せ 32px）
+  assert.ok(client.includes("speed < 0.28"), "フリック速度の閾値が緩んでいない");
+  assert.ok(client.includes("dot > 0.42"), "フリック方向の閾値が緩んでいない");
+  assert.ok(client.includes("dy > 32 && vy > 0.03"), "BALKU 引き寄せの閾値が緩んでいない");
   // ファンの横スワイプからドラッグへの昇格（途中で縦に切ったら持ち上がる）
   assert.ok(client.includes('track.mode = "drag";\n      } else {') || client.includes("ドラッグへ昇格"), "fan→drag 昇格がない");
   // 押して何も起きない面を作らない: 提出パッド/市場/入札コイン/手番
   // トークンはタップでも同じムーブが成立する（ドラッグ後の click は
   // suppressClick で二重実行を防ぐ）
-  // 提出先はシート内の小パッドではなく場の左右半分（左=公開/右=伏せ）。
-  // 半分はタップでも提出でき、束はタップで持ち上げられる
+  // 提出先に専用の受け皿は置かない（第4弾）: 場そのものを左右に割って
+  // 判定し、タップ提出も場のタップ位置（左=公開/右=伏せ）で決まる。
+  // 束はタップで持ち上げられる
   assert.ok(!client.includes("balku-submitpad"), "旧・提出パッドが残っている");
-  assert.ok(/balku-fieldhalf-open[\s\S]{0,700}submitSelected\(true\)/.test(client), "公開（場の左半分）のタップ提出がない");
-  assert.ok(/balku-fieldhalf-down[\s\S]{0,700}submitSelected\(false\)/.test(client), "伏せ（場の右半分）のタップ提出がない");
+  assert.ok(!client.includes("balku-fieldhalves") && !css.includes(".balku-fieldhalves"), "提出先の専用スペースが残っている");
+  assert.ok(client.includes("const zoneRect"), "場を割る仮想ゾーン（zoneRect）がない");
+  assert.ok(client.includes("submitSelected(e.clientX < r.left + r.width / 2)"), "場タップの左右判定（タップ提出）がない");
   assert.ok(client.includes("bundleHeld"), "束のタップ持ち上げがない");
   // 関係ないゾーンが行き先を遮らない: zoneAt はそのドラッグに
   // 関係するゾーンだけを見る（施工シート全体が "build" で遮っていた）
@@ -282,7 +284,7 @@ test("ムーブの受け付け: 判定は広め・近接とフリックの救済
   assert.ok(zoneAtBlock.includes("wanted.includes(id)"), "zoneAt が関係ないゾーンに遮蔽される");
   // 方向スワイプ解決（移動の向きで受ける）が近接の後・フリックの前に試される
   assert.ok(client.includes("const directionZone"), "方向スワイプ解決がない");
-  assert.ok(client.includes("dist < 40") && client.includes("dot > 0.3"), "方向スワイプの閾値（40px / dot 0.3）が固定されていない");
+  assert.ok(client.includes("dist < 24") && client.includes("dot > 0.2"), "方向スワイプの閾値（24px / dot 0.2）が固定されていない");
   assert.ok(endBlock.indexOf("directionZone(") > endBlock.indexOf("nearestZone(") && endBlock.indexOf("directionZone(") < endBlock.indexOf("flickZone("), "近接→方向→フリックの順で救済していない");
   // ドラッグ中の着地予測（dropHot）も同じ解決順で光る
   const moveBlock = client.slice(client.indexOf("const moveDrag"), client.indexOf("const endDrag"));
@@ -300,9 +302,10 @@ test("演出と認知負荷: パーティクル/シェイクと、チップ化�
   assert.ok(client.includes('burstAt(e.clientX, e.clientY, "coin")'), "購入/入札のパーティクルがない");
   assert.ok(css.includes(".balku-fx span") && css.includes("@keyframes balku-fx-fly"), "パーティクルの CSS がない");
   assert.ok(css.includes(".balku-shake {"), "画面シェイクのクラスがない");
-  // 場の左右半分（提出先）の CSS
-  assert.ok(css.includes(".balku-fieldhalves {"), "場の半分の CSS がない");
-  assert.ok(css.includes(".balku-fieldhalf-open {") && css.includes(".balku-fieldhalf-down {"), "公開/伏せ半分の CSS がない");
+  // 提出の予測は専用スペースでなく、場全体の薄い光とクローンの色で返す
+  assert.ok(css.includes(".balku-field-openhot {") && css.includes(".balku-field-downhot {"), "場の予測の光がない");
+  assert.ok(css.includes(".balku-clone-open {") && css.includes(".balku-clone-down {"), "クローンの予測色がない");
+  assert.ok(client.includes("balku-field-openhot") && client.includes("balku-clone-open"), "予測の光/色がクライアントで使われていない（無スタイル部品）");
   // 施工情報は行＋文章ではなくチップとバッジ（構造で状態が分かる形）
   assert.ok(client.includes("balku-reqchips"), "必要素材がチップ化されていない");
   assert.ok(!client.includes("balku-reqrows"), "必要素材の行表示が残っている");
@@ -312,20 +315,57 @@ test("演出と認知負荷: パーティクル/シェイクと、チップ化�
   assert.ok(/第\{st\.turn\}ターン ・ 山札/.test(client), "情報バーのチップ統合がない");
 });
 
-test("取る側と落とす側のバランス: 掴みは大きく、提出先は場の下部だけ", () => {
+test("取る側のバランス: 掴みは大きく、提出先の専用スペースは置かない", () => {
   // ファンの重なりは浅く（露出7割で掴める帯を広く保つ）
   assert.ok(css.includes("* -0.3)"), "ファンの重なりが深いまま（掴める帯が狭い）");
   // ドラッグ中のゴーストは手札カードより大きく浮く
   assert.ok(/\.balku-drag-clone \.balku-card-small \{ width:156px/.test(css), "ドラッグゴーストが小さいまま");
   // 施工の大カード（束の掴み元）も一回り大きく
   assert.ok(css.includes("width:min(264px, 76cqw)"), "施工カードが小さいまま");
-  // 提出先の半分は場いっぱい（inset:0）ではなく下部56%に収める
-  assert.ok(/\.balku-fieldhalves \{[^}]*height:56%/.test(css), "提出先が場の下部に収まっていない");
-  assert.ok(!/\.balku-fieldhalves \{[^}]*inset:0/.test(css), "提出先が場いっぱいに広がっている");
+  // 提出先は場そのもの（第3弾の「場の下部56%の半分」も第4弾で廃止。
+  // 狭くて邪魔な受け皿は置かず、場へ放る動き自体で判定する）
+  assert.ok(!css.includes(".balku-fieldhalves") && !client.includes("balku-fieldhalves"), "提出先の専用スペースが残っている");
 });
 
 test("対戦画面とカタログに絵文字が残っていない", () => {
   assert.ok(!client.includes("🎉"));
   const catalog = fs.readFileSync(path.join(root, "lib", "games-catalog.ts"), "utf8");
   assert.ok(!catalog.includes("🏗"));
+});
+
+test("第4弾: パスボタン明示・境界は緩く薄く・モーションの繋ぎ目", () => {
+  // パスは隠れたジェスチャでなく明示ボタン（情報バーの先頭側＝自分の
+  // 手番の間は横スクロールなしで必ず届く位置）。トークンの放る/タップ
+  // でも等価にパスできる導線は残す
+  assert.ok(client.includes("balku-passbtn"), "パスボタンがない");
+  assert.ok(client.includes('aria-label="パス（手番を次の人へ渡す）"'), "パスボタンのラベルがない");
+  const passIdx = client.indexOf("balku-passbtn");
+  assert.ok(client.slice(passIdx, passIdx + 1200).includes('type: "endTurn"'), "パスボタンが endTurn に繋がっていない");
+  assert.ok(passIdx < client.indexOf("balku-chip-deck"), "パスボタンが情報バーの先頭側にない（山札チップより後ろだと狭幅で画面外に流れる）");
+  assert.ok(css.includes(".balku-passbtn {"), "パスボタンの CSS がない（無スタイル部品）");
+  assert.ok(/\.balku-passbtn \{[^}]*min-height:44px/.test(css), "パスボタンのタップ下限（44px）がない");
+  assert.ok(/\.balku-passbtn \{[^}]*var\(--balku-spring\)/.test(css), "パスボタンにバネの弾力がない");
+  // 境界は薄く: 席と自領域の区切り線は最小限まで減衰させる
+  assert.ok(/\.balku-seat \{[^}]*rgba\(233,242,244,\.06\)/.test(css), "席の境界が薄くなっていない");
+  assert.ok(/\.balku-self \{[^}]*rgba\(233,242,244,\.06\)/.test(css), "自領域の境界が薄くなっていない");
+  // 「ここへドラッグ」の導線は置かない: 受け皿・ヒント文・引き寄せ
+  // ヒントを全廃し、判定は動き自体が担う（説明はハンバーガーの進め方だけ）
+  assert.ok(!client.includes("balku-build-hint") && !css.includes(".balku-build-hint"), "施工シートの導線文が残っている");
+  assert.ok(!client.includes("balku-bundle-pullhint") && !css.includes(".balku-bundle-pullhint"), "束の引き寄せヒントが残っている");
+  assert.ok(client.includes("相手の伏せ束は自分の側へ引くと BALKU"), "ハンバーガーの進め方から BALKU の説明が消えた");
+  // 重なった判定は「中心への近さ」で滲ませて決める（先勝ちの線引きにしない）
+  const zoneAtBlock = client.slice(client.indexOf("const zoneAt"), client.indexOf("const directionZone"));
+  assert.ok(zoneAtBlock.includes("dist < best.dist"), "zoneAt が中心への近さで決めていない");
+  // 繋ぎ目1: ドラッグ中は追随 transition を付けない（指とカードのズレの元）
+  assert.ok(!/\.balku-drag-clone \{[^}]*transition/.test(css), "ドラッグクローンに追随 transition が残っている");
+  assert.ok(css.includes("@keyframes balku-lift"), "掴んだ瞬間のバネ（lift）がない");
+  // 繋ぎ目2: 外して戻る時だけバネで滑らせる
+  assert.ok(client.includes("returning: true"), "スナップバックの帰還状態がない");
+  assert.ok(/\.balku-drag-clone\.balku-drag-return \{[^}]*transition:transform 260ms var\(--balku-spring\)/.test(css), "帰還のバネ transition がない");
+  // 繋ぎ目3: 離した地点から行き先へカードが飛び、着地で消える（寸断しない）
+  assert.ok(client.includes("const flyFromPoint"), "地点→行き先の飛行がない");
+  const endIdx = client.indexOf("const endDrag");
+  const endBlock = client.slice(endIdx, client.indexOf("const cancelDrag", endIdx));
+  assert.ok(endBlock.includes("flyFromPoint(track.label"), "ドロップ時に離した地点から飛んでいない");
+  assert.ok(client.includes("opacity: fly.go ? 0 : 1"), "飛行カードが着地でフェードしていない（消える瞬間が跳ねる）");
 });

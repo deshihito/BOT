@@ -66,7 +66,7 @@ type DragPayload =
   | { source: "bid-coin"; plus: number }
   | { source: "market-material"; kind: MaterialKind }
   | { source: "turn-token" };
-type DragState = { payload: DragPayload; x: number; y: number; label: string };
+type DragState = { payload: DragPayload; x: number; y: number; label: string; returning?: boolean };
 type DropZoneId = "build" | "sell" | "hand" | "submit-open" | "submit-down" | "auction" | "pass";
 type FlyState = { name: string; x: number; y: number; w: number; h: number; dx: number; dy: number; go: boolean };
 
@@ -457,8 +457,7 @@ export default function BalkuClient() {
   const handZoneRef = useRef<HTMLElement | null>(null);
   const seatsRef = useRef<HTMLDivElement | null>(null);
   const auctionRef = useRef<HTMLDivElement | null>(null);
-  const openPadRef = useRef<HTMLDivElement | null>(null);
-  const downPadRef = useRef<HTMLDivElement | null>(null);
+  const fieldRef = useRef<HTMLDivElement | null>(null);
 
   // --- セッション復元と表示名 ---
   useEffect(() => {
@@ -1509,7 +1508,35 @@ export default function BalkuClient() {
     placeProject(card);
   };
 
-  const submitSelected = (faceUp: boolean) => {
+  /* モーションの繋ぎ目: ある地点から行き先の要素の中心へカードを
+     飛ばす。ドラッグの着地もタップ提出もこれを通し、「離した所→
+     届く所」が1本の動きになる（クローンが消えて別の場所に結果が
+     現れる寸断を作らない）。演出なので失敗しても本処理は止めない。 */
+  const flyFromPoint = (name: string, fromX: number, fromY: number, target: HTMLElement | null) => {
+    if (!target) return;
+    try {
+      if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+      const dst = target.getBoundingClientRect();
+      const w = 120;
+      const h = 168;
+      setFly({
+        name,
+        x: fromX - w / 2,
+        y: fromY - h / 2,
+        w,
+        h,
+        dx: dst.left + dst.width / 2 - fromX,
+        dy: dst.top + dst.height / 2 - fromY,
+        go: false,
+      });
+      requestAnimationFrame(() => requestAnimationFrame(() => setFly((f) => (f ? { ...f, go: true } : f))));
+      setTimeout(() => setFly(null), 340);
+    } catch {
+      // 装飾なので無視する
+    }
+  };
+
+  const submitSelected = (faceUp: boolean, viaDrag = false) => {
     if (!selectedProject) return;
     if (!myTurn || busy) {
       playSe("error");
@@ -1519,27 +1546,15 @@ export default function BalkuClient() {
       playSe("error");
       return;
     }
-    // FLIP: 手札の企画カードの位置から施工ゾーンへカードを飛ばす
-    try {
-      const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-      const src = document.querySelector(`[data-hand-project="${selectedProject.id}"]`)?.getBoundingClientRect();
-      const dst = buildZoneRef.current?.getBoundingClientRect();
-      if (src && dst && !reduced) {
-        setFly({
-          name: selectedProject.name,
-          x: src.left,
-          y: src.top,
-          w: src.width,
-          h: src.height,
-          dx: dst.left + dst.width / 2 - (src.left + src.width / 2),
-          dy: dst.top + 56 - (src.top + src.height / 2),
-          go: false,
-        });
-        requestAnimationFrame(() => requestAnimationFrame(() => setFly((f) => (f ? { ...f, go: true } : f))));
-        setTimeout(() => setFly(null), 300);
+    // 繋ぎ目: 束（施工カード）の今の位置から、選んだ場の半分へカードを
+    // 飛ばして提出の動きを1本にする。ドラッグ提出のときは endDrag が
+    // 離した地点から飛ばすので、ここでは飛ばさない（二重の動きは
+    // ズレて見える）。
+    if (!viaDrag) {
+      const src = document.querySelector(".balku-build-card")?.getBoundingClientRect();
+      if (src) {
+        flyFromPoint(selectedProject.name, src.left + src.width / 2, src.top + src.height / 2, fieldRef.current);
       }
-    } catch {
-      // FLIP は装飾なので失敗しても提出は続ける
     }
     void doMove({
       type: "submit",
@@ -1576,8 +1591,6 @@ export default function BalkuClient() {
      （submit-open・submit-down）/ オークション（auction）/ 席（pass）。
      強制BALKU の対象束だけは要素そのものを当たり判定にする。 */
   const zoneEls = (): [DropZoneId, HTMLElement | null][] => [
-    ["submit-open", openPadRef.current],
-    ["submit-down", downPadRef.current],
     ["sell", sellZoneRef.current],
     ["auction", auctionRef.current],
     ["build", buildZoneRef.current],
@@ -1585,14 +1598,39 @@ export default function BalkuClient() {
     ["hand", handZoneRef.current],
   ];
 
+  /* ゾーンの矩形。提出先（submit-open / submit-down）は専用の受け皿を
+     置かず、場そのものを左右に割って使う（2026-11-15 第4弾・ユーザー
+     裁定: 「ここへドラッグ」のスペースは狭くて邪魔。場へ放る動き
+     自体で判定し、公開/伏せは放った位置の左右で決まる。導線の
+     文字も置かない）。 */
+  const zoneRect = (id: DropZoneId): { left: number; right: number; top: number; bottom: number; width: number; height: number } | null => {
+    if (id === "submit-open" || id === "submit-down") {
+      const fr = fieldRef.current?.getBoundingClientRect();
+      if (!fr) return null;
+      const mid = fr.left + fr.width / 2;
+      return id === "submit-open"
+        ? { left: fr.left, right: mid, top: fr.top, bottom: fr.bottom, width: fr.width / 2, height: fr.height }
+        : { left: mid, right: fr.right, top: fr.top, bottom: fr.bottom, width: fr.width / 2, height: fr.height };
+    }
+    const el = zoneEls().find(([z]) => z === id)?.[1];
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    return { left: r.left, right: r.right, top: r.top, bottom: r.bottom, width: r.width, height: r.height };
+  };
+  const ZONE_IDS: DropZoneId[] = ["submit-open", "submit-down", "sell", "auction", "build", "pass", "hand"];
+
   /* ドロップ判定は見た目より広めに取る（桜井政博の原則: 判定は広めに、
      当たらないのが一番のストレス。動画 #223「攻撃判定を常に意識」）。
      2026-11-15: 従来はゾーン矩形ぴったり＋速いフリックでしか届かず、
      ゆっくり正確に運んでも数pxのズレで弾かれて「ムーブできない」が
      量産されていた。矩形を四方に広げ、近接フォールバックと合わせて
-     3段で受ける。 */
-  const DROP_PAD = 24;
-  const DROP_NEAR = 96;
+     3段で受ける。
+     第4弾（同日・ユーザー裁定）: ゲームの境界は本来「緩く薄く、弾力が
+     ある」もの。しっかり区切らない。拡大した矩形同士が重なるのは
+     正常で、重なった場合は中心への近さで滲ませて決める（zoneAt）。
+     パッドと近接の距離もさらに広げた。 */
+  const DROP_PAD = 44;
+  const DROP_NEAR = 160;
   const relevantZones = (source: DragPayload["source"]): DropZoneId[] =>
     (
       {
@@ -1617,16 +1655,22 @@ export default function BalkuClient() {
        シート全体や手札領域など）が先に当たって本来の行き先を遮り、
        「離しても何も起きない」事故が起きていた（2026-11-15 第2弾）。 */
     const wanted = payload ? relevantZones(payload.source) : null;
-    for (const [id, el] of zoneEls()) {
-      if (!el) continue;
+    /* 拡大した矩形が複数重なったら、最初に当たったものではなく
+       中心に一番近いゾーンを採る。境界は線ではなく滲みで決まる。 */
+    let best: { zone: DropZoneId; dist: number } | null = null;
+    for (const id of ZONE_IDS) {
       if (wanted && !wanted.includes(id)) continue;
-      const r = el.getBoundingClientRect();
-      if (x >= r.left - DROP_PAD && x <= r.right + DROP_PAD && y >= r.top - DROP_PAD && y <= r.bottom + DROP_PAD) return id;
+      const r = zoneRect(id);
+      if (!r) continue;
+      if (x >= r.left - DROP_PAD && x <= r.right + DROP_PAD && y >= r.top - DROP_PAD && y <= r.bottom + DROP_PAD) {
+        const dist = Math.hypot(r.left + r.width / 2 - x, r.top + r.height / 2 - y);
+        if (!best || dist < best.dist) best = { zone: id, dist };
+      }
     }
-    return null;
+    return best?.zone ?? null;
   };
 
-  /** 方向スワイプ解決: ゾーンに届かなくても、40px以上移動して
+  /** 方向スワイプ解決: ゾーンに届かなくても、24px以上移動して
       ゾーンの方向へ向かっていれば到達とみなす（曖昧さを受け入れる
       判定）。ポケポケ/シャドバの「カードを放る」感触に合わせ、
       速さではなく移動の向きで決める。提出の公開/伏せは場の左右
@@ -1635,18 +1679,19 @@ export default function BalkuClient() {
     const dx = x - startX;
     const dy = y - startY;
     const dist = Math.hypot(dx, dy);
-    if (dist < 40) return null;
+    if (dist < 24) return null;
     const wanted = relevantZones(payload.source);
     let best: { zone: DropZoneId; dot: number } | null = null;
-    for (const [id, el] of zoneEls()) {
-      if (!el || !wanted.includes(id)) continue;
-      const r = el.getBoundingClientRect();
+    for (const id of ZONE_IDS) {
+      if (!wanted.includes(id)) continue;
+      const r = zoneRect(id);
+      if (!r) continue;
       const cx = r.left + r.width / 2 - startX;
       const cy = r.top + r.height / 2 - startY;
       const cd = Math.hypot(cx, cy);
       if (cd < 24) continue;
       const dot = (dx * cx + dy * cy) / (dist * cd);
-      if (dot > 0.3 && (!best || dot > best.dot)) best = { zone: id, dot };
+      if (dot > 0.2 && (!best || dot > best.dot)) best = { zone: id, dot };
     }
     return best?.zone ?? null;
   };
@@ -1656,9 +1701,10 @@ export default function BalkuClient() {
   const nearestZone = (payload: DragPayload, x: number, y: number): DropZoneId | null => {
     const wanted = relevantZones(payload.source);
     let best: { zone: DropZoneId; dist: number } | null = null;
-    for (const [id, el] of zoneEls()) {
-      if (!el || !wanted.includes(id)) continue;
-      const r = el.getBoundingClientRect();
+    for (const id of ZONE_IDS) {
+      if (!wanted.includes(id)) continue;
+      const r = zoneRect(id);
+      if (!r) continue;
       const dx = Math.max(r.left - x, 0, x - r.right);
       const dy = Math.max(r.top - y, 0, y - r.bottom);
       const dist = Math.hypot(dx, dy);
@@ -1670,18 +1716,19 @@ export default function BalkuClient() {
   /** フリック解決: ゾーンに届いていなくても、ゾーン方向へのスワイプは到達と同等にする。 */
   const flickZone = (track: { payload: DragPayload; startX: number; startY: number }, vx: number, vy: number): DropZoneId | null => {
     const speed = Math.hypot(vx, vy);
-    if (speed < 0.35) return null;
+    if (speed < 0.28) return null;
     const wanted = relevantZones(track.payload.source);
     let best: { zone: DropZoneId; dot: number } | null = null;
-    for (const [id, el] of zoneEls()) {
-      if (!el || !wanted.includes(id)) continue;
-      const r = el.getBoundingClientRect();
+    for (const id of ZONE_IDS) {
+      if (!wanted.includes(id)) continue;
+      const r = zoneRect(id);
+      if (!r) continue;
       const cx = r.left + r.width / 2 - track.startX;
       const cy = r.top + r.height / 2 - track.startY;
       const dist = Math.hypot(cx, cy);
       if (dist < 24 || dist > 900) continue;
       const dot = (vx * cx + vy * cy) / (speed * dist);
-      if (dot > 0.5 && (!best || dot > best.dot)) best = { zone: id, dot };
+      if (dot > 0.42 && (!best || dot > best.dot)) best = { zone: id, dot };
     }
     return best?.zone ?? null;
   };
@@ -1733,7 +1780,7 @@ export default function BalkuClient() {
       return;
     }
     if (zone === "submit-open" || zone === "submit-down") {
-      if (payload.source === "bundle") submitSelected(zone === "submit-open");
+      if (payload.source === "bundle") submitSelected(zone === "submit-open", true);
       return;
     }
     if (zone === "auction") {
@@ -1848,12 +1895,21 @@ export default function BalkuClient() {
     // 相手の束を自分の側へ「引いて離す」引き寄せ（閾値未満は無効＝確認を兼ねる）
     if (!zone && track.payload.source === "opponent-bundle") {
       const dy = e.clientY - track.startY;
-      if (dy > 40 && vy > 0.05) zone = "hand";
+      if (dy > 32 && vy > 0.03) zone = "hand";
     }
     if (!zone) zone = nearestZone(track.payload, e.clientX, e.clientY);
     if (!zone) zone = directionZone(track.payload, track.startX, track.startY, e.clientX, e.clientY);
     if (!zone) zone = flickZone(track, vx, vy);
     if (zone) {
+      // 繋ぎ目: 離した地点から行き先へカードを飛ばしてからクローンを
+      // 消す（結果が別の場所に突然現れる寸断を作らない）
+      const targetEl =
+        track.payload.source === "force-charge" && forceTarget
+          ? (document.querySelector(`[data-bulk-target="${forceTarget.seat}:${forceTarget.submissionId}"]`) as HTMLElement | null)
+          : zone === "submit-open" || zone === "submit-down"
+            ? fieldRef.current
+            : (zoneEls().find(([id]) => id === zone)?.[1] ?? null);
+      flyFromPoint(track.label, e.clientX, e.clientY, targetEl);
       setDrag(null);
       resolveDrop(track.payload, zone, forceTarget);
       // 解決したムーブには着地点でパーティクルを返す（手応えの可視化）
@@ -1867,10 +1923,11 @@ export default function BalkuClient() {
         burstAt(e.clientX, e.clientY, "coin");
       }
     } else {
-      // 対象外で離したら元の位置へ戻る（スナップバック）
+      // 対象外で離したら元の位置へ戻る（スナップバック）。
+      // 帰還だけはバネの transition で滑らせ、着いてから消す
       playSe("error");
-      setDrag({ payload: track.payload, x: track.startX, y: track.startY, label: track.label });
-      setTimeout(() => setDrag(null), 200);
+      setDrag({ payload: track.payload, x: track.startX, y: track.startY, label: track.label, returning: true });
+      setTimeout(() => setDrag(null), 300);
     }
   };
   const cancelDrag = () => {
@@ -1951,7 +2008,6 @@ export default function BalkuClient() {
           </div>
           {isMine && <ProjectArt name={sub.project.name} effectType={sub.project.effect.type} />}
           {renderBundleMats(sub, isMine)}
-          {canBulk && <span className="balku-bundle-pullhint" aria-hidden="true">▽ 引くとBALKU</span>}
         </div>
       );
     }
@@ -1977,7 +2033,6 @@ export default function BalkuClient() {
         <ProjectArt name={sub.project.name} effectType={sub.project.effect.type} />
         <p className="balku-bundle-effect">{sub.project.effect.label}</p>
         {renderBundleMats(sub, true)}
-        {canBulk && <span className="balku-bundle-pullhint" aria-hidden="true">▽ 引くとBALKU</span>}
       </div>
     );
   };
@@ -2285,9 +2340,8 @@ export default function BalkuClient() {
             )}
           </div>
         </div>
-        {/* 提出先はシート内の小パッドではなく、場（中央帯）の左右半分。
-            束をドラッグ/持ち上げすると半分が光る（renderGame の場側）。 */}
-        <p className="balku-build-hint">束を場へ放つと提出（左＝公開 / 右＝伏せ）</p>
+        {/* 提出は束を場へ放つ動き自体で判定する（受け皿も導線の
+            文字も置かない。第4弾のユーザー裁定）。 */}
       </section>
     );
   };
@@ -2450,10 +2504,10 @@ export default function BalkuClient() {
               <h3>進め方</h3>
               <ul className="balku-menu-rules">
                 <li>企画カードをタップし、素材をドラッグして施工ゾーンで束を作る。</li>
-                <li>束を場へ放つと提出。場の左半分が公開、右半分が伏せ。</li>
+                <li>束を場へ放つと提出。放つ位置が左なら公開、右なら伏せ。</li>
                 <li>相手の伏せ束は自分の側へ引くと BALKU。違法を暴けば没収、正規なら奪われる。</li>
                 <li>調達市場はテーブル右端のタブから開く。</li>
-                <li>手番トークンを次の席へ放つとパス。</li>
+                <li>「パス」を押すと手番を渡す。手番トークンを次の席へ放っても同じ。</li>
               </ul>
             </div>
             <button type="button" className="balku-btn balku-btn-ghost" onClick={leaveRoom} disabled={busy}>
@@ -2469,7 +2523,20 @@ export default function BalkuClient() {
 
         {/* 中央：場（オークション／自分の提出／施工ゾーン）＋市場の棚 */}
         <div className="balku-fieldrow">
-          <div className="balku-field">
+          <div
+            ref={fieldRef}
+            className={`balku-field${dropHot === "submit-open" ? " balku-field-openhot" : dropHot === "submit-down" ? " balku-field-downhot" : ""}`}
+            onClickCapture={(e) => {
+              // 束を持ち上げ中は、場のタップ＝提出（左半分＝公開 / 右半分
+              // ＝伏せ）。場の中の子要素（自分の提出の詳細など）より
+              // 先に受ける
+              if (!bundleHeld || !selectedProject || suppressClickRef.current) return;
+              e.stopPropagation();
+              const r = fieldRef.current?.getBoundingClientRect();
+              if (!r) return;
+              submitSelected(e.clientX < r.left + r.width / 2);
+            }}
+          >
             {st.auction && (
               <div key={`${st.auction.roundOpened}:${st.auction.card.id}`} className="balku-auction" role="status" ref={auctionRef} data-drop="auction">
                 <span className="balku-plate">オークション</span>
@@ -2600,56 +2667,10 @@ export default function BalkuClient() {
               </div>
             )}
 
-            {/* 提出先は場の左右半分（ポケポケ式: カードを持つと行き先が
-                画面の半分単位で光る）。束のドラッグ中か、タップで
-                持ち上げ中だけ出現し、半分のどこに放っても落ちる。
-                左＝公開 / 右＝伏せ。 */}
-            {selectedProject && (drag?.payload.source === "bundle" || bundleHeld) && (
-              <div className="balku-fieldhalves" aria-label="提出先">
-                <div
-                  ref={openPadRef}
-                  data-drop="submit-open"
-                  className={`balku-fieldhalf balku-fieldhalf-open${dropHot === "submit-open" ? " balku-drop-hot" : ""}`}
-                  role="button"
-                  tabIndex={0}
-                  aria-label="公開で提出"
-                  onClick={() => {
-                    if (suppressClickRef.current) return;
-                    submitSelected(true);
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault();
-                      submitSelected(true);
-                    }
-                  }}
-                >
-                  <strong>公開</strong>
-                  <span>表向きで提出</span>
-                </div>
-                <div
-                  ref={downPadRef}
-                  data-drop="submit-down"
-                  className={`balku-fieldhalf balku-fieldhalf-down${dropHot === "submit-down" ? " balku-drop-hot" : ""}`}
-                  role="button"
-                  tabIndex={0}
-                  aria-label="伏せて提出"
-                  onClick={() => {
-                    if (suppressClickRef.current) return;
-                    submitSelected(false);
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault();
-                      submitSelected(false);
-                    }
-                  }}
-                >
-                  <strong>伏せ</strong>
-                  <span>裏向きで提出</span>
-                </div>
-              </div>
-            )}
+            {/* 提出先の受け皿は置かない（第4弾）: 場そのものが提出先で、
+                公開/伏せは放った/タップした位置の左右で決まる。予測は
+                場全体の薄い光（balku-field-openhot/downhot）とクローンの
+                色で返す。専用スペースと「ここへドラッグ」の文字は置かない。 */}
 
           </div>
 
@@ -2708,6 +2729,57 @@ export default function BalkuClient() {
         {/* 下段：自分の領域（情報バー＋手札） */}
         <section ref={handZoneRef} className={`balku-self${selfHurtKey ? " balku-self-hurt" : ""}`} aria-label="あなたの領域">
           <div className="balku-infobar">
+            {myTurn && !me.eliminated ? (
+              <>
+                <span
+                  key={`mine-${st.turn}`}
+                  className="balku-chip balku-chip-now balku-draggable balku-turntoken"
+                  {...dragHandlers({ source: "turn-token" }, "手番トークン", true)}
+                  tabIndex={0}
+                  role="button"
+                  aria-label="手番トークン（相手の席へ放つとパス）"
+                  onClick={() => {
+                    if (suppressClickRef.current) return;
+                    void doMove({ type: "endTurn" });
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      void doMove({ type: "endTurn" });
+                    }
+                  }}
+                >
+                  あなたの手番{turnSec !== null ? ` ・ あと${turnSec}秒` : ""}
+                </span>
+                {/* パスは明示ボタンで置く（2026-11-15 第4弾・ユーザー裁定:
+                   トークンの放り先として隠れていた頃は「パスボタンがない」
+                   と繰り返し指摘された。見つけられない操作は無いも同然）。
+                   情報バーの先頭側に置き、横スクロールなしで必ず届く。
+                   トークンのドラッグ/タップも従来どおり等価に残す。 */}
+                <span
+                  className="balku-passbtn"
+                  role="button"
+                  tabIndex={0}
+                  aria-label="パス（手番を次の人へ渡す）"
+                  onClick={() => {
+                    if (suppressClickRef.current) return;
+                    void doMove({ type: "endTurn" });
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      void doMove({ type: "endTurn" });
+                    }
+                  }}
+                >
+                  パス
+                </span>
+              </>
+            ) : (
+              <span key="other" className="balku-chip">
+                {me.eliminated ? "脱落（観戦中）" : `${activePlayer?.name ?? ""}の手番${turnSec !== null ? ` ・ あと${turnSec}秒` : ""}`}
+              </span>
+            )}
             <span className="balku-chip balku-chip-deck">
               <CardBack mini />
               <span className="balku-deckbar" aria-hidden="true">
@@ -2715,32 +2787,6 @@ export default function BalkuClient() {
               </span>
               第{st.turn}ターン ・ 山札 {st.deckCount} / {st.deckInitialCount}
             </span>
-            {myTurn && !me.eliminated ? (
-              <span
-                key={`mine-${st.turn}`}
-                className="balku-chip balku-chip-now balku-draggable balku-turntoken"
-                {...dragHandlers({ source: "turn-token" }, "手番トークン", true)}
-                tabIndex={0}
-                role="button"
-                aria-label="手番トークン（相手の席へ放つとパス）"
-                onClick={() => {
-                  if (suppressClickRef.current) return;
-                  void doMove({ type: "endTurn" });
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") {
-                    e.preventDefault();
-                    void doMove({ type: "endTurn" });
-                  }
-                }}
-              >
-                あなたの手番{turnSec !== null ? ` ・ あと${turnSec}秒` : ""}
-              </span>
-            ) : (
-              <span key="other" className="balku-chip">
-                {me.eliminated ? "脱落（観戦中）" : `${activePlayer?.name ?? ""}の手番${turnSec !== null ? ` ・ あと${turnSec}秒` : ""}`}
-              </span>
-            )}
             {turnSec !== null && st.phase === "active" && <TimerBar sec={turnSec} total={60} />}
             <span className="balku-chip balku-chip-coins">
               {me.coins}コイン / {myBreakdown.points} PT
@@ -2913,7 +2959,7 @@ export default function BalkuClient() {
 
       {drag && (
         <div
-          className="balku-drag-clone"
+          className={`balku-drag-clone${drag.returning ? " balku-drag-return" : ""}${dropHot === "submit-open" ? " balku-clone-open" : dropHot === "submit-down" ? " balku-clone-down" : ""}`}
           style={{ transform: `translate(${drag.x}px, ${drag.y}px) translate(-50%, -72%) rotate(-3deg)` }}
           aria-hidden="true"
         >
@@ -2950,7 +2996,7 @@ export default function BalkuClient() {
             width: fly.w,
             height: fly.h,
             transform: fly.go ? `translate(${fly.dx}px, ${fly.dy}px) scale(.55)` : "translate(0, 0)",
-            opacity: fly.go ? 0.85 : 1,
+            opacity: fly.go ? 0 : 1,
           }}
           aria-hidden="true"
         >
