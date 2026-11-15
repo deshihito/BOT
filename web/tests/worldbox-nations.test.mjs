@@ -492,6 +492,11 @@ export class NextResponse {
   }
 }
 `);
+const stationStubUrl = dataUrl(`
+export async function loadMyLobbyStation() {
+  return globalThis.__wbStationValue ?? null;
+}
+`);
 const nationsRoute = await import(
   dataUrl(
     transpile("api/worldbox/nations/route.ts", rootDir + "/app")
@@ -500,6 +505,7 @@ const nationsRoute = await import(
       .replaceAll('"@/lib/worldbox/mapgen"', JSON.stringify(mapgenUrl))
       .replaceAll('"@/lib/worldbox/nations"', JSON.stringify(nationsUrl))
       .replaceAll('"@/lib/worldbox/nations-online"', JSON.stringify(nationsOnlineUrl))
+      .replaceAll('"@/lib/worldbox/station-online"', JSON.stringify(stationStubUrl))
       .replaceAll('"@/lib/worldbox/buildings-online"', JSON.stringify(buildingsOnlineUrl))
       .replaceAll('"@/lib/worldbox/guilds"', JSON.stringify(guildsUrl)),
   ),
@@ -520,6 +526,8 @@ process.env.DISCORD_SESSION_SECRET = ["worldbox", "nations", "test", "secret"].j
 globalThis.__wbWebSessions = {};
 globalThis.__wbGuildsByToken = {};
 globalThis.__wbGuildFetchCount = {};
+// 役職の操作はギルドボード前が前提（既存シナリオはボード前で操作している）
+globalThis.__wbStationValue = "guild";
 
 function sessionCookie(id, username) {
   const value = auth.createSession({ id, username });
@@ -924,4 +932,35 @@ test("クライアント: 建築モード・建物描画・繁栄度が配線さ
   assert.ok(client.includes("stepMove(activeMap(), player, vel, dt, activeBlocked(), { swim: space === \"world\" })"), "建物が当たり判定に入っていない");
   assert.ok(client.includes("blockedRef.current"), "ワールドの固体集合に建物が入っていない");
   assert.ok(client.includes("blockedRef"), "建物の固体集合が無い");
+});
+
+test("API(nations): 役職の操作はギルドボードの前でのみ（場所ゲート）", async () => {
+  const DELTA = "900000000000000014";
+  const cookieJ = guildUser("200000000000000090", "king-j2", "f9", [
+    discordGuild(DELTA, "でるた鯖", true, "0"),
+  ]);
+  try {
+    // 広場（ギルドボード前でない）からは建国できない
+    globalThis.__wbStationValue = null;
+    const away = await nationsRoute.POST(nationsRequest("POST", cookieJ, { action: "found", guildId: DELTA }));
+    assert.equal(away.status, 409);
+    assert.equal((await away.json()).error, "not_at_guild_board");
+    // 別の施設の前でもダメ
+    globalThis.__wbStationValue = "shop";
+    const atShop = await nationsRoute.POST(nationsRequest("POST", cookieJ, { action: "found", guildId: DELTA }));
+    assert.equal(atShop.status, 409);
+    assert.equal((await atShop.json()).error, "not_at_guild_board");
+    // ギルドボードの前なら建国できる
+    globalThis.__wbStationValue = "guild";
+    assert.equal((await nationsRoute.POST(nationsRequest("POST", cookieJ, { action: "found", guildId: DELTA }))).status, 200);
+    // 離脱もギルドボードの前でのみ
+    globalThis.__wbStationValue = null;
+    const leaveAway = await nationsRoute.POST(nationsRequest("POST", cookieJ, { action: "leave" }));
+    assert.equal(leaveAway.status, 409);
+    assert.equal((await leaveAway.json()).error, "not_at_guild_board");
+    globalThis.__wbStationValue = "guild";
+    assert.equal((await nationsRoute.POST(nationsRequest("POST", cookieJ, { action: "leave" }))).status, 200);
+  } finally {
+    globalThis.__wbStationValue = "guild";
+  }
 });

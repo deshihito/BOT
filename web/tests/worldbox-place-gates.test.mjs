@@ -293,3 +293,16 @@ test("クライアント: スティックは固定式で、タイルタップと
   assert.ok(!client.includes("joy.baseX"), "フローティング基点が残っている");
   assert.ok(!client.includes("p.w * 0.62"), "タッチ位置でスティックを出す旧判定が残っている");
 });
+
+test("クライアント: 施設パネルは離れたら閉じる（掲示板・カジノ・ギルドボード）", () => {
+  const client = fs.readFileSync(path.join(rootDir, "app/games/worldbox/WorldBoxClient.tsx"), "utf8");
+  assert.ok(client.includes('if (stationUi !== "board") setBoardOpen(false);'));
+  assert.ok(client.includes('if (stationUi !== "casino") setCasinoOpen(false);'));
+  assert.ok(client.includes('if (stationUi !== "guild") setGuildBoardOpen(false);'), "ギルドボードが自動で閉じない");
+  // 役職操作の場所エラーに専用ラベルがある
+  assert.ok(client.includes('not_at_guild_board: "ギルドボードの前で操作してください"'));
+  // サーバー側も役職の操作をギルドボード前で検証する
+  const nationsRoute = fs.readFileSync(path.join(rootDir, "app/api/worldbox/nations/route.ts"), "utf8");
+  assert.match(nationsRoute, /loadMyLobbyStation/);
+  assert.match(nationsRoute, /not_at_guild_board/);
+});
