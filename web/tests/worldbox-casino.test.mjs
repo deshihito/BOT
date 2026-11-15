@@ -27,6 +27,15 @@ function dataUrl(js) {
 
 const casinoUrl = dataUrl(transpile("worldbox/casino.ts"));
 const casino = await import(casinoUrl);
+const casinoGamesUrl = dataUrl(transpile("worldbox/casino-games.ts"));
+const games = await import(casinoGamesUrl);
+const blackjackUrl = dataUrl(transpile("blackjack.ts"));
+const casinoSessionUrl = dataUrl(
+  transpile("worldbox/casino-session.ts")
+    .replaceAll('"../blackjack"', JSON.stringify(blackjackUrl))
+    .replaceAll('"./casino-games"', JSON.stringify(casinoGamesUrl)),
+);
+const sessionLib = await import(casinoSessionUrl);
 const rngUrl = dataUrl(transpile("worldbox/rng.ts"));
 const mapgenUrl = dataUrl(transpile("worldbox/mapgen.ts").replaceAll('"./rng"', JSON.stringify(rngUrl)));
 const lobbyUrl = dataUrl(transpile("worldbox/lobby.ts").replaceAll('"./mapgen"', JSON.stringify(mapgenUrl)));
@@ -173,6 +182,12 @@ const presenceOnlineUrl = dataUrl(
     .replaceAll('"../bot-api"', JSON.stringify(botApiStubUrl))
     .replaceAll('"./presence"', JSON.stringify(presenceUrl)),
 );
+const casinoSessionOnlineUrl = dataUrl(
+  transpile("worldbox/casino-session-online.ts")
+    .replaceAll('"../bot-api"', JSON.stringify(botApiStubUrl))
+    .replaceAll('"./casino-session"', JSON.stringify(casinoSessionUrl))
+    .replaceAll('"./casino-games"', JSON.stringify(casinoGamesUrl)),
+);
 const nextServerStubUrl = dataUrl(`
 export class NextResponse {
   static json(body, init = {}) {
@@ -188,6 +203,10 @@ const casinoRoute = await import(
       .replaceAll('"next/server"', JSON.stringify(nextServerStubUrl))
       .replaceAll('"@/lib/auth"', JSON.stringify(authUrl))
       .replaceAll('"@/lib/worldbox/casino"', JSON.stringify(casinoUrl))
+      .replaceAll('"@/lib/blackjack"', JSON.stringify(blackjackUrl))
+      .replaceAll('"@/lib/worldbox/casino-games"', JSON.stringify(casinoGamesUrl))
+      .replaceAll('"@/lib/worldbox/casino-session"', JSON.stringify(casinoSessionUrl))
+      .replaceAll('"@/lib/worldbox/casino-session-online"', JSON.stringify(casinoSessionOnlineUrl))
       .replaceAll('"@/lib/worldbox/economy-bridge"', JSON.stringify(economyUrl))
       .replaceAll('"@/lib/worldbox/economy-bridge-online"', JSON.stringify(economyOnlineUrl))
       .replaceAll('"@/lib/worldbox/lobby"', JSON.stringify(lobbyUrl))
@@ -309,6 +328,228 @@ test("API(casino): 実質残高を超えるベットは 409、ベット検証は
   assert.equal(badGame.status, 400);
   const cross = await casinoRoute.POST(apiRequest(URL_C, "POST", cookie, { game: "slot", bet: 10 }, { origin: "http://evil.example" }));
   assert.equal(cross.status, 403);
+});
+
+// ---------- 移行ゲームの純粋ロジック（Bot ギャンブル原典） ----------
+
+test("casino-games: セブンスロットの配当（7つ揃い・天井・6ペナルティ）", () => {
+  // rng=0 は常に数字0 → 7つ揃いで基本倍率 2000
+  const st1 = games.emptyCasinoUserState();
+  const all0 = games.spinSlot7(st1, 10, () => 0);
+  assert.deepEqual(all0.reels, [0, 0, 0, 0, 0, 0, 0]);
+  assert.equal(all0.reward, 10 * 2000);
+  // 連敗3の次は天井（ベット×50）
+  const st2 = games.emptyCasinoUserState();
+  st2.loseStreak = 3;
+  const pity = games.spinSlot7(st2, 10, () => 0.13);
+  assert.equal(pity.reward, 10 * 50);
+  assert.ok(pity.events.includes("pity"));
+  assert.equal(st2.loseStreak, 0);
+  // 7が7つ揃うと ×2000×5 と確変7
+  const st3 = games.emptyCasinoUserState();
+  const sevens = games.spinSlot7(st3, 10, () => 0.78);
+  assert.deepEqual(sevens.reels, [7, 7, 7, 7, 7, 7, 7]);
+  assert.equal(sevens.reward, 10 * 2000 * 5);
+  assert.equal(st3.kakuhen, games.SLOT7_KAKUHEN_SPINS);
+  // 6が2つだけ揃うとペナルティ（ベット×9 の追加引き落とし）。
+  // 先頭の 0.99 は six カウンタ判定が消費する分。
+  const st4 = games.emptyCasinoUserState();
+  const seq = [0.99, 0.6, 0.6, 0, 0.1, 0.2, 0.3, 0.45];
+  let i = 0;
+  const pen = games.spinSlot7(st4, 10, () => seq[i++ % seq.length]);
+  assert.deepEqual(pen.reels, [6, 6, 0, 1, 2, 3, 4]);
+  assert.equal(pen.reward, 0);
+  assert.equal(pen.penalty, 10 * 9);
+  assert.ok(pen.events.includes("six_penalty"));
+});
+
+test("casino-games: ダブルアップの倍率・内部モード・キャッシュアウト", () => {
+  const st = games.emptyCasinoUserState();
+  const s = { bet: 100, multiplier: 1, streak: 0 };
+  const win = games.doubleGo(s, st, () => 0.5);
+  assert.equal(win.win, true);
+  assert.equal(s.multiplier, games.DOUBLE_MULTIPLIER_STEP);
+  assert.equal(win.currentValue, 160);
+  const lose = games.doubleGo(s, st, () => 0.9);
+  assert.equal(lose.win, false);
+  assert.equal(lose.finished, true);
+  // キャッシュアウトが 500 超で HELL 落ち（原典どおり）
+  const st2 = games.emptyCasinoUserState();
+  const payout = games.doubleCashout({ bet: 1000, multiplier: 1, streak: 0 }, st2);
+  assert.equal(payout, 1000);
+  assert.equal(st2.internalMode, "HELL");
+  const st3 = games.emptyCasinoUserState();
+  assert.equal(games.doubleCashout({ bet: 100, multiplier: 1.6, streak: 1 }, st3), 160);
+  assert.equal(st3.internalMode, "NORMAL");
+});
+
+test("casino-games: ダイスの検証と抽選", () => {
+  assert.equal(games.validateDice(6, 3), null);
+  assert.equal(games.validateDice(4, 1), "invalid_dice_range");
+  assert.equal(games.validateDice(6, 7), "invalid_dice_number");
+  assert.equal(games.validateDice(6, 0), "invalid_dice_number");
+  assert.equal(games.rollDice(6, () => 0), 1);
+  assert.equal(games.rollDice(6, () => 0.999), 6);
+  assert.deepEqual([...games.DICE_RANGES], [6, 20, 100]);
+});
+
+test("casino: セッションの整形とブラックジャックの伏せ札", () => {
+  const s7 = sessionLib.cleanCasinoSession({
+    kind: "slot7", bet: 10, total: 10, remaining: 3, prepayOpId: "op1",
+    pendingReward: 50, pendingPenalty: 0, lastReels: [1, 2], lastEvents: [], createdAt: 100,
+  });
+  assert.equal(s7?.kind, "slot7");
+  assert.equal(s7?.remaining, 3);
+  assert.equal(sessionLib.cleanCasinoSession({ kind: "slot7", bet: -1 }), null);
+  assert.equal(sessionLib.cleanCasinoSession({ kind: "nope", createdAt: 1 }), null);
+  assert.equal(sessionLib.cleanCasinoSession("junk"), null);
+  const bjView = sessionLib.publicSessionView({
+    kind: "blackjack", bet: 100, spendOpIds: ["op1"], createdAt: 1,
+    bj: {
+      chips: 900, bet: 100, doubled: false, deck: [], round: 1, rng: 0,
+      playerHand: [{ suit: "spade", rank: 10 }, { suit: "heart", rank: 7 }],
+      dealerHand: [{ suit: "club", rank: 5 }, { suit: "diamond", rank: 13 }],
+      phase: "player", result: null,
+    },
+  });
+  assert.equal(bjView.dealerHand.length, 1, "プレイ中はディーラーの2枚目を隠す");
+  assert.equal(bjView.dealerHidden, true);
+});
+
+test("casino: prepaid な gamble オプと新理由がブリッジを通る", () => {
+  for (const reason of ["casino_dice", "casino_slot7", "casino_blackjack", "casino_double"]) {
+    const op = eco.buildEconomyOp(
+      { kind: "gamble", userKey: MY_KEY, discordId: ME, amount: 100, reason, payout: 250, prepaid: true },
+      "12345678-abcd-4abc-8abc-1234567890ab", 1,
+    );
+    assert.equal(op?.prepaid, true, reason);
+    assert.equal(eco.parseEconomyOp(op)?.prepaid, true, reason);
+  }
+  // prepaid でないオプには付けない
+  const plain = eco.buildEconomyOp(
+    { kind: "gamble", userKey: MY_KEY, discordId: ME, amount: 100, reason: "casino_slot", payout: 0 },
+    "12345678-abcd-4abc-8abc-1234567890ab", 1,
+  );
+  assert.equal(plain?.prepaid, undefined);
+});
+
+// ---------- API: 移行ゲーム ----------
+
+function markPendingSpendsDone() {
+  for (const [k, v] of globalThis.__wbCasinoStore) {
+    if (k.startsWith("worldbox_economy ") && v && typeof v === "object" && v.kind === "spend" && v.status === "pending") {
+      v.status = "done";
+    }
+  }
+}
+function findOps(pred) {
+  const out = [];
+  for (const [k, v] of globalThis.__wbCasinoStore) {
+    if (k.startsWith("worldbox_economy ") && v && typeof v === "object" && pred(v)) out.push(v);
+  }
+  return out;
+}
+function clearSession() {
+  globalThis.__wbCasinoStore.delete(`worldbox_casino session:${MY_KEY}`);
+}
+
+test("API(casino): ダイスはテーブルの前で遊べ、当たれば bet×範囲", async () => {
+  globalThis.__wbCasinoUsers.set(ME, 10000);
+  clearSession();
+  setPresence(41.5, 24.5, "lobby");
+  const bad = await casinoRoute.POST(apiRequest(URL_C, "POST", cookie, { action: "play", game: "dice", bet: 10, maxValue: 6, number: 9 }));
+  assert.equal(bad.status, 400);
+  assert.equal((await bad.json()).error, "invalid_dice_number");
+  const res = await casinoRoute.POST(apiRequest(URL_C, "POST", cookie, { action: "play", game: "dice", bet: 10, maxValue: 6, number: 3 }));
+  assert.equal(res.status, 200);
+  const data = await res.json();
+  assert.ok(data.result.rolled >= 1 && data.result.rolled <= 6);
+  assert.equal(data.payout, data.result.hit ? 60 : 0);
+  const stored = globalThis.__wbCasinoStore.get(`worldbox_economy ${data.opId}`);
+  assert.equal(stored.reason, "casino_dice");
+});
+
+test("API(casino): ダブルアップは先払い→キャッシュアウトで prepaid 精算される", async () => {
+  globalThis.__wbCasinoUsers.set(ME, 10000);
+  clearSession();
+  setPresence(41.5, 24.5, "lobby");
+  const start = await casinoRoute.POST(apiRequest(URL_C, "POST", cookie, { action: "double_start", bet: 100 }));
+  assert.equal(start.status, 200);
+  const startData = await start.json();
+  assert.equal(startData.session.kind, "double");
+  const spends = findOps((o) => o.kind === "spend" && o.reason === "casino_double_bet");
+  assert.equal(spends.length, 1);
+  assert.equal(spends[0].amount, 100);
+  // 先払いが処理中のキャッシュアウトは 409
+  const early = await casinoRoute.POST(apiRequest(URL_C, "POST", cookie, { action: "double_cashout" }));
+  assert.equal(early.status, 409);
+  assert.equal((await early.json()).error, "bet_pending");
+  // ワーカーが先払いを適用した想定にしてキャッシュアウト（倍率1 → ベット返し）
+  markPendingSpendsDone();
+  const cash = await casinoRoute.POST(apiRequest(URL_C, "POST", cookie, { action: "double_cashout" }));
+  assert.equal(cash.status, 200);
+  assert.equal((await cash.json()).payout, 100);
+  const settles = findOps((o) => o.kind === "gamble" && o.reason === "casino_double");
+  assert.equal(settles.length, 1);
+  assert.equal(settles[0].prepaid, true);
+  assert.equal(settles[0].payout, 100);
+  const after = await (await casinoRoute.GET(apiRequest(URL_C, "GET", cookie))).json();
+  assert.equal(after.session, null);
+});
+
+test("API(casino): ブラックジャックは配ってスタンドすると精算オプが積まれる", async () => {
+  globalThis.__wbCasinoUsers.set(ME, 10000);
+  clearSession();
+  setPresence(41.5, 24.5, "lobby");
+  const start = await casinoRoute.POST(apiRequest(URL_C, "POST", cookie, { action: "bj_start", bet: 100 }));
+  assert.equal(start.status, 200);
+  const startData = await start.json();
+  assert.equal(startData.session.kind, "blackjack");
+  assert.equal(startData.session.playerHand.length, 2);
+  assert.equal(startData.session.dealerHand.length, startData.session.phase === "player" ? 1 : 2);
+  markPendingSpendsDone();
+  if (startData.session.phase === "player") {
+    const stand = await casinoRoute.POST(apiRequest(URL_C, "POST", cookie, { action: "bj_stand" }));
+    assert.equal(stand.status, 200);
+    const standData = await stand.json();
+    assert.ok(standData.final, "決着した手札が返る");
+    assert.equal(standData.final.dealerHand.length >= 2, true);
+  }
+  const after = await (await casinoRoute.GET(apiRequest(URL_C, "GET", cookie))).json();
+  assert.equal(after.session, null, "精算まで終わればセッションは消える");
+  const settles = findOps((o) => o.kind === "gamble" && o.reason === "casino_blackjack");
+  assert.equal(settles.length, 1);
+  assert.equal(settles[0].prepaid, true);
+  assert.equal(settles[0].amount, 100);
+  assert.ok([0, 100, 200, 250].includes(settles[0].payout), `payout=${settles[0].payout}`);
+});
+
+test("API(casino): セブンスロットは先払いして回し切ると集計精算される", async () => {
+  globalThis.__wbCasinoUsers.set(ME, 10000);
+  clearSession();
+  setPresence(39.5, 20.5, "lobby");
+  const start = await casinoRoute.POST(apiRequest(URL_C, "POST", cookie, { action: "slot7_start", bet: 10, spins: 10 }));
+  assert.equal(start.status, 200);
+  const spends = findOps((o) => o.kind === "spend" && o.reason === "casino_slot7_prepay");
+  assert.equal(spends.length, 1);
+  assert.equal(spends[0].amount, 100);
+  // セッション中は別のセッションを始められない
+  const dup = await casinoRoute.POST(apiRequest(URL_C, "POST", cookie, { action: "slot7_start", bet: 10, spins: 10 }));
+  assert.equal(dup.status, 409);
+  assert.equal((await dup.json()).error, "session_active");
+  markPendingSpendsDone();
+  let last = null;
+  for (let i = 0; i < 10; i++) {
+    const res = await casinoRoute.POST(apiRequest(URL_C, "POST", cookie, { action: "slot7_spin" }));
+    assert.equal(res.status, 200, `spin ${i}`);
+    last = await res.json();
+    assert.equal(last.spin.reels.length, 7);
+  }
+  assert.equal(last.session, null, "回し切ると精算されてセッションが消える");
+  const settles = findOps((o) => o.kind === "gamble" && o.reason === "casino_slot7");
+  assert.equal(settles.length, 1);
+  assert.equal(settles[0].prepaid, true);
+  assert.equal(settles[0].amount, 100);
 });
 
 // ---------- クライアント配線 ----------
