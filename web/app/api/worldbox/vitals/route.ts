@@ -11,7 +11,8 @@ import { parseSave } from "@/lib/worldbox/save";
 import { loadWorldBoxSave } from "@/lib/worldbox/save-online";
 import { loadNationsState } from "@/lib/worldbox/nations-online";
 import { loadTileOverride } from "@/lib/worldbox/tiles-online";
-import { buildCaveLayer, parseInstanceSpace } from "@/lib/worldbox/instances";
+import { buildCaveLayer, parseInstanceSpace, weekKeyOf } from "@/lib/worldbox/instances";
+import { loadRuinsPersonal } from "@/lib/worldbox/instances-online";
 import type { PlayerProfile, RespawnPoint } from "@/lib/worldbox/profile";
 import {
   applyDeath, applyMobDamage, resolveRespawnPoint, setBedRespawn, stepVitals,
@@ -115,6 +116,7 @@ export async function POST(request: Request) {
     const def = mobById(data.mobId);
     const instDmg = typeof data.space === "string" ? parseInstanceSpace(data.space) : null;
     const inCave = instDmg?.kind === "cave";
+    const inRuins = instDmg?.kind === "ruins";
     if (!def || def.temperament === "passive" || def.attack <= 0 || (def.instanceOnly && !inCave) || (inCave && def.instanceOnly && def.instanceOnly !== "cave")) {
       return errorResponse("unknown_mob", 400);
     }
@@ -129,6 +131,11 @@ export async function POST(request: Request) {
       if (!cave.mobs.some((m) => m.mobId === def.id && m.x === x && m.y === y)) {
         return errorResponse("unknown_mob", 400);
       }
+    } else if (inRuins && instDmg && typeof data.space === "string") {
+      const personal = await loadRuinsPersonal(data.space, ownerKey, weekKeyOf(now));
+      if (!personal.summons.some((m) => m.mobId === def.id && m.x === x && m.y === y)) {
+        return errorResponse("unknown_mob", 400);
+      }
     } else {
       const isNight = isNightPhase(phaseAtTime(now / 1000));
       if (!mobExistsAt(MAP_SEED, def.id, x, y, isNight) && !mobExistsAt(MAP_SEED, def.id, x, y, !isNight)) {
@@ -141,7 +148,7 @@ export async function POST(request: Request) {
       Math.abs(data.px) <= WORLD_COORD_LIMIT && Math.abs(data.py) <= WORLD_COORD_LIMIT
         ? { x: data.px, y: data.py }
         : null;
-    const pos = await actorWorldPosition(ownerKey, reported, inCave && typeof data.space === "string" ? data.space : "world");
+    const pos = await actorWorldPosition(ownerKey, reported, (inCave || inRuins) && typeof data.space === "string" ? data.space : "world");
     if (pos) {
       const dist = mobDistance(Math.floor(pos.x), Math.floor(pos.y), { x, y, size: def.size });
       if (dist > MOB_ATTACK_MAX_DISTANCE) return errorResponse("too_far", 409);

@@ -52,6 +52,7 @@ function clampToSpace(space: SaveSpace, x: number, y: number): { x: number; y: n
   if (space === "lobby") return { x: clampPos(x, LOBBY_W), y: clampPos(y, LOBBY_H) };
   if (space === "tent") return { x: clampPos(x, TENT_W), y: clampPos(y, TENT_H) };
   if (instanceKindOf(space) === "cave") return { x: clampPos(x, 64), y: clampPos(y, 64) }; // CAVE_W/H = 64
+  if (instanceKindOf(space) === "ruins") return { x: clampPos(x, 48), y: clampPos(y, 48) }; // RUINS_W/H = 48
   const lim = (v: number) => Math.max(-WORLD_COORD_LIMIT, Math.min(WORLD_COORD_LIMIT, v));
   return { x: lim(x), y: lim(y) };
 }
