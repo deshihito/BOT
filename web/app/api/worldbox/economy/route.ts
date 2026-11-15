@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getRequestSession, publicOrigin, sessionOwnerKey } from "@/lib/auth";
 import { buildEconomyOp } from "@/lib/worldbox/economy-bridge";
 import { enqueueEconomyOp, isEconomyEnabled, loadMyEconomyOps, readUserBalance } from "@/lib/worldbox/economy-bridge-online";
+import { loadMyLobbyStation } from "@/lib/worldbox/station-online";
 
 export const runtime = "nodejs";
 
@@ -11,6 +12,7 @@ export const runtime = "nodejs";
 // 残高移動は Bot 本体のワーカーが transfer_coins で適用する。
 // GET: { balance, ops }（Discord ログイン中のみ。ops は自分の直近20件）
 // POST { action: "transfer", toDiscordId, amount }: 送金オプを積む。
+//   場所制約: ロビーの銀行の前にいること（サーバー側でプレゼンス検証）。
 //   spend / earn はサーバー側ライブラリ専用で、この API からは積めない（400）。
 // Bot API 未設定なら 503。
 
@@ -76,6 +78,10 @@ export async function POST(request: Request) {
     }
     if (fields.toDiscordId === session.id) return errorResponse("self_transfer", 400);
     return errorResponse("invalid_amount", 400);
+  }
+  // 場所制約: 送金は銀行の前でのみ（入力検証を通った後に位置を確かめる）
+  if ((await loadMyLobbyStation(sessionOwnerKey(session))) !== "bank") {
+    return errorResponse("not_at_bank", 409);
   }
   const stored = await enqueueEconomyOp(op);
   if (!stored) return errorResponse("economy_failed", 500);

@@ -10,6 +10,7 @@ import {
 } from "@/lib/worldbox/economy-bridge-online";
 import { moveSlot, swapSlots, type PlayerProfile } from "@/lib/worldbox/profile";
 import { findPresenceOwnerKey, isPresenceEnabled } from "@/lib/worldbox/presence-online";
+import { loadMyLobbyStation } from "@/lib/worldbox/station-online";
 import { isProfileEnabled, loadProfile, storeProfile } from "@/lib/worldbox/profile-online";
 
 export const runtime = "nodejs";
@@ -21,8 +22,10 @@ export const runtime = "nodejs";
 // 積むだけ（案B）。実際の移動は Bot 本体のワーカーが適用する。
 // GET: 自分のプロフィール
 // POST { action: "buy" | "sell", itemId, count? }: ショップ売買
+//   （場所制約: ロビーのショップの前にいること。サーバー側でプレゼンス検証）
 // POST { action: "eat", itemId }: かばんの食事を食べて空腹度を回復
 // POST { action: "craft", recipeId }: 合成
+//   （場所制約: ロビー鍛冶屋の作業台の前にいること。サーバー側で検証）
 // POST { action: "work" }: 労働（空腹度を消費し、報酬は earn オプ）
 // POST { action: "steal", targetId }: いま歩いている相手から steal
 // プロフィールの保存先は bot_kv（名前空間 worldbox_profiles、
@@ -145,10 +148,17 @@ export async function POST(request: Request) {
     return { discordId };
   };
 
+  /** 場所制約の検証: 本人がロビーの対象ステーションの前にいなければ 409。 */
+  const stationGate = async (station: string, error: string) => {
+    return (await loadMyLobbyStation(ownerKey)) === station ? null : statusError(error, 409);
+  };
+
   switch (data.action) {
     case "buy": {
       const gate = coinGate();
       if ("response" in gate) return gate.response;
+      const place = await stationGate("shop", "not_at_shop");
+      if (place) return place;
       const balance = await readUserBalance(gate.discordId);
       if (balance === null) return statusError("economy_unavailable", 503);
       return saveWithCoin(buyItem(current, data.itemId, data.count, balance), gate.discordId);
@@ -156,6 +166,8 @@ export async function POST(request: Request) {
     case "sell": {
       const gate = coinGate();
       if ("response" in gate) return gate.response;
+      const place = await stationGate("shop", "not_at_shop");
+      if (place) return place;
       return saveWithCoin(sellItem(current, data.itemId, data.count), gate.discordId);
     }
     case "swap": {
@@ -175,6 +187,8 @@ export async function POST(request: Request) {
       return saveAndReturn(result, result.ok ? { itemName: result.item.name } : {});
     }
     case "craft": {
+      const place = await stationGate("smith", "not_at_workbench");
+      if (place) return place;
       const result = craftItem(current, data.recipeId);
       return saveAndReturn(result, result.ok
         ? { craftedId: result.recipe.output, rareId: result.rare?.id ?? null }
