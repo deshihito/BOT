@@ -79,7 +79,7 @@ function ItemIcon({ id, size = 24 }: { id: string; size?: number }) {
   );
 }
 
-export default function WorldBoxEconomyPanel({ space }: { space: SaveSpace }) {
+export default function WorldBoxEconomyPanel({ space, onClose }: { space: SaveSpace; onClose: () => void }) {
   // ショップ（売買）はロビー空間でのみ開く。ワールドではタブ自体を出さない。
   const inLobby = space === "lobby";
   const [profile, setProfile] = useState<PlayerProfile | null>(null);
@@ -199,16 +199,26 @@ export default function WorldBoxEconomyPanel({ space }: { space: SaveSpace }) {
     }
   };
 
-  if (loadState === "loading") return <div style={panel}>読み込み中…</div>;
-  if (loadState === "guest") {
-    return (
-      <div style={panel}>
-        経済機能（かばん・ショップ・合成・steal）を使うにはログインが必要です。
+  const closeBtn = (
+    <button type="button" style={btn} onClick={onClose}>
+      閉じる
+    </button>
+  );
+  const panelHead = (text: string) => (
+    <div style={panel}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <span>{text}</span>
+        <span style={{ flex: 1 }} />
+        {closeBtn}
       </div>
-    );
+    </div>
+  );
+  if (loadState === "loading") return panelHead("読み込み中…");
+  if (loadState === "guest") {
+    return panelHead("経済機能（かばん・ショップ・合成・steal）を使うにはログインが必要です。");
   }
   if (loadState === "unavailable" || !profile) {
-    return <div style={panel}>いまは経済機能を使えません。</div>;
+    return panelHead("いまは経済機能を使えません。");
   }
 
   const owned = ITEMS.filter((item) => (profile.items[item.id] ?? 0) > 0);
@@ -246,6 +256,7 @@ export default function WorldBoxEconomyPanel({ space }: { space: SaveSpace }) {
         >
           労働する
         </button>
+        {closeBtn}
       </div>
 
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12 }}>
