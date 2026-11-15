@@ -82,4 +82,5 @@ AGO WORLD BOX（web/app/games/worldbox）に関わる作業をする Muse は、
 ## 拡充カタログ・マップロジック（2026-11-15 追加）
 - アイテムカタログは 323 種（素材43・ブロック76・種26・作物24・食事52・合成品31・家具37・特殊18・道具16）、レシピ159種、作物定義26種、アイコン306種。追加は items.ts へのデータ追加のみで、アイコンは public/img/worldbox/items/<id>.png + ITEM_ICON_IDS に登録する。
 - バイオーム/チャンク/構造物の基礎ロジックは web/lib/worldbox/maplogic.ts（座標から決定的。biomeAt / chunkOf / structuresForChunk / findLandSpawn）。構造物はスーパーセル方式で同種の最小間隔を保証する。入口系は「1マス→別枠マップ（cave/dungeon/ruins）」で、中身は洞窟=希少鉱物・遺跡=宝箱+罠・ダンジョン=強敵。
-- 特殊オブジェクトは web/lib/worldbox/objects.ts（採取/鉱脈/宝箱/入口/温泉/魚影など22種、決定的配置＋ルート＋再出現）。モブは web/lib/worldbox/mobs.ts（14種、バイオーム・時間帯・ドロップ表。ダンジョン専用含む）。
+- 特殊オブジェクトは web/lib/worldbox/objects.ts（採取/鉱脈/宝箱/入口/温泉/魚影など22種、決定的配置＋ルート＋再出現）。モブは web/lib/worldbox/mobs.ts（29種、バイオーム・時間帯・ドロップ表。ダンジョン専用含む）。
+- モブのサイズは 1〜20 マスで規定する（size×size 占有、アンカー中心）。サイズ帯: 1=小型 / 2〜3=中型 / 4〜6=大型 / 7〜12=巨大 / 13〜20=超巨大。大型（size>=4）はチャンク密度で出さずスーパーセル配置（セル一辺 size×2 チャンク、同種は最大1体）で疎らに置く。

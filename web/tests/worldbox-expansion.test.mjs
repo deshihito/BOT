@@ -5,7 +5,7 @@
 // - チャンク座標系（往復・負座標）とスーパーセル方式の構造物配置
 // - 決定的ランダムスポーン
 // - 特殊オブジェクト（定義整合・決定的配置・ルート・再出現）
-// - モブ（定義整合・時間帯/バイオームで決まる決定的出現）
+// - モブ（定義整合・時間帯/バイオームで決まる決定的出現・サイズ規定 1〜20 マス）
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -75,6 +75,8 @@ const ob = await loadBundle(
     "SPECIAL_OBJECTS", "specialObjectById", "validateSpecialObjects", "objectsForChunk",
     "rollObjectLoot", "lootForObjectAt", "objectRespawned", "makeRng",
     "MOBS", "mobById", "validateMobs", "mobsForChunk",
+    "MOB_SIZE_MIN", "MOB_SIZE_MAX", "LARGE_MOB_SIZE", "MOB_SIZE_CLASSES", "mobSizeClass",
+    "mobFootprintBounds", "mobOccupiesTile", "largeMobsForChunk",
   ],
 );
 
@@ -279,8 +281,8 @@ test("特殊オブジェクト: ルートは決定的で範囲内、再出現規
 });
 
 // ---------------------------------------------------------------- モブ
-test("モブ: 12種以上・ドロップ整合・出現は時間帯とバイオームで決まる", () => {
-  assert.ok(ob.MOBS.length >= 12, `mobs=${ob.MOBS.length}`);
+test("モブ: 29種・ドロップ整合・出現は時間帯とバイオームで決まる", () => {
+  assert.equal(ob.MOBS.length, 29);
   assert.deepEqual(ob.validateMobs(), []);
   const day = ob.mobsForChunk(ml.MAP_SEED, 16, 16, false);
   const day2 = ob.mobsForChunk(ml.MAP_SEED, 16, 16, false);
@@ -288,6 +290,7 @@ test("モブ: 12種以上・ドロップ整合・出現は時間帯とバイオ�
   for (const placed of [...day, ...ob.mobsForChunk(ml.MAP_SEED, 16, 16, true)]) {
     const def = ob.mobById(placed.mobId);
     assert.ok(!def.instanceOnly, def.id);
+    assert.ok(placed.size < ob.LARGE_MOB_SIZE, "density spawn excludes large mobs");
     assert.ok(def.biomes.includes(placed.biome), `${def.id} in ${placed.biome}`);
   }
   const nightIds = new Set();
@@ -299,4 +302,65 @@ test("モブ: 12種以上・ドロップ整合・出現は時間帯とバイオ�
   }
   const dungeonOnly = ob.MOBS.filter((m) => m.instanceOnly === "dungeon");
   assert.ok(dungeonOnly.length >= 2);
+});
+
+test("モブ: サイズは 1〜20 マスで規定され、全サイズ帯に実在する", () => {
+  assert.equal(ob.MOB_SIZE_MIN, 1);
+  assert.equal(ob.MOB_SIZE_MAX, 20);
+  for (const def of ob.MOBS) {
+    assert.ok(Number.isInteger(def.size) && def.size >= 1 && def.size <= 20, def.id);
+    assert.ok(ob.mobSizeClass(def.size), def.id);
+  }
+  assert.equal(Math.max(...ob.MOBS.map((m) => m.size)), 20);
+  for (const cls of ob.MOB_SIZE_CLASSES) {
+    assert.ok(ob.MOBS.some((m) => ob.mobSizeClass(m.size) === cls.id), cls.id);
+  }
+  assert.equal(ob.mobSizeClass(1), "small");
+  assert.equal(ob.mobSizeClass(3), "medium");
+  assert.equal(ob.mobSizeClass(6), "large");
+  assert.equal(ob.mobSizeClass(12), "huge");
+  assert.equal(ob.mobSizeClass(20), "colossal");
+  assert.equal(ob.mobSizeClass(0), null);
+  assert.equal(ob.mobSizeClass(21), null);
+});
+
+test("モブ: 占有範囲は size×size で、アンカー中心", () => {
+  assert.deepEqual(ob.mobFootprintBounds(1, 10, 10), { minX: 10, minY: 10, maxX: 10, maxY: 10 });
+  const b20 = ob.mobFootprintBounds(20, 100, 100);
+  assert.equal(b20.maxX - b20.minX + 1, 20);
+  assert.equal(b20.maxY - b20.minY + 1, 20);
+  assert.ok(ob.mobOccupiesTile(20, 100, 100, b20.minX, b20.maxY));
+  assert.ok(!ob.mobOccupiesTile(20, 100, 100, b20.maxX + 1, 100));
+  assert.ok(ob.mobOccupiesTile(2, 5, 5, 4, 4));
+  assert.ok(!ob.mobOccupiesTile(2, 5, 5, 6, 5));
+});
+
+test("モブ: 大型はスーパーセル配置で決定的・同種はセルに最大1体", () => {
+  let found = 0;
+  for (let cx = 0; cx < 40; cx++) {
+    for (let cy = 0; cy < 40; cy++) {
+      const placed = ob.largeMobsForChunk(9, cx, cy, false);
+      assert.deepEqual(placed, ob.largeMobsForChunk(9, cx, cy, false));
+      assert.ok(placed.length <= 1);
+      for (const p of placed) {
+        const def = ob.mobById(p.mobId);
+        assert.ok(def.size >= ob.LARGE_MOB_SIZE);
+        assert.equal(def.instanceOnly, undefined);
+        assert.ok(def.biomes.includes(p.biome));
+        found++;
+      }
+    }
+  }
+  assert.ok(found > 0, "large mobs spawn somewhere");
+  const cells = new Set();
+  for (let cx = 0; cx < 80; cx++) {
+    for (let cy = 0; cy < 80; cy++) {
+      for (const p of ob.largeMobsForChunk(9, cx, cy, false)) {
+        const def = ob.mobById(p.mobId);
+        const cell = Math.floor(cx / (def.size * 2)) + "," + Math.floor(cy / (def.size * 2)) + "," + p.mobId;
+        assert.ok(!cells.has(cell), cell);
+        cells.add(cell);
+      }
+    }
+  }
 });
