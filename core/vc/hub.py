@@ -260,7 +260,19 @@ class VoiceHub(commands.Cog):
 
     @app_commands.command(name="vc", description="音楽・ボイス機能の操作パネルを表示します")
     async def vc(self, interaction: discord.Interaction):
-        await interaction.response.defer(thinking=True)
+        deferred = True
+        try:
+            await interaction.response.defer(thinking=True)
+        except discord.NotFound as exc:
+            if exc.code != 10062:
+                raise
+            # 応答期限切れ（Unknown interaction）: インタラクション自体は失効して
+            # いるが、パネルは通常メッセージとして出せる（ボタンは押された時点で
+            # 新しいインタラクションになるので、そのまま使える）。
+            deferred = False
+            logger.warning(
+                "/vc の応答が期限切れでした。パネルを通常メッセージで出します（ユーザー %s）",
+                interaction.user.id)
         history_specs = []
         if interaction.guild_id is not None:
             from core.support import guild_settings
@@ -270,7 +282,11 @@ class VoiceHub(commands.Cog):
                 store, interaction.guild_id, interaction.user.id, "vc")
         view = VoicePanelView(self, owner_id=interaction.user.id,
                               history_specs=history_specs)
-        await interaction.followup.send(view=as_panel_v2(view))
+        panel = as_panel_v2(view)
+        if deferred:
+            await interaction.followup.send(view=panel)
+        elif interaction.channel is not None:
+            await interaction.channel.send(view=panel)
 
     async def _trigger_denied_reason(self, interaction: discord.Interaction) -> str | None:
         """音声トリガーを操作できないときは理由を返す（support.py の権限設定と共通）。"""
