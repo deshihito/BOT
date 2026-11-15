@@ -92,3 +92,47 @@ export function checkBuySold(itemId: unknown): "not_sold" | null {
   if (!item) return null;
   return isShopExcluded(item) ? "not_sold" : null;
 }
+
+/** 日次ローテーション用の日キー（UTC の日付）。 */
+export function shopDayKeyOf(now: number): string {
+  return new Date(now).toISOString().slice(0, 10);
+}
+
+function shopHash(text: string): number {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return h >>> 0;
+}
+
+/**
+ * その日の価格（決定的）。基準価格から 5% 刻みで ±10% の範囲で揺れる。
+ * Plan A の原資ルールの内側の揺れで、上下は日とアイテムで決まる。
+ */
+export function dailyPriceFor(item: ItemDef, dayKey: string): number {
+  const step = (shopHash(`${dayKey}:${item.id}`) % 5) - 2; // -2..2
+  return Math.max(1, Math.round(item.price * (1 + step * 0.05)));
+}
+
+/**
+ * その日の品目（決定的ローテーション）。ジャンル品目が多い店では
+ * 毎日 75% の窓が回り、少ない店では全品目が出る。
+ */
+export function dailyStockForGenre(genreId: ShopGenreId, dayKey: string): ItemDef[] {
+  const all = itemsForGenre(genreId);
+  if (all.length <= 8) return all;
+  const window = Math.ceil(all.length * 0.75);
+  const offset = shopHash(`${dayKey}:stock:${genreId}`) % all.length;
+  const out: ItemDef[] = [];
+  for (let i = 0; i < window; i++) out.push(all[(offset + i) % all.length]);
+  return out;
+}
+
+/** その日その店で買えるか（ジャンル店での日次品目チェック）。 */
+export function checkDailyStock(genreId: ShopGenreId | null, itemId: unknown, dayKey: string): "not_sold" | null {
+  if (genreId === null) return null;
+  if (typeof itemId !== "string") return null;
+  return dailyStockForGenre(genreId, dayKey).some((i) => i.id === itemId) ? null : "not_sold";
+}
