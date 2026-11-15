@@ -15,6 +15,7 @@ import {
 import {
   isContainersEnabled, loadContainer, storeContainer,
 } from "@/lib/worldbox/containers-online";
+import { withUserLock } from "@/lib/worldbox/user-lock";
 
 export const runtime = "nodejs";
 
@@ -78,7 +79,7 @@ async function resolveContainer(
   if (block.ownerId !== selfId) {
     return { ok: false, error: "not_owner", status: 403 };
   }
-  const stored = await loadContainer(x, y, block.itemId);
+  const stored = await loadContainer("world", x, y, block.itemId);
   // 状態が無い・所有がずれている場合は空のコンテナとして扱う
   const state = stored && stored.ownerId === selfId
     ? stored
@@ -148,20 +149,25 @@ export async function POST(request: Request) {
     if (dist > MAX_ACTION_DISTANCE) return errorJson("too_far", 409);
   }
 
-  const resolved = await resolveContainer(ownerKey, coord.x, coord.y);
-  if (!resolved.ok) return errorJson(resolved.error, resolved.status);
+  // 同一ユーザーへの並行リクエストを直列化する（S4）: コンテナと
+  // プロフィールの両方を読み書きするため、ロック無しだと二重移動や
+  // lost update が起きる（タイル側と同じ型、S1 の横展開）。
+  return withUserLock(ownerKey, async () => {
+        const resolved = await resolveContainer(ownerKey, coord.x, coord.y);
+        if (!resolved.ok) return errorJson(resolved.error, resolved.status);
 
-  const profile = await loadProfile(ownerKey);
-  const moved = moveContainerSlot(profile, resolved.state, fields.from, fields.to);
-  if (!moved) return errorJson("invalid_action", 400);
-  if (!(await storeContainer(coord.x, coord.y, moved.container))) {
-    return errorJson("containers_failed", 500);
-  }
-  if (!(await storeProfile(ownerKey, moved.profile))) {
-    return errorJson("containers_failed", 500);
-  }
-  return NextResponse.json(
-    { ok: true, profile: moved.profile, container: moved.container },
-    { headers: NO_STORE },
-  );
+        const profile = await loadProfile(ownerKey);
+        const moved = moveContainerSlot(profile, resolved.state, fields.from, fields.to);
+        if (!moved) return errorJson("invalid_action", 400);
+        if (!(await storeContainer("world", coord.x, coord.y, moved.container))) {
+          return errorJson("containers_failed", 500);
+        }
+        if (!(await storeProfile(ownerKey, moved.profile))) {
+          return errorJson("containers_failed", 500);
+        }
+        return NextResponse.json(
+          { ok: true, profile: moved.profile, container: moved.container },
+          { headers: NO_STORE },
+        );
+  });
 }

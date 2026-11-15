@@ -29,6 +29,11 @@ async function scanTileOverrides(): Promise<TileOverridesMap> {
 // 自分の行為の結果は次回読みでも必ず見える。
 const OVERRIDES_CACHE_TTL_MS = 3_000;
 let overridesCache: { at: number; map: TileOverridesMap } | null = null;
+// 書き込みの通し番号。スキャン（kvList）が走っている最中に書き込みが
+// 入ると、スキャン完了時に書き込み前の古いスナップショットでキャッシュを
+// 上書きして書き込みが見えなくなる競合があるため、スキャン前後で番号を
+// 比べて変わっていたら古いスナップショットをそのまま載せない。
+let overridesEpoch = 0;
 
 /** 保存済みの上書きをすべて読む（短TTLキャッシュつき）。無い・読めない・未設定なら空。 */
 export async function loadTileOverrides(): Promise<TileOverridesMap> {
@@ -36,7 +41,18 @@ export async function loadTileOverrides(): Promise<TileOverridesMap> {
   if (overridesCache && Date.now() - overridesCache.at < OVERRIDES_CACHE_TTL_MS) {
     return overridesCache.map;
   }
+  const epochBefore = overridesEpoch;
   const map = await scanTileOverrides();
+  if (overridesEpoch !== epochBefore) {
+    // スキャン中に書き込みが入った: 書き込みは既存キャッシュへ即時反映
+    // 済みなので、古いスナップショットで上書きせず、書き込み分を重ねて載せる。
+    // キャッシュ自体が無い（温まる前の書き込み）場合は載せずに返し、
+    // 次回読みで取り直す。
+    if (!overridesCache) return map;
+    const merged = { ...map, ...overridesCache.map };
+    overridesCache = { at: Date.now(), map: merged };
+    return merged;
+  }
   overridesCache = { at: Date.now(), map };
   return map;
 }
@@ -61,6 +77,7 @@ export async function storeTileOverride(
   try {
     if (override === null) await kvDelete(WORLDBOX_TILES_NAMESPACE, tileKey(x, y));
     else await kvSet(WORLDBOX_TILES_NAMESPACE, tileKey(x, y), JSON.stringify(override));
+    overridesEpoch += 1;
     if (overridesCache) {
       const key = tileKey(x, y);
       if (override === null) delete overridesCache.map[key];

@@ -1200,6 +1200,25 @@ export default function WorldBoxClient() {
         mobStatesRef.current = next;
         return;
       }
+      // ダンジョンも洞窟・遺跡と同じく空間単位で取り直す（S4）。
+      // 無いとダンジョンのモブ状態は倒した時の自作値のまま更新されず、
+      // 他者の撃破・復活が画面に反映されない。
+      const dungeonSpace = parseInstanceSpace(spaceUi)?.kind === "dungeon" ? spaceUi : null;
+      if (dungeonSpace) {
+        const res = await fetch(
+          `/api/worldbox/mobs?space=${encodeURIComponent(dungeonSpace)}`,
+          { headers: { Accept: "application/json" } },
+        );
+        if (!res.ok) return;
+        const data = (await res.json()) as { states?: Record<string, MobState> };
+        const next: Record<string, MobState> = { ...mobStatesRef.current };
+        for (const key of Object.keys(next)) {
+          if (key.startsWith(`${dungeonSpace}#`)) delete next[key];
+        }
+        Object.assign(next, data.states ?? {});
+        mobStatesRef.current = next;
+        return;
+      }
       const px = Math.floor(playerPosRef.current.x);
       const py = Math.floor(playerPosRef.current.y);
       const x0 = px - 64;
@@ -1240,7 +1259,7 @@ export default function WorldBoxClient() {
         }),
       });
       const data = (await res.json().catch(() => ({}))) as {
-        error?: string; hp?: number; dead?: boolean; profile?: PlayerProfile; key?: string;
+        error?: string; hp?: number; dead?: boolean; profile?: PlayerProfile; key?: string; deadUntil?: number;
       };
       if (data.key) key = data.key;
       if (!res.ok) {
@@ -1249,7 +1268,8 @@ export default function WorldBoxClient() {
         return;
       }
       const next = { ...mobStatesRef.current };
-      if (data.dead) next[key] = { hp: 0, deadUntil: Date.now() + MOB_RESPAWN_MS + mobRespawnDelayMs(key) };
+      // 復活時刻はサーバーの正を使う（S4）。無ければ従来どおり自時計で計算する。
+      if (data.dead) next[key] = { hp: 0, deadUntil: typeof data.deadUntil === "number" ? data.deadUntil : Date.now() + MOB_RESPAWN_MS + mobRespawnDelayMs(key) };
       else if (typeof data.hp === "number") next[key] = { hp: data.hp };
       mobStatesRef.current = next;
       fxEventsRef.current.push({

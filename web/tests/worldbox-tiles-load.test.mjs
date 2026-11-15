@@ -137,6 +137,87 @@ test("move: 埋没判定は深い重なりだけを拾い、壁への密着で�
   assert.equal(MV.canStandAt(map, free.x, free.y, blocked, { swim: true }), true);
 });
 
+// ---------- S4: スキャン中の書き込み競合（epoch ガード） ----------
+
+// kvList を遅延させられる別スタブ（スキャン開始→書き込み→完了を再現する）
+const raceBotApiStubUrl = dataUrl(`
+const store = new Map();
+let listCalls = 0;
+let pending = [];
+let hold = false;
+export function isBotApiConfigured() { return true; }
+export async function kvList() {
+  listCalls++;
+  const snap = new Map(store);
+  if (!hold) return snap;
+  return new Promise((resolve) => { pending.push(() => resolve(snap)); });
+}
+export async function kvGet(ns, key) { return store.has(key) ? store.get(key) : null; }
+export async function kvSet(ns, key, value) { store.set(key, value); }
+export async function kvDelete(ns, key) { store.delete(key); }
+export function __listCalls() { return listCalls; }
+export function __pendingLists() { return pending.length; }
+export function __holdLists(v) { hold = v; }
+export function __releaseLists() { const ps = pending; pending = []; for (const p of ps) p(); }
+export function __seed(key, value) { store.set(key, value); }
+`);
+const raceOnlineUrl = dataUrl(
+  transpile("worldbox/tiles-online.ts")
+    .replaceAll('"../bot-api"', JSON.stringify(raceBotApiStubUrl))
+    .replaceAll('"./tiles"', JSON.stringify(tilesUrl)),
+);
+const raceOnline = await import(raceOnlineUrl);
+const raceBotApi = await import(raceBotApiStubUrl);
+
+test("tiles-online(S4): スキャン中の書き込みは古いスナップショットに消されない", async () => {
+  const realNow = Date.now;
+  let now = 2_000_000;
+  Date.now = () => now;
+  try {
+    await raceOnline.loadTileOverrides(); // キャッシュを温める（空）
+    assert.equal(raceBotApi.__listCalls(), 1);
+    now += 3_001; // TTL を過ぎさせる
+    raceBotApi.__holdLists(true);
+    const loading = raceOnline.loadTileOverrides(); // スキャン開始（遅延中）
+    // スキャンが kvList に到達するまで1ティック待つ
+    for (let i = 0; i < 10 && raceBotApi.__pendingLists() === 0; i++) await new Promise((r) => setTimeout(r, 0));
+    assert.equal(raceBotApi.__pendingLists(), 1, "スキャンが走っている");
+    // スキャン中に書き込む（キャッシュへ即時反映されるはず）
+    assert.equal(await raceOnline.storeTileOverride(9, 9, OV), true);
+    raceBotApi.__releaseLists(); // スキャン完了（書き込み前のスナップショット）
+    raceBotApi.__holdLists(false);
+    const map = await loading;
+    assert.deepEqual(map["9,9"], OV, "書き込みがスキャン結果に残る");
+    // 次回読み（キャッシュ）でも残る
+    const cached = await raceOnline.loadTileOverrides();
+    assert.deepEqual(cached["9,9"], OV);
+    assert.equal(raceBotApi.__listCalls(), 2, "余計な再スキャンをしていない");
+  } finally {
+    Date.now = realNow;
+  }
+});
+
+// ---------- S4: withUserLock の直列化 ----------
+
+const userLockUrl = dataUrl(transpile("worldbox/user-lock.ts"));
+const userLock = await import(userLockUrl);
+
+test("user-lock(S4): 同じキーの並行呼び出しは直列化され、違うキーは並走する", async () => {
+  const order = [];
+  const job = async (key, name, ms) => {
+    await userLock.withUserLock(key, async () => {
+      order.push(`${name}:in`);
+      await new Promise((r) => setTimeout(r, ms));
+      order.push(`${name}:out`);
+    });
+  };
+  await Promise.all([job("k", "a", 10), job("k", "b", 0), job("other", "c", 0)]);
+  // a と b は同じキーなので a が出てから b が入る。c は別キーで並走する。
+  assert.ok(order.indexOf("a:out") < order.indexOf("b:in"), `直列化されていない: ${order}`);
+  assert.equal(order.filter((e) => e.endsWith(":in")).length, 3);
+  assert.equal(order.filter((e) => e.endsWith(":out")).length, 3);
+});
+
 // ---------- クライアント配線 ----------
 
 test("tiles-load: ルート GET はキャッシュつき読み取りを使い、クライアントは先読みと救済を持つ", () => {
@@ -144,6 +225,9 @@ test("tiles-load: ルート GET はキャッシュつき読み取りを使い、
   assert.ok(route.includes("loadTileOverrides"), "タイル GET は全件読みを使う");
   const onlineSrc = fs.readFileSync(path.join(libDir, "worldbox/tiles-online.ts"), "utf8");
   assert.ok(onlineSrc.includes("OVERRIDES_CACHE_TTL_MS"), "全件読みは短TTLキャッシュつき");
+  assert.ok(onlineSrc.includes("overridesEpoch"), "スキャン中の書き込み競合に epoch ガードが無い（S4）");
+  assert.ok(route.includes("withUserLock(`tile:${tx},${ty}`"), "タイル行為がタイル単位で直列化されていない（S4）");
+  assert.ok(route.includes("withUserLock(ownerKey"), "タイル行為がユーザー単位で直列化されていない（S4）");
   const client = fs.readFileSync(path.join(rootDir, "app/games/worldbox/WorldBoxClient.tsx"), "utf8");
   assert.ok(client.includes("tilesCenterRef"), "取得中心を記録する");
   assert.ok(client.includes("Math.max(dx, dy) >= 48"), "範囲の端に近づいたら先読みする");
