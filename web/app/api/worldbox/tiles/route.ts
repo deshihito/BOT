@@ -16,6 +16,7 @@ import { canBreakOthersBlock } from "@/lib/worldbox/war";
 import { containerIsEmpty, isContainerItem } from "@/lib/worldbox/containers";
 import { isMachineItem, machineBufferCount } from "@/lib/worldbox/machines";
 import { deleteMachine, loadMachine } from "@/lib/worldbox/machines-online";
+import { bumpMetric, recordFirstStep } from "@/lib/worldbox/metrics-online";
 import { loadContainer, storeContainer } from "@/lib/worldbox/containers-online";
 import { withUserLock } from "@/lib/worldbox/user-lock";
 import {
@@ -232,6 +233,15 @@ export async function POST(request: Request) {
         }
         if (!(await storeProfile(ownerKey, result.profile))) {
           return NextResponse.json({ error: "tiles_failed" }, { status: 500, headers: NO_STORE });
+        }
+        // 計測（ベストエフォート）: 設置数・収穫数・初回ステップ
+        if (fields.action === "place_block") {
+          void bumpMetric("blocksPlaced", 1, Date.now());
+          void recordFirstStep(ownerKey, "place", Date.now());
+        }
+        if (fields.action === "chop" || fields.action === "mine" || fields.action === "harvest") {
+          void bumpMetric("harvests", 1, Date.now());
+          void recordFirstStep(ownerKey, "gather", Date.now());
         }
         // コンテナを回収したら中身（空）の状態も消す
         if (minedContainerItem) await storeContainer("world", tx, ty, null);

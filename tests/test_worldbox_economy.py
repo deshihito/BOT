@@ -631,3 +631,20 @@ class TestQueueBehavior(WorkerCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_apply_metric_aggregates_by_reason():
+    from core.general.circulation.worldbox_economy import apply_metric
+
+    rec = apply_metric(None, {"kind": "earn", "reason": "shop_sale"}, 120, 5000)
+    assert rec == {"earn": {"shop_sale": 120}, "spend": {}, "bankroll": 5000}
+    rec = apply_metric(rec, {"kind": "earn", "reason": "shop_sale"}, 30, 4800)
+    rec = apply_metric(rec, {"kind": "spend", "reason": "arena_entry"}, 50, 4800)
+    rec = apply_metric(rec, {"kind": "gamble", "reason": "casino_slot", "amount": 200}, 450, None)
+    rec = apply_metric(rec, {"kind": "transfer", "reason": "gift"}, 999, None)
+    assert rec["earn"]["shop_sale"] == 150
+    assert rec["spend"]["arena_entry"] == 50
+    assert rec["spend"]["casino_bet"] == 200
+    assert rec["earn"]["casino_payout"] == 450
+    assert "gift" not in rec["earn"] and "gift" not in rec["spend"]
+    assert rec["bankroll"] == 4800  # None では更新しない

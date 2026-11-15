@@ -10,6 +10,7 @@ import {
 import { listPresence } from "@/lib/worldbox/presence-online";
 import { presenceIdFor, sanitizePresenceSpace } from "@/lib/worldbox/presence";
 import { loadNationsState } from "@/lib/worldbox/nations-online";
+import { bumpMetric } from "@/lib/worldbox/metrics-online";
 
 export const runtime = "nodejs";
 
@@ -99,6 +100,11 @@ export async function POST(request: Request) {
   };
   if (!(await appendChatMessage(message))) return err("store_failed", 503);
   lastPostAt.set(ownerKey, now);
+  void bumpMetric(
+    fields.channel === "proximity" ? "chatsNear" : fields.channel === "global" ? "chatsGlobal" : "chatsUnion",
+    1,
+    now,
+  );
   // ユニオンは Discord 連携チャンネルへも流す（Bot ワーカーが投稿する）
   if (fields.channel === "union" && membership) {
     const settings = await loadUnionChatSettings(membership.nationId);

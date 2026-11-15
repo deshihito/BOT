@@ -436,6 +436,7 @@ class CirculationCog(commands.Cog):
             insufficient_marker=lambda: wallet_module.INSUFFICIENT,
             new_user_balance=lambda: wallet_module.NEW_USER_BALANCE,
             balance_reader=self._balance,
+            metrics_kv=KVStore(worldbox_economy_core.METRICS_NAMESPACE),
         )
         # AGO WORLD BOX のユニオンチャット → Discord チャンネル連携:
         # Web が送信箱に積んだ投稿を連携先チャンネルへ流す

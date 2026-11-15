@@ -5,6 +5,7 @@ import { LOBBY_H, LOBBY_W } from "@/lib/worldbox/lobby";
 import { LOBBY2_H, LOBBY2_W, LOBBY3_H, LOBBY3_W } from "@/lib/worldbox/lobby-floors";
 import { TENT_MAX_H, TENT_MAX_W } from "@/lib/worldbox/tent";
 import { isPresenceEnabled, listPresence, putPresence, removePresence } from "@/lib/worldbox/presence-online";
+import { recordFirstStep, recordPresenceMetric } from "@/lib/worldbox/metrics-online";
 import { presenceIdFor, sanitizeHeartbeat, sanitizePresenceSpace, selectVisiblePlayers, thinPresenceNear } from "@/lib/worldbox/presence";
 
 export const runtime = "nodejs";
@@ -86,6 +87,14 @@ export async function PUT(request: Request) {
   const stored = await putPresence(sessionOwnerKey(session), { ...heartbeat, name }, Date.now());
   if (!stored) {
     return NextResponse.json({ error: "presence_failed" }, { status: 500, headers: NO_STORE });
+  }
+  // 計測（ベストエフォート）: DAU・同時接続ピーク・初回ステップ
+  const ownerKey = sessionOwnerKey(session);
+  const now = Date.now();
+  const fresh = (await listPresence()).filter((e) => now - e.ts <= 15_000).length;
+  void recordPresenceMetric(ownerKey, fresh, now);
+  if (space === "lobby" || space === "lobby2" || space === "lobby3") {
+    void recordFirstStep(ownerKey, "lobby", now);
   }
   return NextResponse.json({ ok: true }, { headers: NO_STORE });
 }
