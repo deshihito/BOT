@@ -23,7 +23,7 @@ import {
   buildCaveLayer, buildDungeonFloor, dungeonHpScale, makeInstanceSpace, parseInstanceSpace,
 } from "@/lib/worldbox/instances";
 import {
-  loadDungeonSession, loadRuinsPersonal, storeRuinsPersonal,
+  loadDungeonSession, loadRuinsPersonal, storeDungeonSession, storeRuinsPersonal,
 } from "@/lib/worldbox/instances-online";
 import { partyKeyOf } from "@/lib/worldbox/party";
 import { loadPartyOf } from "@/lib/worldbox/party-online";
@@ -196,6 +196,22 @@ export async function POST(request: Request) {
     };
     if (!(await storeProfile(target.ownerKey, healed))) return err("store_failed", 503);
     await clearDeath(target.ownerKey);
+    // ダンジョン内蘇生: セッションの dead から外す。残っていると蘇生後も
+    // 攻撃不可（mobs ルートが dead を弾く）・全滅判定が誤って閉じてしまう（S5）。
+    // セッション保存の失敗は蘇生自体を壊さないため best-effort とする。
+    {
+      const inst = parseInstanceSpace(space);
+      if (inst?.kind === "dungeon") {
+        const targetParty = await loadPartyOf(target.ownerKey);
+        const floor1 = makeInstanceSpace("dungeon", inst.entranceX, inst.entranceY, 0);
+        const ds = await loadDungeonSession(floor1, partyKeyOf(targetParty, target.ownerKey));
+        if (ds && ds.dead.includes(target.ownerKey)) {
+          await storeDungeonSession(floor1, {
+            ...ds, dead: ds.dead.filter((m) => m !== target.ownerKey),
+          }).catch(() => false);
+        }
+      }
+    }
     const { profile: medicNext } = addMasteryXp(
       { ...profile, reviveMark: { space, at: now } },
       "medic",
