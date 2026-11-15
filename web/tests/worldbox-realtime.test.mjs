@@ -84,4 +84,6 @@ test("配線: ラッパー・デプロイ・トークンルート・クライア
   // フォールバック（REST ハートビートとポーリング）が残っている
   assert.ok(client.includes("sendHeartbeat()"), "REST フォールバックが消えている");
   assert.ok(client.includes("pollOthers"), "ポーリングが消えている");
+  // bot_kv プレゼンス（サーバー検証の正）の鮮度維持: WS 接続中も REST を併送する
+  assert.ok(client.includes("lastRestHeartbeatAt"), "REST 併送の間隔管理が無い");
 });
