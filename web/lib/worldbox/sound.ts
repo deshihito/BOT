@@ -24,7 +24,7 @@ export type WbBgmScene = "field-day" | "field-night" | "lobby" | "casino";
  * night は daynight.ts の nightAmount（0=昼、1=真夜中）。
  */
 export function bgmSceneFor(input: {
-  space: "world" | "lobby" | "tent";
+  space: string;
   night: number;
   casinoOpen: boolean;
 }): WbBgmScene {

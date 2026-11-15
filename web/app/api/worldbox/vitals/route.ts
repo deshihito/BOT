@@ -11,6 +11,7 @@ import { parseSave } from "@/lib/worldbox/save";
 import { loadWorldBoxSave } from "@/lib/worldbox/save-online";
 import { loadNationsState } from "@/lib/worldbox/nations-online";
 import { loadTileOverride } from "@/lib/worldbox/tiles-online";
+import { buildCaveLayer, parseInstanceSpace } from "@/lib/worldbox/instances";
 import type { PlayerProfile, RespawnPoint } from "@/lib/worldbox/profile";
 import {
   applyDeath, applyMobDamage, resolveRespawnPoint, setBedRespawn, stepVitals,
@@ -42,15 +43,16 @@ function errorResponse(error: string, status = 409) {
 async function actorWorldPosition(
   ownerKey: string,
   reported?: { x: number; y: number } | null,
+  space: string = "world",
 ): Promise<{ x: number; y: number } | null> {
   const selfId = presenceIdFor(ownerKey);
   const entries = await listPresence();
   const now = Date.now();
-  const entry = entries.find((e) => e.id === selfId && e.space === "world" && now - e.ts <= 15_000);
+  const entry = entries.find((e) => e.id === selfId && e.space === space && now - e.ts <= 15_000);
   if (entry) return { x: entry.x, y: entry.y };
   if (reported) return reported;
   const saved = parseSave(await loadWorldBoxSave(ownerKey));
-  if (saved && saved.space === "world") return { x: saved.x, y: saved.y };
+  if (saved && saved.space === space) return { x: saved.x, y: saved.y };
   return null;
 }
 
@@ -94,7 +96,7 @@ export async function POST(request: Request) {
     return errorResponse("invalid_request", 400);
   }
   const data = (body ?? {}) as {
-    action?: unknown; mobId?: unknown; x?: unknown; y?: unknown; px?: unknown; py?: unknown;
+    action?: unknown; mobId?: unknown; x?: unknown; y?: unknown; px?: unknown; py?: unknown; space?: unknown;
   };
   const ownerKey = sessionOwnerKey(session);
   const now = Date.now();
@@ -111,7 +113,9 @@ export async function POST(request: Request) {
 
   if (data.action === "damage") {
     const def = mobById(data.mobId);
-    if (!def || def.instanceOnly || def.temperament === "passive" || def.attack <= 0) {
+    const instDmg = typeof data.space === "string" ? parseInstanceSpace(data.space) : null;
+    const inCave = instDmg?.kind === "cave";
+    if (!def || def.temperament === "passive" || def.attack <= 0 || (def.instanceOnly && !inCave) || (inCave && def.instanceOnly && def.instanceOnly !== "cave")) {
       return errorResponse("unknown_mob", 400);
     }
     if (typeof data.x !== "number" || typeof data.y !== "number") {
@@ -120,9 +124,16 @@ export async function POST(request: Request) {
     const x = Math.floor(data.x);
     const y = Math.floor(data.y);
     if (Math.abs(x) > WORLD_COORD_LIMIT || Math.abs(y) > WORLD_COORD_LIMIT) return errorResponse("unknown_mob", 400);
-    const isNight = isNightPhase(phaseAtTime(now / 1000));
-    if (!mobExistsAt(MAP_SEED, def.id, x, y, isNight) && !mobExistsAt(MAP_SEED, def.id, x, y, !isNight)) {
-      return errorResponse("unknown_mob", 400);
+    if (inCave && instDmg) {
+      const cave = buildCaveLayer(MAP_SEED, instDmg.entranceX, instDmg.entranceY, instDmg.layer);
+      if (!cave.mobs.some((m) => m.mobId === def.id && m.x === x && m.y === y)) {
+        return errorResponse("unknown_mob", 400);
+      }
+    } else {
+      const isNight = isNightPhase(phaseAtTime(now / 1000));
+      if (!mobExistsAt(MAP_SEED, def.id, x, y, isNight) && !mobExistsAt(MAP_SEED, def.id, x, y, !isNight)) {
+        return errorResponse("unknown_mob", 400);
+      }
     }
     const reported =
       typeof data.px === "number" && typeof data.py === "number" &&
@@ -130,7 +141,7 @@ export async function POST(request: Request) {
       Math.abs(data.px) <= WORLD_COORD_LIMIT && Math.abs(data.py) <= WORLD_COORD_LIMIT
         ? { x: data.px, y: data.py }
         : null;
-    const pos = await actorWorldPosition(ownerKey, reported);
+    const pos = await actorWorldPosition(ownerKey, reported, inCave && typeof data.space === "string" ? data.space : "world");
     if (pos) {
       const dist = mobDistance(Math.floor(pos.x), Math.floor(pos.y), { x, y, size: def.size });
       if (dist > MOB_ATTACK_MAX_DISTANCE) return errorResponse("too_far", 409);

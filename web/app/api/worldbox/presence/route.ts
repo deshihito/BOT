@@ -64,7 +64,9 @@ export async function PUT(request: Request) {
     return NextResponse.json({ error: "invalid_request" }, { status: 400, headers: NO_STORE });
   }
   const space = sanitizePresenceSpace((body as { space?: unknown } | null)?.space);
-  const bounds = space === "lobby" ? rectBounds(LOBBY_W, LOBBY_H) : space === "tent" ? rectBounds(TENT_W, TENT_H) : worldBounds();
+  // 洞窟（64×64）はインスタンス空間 ID で判定する（instances.ts の形式を複製）
+  const isCave = /^cave:-?\d+,-?\d+:\d+$/.test(space);
+  const bounds = space === "lobby" ? rectBounds(LOBBY_W, LOBBY_H) : space === "tent" ? rectBounds(TENT_W, TENT_H) : isCave ? rectBounds(64, 64) : worldBounds();
   const heartbeat = sanitizeHeartbeat(body, bounds);
   if (!heartbeat) {
     return NextResponse.json({ error: "invalid_heartbeat" }, { status: 400, headers: NO_STORE });

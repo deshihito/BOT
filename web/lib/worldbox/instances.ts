@@ -1,0 +1,268 @@
+// AGO WORLD BOX のインスタンス空間（洞窟など別枠マップ）の純粋ロジック。
+// 空間 ID は "cave:<入口x>,<入口y>:<層>" の文字列で、セーブ/プレゼンスの
+// space にそのまま乗る（入口タイルのワールド座標がインスタンスの識別子）。
+// 中身はワールドシード + 入口座標 + 層から決定的に生成され、保存しない。
+// 枯渇状態（鉱脈・宝箱）だけをサーバーが持つ（instances ルート）。
+import { L_DARK, L_SAND, L_WALL, isSolidLobbyTile, type LobbyData, type LobbyObject } from "./lobby";
+import { T_GRASS, T_ROCK, tilesSource, type TopDownMap } from "./mapgen";
+import { makeRng } from "./rng";
+import { specialObjectById, type SpecialObjectDef } from "./objects";
+import type { PlacedMob } from "./mobs";
+
+export type InstanceKind = "cave" | "ruins" | "dungeon";
+
+export type InstanceSpaceRef = {
+  kind: InstanceKind;
+  entranceX: number;
+  entranceY: number;
+  layer: number;
+};
+
+const INSTANCE_SPACE_RE = /^(cave|ruins|dungeon):(-?\d+),(-?\d+):(\d+)$/;
+
+export function makeInstanceSpace(kind: InstanceKind, entranceX: number, entranceY: number, layer: number): string {
+  return `${kind}:${Math.floor(entranceX)},${Math.floor(entranceY)}:${Math.max(0, Math.floor(layer))}`;
+}
+
+export function parseInstanceSpace(space: unknown): InstanceSpaceRef | null {
+  if (typeof space !== "string") return null;
+  const m = INSTANCE_SPACE_RE.exec(space);
+  if (!m) return null;
+  return {
+    kind: m[1] as InstanceKind,
+    entranceX: Number(m[2]),
+    entranceY: Number(m[3]),
+    layer: Number(m[4]),
+  };
+}
+
+export function isInstanceSpace(space: unknown): boolean {
+  return parseInstanceSpace(space) !== null;
+}
+
+// ---------------------------------------------------------------- 明かり
+/** 明かりの半径（タイル）。松明 6 / ランプ 9 が基準、無しは足元のみ。 */
+export function lightRadiusTiles(inventory: Readonly<Record<string, number>> | null | undefined): number {
+  if (!inventory) return 2.5;
+  if ((inventory["lamp"] ?? 0) > 0) return 9;
+  if ((inventory["torch"] ?? 0) > 0) return 6;
+  return 2.5;
+}
+
+// ---------------------------------------------------------------- 洞窟
+export const CAVE_W = 64;
+export const CAVE_H = 64;
+export const CAVE_LAYERS = 3;
+
+export type CaveVein = {
+  /** 枯渇状態のキー（層内で一意）。 */
+  key: string;
+  objectId: string;
+  x: number;
+  y: number;
+};
+
+export type CaveLayer = {
+  data: LobbyData;
+  /** 帰還ポータル（入口）タイル。出現位置でもある。 */
+  portal: { x: number; y: number };
+  stairsUp: { x: number; y: number } | null;
+  stairsDown: { x: number; y: number } | null;
+  /** 温泉タイル（踏むと休憩）。1層目のみ。 */
+  onsen: readonly { x: number; y: number }[];
+  veins: readonly CaveVein[];
+  chest: { x: number; y: number } | null;
+  mobs: readonly PlacedMob[];
+};
+
+/** 層ごとの鉱脈プール（浅い=石炭/銅、深い=希少、水晶、最深=ミスリル）。 */
+const CAVE_VEIN_POOLS: readonly (readonly { objectId: string; count: number }[])[] = [
+  [
+    { objectId: "coal_vein", count: 6 },
+    { objectId: "copper_vein", count: 6 },
+  ],
+  [
+    { objectId: "coal_vein", count: 3 },
+    { objectId: "copper_vein", count: 3 },
+    { objectId: "rare_vein", count: 3 },
+    { objectId: "crystal_cluster", count: 2 },
+  ],
+  [
+    { objectId: "rare_vein", count: 3 },
+    { objectId: "crystal_cluster", count: 3 },
+    { objectId: "mithril_vein", count: 2 },
+  ],
+];
+
+/** 層ごとのモブ（洞窟コウモリとゴーレム）。 */
+const CAVE_MOB_POOLS: readonly (readonly string[])[] = [
+  ["cave_bat", "cave_bat", "cave_bat", "cave_bat"],
+  ["cave_bat", "cave_bat", "cave_bat", "golem"],
+  ["cave_bat", "cave_bat", "golem", "golem"],
+];
+
+/** 宝箱の再出現（共有マップなので有限にし、6時間で戻る）。 */
+export const CAVE_CHEST_RESPAWN_MS = 6 * 60 * 60 * 1000;
+
+function hashSeed(seed: number, ex: number, ey: number, layer: number): number {
+  let h = (seed ^ 0x9e3779b9) >>> 0;
+  for (const v of [ex, ey, layer]) {
+    h ^= (v * 2654435761) >>> 0;
+    h = Math.imul(h ^ (h >>> 13), 16777619) >>> 0;
+  }
+  return h >>> 0;
+}
+
+const caveCache = new Map<string, CaveLayer>();
+
+/** 洞窟の1層を決定的に生成する（結果はキャッシュ）。 */
+export function buildCaveLayer(seed: number, entranceX: number, entranceY: number, layer: number): CaveLayer {
+  const cacheKey = `${seed}:${entranceX},${entranceY}:${layer}`;
+  const cached = caveCache.get(cacheKey);
+  if (cached) return cached;
+
+  const rng = makeRng(hashSeed(seed, entranceX, entranceY, layer));
+  const tiles = new Uint8Array(CAVE_W * CAVE_H).fill(L_WALL);
+  const floor = new Set<string>();
+  const carve = (x: number, y: number) => {
+    if (x < 1 || y < 1 || x >= CAVE_W - 1 || y >= CAVE_H - 1) return;
+    tiles[y * CAVE_W + x] = L_DARK;
+    floor.add(`${x},${y}`);
+  };
+
+  // 入口（ポータル）は南寄り中央。ランダムウォークで通路を掘り、部屋を繋ぐ。
+  const portal = { x: 32, y: CAVE_H - 6 };
+  for (let dy = 0; dy < 3; dy++) for (let dx = -1; dx <= 1; dx++) carve(portal.x + dx, portal.y + dy - 1);
+  const walkers: { x: number; y: number }[] = [{ ...portal }];
+  const roomCenters: { x: number; y: number }[] = [{ ...portal }];
+  for (let w = 0; w < 5; w++) {
+    let { x, y } = walkers[0];
+    const steps = 260 + Math.floor(rng() * 160);
+    for (let s = 0; s < steps; s++) {
+      carve(x, y);
+      carve(x + (rng() < 0.3 ? 1 : 0), y);
+      const dir = Math.floor(rng() * 4);
+      if (dir === 0) x += 1;
+      else if (dir === 1) x -= 1;
+      else if (dir === 2) y += 1;
+      else y -= 1;
+      x = Math.max(2, Math.min(CAVE_W - 3, x));
+      y = Math.max(2, Math.min(CAVE_H - 3, y));
+      if (s % 90 === 89) {
+        // 部屋を掘って中心を記録（階段・宝箱・温泉の置き場候補）
+        const rw = 3 + Math.floor(rng() * 3);
+        const rh = 3 + Math.floor(rng() * 3);
+        for (let dy = 0; dy < rh; dy++) for (let dx = 0; dx < rw; dx++) carve(x + dx - 1, y + dy - 1);
+        roomCenters.push({ x, y });
+      }
+    }
+    walkers[0] = { x, y };
+  }
+  const floorList = [...floor].map((k) => {
+    const [x, y] = k.split(",").map(Number);
+    return { x, y };
+  });
+  const farFrom = (p: { x: number; y: number }, min: number) =>
+    floorList.filter((t) => Math.hypot(t.x - p.x, t.y - p.y) >= min);
+  const pickFar = (from: { x: number; y: number }, min: number, used: Set<string>) => {
+    const cand = farFrom(from, min).filter((t) => !used.has(`${t.x},${t.y}`));
+    if (cand.length === 0) return null;
+    const t = cand[Math.floor(rng() * cand.length)];
+    used.add(`${t.x},${t.y}`);
+    return t;
+  };
+  const used = new Set<string>([`${portal.x},${portal.y}`]);
+
+  // 階段: 下りは入口から遠く、上りは入口の隣。
+  const stairsDown = layer < CAVE_LAYERS - 1 ? pickFar(portal, 24, used) : null;
+  const stairsUp = layer > 0 ? { x: portal.x + 2, y: portal.y } : null;
+  if (stairsUp) used.add(`${stairsUp.x},${stairsUp.y}`);
+
+  // 温泉（1層目のみ、入口近くの小部屋タイルを砂地にして目印にする）
+  const onsen: { x: number; y: number }[] = [];
+  if (layer === 0) {
+    const base = { x: portal.x - 3, y: portal.y - 1 };
+    for (let dy = 0; dy < 2; dy++) {
+      for (let dx = 0; dx < 2; dx++) {
+        const t = { x: base.x + dx, y: base.y + dy };
+        if (floor.has(`${t.x},${t.y}`)) {
+          tiles[t.y * CAVE_W + t.x] = L_SAND;
+          onsen.push(t);
+          used.add(`${t.x},${t.y}`);
+        }
+      }
+    }
+  }
+
+  // 宝箱は最深の部屋へ。
+  const chest = pickFar(portal, 18, used);
+
+  // 鉱脈: 床に隣接する壁タイルへ貼る。
+  const veins: CaveVein[] = [];
+  const wallUsed = new Set<string>();
+  const pool = CAVE_VEIN_POOLS[layer] ?? CAVE_VEIN_POOLS[0];
+  for (const entry of pool) {
+    for (let i = 0; i < entry.count; i++) {
+      for (let tries = 0; tries < 40; tries++) {
+        const f = floorList[Math.floor(rng() * floorList.length)];
+        const dirs = [
+          { x: f.x + 1, y: f.y },
+          { x: f.x - 1, y: f.y },
+          { x: f.x, y: f.y + 1 },
+          { x: f.x, y: f.y - 1 },
+        ];
+        const w = dirs[Math.floor(rng() * dirs.length)];
+        const key = `${w.x},${w.y}`;
+        if (w.x < 1 || w.y < 1 || w.x >= CAVE_W - 1 || w.y >= CAVE_H - 1) continue;
+        if (tiles[w.y * CAVE_W + w.x] !== L_WALL || wallUsed.has(key)) continue;
+        wallUsed.add(key);
+        veins.push({ key: `${entry.objectId}:${veins.length}`, objectId: entry.objectId, x: w.x, y: w.y });
+        break;
+      }
+    }
+  }
+
+  // モブ: 入口の安全圏（半径6）より外の床へ。
+  const mobs: PlacedMob[] = [];
+  for (const mobId of CAVE_MOB_POOLS[layer] ?? []) {
+    const t = pickFar(portal, 8, used);
+    if (t) mobs.push({ mobId, x: t.x, y: t.y, biome: "highland", size: mobId === "golem" ? 3 : 1 });
+  }
+
+  // LobbyData として組み立てる（ロビー描画・移動をそのまま使う）。
+  const objects: LobbyObject[] = [
+    { sprite: "warp_pad", x: portal.x, y: portal.y, w: 1, h: 1, solid: false },
+  ];
+  if (stairsDown) objects.push({ sprite: "stairs", x: stairsDown.x, y: stairsDown.y, w: 1, h: 1, solid: false });
+  if (stairsUp) objects.push({ sprite: "stairs", x: stairsUp.x, y: stairsUp.y, w: 1, h: 1, solid: false });
+  for (const v of veins) objects.push({ sprite: v.objectId, x: v.x, y: v.y, w: 1, h: 1, solid: true });
+  if (chest) objects.push({ sprite: "cave_chest", x: chest.x, y: chest.y, w: 1, h: 1, solid: true });
+  const blocked = new Set<string>();
+  for (const o of objects) if (o.solid) blocked.add(`${o.x},${o.y}`);
+  const moveTiles = new Uint8Array(CAVE_W * CAVE_H);
+  for (let i = 0; i < tiles.length; i++) moveTiles[i] = isSolidLobbyTile(tiles[i]) ? T_ROCK : T_GRASS;
+  const moveMap: TopDownMap = tilesSource(0, CAVE_W, CAVE_H, moveTiles);
+  const result: CaveLayer = {
+    data: { width: CAVE_W, height: CAVE_H, tiles, objects, npcs: [], blocked, moveMap },
+    portal,
+    stairsUp,
+    stairsDown,
+    onsen,
+    veins,
+    chest,
+    mobs,
+  };
+  caveCache.set(cacheKey, result);
+  return result;
+}
+
+/** 鉱脈の定義（段位ゲート・再出現つき）。 */
+export function caveVeinDef(vein: CaveVein): SpecialObjectDef | null {
+  return specialObjectById(vein.objectId);
+}
+
+/** 入口・階段まわりの安全圏か（モブ配置と接触判定の除外に使う）。 */
+export function isCaveSafeTile(cave: CaveLayer, x: number, y: number): boolean {
+  const near = (p: { x: number; y: number } | null) => p !== null && Math.hypot(x - p.x, y - p.y) <= 1.5;
+  return near(cave.portal) || near(cave.stairsUp) || near(cave.stairsDown);
+}
