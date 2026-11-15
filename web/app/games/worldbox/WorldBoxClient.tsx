@@ -14,7 +14,11 @@ import {
   generateMap, mapSpawn, mapTileAt, sampleMinimapTiles, type TopDownMap,
 } from "@/lib/worldbox/mapgen";
 import { DASH_SPEED, SWIM_DASH_SPEED, SWIM_SPEED, WALK_SPEED, findFreeNear, isWaterAt, stepMove } from "@/lib/worldbox/move";
-import { nightAmount, phaseAtTime } from "@/lib/worldbox/daynight";
+import { isNightPhase, nightAmount, phaseAtTime } from "@/lib/worldbox/daynight";
+import { mobById, mobOccupiesTile, type PlacedMob } from "@/lib/worldbox/mobs";
+import {
+  MOB_ATTACK_RANGE, MOB_RESPAWN_MS, mobDistance, mobHpNow, mobKeyOf, visibleMobs, type MobState,
+} from "@/lib/worldbox/combat";
 import { advanceWalkPhase, attackSwingAngle, damp, moveLean, stepBeatIndex, walkBob, walkSquashY } from "@/lib/worldbox/anim";
 import {
   WHIFF_ALPHA_SCALE, createFxSystem, createShake, fxLifeRatio, phaseKind, popProgress, popScale, shakeOffsetAt,
@@ -147,6 +151,38 @@ const NATION_ERROR_LABEL: Record<string, string> = {
 };
 
 /** タイル行為の失敗ラベル（断片のみ）。 */
+/** モブの描画色（本体色）と特徴。スプライトの代わりに図形で描くための表。 */
+const MOB_STYLE: Record<string, { body: string; sub?: string; feature?: "ears" | "snout" | "comb" | "horns" | "shell" | "wings" | "blob" | "bones" }> = {
+  mouse: { body: "#9a8f85", feature: "ears" },
+  chicken: { body: "#f2ede2", sub: "#e2483a", feature: "comb" },
+  rabbit: { body: "#e8e2d6", feature: "ears" },
+  frog: { body: "#69a84f", feature: "blob" },
+  crab: { body: "#d96b4a", feature: "shell" },
+  bee: { body: "#e8c33c", sub: "#4a3b28", feature: "wings" },
+  slime: { body: "#6fc46a", feature: "blob" },
+  pig: { body: "#e8a0b4", feature: "snout" },
+  sheep: { body: "#ddd6c8", feature: "blob" },
+  cow: { body: "#efe9dd", sub: "#6b543f", feature: "horns" },
+  deer: { body: "#b0824f", feature: "horns" },
+  horse: { body: "#8a6844", feature: "ears" },
+  boar: { body: "#7a5c40", feature: "snout" },
+  wolf: { body: "#8d939e", feature: "ears" },
+  spider: { body: "#4c4453", feature: "blob" },
+  skeleton: { body: "#e9e6da", feature: "bones" },
+  bear: { body: "#6f5138", feature: "ears" },
+  golem: { body: "#8d9291", feature: "shell" },
+  treant: { body: "#5d7a3c", sub: "#7a5c40", feature: "horns" },
+  sea_serpent: { body: "#3f7f9e", feature: "blob" },
+  giant_golem: { body: "#7c8382", feature: "shell" },
+  giant: { body: "#c9a186", feature: "blob" },
+  ancient_turtle: { body: "#5f7f5a", feature: "shell" },
+  world_dragon: { body: "#7a4a8c", feature: "wings" },
+};
+/** モブ被弾/死亡エフェクトの色（本体色に寄せる）。 */
+const MOB_FX_COLOR: Record<string, string> = Object.fromEntries(
+  Object.entries(MOB_STYLE).map(([id, s]) => [id, s.body]),
+);
+
 const TILE_ERROR_LABEL: Record<string, string> = {
   tool_required: "道具が必要",
   tile_blocked: "そこではできない",
@@ -644,6 +680,67 @@ export default function WorldBoxClient() {
   };
   const postTileActionRef = useRef(postTileAction);
   postTileActionRef.current = postTileAction;
+  /** モブ個体状態（傷/死亡がある個体だけサーバーから受ける）。 */
+  const mobStatesRef = useRef<Record<string, MobState>>({});
+  const refreshMobs = async () => {
+    try {
+      const px = Math.floor(playerPosRef.current.x);
+      const py = Math.floor(playerPosRef.current.y);
+      const x0 = Math.max(0, Math.min(MAP_W - 128, px - 64));
+      const y0 = Math.max(0, Math.min(MAP_H - 128, py - 64));
+      const res = await fetch(
+        `/api/worldbox/mobs?x0=${x0}&y0=${y0}&x1=${x0 + 127}&y1=${y0 + 127}`,
+        { headers: { Accept: "application/json" } },
+      );
+      if (!res.ok) return;
+      const data = (await res.json()) as { states?: Record<string, MobState> };
+      const next: Record<string, MobState> = { ...mobStatesRef.current };
+      for (const key of Object.keys(next)) {
+        const m = /@(-?\d+),(-?\d+)$/.exec(key);
+        if (!m) continue;
+        const x = Number(m[1]);
+        const y = Number(m[2]);
+        if (x >= x0 && x <= x0 + 127 && y >= y0 && y <= y0 + 127) delete next[key];
+      }
+      Object.assign(next, data.states ?? {});
+      mobStatesRef.current = next;
+    } catch { /* 読めなくても歩き続けられる */ }
+  };
+  /** モブへの攻撃（サーバーが配置・距離・HP の正）。結果は演出で返す。 */
+  const attackMob = async (placed: PlacedMob) => {
+    const key = mobKeyOf(placed);
+    const def = mobById(placed.mobId);
+    try {
+      const res = await fetch("/api/worldbox/mobs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "attack", mobId: placed.mobId, x: placed.x, y: placed.y }),
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        error?: string; hp?: number; dead?: boolean; profile?: PlayerProfile;
+      };
+      if (!res.ok) {
+        if (data.error === "too_far") setTileMsg(TILE_ERROR_LABEL.too_far);
+        fxEventsRef.current.push({ kind: "whiff", x: placed.x, y: placed.y });
+        return;
+      }
+      const next = { ...mobStatesRef.current };
+      if (data.dead) next[key] = { hp: 0, deadUntil: Date.now() + MOB_RESPAWN_MS };
+      else if (typeof data.hp === "number") next[key] = { hp: data.hp };
+      mobStatesRef.current = next;
+      fxEventsRef.current.push({
+        kind: data.dead ? "death" : "hit",
+        x: placed.x, y: placed.y,
+        sizeTiles: placed.size,
+        color: def ? MOB_FX_COLOR[def.id] : undefined,
+      });
+      if (data.profile) setInvProfile(data.profile);
+    } catch {
+      fxEventsRef.current.push({ kind: "whiff", x: placed.x, y: placed.y });
+    }
+  };
+  const attackMobRef = useRef(attackMob);
+  attackMobRef.current = attackMob;
   /** インベントリ整理: 任意スロット間の移動（サーバー側 moveSlot が正）。 */
   const moveItem = async (from: SlotRef, to: SlotRef) => {
     try {
@@ -678,11 +775,13 @@ export default function WorldBoxClient() {
     void refreshBuildings();
     void refreshInv();
     void refreshTiles();
+    void refreshMobs();
     const timer = window.setInterval(() => {
       void refreshNations();
       void refreshBuildings();
       void refreshInv();
       void refreshTiles();
+      void refreshMobs();
     }, 15000);
     return () => window.clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -745,6 +844,17 @@ export default function WorldBoxClient() {
     // 基点を持ち歩くのは「スティックが起動したか」と倒し量だけ。
     const joy = { active: false, pointerId: -1, dx: 0, dy: 0 };
     const others = new Map<string, OtherRender>();
+    /** モブの見た目状態（現在位置・被弾フラッシュ・ノックバック・歩行位相）。
+     * 配置と HP/死亡は決定的配置＋サーバー状態が正で、ここは動きの表現だけを持つ。 */
+    type MobRender = {
+      ax: number; ay: number; wx: number; wy: number;
+      tx: number; ty: number; nextThink: number; phase: number; face: 1 | -1;
+      flashAt: number; kx: number; ky: number; seenAt: number; fleeUntil: number;
+    };
+    const mobRenders = new Map<string, MobRender>();
+    let mobCacheKey = "";
+    let mobCache: PlacedMob[] = [];
+    let lastAttackAt = 0;
     // スタミナとダッシュ（キーの2度押し / スティックの強い倒し）
     let stamina: StaminaState = createStamina();
     let tapTracker: TapTracker = createTapTracker();
@@ -917,6 +1027,37 @@ export default function WorldBoxClient() {
       };
     };
     /** 道具タップ: 選択中の道具/種と隣接タイルの状態で行為が決まる。 */
+    /** モブのタップ = 攻撃。タイル行為より優先する（モブがいるマスは殴る）。 */
+    const handleMobTap = (t: { x: number; y: number }): boolean => {
+      if (!invRef.current) return false;
+      const nowMs = Date.now();
+      const px = Math.floor(player.x);
+      const py = Math.floor(player.y);
+      for (const placed of mobCache) {
+        const def = mobById(placed.mobId);
+        if (!def) continue;
+        const key = mobKeyOf(placed);
+        if (!mobHpNow(def, mobStatesRef.current[key] ?? null, nowMs).alive) continue;
+        const r = mobRenders.get(key);
+        const cx = r ? Math.floor(r.wx) : placed.x;
+        const cy = r ? Math.floor(r.wy) : placed.y;
+        if (!mobOccupiesTile(placed.size, cx, cy, t.x, t.y)) continue;
+        if (mobDistance(px, py, { x: cx, y: cy, size: placed.size }) > MOB_ATTACK_RANGE) {
+          setTileMsg(TILE_ERROR_LABEL.too_far);
+          return true;
+        }
+        // 向きをモブへ向けて即時に振る（HP と粒はサーバー応答で返す）
+        player.face = cx + 0.5 >= player.x ? 1 : -1;
+        const slot = invRef.current.hotbar[selSlotRef.current] ?? null;
+        swing = { startedAt: performance.now(), itemId: slot?.id ?? null, face: player.face, whiff: false };
+        if (nowMs - lastAttackAt >= 350) {
+          lastAttackAt = nowMs;
+          void attackMobRef.current(placed);
+        }
+        return true;
+      }
+      return false;
+    };
     const handleTileTap = (t: { x: number; y: number }): boolean => {
       const prof = invRef.current;
       if (!prof) return false;
@@ -979,7 +1120,10 @@ export default function WorldBoxClient() {
         canvas.setPointerCapture(e.pointerId);
         return;
       }
-      if (space === "world") handleTileTap(toTile(e));
+      if (space === "world") {
+        const t = toTile(e);
+        if (!handleMobTap(t)) handleTileTap(t);
+      }
     };
     const onPointerMove = (e: PointerEvent) => {
       if (buildRef.current.active && space === "world") {
@@ -1440,6 +1584,20 @@ export default function WorldBoxClient() {
           spawnMobFx(fxSys, ev.kind, ev.x + 0.5, ev.y + 0.5, { sizeTiles: ev.sizeTiles, color: ev.color });
           if (ev.kind === "death") shake = startShake(shake, 3, now);
           if (ev.kind === "spawn") pops.set(`${ev.x},${ev.y}`, now);
+          if (ev.kind === "hit") {
+            // 被弾した個体は白フラッシュ＋ノックバック。敵対でなければ逃げる
+            for (const [mkey, r] of mobRenders) {
+              if (r.ax !== ev.x || r.ay !== ev.y) continue;
+              r.flashAt = now;
+              const dx = r.wx - player.x;
+              const dy = r.wy - player.y;
+              const len = Math.hypot(dx, dy) || 1;
+              r.kx += (dx / len) * TILE * 0.20;
+              r.ky += (dy / len) * TILE * 0.20;
+              const mdef = mobById(mkey.split("@")[0]);
+              if (mdef && mdef.temperament !== "hostile") r.fleeUntil = now + 900;
+            }
+          }
           continue;
         }
         spawnBurst(fxSys, ev.kind, ev.x + 0.5, ev.y + 0.5);
@@ -1667,6 +1825,214 @@ export default function WorldBoxClient() {
         ctx.imageSmoothingEnabled = true;
       }
 
+      // ---- モブ: 配置は決定的、HP/死亡はサーバー状態、動きは見た目だけここで作る ----
+      const mobDrawQueue: { placed: PlacedMob; r: MobRender; hpFrac: number }[] = [];
+      const drawMob = (placed: PlacedMob, r: MobRender, hpFrac: number) => {
+        const def = mobById(placed.mobId);
+        if (!def) return;
+        const style = MOB_STYLE[def.id] ?? {
+          body: def.temperament === "hostile" ? "#a04a4a" : "#b8b0a2",
+          feature: "blob" as const,
+        };
+        const sizePx = TILE * Math.max(1, placed.size) * 0.94;
+        const bob = walkBob(r.phase) * TILE * 0.045;
+        const cxp = toScreenX(r.wx) + r.kx;
+        const baseY = toScreenY(r.wy) + r.ky;
+        const cy = baseY - bob;
+        const flash = now - r.flashAt < 130;
+        const pop = popScale(popProgress(r.seenAt, now));
+        ctx.save();
+        if (pop !== 1) {
+          ctx.translate(cxp, baseY);
+          ctx.scale(pop, pop);
+          ctx.translate(-cxp, -baseY);
+        }
+        // 影
+        ctx.fillStyle = "rgba(20,26,20,0.25)";
+        ctx.beginPath();
+        ctx.ellipse(cxp, baseY + sizePx * 0.30, sizePx * 0.34, sizePx * 0.12, 0, 0, Math.PI * 2);
+        ctx.fill();
+        // 本体（丸みのある塊。特徴は耳・鼻・トサカ・角・甲羅・羽・骨で描き分ける）
+        const w = sizePx * 0.76;
+        const h = sizePx * 0.60;
+        const by = cy - h / 2;
+        ctx.fillStyle = flash ? "#ffffff" : style.body;
+        ctx.beginPath();
+        ctx.ellipse(cxp, cy, w / 2, h / 2, 0, 0, Math.PI * 2);
+        ctx.fill();
+        if (style.sub && !flash) {
+          ctx.fillStyle = style.sub;
+          ctx.globalAlpha = 0.55;
+          ctx.beginPath();
+          ctx.ellipse(cxp - w * 0.16, cy + h * 0.08, w * 0.20, h * 0.24, 0, 0, Math.PI * 2);
+          ctx.ellipse(cxp + w * 0.22, cy - h * 0.10, w * 0.13, h * 0.16, 0, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.globalAlpha = 1;
+        }
+        ctx.fillStyle = flash ? "#ffffff" : style.body;
+        if (style.feature === "ears") {
+          for (const s of [-1, 1]) {
+            ctx.beginPath();
+            ctx.ellipse(cxp + s * w * 0.26, by - h * 0.06, w * 0.10, h * 0.20, s * 0.25, 0, Math.PI * 2);
+            ctx.fill();
+          }
+        } else if (style.feature === "horns") {
+          ctx.strokeStyle = flash ? "#ffffff" : "#e8e0cc";
+          ctx.lineWidth = Math.max(2, sizePx * 0.045);
+          for (const s of [-1, 1]) {
+            ctx.beginPath();
+            ctx.arc(cxp + s * w * 0.30, by + h * 0.02, w * 0.13, Math.PI * (s > 0 ? 1.15 : 0.55), Math.PI * (s > 0 ? 1.85 : 1.45));
+            ctx.stroke();
+          }
+        } else if (style.feature === "comb") {
+          ctx.fillStyle = flash ? "#ffffff" : (style.sub ?? "#e2483a");
+          for (const o of [-0.14, 0, 0.14]) {
+            ctx.beginPath();
+            ctx.arc(cxp + o * w, by + h * 0.02, w * 0.075, 0, Math.PI * 2);
+            ctx.fill();
+          }
+          // くちばし
+          ctx.fillStyle = flash ? "#ffffff" : "#e8a33c";
+          ctx.beginPath();
+          ctx.ellipse(cxp + r.face * w * 0.30, cy + h * 0.05, w * 0.10, h * 0.09, 0, 0, Math.PI * 2);
+          ctx.fill();
+        } else if (style.feature === "snout") {
+          ctx.fillStyle = flash ? "#ffffff" : "rgba(255,255,255,0.35)";
+          ctx.beginPath();
+          ctx.ellipse(cxp + r.face * w * 0.14, cy + h * 0.10, w * 0.17, h * 0.15, 0, 0, Math.PI * 2);
+          ctx.fill();
+        } else if (style.feature === "shell") {
+          ctx.strokeStyle = "rgba(30,30,30,0.28)";
+          ctx.lineWidth = Math.max(1.5, sizePx * 0.03);
+          for (const rr of [0.30, 0.20]) {
+            ctx.beginPath();
+            ctx.ellipse(cxp, cy, w * rr, h * rr, 0, 0, Math.PI * 2);
+            ctx.stroke();
+          }
+        } else if (style.feature === "wings") {
+          const flap = Math.sin(r.phase * 2.2) * 0.35;
+          ctx.fillStyle = flash ? "#ffffff" : "rgba(240,240,235,0.75)";
+          for (const s of [-1, 1]) {
+            ctx.beginPath();
+            ctx.ellipse(cxp + s * w * 0.52, cy - h * 0.12 + flap * h * 0.2, w * 0.20, h * 0.13, s * (0.5 + flap), 0, Math.PI * 2);
+            ctx.fill();
+          }
+        } else if (style.feature === "bones") {
+          ctx.strokeStyle = "rgba(70,66,58,0.5)";
+          ctx.lineWidth = Math.max(1.5, sizePx * 0.03);
+          for (const o of [-0.16, 0, 0.16]) {
+            ctx.beginPath();
+            ctx.moveTo(cxp + o * w, cy - h * 0.22);
+            ctx.lineTo(cxp + o * w, cy + h * 0.22);
+            ctx.stroke();
+          }
+        } else {
+          // blob: 光沢
+          ctx.fillStyle = "rgba(255,255,255,0.35)";
+          ctx.beginPath();
+          ctx.ellipse(cxp - w * 0.16, cy - h * 0.18, w * 0.14, h * 0.11, -0.5, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        // 目（向き側に寄せる）
+        ctx.fillStyle = def.temperament === "hostile" && !flash ? "#c22e2e" : "#26221e";
+        for (const s of [-1, 1]) {
+          ctx.beginPath();
+          ctx.arc(cxp + r.face * w * 0.10 + s * w * 0.13, cy - h * 0.06, Math.max(1.8, sizePx * 0.045), 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.restore();
+        // HP バー（傷ついた個体だけ）
+        if (hpFrac < 1) {
+          const bw = Math.max(26, w * 0.9);
+          const bh2 = 4;
+          const bxHp = cxp - bw / 2;
+          const byHp = by - 9;
+          ctx.fillStyle = "rgba(12,14,12,0.55)";
+          ctx.fillRect(bxHp - 1, byHp - 1, bw + 2, bh2 + 2);
+          ctx.fillStyle = hpFrac > 0.5 ? "#7ed957" : hpFrac > 0.25 ? "#f2c53c" : "#e2483a";
+          ctx.fillRect(bxHp, byHp, bw * Math.max(0, hpFrac), bh2);
+        }
+      };
+      if (space === "world") {
+        const nowMs = Date.now();
+        const isNight = isNightPhase(phaseAtTime(nowMs / 1000));
+        const vx0 = Math.max(0, Math.floor(cam.x - cw / TILE / 2) - 3);
+        const vy0 = Math.max(0, Math.floor(cam.y - ch / TILE / 2) - 3);
+        const vx1 = Math.min(MAP_W - 1, Math.ceil(cam.x + cw / TILE / 2) + 3);
+        const vy1 = Math.min(MAP_H - 1, Math.ceil(cam.y + ch / TILE / 2) + 3);
+        const cacheKey = `${vx0 >> 5},${vy0 >> 5},${vx1 >> 5},${vy1 >> 5},${isNight ? 1 : 0}`;
+        if (cacheKey !== mobCacheKey) {
+          mobCacheKey = cacheKey;
+          mobCache = visibleMobs(MAP_SEED, vx0, vy0, vx1, vy1, isNight);
+          const keys = new Set(mobCache.map((m) => mobKeyOf(m)));
+          for (const k of [...mobRenders.keys()]) if (!keys.has(k)) mobRenders.delete(k);
+        }
+        for (const placed of mobCache) {
+          const def = mobById(placed.mobId);
+          if (!def) continue;
+          const key = mobKeyOf(placed);
+          const hpNow = mobHpNow(def, mobStatesRef.current[key] ?? null, nowMs);
+          if (!hpNow.alive) {
+            // 死んでいる間は見た目状態を捨てる（復活時はアンカーでポップして出る）
+            mobRenders.delete(key);
+            continue;
+          }
+          let r = mobRenders.get(key);
+          if (!r) {
+            r = {
+              ax: placed.x, ay: placed.y, wx: placed.x + 0.5, wy: placed.y + 0.5,
+              tx: placed.x + 0.5, ty: placed.y + 0.5, nextThink: 0,
+              phase: Math.random() * 6, face: 1, flashAt: 0, kx: 0, ky: 0, seenAt: now, fleeUntil: 0,
+            };
+            mobRenders.set(key, r);
+            fxEventsRef.current.push({ kind: "spawn", x: placed.x, y: placed.y, sizeTiles: placed.size, color: MOB_FX_COLOR[def.id] });
+          }
+          // 思考: うろつき / 敵対は接近 / 被弾直後の非敵対は逃げる
+          if (now >= r.nextThink) {
+            r.nextThink = now + 1400 + Math.random() * 1800;
+            const fleeing = now < r.fleeUntil;
+            const distP = Math.hypot(player.x - r.wx, player.y - r.wy);
+            if (fleeing) {
+              const dx = r.wx - player.x;
+              const dy = r.wy - player.y;
+              const len = Math.hypot(dx, dy) || 1;
+              r.tx = placed.x + 0.5 + (dx / len) * 2;
+              r.ty = placed.y + 0.5 + (dy / len) * 2;
+            } else if (def.temperament === "hostile" && distP < 5 && placed.size < 4) {
+              r.tx = player.x;
+              r.ty = player.y;
+            } else if (placed.size < 4) {
+              const ang = Math.random() * Math.PI * 2;
+              const rad = Math.random() * 1.3;
+              r.tx = placed.x + 0.5 + Math.cos(ang) * rad;
+              r.ty = placed.y + 0.5 + Math.sin(ang) * rad;
+            } else {
+              r.tx = placed.x + 0.5;
+              r.ty = placed.y + 0.5;
+            }
+          }
+          const fleeing = now < r.fleeUntil;
+          const chasing = def.temperament === "hostile" && Math.hypot(player.x - r.wx, player.y - r.wy) < 5;
+          const speed = fleeing ? 1.7 : chasing ? 1.12 : 0.55;
+          const dx = r.tx - r.wx;
+          const dy = r.ty - r.wy;
+          const distT = Math.hypot(dx, dy);
+          // 敵対はプレイヤーに重ならない（手前で止まる）
+          const stopAt = chasing && !fleeing ? 0.85 : 0.05;
+          if (distT > stopAt) {
+            const step = Math.min(distT - (chasing && !fleeing ? stopAt : 0), speed * dt);
+            r.wx += (dx / distT) * step;
+            r.wy += (dy / distT) * step;
+            r.phase = advanceWalkPhase(r.phase, speed, dt);
+            if (dx < -0.02) r.face = -1;
+            else if (dx > 0.02) r.face = 1;
+          }
+          r.kx *= Math.exp(-9 * dt);
+          r.ky *= Math.exp(-9 * dt);
+          mobDrawQueue.push({ placed, r, hpFrac: hpNow.hp / def.hp });
+        }
+      }
+
       // プレイヤー群（y 順で奥行き感）
       const drawList: { y: number; draw: () => void }[] = [];
       for (const o of others.values()) {
@@ -1721,6 +2087,9 @@ export default function WorldBoxClient() {
             draw: () => drawAvatar(ctx, Math.round(lobbyOx + (n.x + 0.5) * TILE), Math.round(lobbyOy + (n.y + 1) * TILE), 1, 0, 0, null),
           });
         }
+      }
+      for (const q of mobDrawQueue) {
+        drawList.push({ y: q.r.wy, draw: () => drawMob(q.placed, q.r, q.hpFrac) });
       }
       drawList.push({
         y: player.y,
