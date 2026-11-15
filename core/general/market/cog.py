@@ -45,7 +45,7 @@ MARKET_COLOR = 0x2ECC71
 #: 入口に定義があった頃は入口へのパッチで差し替えられたが、集約後は
 #: discord.py の拡張ローダが集約モジュールのインスタンスを二重化し、
 #: 入口側のパッチが実装に届かない場合があるため、実装側の所有に統一した
-#: （nation / wordle と同じ流儀。テストもこちらをパッチする）。
+#: （wordle と同じ流儀。テストもこちらをパッチする）。
 CHART_PATH = Path(__file__).resolve().parents[3] / "data" / "market_chart.png"
 CHART_FONT_PATH = (Path(__file__).resolve().parents[3]
                    / "assets" / "fonts" / "MPLUSRounded1c-Regular.ttf")

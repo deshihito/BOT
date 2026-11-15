@@ -22,8 +22,6 @@ log = logging.getLogger(__name__)
 # are never addressable through this API.
 TABLES = frozenset({
     "bot_kv", "users", "transaction_history",
-    "dungeon_maps", "dungeon_players", "dungeon_bases",
-    "nation_guilds", "nation_tiles", "nation_players",
     "bump_rta_settings", "bump_rta_records", "bump_rta_worst_records", "bump_rta_events",
     "bump_rta_pending", "bump_rta_reminders", "jinrou_ratings",
     "fujo_users", "fujo_activities", "playlists", "user_music_playlists",
@@ -35,9 +33,6 @@ TABLES = frozenset({
 # Callers may invoke only these known public functions and named arguments.
 RPC_ARGUMENTS = {
     "transfer_coins": frozenset({"p_sender_id", "p_receiver_id", "p_amount", "p_new_user_balance"}),
-    "dungeon_apply_coins": frozenset({"p_user_id", "p_delta"}),
-    "nation_found": frozenset({"p_guild_id", "p_user_id"}),
-    "nation_adjust": frozenset({"p_user_id", "p_coins_delta", "p_hunger_delta"}),
     "record_bump_rta_best": frozenset({"p_guild_id", "p_user_id", "p_event_type", "p_elapsed_ms", "p_completed_at"}),
     "record_bump_rta_worst": frozenset({"p_guild_id", "p_user_id", "p_event_type", "p_elapsed_ms", "p_completed_at"}),
     "get_bump_rta_global_ranking": frozenset({"p_event_type", "p_limit"}),
@@ -47,7 +42,7 @@ RPC_ARGUMENTS = {
     "get_bump_rta_record_ranks": frozenset({"p_guild_id", "p_event_type", "p_elapsed_ms"}),
     "party_game_record_win": frozenset({"p_guild_id", "p_user_id", "p_game"}),
 }
-RPC_SCALAR_RESULTS = frozenset({"transfer_coins", "dungeon_apply_coins", "nation_adjust", "party_game_record_win"})
+RPC_SCALAR_RESULTS = frozenset({"transfer_coins", "party_game_record_win"})
 
 FILTER_OPERATORS = frozenset({"eq", "neq", "gt", "gte", "lt", "lte", "like", "ilike", "contains", "is", "in"})
 MAX_LIMIT = 10_000

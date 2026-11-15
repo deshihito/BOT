@@ -55,7 +55,7 @@ class APIClientTest(unittest.TestCase):
         response = Mock(ok=True, status_code=200)
         response.json.return_value = {"data": False}
         post.return_value = response
-        result = self.client.rpc("dungeon_apply_coins", {"p_user_id": "1", "p_delta": -1}).execute()
+        result = self.client.rpc("transfer_coins", {"p_sender_id": "1", "p_receiver_id": "2", "p_amount": 1, "p_new_user_balance": 0}).execute()
         self.assertIs(result.data, False)
 
     @patch("core.support.api_client.requests.post")

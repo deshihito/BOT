@@ -16,41 +16,6 @@
 
 from __future__ import annotations
 
-# ---------------------------------------------------------------- 国づくりの初回ガイド
-# !nation を初めて使った人に出す 3 ステップのチュートリアル（cogs/nation_onboarding.py）。
-# 同じ文章を /help と Web サイトのガイド（NATION_GUIDE）でも使う。
-NATION_TUTORIAL = [
-    {
-        "title": "1. 国に入る・国をつくる",
-        "body": (
-            "国づくりは、サーバーごとに 1 つの国を育てる遊びです。\n"
-            "- このサーバーに国があれば、参加機能から国民になれます（入れるのは 1 人 1 か国）。\n"
-            "- まだ国がなければ、サーバーの管理者かオーナーが建国できます。"
-            "建国した人が国王になり、首都が共有マップに置かれます。"
-        ),
-    },
-    {
-        "title": "2. 空腹度とコイン",
-        "body": (
-            "- **空腹度**: 参加したときは 100 です。これから時間とともに減っていくしくみが入る予定です。\n"
-            "- **コイン（AGO）**: 所持金は `/general` の「プレイヤー状況」で確認できます。ほかのゲームで稼いだコインも国づくりで使えます。\n"
-            "所属国・役職・所持金・空腹度は、状態確認機能で確認できます。"
-        ),
-    },
-    {
-        "title": "3. まずやること",
-        "body": (
-            "1. 国民参加または建国の機能を使う\n"
-            "2. 状態確認機能で自分の情報を見る\n"
-            "3. Web サイトの共有マップで、自分の国の場所と広さを見てみる\n"
-            "操作方法はサーバー管理者に確認してください。"
-        ),
-    },
-]
-
-NATION_GUIDE = "\n\n".join(f"## {step['title']}\n{step['body']}" for step in NATION_TUTORIAL)
-
-
 CATEGORIES = [
     {
         "id": "support",
@@ -152,14 +117,6 @@ COMMAND_META: dict[str, dict] = {
     # /general の重心はマネー（コイン経済圏の入口: ステータス・市場・工房・採掘も経済側）
     "/general": {"category": "economy", "usage": "/general（操作パネルを表示）"},
     # ---------------------------------------------------------------- コイン
-    "!nation": {"category": "economy", "summary": "国づくり機能", "guild_only": True, "hidden": True},
-    "!nation join": {"category": "economy", "guide": NATION_GUIDE, "guild_only": True,
-                      "summary": "このサーバーの国に国民として参加します", "hidden": True},
-    "!nation found": {"category": "economy", "guide": NATION_GUIDE, "guild_only": True,
-                       "summary": "このサーバーの国を建国します（管理者かオーナーのみ）",
-                       "permissions": ["administrator"], "hidden": True},
-    "!nation status": {"category": "economy", "guide": NATION_GUIDE, "guild_only": True,
-                       "summary": "所属国・役職・所持金・空腹度を表示します", "hidden": True},
     "!coin": {"category": "economy", "summary": "管理者が自分の残高を直接設定します", "permissions": ["bot_admin"],
               "hidden": True},
 
@@ -183,8 +140,6 @@ COMMAND_META: dict[str, dict] = {
     "!ggrks": {"category": "fun", "options": {"keyword": "検索する言葉"}},
 
     # ---------------------------------------------------------------- サーバー管理
-    "!dungeon_reset": {"category": "admin", "summary": "ダンジョンのマップを全サーバー分リセットします", "permissions": ["bot_admin"],
-                       "hidden": True},
     "!logs": {"category": "admin", "summary": "サーバー側のログを取得します", "permissions": ["bot_admin"],
               "usage": "!logs [行数] [重要度]", "hidden": True},
     "!usage_stats": {"category": "admin", "summary": "コマンドと機能の利用統計を表示します", "permissions": ["bot_admin"],
