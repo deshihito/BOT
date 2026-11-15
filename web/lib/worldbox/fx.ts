@@ -120,7 +120,10 @@ export type FxBurstKind =
   | "step" // 足元: 小さな土ぼこり/水しぶき
   | "dash" // ダッシュ: 風の筋
   | "warp" // ワープ: 立ち上る光
-  | "poof"; // 消滅: 煙
+  | "poof" // 消滅: 煙
+  | "hit" // 被ダメージ: 赤い火花（短命）
+  | "death" // 死亡: 大きめの破片と煙
+  | "spawn"; // 出現: 煙と光が立ち上る
 
 type BurstSpec = {
   count: number;
@@ -216,7 +219,63 @@ const BURSTS: Record<FxBurstKind, BurstSpec> = {
     speed: [0.5, 1.5], dir: null, spread: Math.PI * 2, life: [0.35, 0.6], size: [0.1, 0.2],
     gravity: -1.2, drag: 2.0, vrot: 0,
   },
+  hit: {
+    count: 10, shapes: ["spark", "spark", "chip"],
+    colors: ["#e5484d", "#ffffff", "#7a1f24", "#ffb3b8"],
+    speed: [1.6, 4.2], dir: -Math.PI / 2, spread: 2.4, life: [0.18, 0.38], size: [0.04, 0.09],
+    gravity: 6, drag: 1.6, vrot: 8,
+  },
+  death: {
+    count: 22, shapes: ["chip", "puff", "chip"],
+    colors: ["#c9c2b4", "#8d867a", "#5c564c", "#e8e4da"],
+    speed: [1.2, 3.8], dir: null, spread: Math.PI * 2, life: [0.4, 0.85], size: [0.09, 0.22],
+    gravity: 5.5, drag: 1.3, vrot: 8,
+  },
+  spawn: {
+    count: 14, shapes: ["puff", "glow"],
+    colors: ["#e6dcff", "#b79cff", "#ffffff", "#8d867a"],
+    speed: [0.3, 1.2], dir: -Math.PI / 2, spread: 1.2, life: [0.4, 0.8], size: [0.08, 0.18],
+    gravity: -2.2, drag: 1.2, vrot: 0,
+  },
 };
+
+/** バーストの実生成（粒数・大きさ・散らばりを差し替え可能にした共通部）。 */
+function emitBurst(
+  sys: FxSystem,
+  spec: BurstSpec,
+  x: number,
+  y: number,
+  opts: { count: number; sizeMul?: number; scatterX?: number; scatterY?: number; dirX?: number; color?: string },
+): number {
+  const n = Math.max(0, Math.min(FX_BURST_MAX, Math.round(opts.count * sys.intensity)));
+  const sizeMul = opts.sizeMul ?? 1;
+  const scatterX = opts.scatterX ?? 0.3;
+  const scatterY = opts.scatterY ?? 0.2;
+  for (let i = 0; i < n; i++) {
+    const baseDir = spec.dir ?? fxRand(sys) * Math.PI * 2;
+    const ang = baseDir + (fxRand(sys) - 0.5) * spec.spread;
+    const speed = spec.speed[0] + fxRand(sys) * (spec.speed[1] - spec.speed[0]);
+    let vx = Math.cos(ang) * speed;
+    const vy = Math.sin(ang) * speed;
+    if (opts.dirX) vx += opts.dirX * 0.8;
+    pushParticle(sys, {
+      x: x + (fxRand(sys) - 0.5) * scatterX,
+      y: y + (fxRand(sys) - 0.5) * scatterY,
+      vx,
+      vy,
+      age: 0,
+      life: spec.life[0] + fxRand(sys) * (spec.life[1] - spec.life[0]),
+      size: (spec.size[0] + fxRand(sys) * (spec.size[1] - spec.size[0])) * sizeMul,
+      gravity: spec.gravity,
+      drag: spec.drag,
+      rot: fxRand(sys) * Math.PI * 2,
+      vrot: (fxRand(sys) - 0.5) * 2 * spec.vrot,
+      shape: spec.shapes[Math.floor(fxRand(sys) * spec.shapes.length) % spec.shapes.length],
+      color: opts.color ?? spec.colors[Math.floor(fxRand(sys) * spec.colors.length) % spec.colors.length],
+    });
+  }
+  return n;
+}
 
 /**
  * 行為の払い戻しとして粒を出す。x/y はワールド座標（タイル単位）。
@@ -230,36 +289,53 @@ export function spawnBurst(
   opts: { dirX?: number; color?: string } = {},
 ): number {
   const spec = BURSTS[kind];
-  const n = Math.max(0, Math.min(FX_BURST_MAX, Math.round(spec.count * sys.intensity)));
-  for (let i = 0; i < n; i++) {
-    const baseDir = spec.dir ?? fxRand(sys) * Math.PI * 2;
-    const ang = baseDir + (fxRand(sys) - 0.5) * spec.spread + (opts.dirX ? 0 : 0);
-    const speed = spec.speed[0] + fxRand(sys) * (spec.speed[1] - spec.speed[0]);
-    let vx = Math.cos(ang) * speed;
-    const vy = Math.sin(ang) * speed;
-    if (opts.dirX) vx += opts.dirX * 0.8;
-    pushParticle(sys, {
-      x: x + (fxRand(sys) - 0.5) * 0.3,
-      y: y + (fxRand(sys) - 0.5) * 0.2,
-      vx,
-      vy,
-      age: 0,
-      life: spec.life[0] + fxRand(sys) * (spec.life[1] - spec.life[0]),
-      size: spec.size[0] + fxRand(sys) * (spec.size[1] - spec.size[0]),
-      gravity: spec.gravity,
-      drag: spec.drag,
-      rot: fxRand(sys) * Math.PI * 2,
-      vrot: (fxRand(sys) - 0.5) * 2 * spec.vrot,
-      shape: spec.shapes[Math.floor(fxRand(sys) * spec.shapes.length) % spec.shapes.length],
-      color: opts.color ?? spec.colors[Math.floor(fxRand(sys) * spec.colors.length) % spec.colors.length],
-    });
-  }
-  return n;
+  return emitBurst(sys, spec, x, y, { count: spec.count, dirX: opts.dirX, color: opts.color });
+}
+
+// ---- モブ演出（出現/被ダメージ/死亡） ----
+
+export type FxMobEvent = "spawn" | "hit" | "death";
+
+/**
+ * モブの大きさ（sizeTiles = 占有マス数 1〜20）に応じた粒数倍率。
+ * 大きいモブほど多く出すが、FX_BURST_MAX の天井は別途 emitBurst が守る。
+ */
+export function mobCountMul(sizeTiles: number): number {
+  return Math.min(2.6, 0.8 + 0.18 * sizeTiles);
+}
+
+/** モブの大きさに応じた粒サイズ倍率（最大 2.2 倍で頭打ち）。 */
+export function mobSizeMul(sizeTiles: number): number {
+  return Math.min(2.2, 0.85 + 0.09 * sizeTiles);
+}
+
+/**
+ * モブの出現/被ダメージ/死亡の粒を出す。x/y はモブのアンカー中心（タイル単位）。
+ * 粒は占有範囲いっぱいに散らし、粒数・粒サイズは大きさでスケールする。
+ * sizeTiles が不正（0/NaN/負）なら 1 として扱う。返り値は出た粒数。
+ */
+export function spawnMobFx(
+  sys: FxSystem,
+  event: FxMobEvent,
+  x: number,
+  y: number,
+  opts: { sizeTiles?: number; color?: string } = {},
+): number {
+  const raw = opts.sizeTiles ?? 1;
+  const sizeTiles = Number.isFinite(raw) ? Math.min(20, Math.max(1, Math.floor(raw))) : 1;
+  const spec = BURSTS[event];
+  return emitBurst(sys, spec, x, y, {
+    count: spec.count * mobCountMul(sizeTiles),
+    sizeMul: mobSizeMul(sizeTiles),
+    scatterX: Math.max(0.3, sizeTiles * 0.8),
+    scatterY: Math.max(0.2, sizeTiles * 0.8),
+    color: opts.color,
+  });
 }
 
 // ---- 環境パーティクル（バイオームと時刻で決まる漂い） ----
 
-export type FxAmbientKind = "snow" | "leaf" | "pollen" | "firefly";
+export type FxAmbientKind = "snow" | "leaf" | "pollen" | "firefly" | "rain";
 
 /**
  * その場所で漂う環境粒の種類。雪原は雪、森は落葉、夜は蛍、それ以外は花粉。
@@ -273,11 +349,62 @@ export function ambientKindFor(tile: number, isTree: boolean, night: number): Fx
   return "pollen";
 }
 
+// ---- 天候（決定的サイクル。全員が同じ空を見る） ----
+
+export type FxWeather = "clear" | "rain";
+
+/** 天候1区間の長さ（秒）。昼夜サイクル（240秒）とは独立に切り替わる。 */
+export const WEATHER_PERIOD_SEC = 360;
+
+/**
+ * unix 時刻からその区間の天候を決める（決定的）。
+ * 区間インデックスのハッシュで決めるため、サーバーを介さず全クライアントが一致する。
+ */
+export function weatherAt(unixSec: number): FxWeather {
+  const idx = Math.floor(unixSec / WEATHER_PERIOD_SEC);
+  let h = idx | 0;
+  h = Math.imul(h ^ (h >>> 15), 2246822519);
+  h ^= h >>> 13;
+  h = Math.imul(h, 3266489917);
+  h ^= h >>> 16;
+  return (h >>> 0) / 4294967296 < 0.35 ? "rain" : "clear";
+}
+
+/**
+ * 天候つきの環境粒の種類。優先順位は 雪 > 雨 > 森 > 夜 > 花粉
+ * （雪バイオームでは雨でなく雪が降り続ける）。
+ */
+export function weatherAmbientKind(weather: FxWeather, tile: number, isTree: boolean, night: number): FxAmbientKind {
+  if (tile === 6 || tile === 7) return "snow";
+  if (weather === "rain") return "rain";
+  return ambientKindFor(tile, isTree, night);
+}
+
+// ---- 時間帯（daynight の位相の名前づけ） ----
+
+export type FxPhaseKind = "day" | "dusk" | "night" | "dawn";
+
+/**
+ * 昼夜位相（0〜1、daynight.ts と同じ時計）の時間帯名。
+ * nightAmount と整合させる: 真夜中は 0.86〜0.18、朝の移行が dawn（0.18〜0.30）、
+ * 昼が day（0.30〜0.68）、夕方〜日没の移行が dusk（0.68〜0.86）。
+ */
+export function phaseKind(phase: number): FxPhaseKind {
+  // 範囲外だけを 0〜1 へ畳む（0.18+1 の %1 で境界がずれる浮動小数誤差を避ける）
+  let p = phase % 1;
+  if (p < 0) p += 1;
+  if (p >= 0.18 && p < 0.3) return "dawn";
+  if (p >= 0.3 && p < 0.68) return "day";
+  if (p >= 0.68 && p < 0.86) return "dusk";
+  return "night";
+}
+
 const AMBIENT_SPEC: Record<FxAmbientKind, { colors: string[]; size: [number, number]; life: [number, number]; fall: [number, number]; sway: number }> = {
   snow: { colors: ["#ffffff", "#e8f1f7"], size: [0.03, 0.07], life: [1.6, 2.8], fall: [0.5, 0.9], sway: 0.5 },
   leaf: { colors: ["#69b84a", "#3e7d2c", "#a8c256"], size: [0.05, 0.1], life: [1.4, 2.4], fall: [0.35, 0.65], sway: 0.8 },
   pollen: { colors: ["#fff3b0", "#ffe98a"], size: [0.02, 0.045], life: [1.8, 3.0], fall: [0.06, 0.16], sway: 0.35 },
   firefly: { colors: ["#d8ffb0", "#aef29a"], size: [0.03, 0.055], life: [1.6, 2.6], fall: [-0.05, 0.05], sway: 0.6 },
+  rain: { colors: ["#7cc0e8", "#a8d4f0", "#3a7cb4"], size: [0.03, 0.06], life: [0.9, 1.4], fall: [7, 10], sway: 0.4 },
 };
 
 /** 画面範囲 [x0,x1]×[y0,y1] の上辺付近に環境粒を1つ出す。 */
@@ -296,7 +423,7 @@ export function spawnAmbient(sys: FxSystem, kind: FxAmbientKind, x0: number, x1:
     drag: 0,
     rot: fxRand(sys) * Math.PI * 2,
     vrot: (fxRand(sys) - 0.5) * 3,
-    shape: kind === "snow" ? "snow" : kind === "leaf" ? "leaf" : "glow",
+    shape: kind === "snow" ? "snow" : kind === "leaf" ? "leaf" : kind === "rain" ? "spark" : "glow",
     color: spec.colors[Math.floor(fxRand(sys) * spec.colors.length) % spec.colors.length],
   };
   pushParticle(sys, p);
@@ -359,6 +486,9 @@ export function swingProgress(startedAt: number, nowMs: number): number {
   const k = (nowMs - startedAt) / SWING_DURATION_MS;
   return k < 0 ? 0 : k > 1 ? 1 : k;
 }
+
+/** 空振り（行為の失敗）時の風切りの濃さ係数。成功時のスイングより薄く・細く出す。 */
+export const WHIFF_ALPHA_SCALE = 0.45;
 
 /** 風切りの弧の不透明度（振り抜きの瞬間だけ濃く、すぐ消える）。 */
 export function slashAlpha(k: number): number {
