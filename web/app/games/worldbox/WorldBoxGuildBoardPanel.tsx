@@ -99,7 +99,54 @@ export default function WorldBoxGuildBoardPanel({
   getPlayerPos: () => { x: number; y: number };
   onClose: () => void;
 }) {
-  const [tab, setTab] = useState<"requests" | "roles" | "adventure">("requests");
+  const [tab, setTab] = useState<"requests" | "roles" | "adventure" | "board">("requests");
+  // ユニオン掲示（チャット）と Discord 連携設定
+  const [unionMsgs, setUnionMsgs] = useState<{ name: string; text: string; at: number }[]>([]);
+  const [unionRole, setUnionRole] = useState<string>("");
+  const [unionChannelId, setUnionChannelId] = useState("");
+  const [unionChannelInput, setUnionChannelInput] = useState("");
+  const refreshUnion = useCallback(async () => {
+    try {
+      const [chatRes, setRes] = await Promise.all([
+        fetch("/api/worldbox/chat?channel=union", { headers: { Accept: "application/json" } }),
+        fetch("/api/worldbox/union-settings", { headers: { Accept: "application/json" } }),
+      ]);
+      if (chatRes.ok) {
+        const data = (await chatRes.json()) as { messages?: { name: string; text: string; at: number }[] };
+        setUnionMsgs(data.messages ?? []);
+      }
+      if (setRes.ok) {
+        const data = (await setRes.json()) as { role?: string; chatChannelId?: string };
+        setUnionRole(data.role ?? "");
+        setUnionChannelId(data.chatChannelId ?? "");
+        setUnionChannelInput(data.chatChannelId ?? "");
+      }
+    } catch { /* 読めなくてもパネルは開いたままにする */ }
+  }, []);
+  useEffect(() => {
+    if (tab === "board") void refreshUnion();
+  }, [tab, refreshUnion]);
+  const saveUnionChannel = async () => {
+    setBusy(true);
+    try {
+      const res = await fetch("/api/worldbox/union-settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ channelId: unionChannelInput.trim() }),
+      });
+      const json = (await res.json().catch(() => ({}))) as { chatChannelId?: string; error?: string };
+      if (res.ok) {
+        setUnionChannelId(json.chatChannelId ?? "");
+        setMsg("保存した");
+      } else {
+        setMsg(json.error === "invalid_channel_id" ? "チャンネルIDが不正" : "保存できない");
+      }
+    } catch {
+      setMsg("保存できない");
+    } finally {
+      setBusy(false);
+    }
+  };
   const [data, setData] = useState<RequestsData | null>(null);
   const [msg, setMsg] = useState("");
   const [busy, setBusy] = useState(false);
@@ -181,6 +228,14 @@ export default function WorldBoxGuildBoardPanel({
           onClick={() => setTab("adventure")}
         >
           冒険役職
+        </button>
+        <button
+          type="button"
+          style={{ ...tabBtn, ...(tab === "board" ? tabOn : {}) }}
+          aria-pressed={tab === "board"}
+          onClick={() => setTab("board")}
+        >
+          掲示
         </button>
         <button type="button" style={tabBtn} onClick={onClose}>
           閉じる
@@ -369,6 +424,43 @@ export default function WorldBoxGuildBoardPanel({
             );
           })}
           {msg && <div style={{ fontSize: 13 }}>{msg}</div>}
+        </div>
+      )}
+
+      {tab === "board" && (
+        <div style={{ marginTop: 10 }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 4, maxHeight: 220, overflowY: "auto" }}>
+            {unionMsgs.length === 0 ? (
+              <span style={{ fontSize: 13, opacity: 0.75 }}>まだ投稿がない</span>
+            ) : (
+              [...unionMsgs].reverse().map((m, i) => (
+                <div key={i} style={{ fontSize: 13 }}>
+                  <strong>{m.name}</strong>
+                  <span style={{ opacity: 0.6, marginLeft: 6, fontSize: 11 }}>
+                    {new Date(m.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                  </span>
+                  <div>{m.text}</div>
+                </div>
+              ))
+            )}
+          </div>
+          {(unionRole === "king" || unionRole === "minister") && (
+            <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 10, flexWrap: "wrap" }}>
+              <span style={{ fontSize: 12, opacity: 0.8 }}>Discord連携</span>
+              <input
+                value={unionChannelInput}
+                onChange={(e) => setUnionChannelInput(e.target.value)}
+                placeholder="チャンネルID"
+                inputMode="numeric"
+                style={{ flex: 1, minWidth: 140, padding: "6px 8px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.25)", background: "rgba(255,255,255,0.06)", color: "#fff", fontSize: 13 }}
+              />
+              <button type="button" style={btn} disabled={busy} onClick={() => { void saveUnionChannel(); }}>
+                保存
+              </button>
+              {unionChannelId && <span style={{ fontSize: 12, opacity: 0.75 }}>連携中</span>}
+            </div>
+          )}
+          {msg && <div style={{ fontSize: 13, marginTop: 6 }}>{msg}</div>}
         </div>
       )}
 

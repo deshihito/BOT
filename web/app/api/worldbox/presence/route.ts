@@ -4,7 +4,7 @@ import { rectBounds, worldBounds } from "@/lib/worldbox/mapgen";
 import { LOBBY_H, LOBBY_W } from "@/lib/worldbox/lobby";
 import { TENT_H, TENT_W } from "@/lib/worldbox/tent";
 import { isPresenceEnabled, listPresence, putPresence, removePresence } from "@/lib/worldbox/presence-online";
-import { presenceIdFor, sanitizeHeartbeat, sanitizePresenceSpace, selectVisiblePlayers } from "@/lib/worldbox/presence";
+import { presenceIdFor, sanitizeHeartbeat, sanitizePresenceSpace, selectVisiblePlayers, thinPresenceNear } from "@/lib/worldbox/presence";
 
 export const runtime = "nodejs";
 
@@ -31,7 +31,12 @@ export async function GET(request: Request) {
   const selfId = session ? presenceIdFor(sessionOwnerKey(session)) : null;
   const space = sanitizePresenceSpace(new URL(request.url).searchParams.get("space"));
   const entries = await listPresence();
-  const players = selectVisiblePlayers(entries, selfId, Date.now(), undefined, space).map((e) => ({
+  // ワールドでは近傍だけに間引く（スケール対策）。ロビー等の小空間は全員返す。
+  // 間引きは「新しい順の上限」より先に効かせるため、ワールドでは上限を広げてから絞る。
+  const self = space === "world" && selfId ? (entries.find((e) => e.id === selfId) ?? null) : null;
+  let visible = selectVisiblePlayers(entries, selfId, Date.now(), self ? 4096 : undefined, space);
+  if (self) visible = thinPresenceNear(visible, self);
+  const players = visible.map((e) => ({
     id: e.id,
     name: e.name,
     x: e.x,
@@ -40,6 +45,9 @@ export async function GET(request: Request) {
     vy: e.vy,
     face: e.face,
     space: e.space,
+    role: e.role ?? "free",
+    rank: e.rank ?? 1,
+    party: e.party ?? "",
     ts: e.ts,
   }));
   // now はクライアント側の時計ずれ補正用（エントリ ts はサーバー時刻のため）
