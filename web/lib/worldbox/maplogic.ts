@@ -5,7 +5,7 @@
 // 現在の 1024×1024 固定マップでも、将来のチャンク式無制限マップでも
 // 同じロジックが使える（マップ配列に依存しない）。
 import {
-  MAP_H, MAP_SEED, T_GRASS, T_ROCK, T_SAND, T_SNOW, T_SNOW_TREE, T_TREE, T_WATER,
+  CHUNK_SIZE, MAP_SEED, T_GRASS, T_ROCK, T_SAND, T_SNOW, T_SNOW_TREE, T_TREE, T_WATER,
   fbm, mapTileAt, snowBoundaryAt, type TopDownMap,
 } from "./mapgen";
 import { makeRng } from "./rng";
@@ -62,7 +62,7 @@ export function moistureAt(seed: number, x: number, y: number): number {
 
 /** 気温 [0,1]。北（小さい y）ほど低く、ノイズで揺れる。雪原判定の基礎。 */
 export function temperatureAt(seed: number, x: number, y: number): number {
-  const latitude = 1 - Math.min(1, Math.max(0, y / MAP_H));
+  const latitude = 1 - Math.min(1, Math.max(0, y / WORLD_SPAN));
   const wobble = (fbm(x * 0.004, y * 0.004, seed ^ 0x71aa, 2) - 0.5) * 0.2;
   return Math.min(1, Math.max(0, latitude * 0.75 + 0.25 + wobble - 0.35));
 }
@@ -112,7 +112,6 @@ export function resourceProfileFor(biome: BiomeId): readonly string[] {
 
 // ---------------------------------------------------------------- チャンク
 /** 1チャンクのタイル数。チャンク式（無制限マップ）の基礎単位。 */
-export const CHUNK_SIZE = 32;
 
 export function chunkOf(x: number, y: number): { cx: number; cy: number } {
   return { cx: Math.floor(x / CHUNK_SIZE), cy: Math.floor(y / CHUNK_SIZE) };
@@ -230,9 +229,14 @@ export function findLandSpawn(
     h = Math.imul(h, 16777619);
   }
   const rng = makeRng((map.seed ^ h) >>> 0);
+  // 有限マップはその範囲内、無制限ワールドは原点中心 ±2000 を探す。
+  const spanX = map.width ?? 4000;
+  const spanY = map.height ?? 4000;
+  const offX = map.width ? 0 : -2000;
+  const offY = map.height ? 0 : -2000;
   for (let i = 0; i < tries; i++) {
-    const x = Math.floor(rng() * map.width);
-    const y = Math.floor(rng() * map.height);
+    const x = Math.floor(rng() * spanX) + offX;
+    const y = Math.floor(rng() * spanY) + offY;
     const tile = mapTileAt(map, x, y);
     if (tile === T_GRASS) return { x: x + 0.5, y: y + 0.5 };
   }

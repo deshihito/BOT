@@ -1,9 +1,20 @@
 // AGO WORLD BOX の同時接続プレゼンス（純粋ロジック）。
 // ハートビートの検証・整形、鮮度判定、デッドレコニング（速度による先読み）を
 // ここに集約し、API ルートとクライアント描画はこの結果だけを使う。
-import { worldBounds, type CoordBounds } from "./mapgen";
+// 座標境界は mapgen.ts の worldBounds と同じ値（このファイルは単体で
+// トランスパイルされるため import せず複製して明示する。値の正は mapgen）。
+export type CoordBounds = { minX: number; maxX: number; minY: number; maxY: number };
 
-export type { CoordBounds };
+const PRESENCE_COORD_LIMIT = 1_000_000;
+
+function fallbackBounds(): CoordBounds {
+  return {
+    minX: -PRESENCE_COORD_LIMIT,
+    maxX: PRESENCE_COORD_LIMIT,
+    minY: -PRESENCE_COORD_LIMIT,
+    maxY: PRESENCE_COORD_LIMIT,
+  };
+}
 
 /** ハートビートが「在席」とみなせる上限（ミリ秒）。送信間隔 約1秒 +  poll 約2秒 の余裕。 */
 export const PRESENCE_FRESH_MS = 10_000;
@@ -99,7 +110,7 @@ export function parsePresenceEntry(id: string, raw: unknown): PresenceEntry | nu
   if (!data || typeof data !== "object") return null;
   const v = data as Record<string, unknown>;
   if (typeof v.ts !== "number" || !Number.isFinite(v.ts)) return null;
-  const hb = sanitizeHeartbeat(v, worldBounds());
+  const hb = sanitizeHeartbeat(v, fallbackBounds());
   if (!hb) return null;
   return { ...hb, id, ts: v.ts };
 }

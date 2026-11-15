@@ -91,6 +91,9 @@ export function isSolidMapTile(id: number): boolean {
 export type TileSource = {
   seed: number;
   tileAt: (x: number, y: number) => number;
+  /** 有限のタイル源（ロビー等）だけが持つ広さ。無制限ワールドでは undefined。 */
+  width?: number;
+  height?: number;
 };
 
 /** 互換名（旧来の「マップ」はタイル源そのものになった）。 */
@@ -104,6 +107,8 @@ export function mapTileAt(map: TileSource, x: number, y: number): number {
 export function tilesSource(seed: number, width: number, height: number, tiles: Uint8Array): TileSource {
   return {
     seed,
+    width,
+    height,
     tileAt: (x, y) => (x < 0 || y < 0 || x >= width || y >= height ? T_ROCK : tiles[y * width + x]),
   };
 }
@@ -171,6 +176,22 @@ export function tileAt(x: number, y: number, seed: number = MAP_SEED): number {
 }
 
 /** ワールドのタイル源（無制限・純関数）。 */
+/**
+ * 互換: 有限範囲（既定 1024×1024）をタイル配列として生成する旧 generateMap。
+ * 中身は tileAt の切り出しで、無制限ワールドと地形が一致する。
+ */
+export function generateMap(
+  seed: number = MAP_SEED,
+  width = 1024,
+  height = 1024,
+): TileSource & { tiles: Uint8Array } {
+  const tiles = new Uint8Array(width * height);
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) tiles[y * width + x] = tileAt(x, y, seed);
+  }
+  return { ...tilesSource(seed, width, height, tiles), tiles };
+}
+
 export function worldTileSource(seed: number = MAP_SEED): TileSource {
   return { seed, tileAt: (x, y) => tileAt(x, y, seed) };
 }

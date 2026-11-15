@@ -1719,7 +1719,7 @@ export default function WorldBoxClient() {
       // 環境パーティクル（雪原=雪、森=落葉、夜=蛍、それ以外=花粉。ワールドのみ）
       if (space === "world" && now - lastAmbientAt > 150 && !reducedMotion) {
         lastAmbientAt = now;
-        const ptile = mapTileAt(effMap, Math.floor(player.x), Math.floor(player.y));
+        const ptile = mapTileAt(worldMap, Math.floor(player.x), Math.floor(player.y));
         const kind = ambientKindFor(ptile, ptile === T_TREE || ptile === T_SNOW_TREE, nightAmount(phaseAtTime(nowMs / 1000)));
         spawnAmbient(fxSys, kind, cam.x - cw / TILE / 2 - 1, cam.x + cw / TILE / 2 + 1, cam.y - ch / TILE / 2 - 1);
       }

@@ -4,7 +4,8 @@
 // 戦闘そのもの（HP の増減・攻撃判定）はプレイヤー HP 実装側が担い、
 // ここは「何が・どこに・どれだけ出て・何を落とすか」の基礎表に徹する。
 import { itemById } from "./items";
-import { CHUNK_SIZE, biomeAt, chunkHash, type BiomeId } from "./maplogic";
+import { biomeAt, chunkHash, type BiomeId } from "./maplogic";
+import { CHUNK_SIZE } from "./mapgen";
 
 export type MobTemperament = "passive" | "neutral" | "hostile";
 
