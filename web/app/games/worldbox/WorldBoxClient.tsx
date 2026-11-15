@@ -13,7 +13,7 @@ import {
   MAP_H, MAP_SEED, MAP_W, MINIMAP_SIZE, T_DIRT, T_GRASS, T_ROCK, T_SAND, T_SNOW, T_SNOW_TREE, T_TREE, T_WATER,
   generateMap, mapSpawn, mapTileAt, sampleMinimapTiles, type TopDownMap,
 } from "@/lib/worldbox/mapgen";
-import { DASH_SPEED, SWIM_DASH_SPEED, SWIM_SPEED, WALK_SPEED, findFreeNear, isWaterAt, stepMove } from "@/lib/worldbox/move";
+import { DASH_SPEED, PLAYER_RADIUS, SWIM_DASH_SPEED, SWIM_SPEED, WALK_SPEED, findFreeNear, isWaterAt, stepMove } from "@/lib/worldbox/move";
 import { isNightPhase, nightAmount, phaseAtTime } from "@/lib/worldbox/daynight";
 import { mobById, mobOccupiesTile, type PlacedMob } from "@/lib/worldbox/mobs";
 import {
@@ -1103,6 +1103,7 @@ export default function WorldBoxClient() {
     // ハートビートは適応間隔: 移動中は 500ms、静止中は 2s。
     // ワープやノックバック等の大きなジャンプは間隔を待たず即送る。
     let lastHeartbeatAt = 0;
+    let lastRestHeartbeatAt = 0;
     let lastHeartbeatPos = { x: player.x, y: player.y };
     const heartbeatTick = () => {
       if (!loggedIn) return;
@@ -1112,12 +1113,19 @@ export default function WorldBoxClient() {
       const movedDist = Math.hypot(player.x - lastHeartbeatPos.x, player.y - lastHeartbeatPos.y);
       const moving = Math.hypot(player.vx, player.vy) > 0.1 || movedDist > 0.05;
       const wsOpen = rtSocket?.readyState === WebSocket.OPEN;
-      const interval = wsOpen ? (moving ? 100 : 1000) : moving ? 500 : 2000;
-      if (movedDist <= 4 && now - lastHeartbeatAt < interval) return;
+      // bot_kv プレゼンスはサーバー検証（カジノ・ステーション・ギルドボード・
+      // モブ距離）の正だが、WS 中継は bot_kv に書かない。REST ハートビートを
+      // WS の有無と独立に併送し、bot_kv 側の鮮度を保つ（止めると全ゲートが死ぬ）。
+      if (movedDist > 4 || now - lastRestHeartbeatAt >= (moving ? 500 : 2000)) {
+        lastRestHeartbeatAt = now;
+        lastHeartbeatPos = { x: player.x, y: player.y };
+        sendHeartbeat();
+      }
+      if (!wsOpen) return;
+      if (movedDist <= 4 && now - lastHeartbeatAt < (moving ? 100 : 1000)) return;
       lastHeartbeatAt = now;
       lastHeartbeatPos = { x: player.x, y: player.y };
-      if (wsOpen) sendWsHeartbeat();
-      else sendHeartbeat();
+      sendWsHeartbeat();
     };
     const heartbeatTimer = window.setInterval(heartbeatTick, 250);
     const pollTimer = window.setInterval(pollOthers, 1000);
@@ -2277,12 +2285,13 @@ export default function WorldBoxClient() {
         const nationColor = nationsRef.current.playerNations[o.track.entry.id]?.color ?? null;
         const oSwim = space === "world" && isWaterAt(effMap, o.track.rx, o.track.ry);
         drawList.push({
-          y: o.track.ry,
+          y: o.track.ry + PLAYER_RADIUS,
           draw: () =>
             drawAvatar(
               ctx,
               space === "lobby" ? Math.round(lobbyOx + o.track.rx * TILE) : toScreenX(o.track.rx),
-              space === "lobby" ? Math.round(lobbyOy + o.track.ry * TILE) : toScreenY(o.track.ry),
+              // 足元は当たり円の底（中心 + 半径）に合わせる（中心に置くと手前で止まって見える）
+              space === "lobby" ? Math.round(lobbyOy + o.track.ry * TILE) + TILE * PLAYER_RADIUS : toScreenY(o.track.ry) + TILE * PLAYER_RADIUS,
               o.track.entry.face, o.phase, Math.min(1, Math.hypot(o.track.entry.vx, o.track.entry.vy) / WALK_SPEED), o.track.entry.name || null, nationColor, oSwim,
             ),
         });
@@ -2330,12 +2339,13 @@ export default function WorldBoxClient() {
         drawList.push({ y: q.r.wy, draw: () => drawMob(q.placed, q.r, q.hpFrac) });
       }
       drawList.push({
-        y: player.y,
+        y: player.y + PLAYER_RADIUS,
         draw: () =>
           drawAvatar(
             ctx,
             space === "lobby" ? Math.round(lobbyOx + player.x * TILE) : toScreenX(player.x),
-            space === "lobby" ? Math.round(lobbyOy + player.y * TILE) : toScreenY(player.y),
+            // 足元は当たり円の底（中心 + 半径）に合わせる（中心に置くと手前で止まって見える）
+            space === "lobby" ? Math.round(lobbyOy + player.y * TILE) + TILE * PLAYER_RADIUS : toScreenY(player.y) + TILE * PLAYER_RADIUS,
             player.face, player.phase, speedRatio, null, null, playerSwimming,
           ),
       });
