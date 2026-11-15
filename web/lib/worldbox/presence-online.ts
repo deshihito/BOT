@@ -2,9 +2,9 @@
 // 保存先は bot_kv（名前空間 "worldbox_presence"、キー = 所有者キー）。
 // kvList で名前空間を列挙できるため、プレイヤーごとのキーで保存し、
 // 読取側は鮮度でふるう（古いキーは読取時に無視され、次回 PUT で上書きされる）。
-import { isBotApiConfigured, kvDelete, kvList, kvSet } from "../bot-api";
+import { isBotApiConfigured, kvDelete, kvGet, kvList, kvSet } from "../bot-api";
 import {
-  PRESENCE_FRESH_MS, parsePresenceEntry, presenceIdFor,
+  PRESENCE_FRESH_MS, isFreshPresence, parsePresenceEntry, presenceIdFor,
   type Heartbeat, type PresenceEntry,
 } from "./presence";
 
@@ -50,6 +50,23 @@ export async function findPresenceOwnerKey(presenceId: string): Promise<string |
       return null;
     }
     return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 自分のプレゼンス（サーバー側の位置検証用）。
+ * 鮮度切れ・未送信・読み取り失敗はすべて null（＝いないものとして扱う）。
+ */
+export async function loadMyPresence(ownerKey: string): Promise<PresenceEntry | null> {
+  if (!isBotApiConfigured()) return null;
+  try {
+    const raw = await kvGet(WORLDBOX_PRESENCE_NAMESPACE, ownerKey);
+    if (raw === null) return null;
+    const entry = parsePresenceEntry(presenceIdFor(ownerKey), raw);
+    if (!entry || !isFreshPresence(entry, Date.now())) return null;
+    return entry;
   } catch {
     return null;
   }

@@ -9,7 +9,7 @@
 // オプとして表現される。
 export const WORLDBOX_ECONOMY_NAMESPACE = "worldbox_economy";
 
-export type EconomyOpKind = "spend" | "earn" | "transfer" | "steal";
+export type EconomyOpKind = "spend" | "earn" | "transfer" | "steal" | "gamble";
 export type EconomyOpStatus = "pending" | "done" | "failed";
 
 export interface EconomyOp {
@@ -25,6 +25,10 @@ export interface EconomyOp {
   toDiscordId?: string;
   /** steal の奪い元（steal のみ）。ワーカーがこのユーザーから受け手へ移す。 */
   fromDiscordId?: string;
+  /** gamble の確定配当（ベット込みの総額、0 = はずれ。gamble のみ必須）。
+   * ワーカーはベットを引き落としてから、ベット分＋バンクロールで
+   * 確保できた利益分を上限にこの額まで払う（Plan A）。 */
+  payout?: number;
   status: EconomyOpStatus;
   /** 失敗コード（failed のみ）。 */
   error?: string;
@@ -48,6 +52,22 @@ export const EARN_REASONS: ReadonlySet<string> = new Set([
   "shop_sale",
   "work",
 ]);
+
+/** gamble の理由ホワイトリスト（Bot 側でも同じ集合で検証する）。 */
+export const GAMBLE_REASONS: ReadonlySet<string> = new Set([
+  "casino_slot",
+  "casino_roulette",
+]);
+
+/** gamble の配当上限（ベット最大 1,000,000 × スロット最大倍率 300）。 */
+export const GAMBLE_PAYOUT_MAX = 300_000_000;
+
+/** gamble の配当: 整数 0..GAMBLE_PAYOUT_MAX のときだけ通す。 */
+export function validateGamblePayout(value: unknown): number | null {
+  if (typeof value !== "number" || !Number.isInteger(value)) return null;
+  if (value < 0 || value > GAMBLE_PAYOUT_MAX) return null;
+  return value;
+}
 
 const DISCORD_ID_RE = /^\d{5,25}$/;
 const OP_ID_RE = /^[A-Za-z0-9-]{8,64}$/;
@@ -81,6 +101,7 @@ export interface BuildEconomyOpInput {
   reason: unknown;
   toDiscordId?: unknown;
   fromDiscordId?: unknown;
+  payout?: unknown;
 }
 
 /**
@@ -98,6 +119,7 @@ export function buildEconomyOp(input: BuildEconomyOpInput, id: string, now: numb
   const reason = validateEconomyReason(input.reason);
   if (reason === null) return null;
   if (input.kind === "earn" && !EARN_REASONS.has(reason)) return null;
+  if (input.kind === "gamble" && !GAMBLE_REASONS.has(reason)) return null;
   const op: EconomyOp = {
     id,
     kind: input.kind,
@@ -117,6 +139,11 @@ export function buildEconomyOp(input: BuildEconomyOpInput, id: string, now: numb
     const from = validateDiscordId(input.fromDiscordId);
     if (from === null || from === discordId) return null;
     op.fromDiscordId = from;
+  }
+  if (input.kind === "gamble") {
+    const payout = validateGamblePayout(input.payout);
+    if (payout === null) return null;
+    op.payout = payout;
   }
   return op;
 }
@@ -141,7 +168,7 @@ export function parseEconomyOp(raw: unknown): EconomyOp | null {
   if (!isRecord(value)) return null;
   const { id, kind, userKey, discordId, status } = value;
   if (typeof id !== "string" || !OP_ID_RE.test(id)) return null;
-  if (kind !== "spend" && kind !== "earn" && kind !== "transfer" && kind !== "steal") return null;
+  if (kind !== "spend" && kind !== "earn" && kind !== "transfer" && kind !== "steal" && kind !== "gamble") return null;
   if (typeof userKey !== "string" || userKey.length === 0) return null;
   if (validateDiscordId(discordId) === null) return null;
   if (status !== "pending" && status !== "done" && status !== "failed") return null;
@@ -169,6 +196,11 @@ export function parseEconomyOp(raw: unknown): EconomyOp | null {
     const from = validateDiscordId(value.fromDiscordId);
     if (from === null) return null;
     op.fromDiscordId = from;
+  }
+  if (kind === "gamble") {
+    const payout = validateGamblePayout(value.payout);
+    if (payout === null) return null;
+    op.payout = payout;
   }
   if (typeof value.error === "string" && value.error.length > 0) op.error = value.error;
   if (typeof value.appliedAmount === "number" && Number.isInteger(value.appliedAmount) && value.appliedAmount >= 0) {

@@ -16,6 +16,13 @@ Web は残高を直接触らない。Web が bot_kv の名前空間 ``worldbox_e
   検証・抽選・額の算出まで済んでいるため、ここでは被害者の現在残高を
   上限に min(amount, 残高) だけを二段フォールバックで移し、実際に
   動いた額を appliedAmount に記録する（残高0なら done で 0）。
+- gamble: カジノの1プレイ（amount = ベット、payout = 確定配当の総額）。
+  ベットを引き落としてから配当を払う原子的な適用で、引き落としが
+  できなければ配当も払わない。配当の利益分（payout - ベット）は
+  pay_house でバンクロールから確保できた分だけ払い（Plan A、
+  Discord 側ギャンブルと同じ決済）、負け（payout = 0）のベットは
+  add_loss で還流する（70% プール / 30% 国庫）。実際に払った総額を
+  appliedAmount に記録する。
 
 冪等性: status が "pending" のものだけを拾い、適用前に claim
 （トークン + 時刻）を書き込んで再読込で自分の claim か確認してから
@@ -43,9 +50,13 @@ NAMESPACE = "worldbox_economy"
 WORLDBOX_ID = "WORLD_BOX"
 #: earn の理由ホワイトリスト（Web 側 economy-bridge.ts の EARN_REASONS と同じ集合）
 EARN_REASONS = frozenset({"harvest", "guild_shop_sale", "arena_prize", "shop_sale", "work"})
-OP_KINDS = frozenset({"spend", "earn", "transfer", "steal"})
+#: gamble の理由ホワイトリスト（Web 側 economy-bridge.ts の GAMBLE_REASONS と同じ集合）
+GAMBLE_REASONS = frozenset({"casino_slot", "casino_roulette"})
+OP_KINDS = frozenset({"spend", "earn", "transfer", "steal", "gamble"})
 AMOUNT_MIN = 1
 AMOUNT_MAX = 1_000_000
+#: gamble の配当上限（Web 側 GAMBLE_PAYOUT_MAX と同じ値）
+PAYOUT_MAX = 300_000_000
 REASON_MAX = 40
 #: ポーリング間隔（秒。bg_cutout の 30 秒に合わせる）
 POLL_SECONDS = 30.0
@@ -123,6 +134,13 @@ def parse_op(raw: Any) -> Optional[dict[str, Any]]:
         if not _is_discord_id(from_id) or from_id == discord_id:
             return None
         op["fromDiscordId"] = from_id
+    if kind == "gamble":
+        payout = value.get("payout")
+        if isinstance(payout, bool) or not isinstance(payout, int):
+            return None
+        if not 0 <= payout <= PAYOUT_MAX:
+            return None
+        op["payout"] = payout
     return op
 
 
@@ -327,7 +345,67 @@ class WorldBoxEconomyWorker:
             return await self._apply_earn(wallet, op)
         if kind == "steal":
             return await self._apply_steal(wallet, op)
+        if kind == "gamble":
+            return await self._apply_gamble(wallet, op)
         return await self._apply_transfer(wallet, op)
+
+    async def _apply_gamble(self, wallet: Any, op: dict[str, Any]) -> int:
+        """カジノの1プレイを原子的に適用する。戻り値は実際に払った配当。
+
+        ベットを引き落とせなければ配当は払わない（failed）。負けは
+        ベットを還流して 0。当たりはベット分（自分の金）＋ pay_house で
+        確保できた利益分だけを払う。入金に失敗したら確保した原資を
+        戻し、ベットも返金して failed（どちらも中途半端に残さない）。
+        """
+        if op["reason"] not in GAMBLE_REASONS:
+            raise _OpFailed("invalid_reason")
+        user = op["discordId"]
+        bet = op["amount"]
+        payout = op["payout"]
+        debit = await wallet._change_balance(user, -bet, require_funds=True)
+        if debit is self._marker():
+            raise _OpFailed("insufficient_funds")
+        if debit is None:
+            raise _OpFailed("balance_update_failed")
+        await self._record_history(user, WORLDBOX_ID, bet, op["reason"])
+        if payout <= 0:
+            try:
+                self._economy_store.add_loss(bet)
+            except Exception:
+                logger.exception("worldbox economy: gamble の還流に失敗（id=%s）", op["id"])
+            return 0
+        profit = max(0, payout - bet)
+        breakdown: Any = None
+        house_paid = 0
+        if profit > 0:
+            try:
+                breakdown = self._economy_store.pay_house(profit)
+            except Exception:
+                breakdown = None
+            if isinstance(breakdown, dict):
+                try:
+                    house_paid = max(0, int(breakdown.get("paid") or 0))
+                except (TypeError, ValueError):
+                    house_paid = 0
+        credit_amount = min(payout, bet) + house_paid
+        credited = await wallet._change_balance(
+            user, credit_amount, create_with=self._initial_balance(),
+        )
+        if credited is None or credited is self._marker():
+            if breakdown is not None:
+                try:
+                    self._economy_store.refund_house(breakdown)
+                except Exception:
+                    logger.exception("worldbox economy: refund_house に失敗（id=%s）", op["id"])
+            refund = await wallet._change_balance(user, bet)
+            if refund is None:
+                logger.critical(
+                    "worldbox economy: gamble のベット返金に失敗しました（user=%s bet=%s）",
+                    user, bet,
+                )
+            raise _OpFailed("credit_failed")
+        await self._record_history(WORLDBOX_ID, user, credit_amount, op["reason"])
+        return credit_amount
 
     async def _apply_steal(self, wallet: Any, op: dict[str, Any]) -> int:
         """被害者 → 実行者へ、被害者の現在残高を上限に移す。

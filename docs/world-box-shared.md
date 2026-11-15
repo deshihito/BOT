@@ -33,7 +33,8 @@ AGO WORLD BOX（web/app/games/worldbox）に関わる作業をする Muse は、
 - 通貨は AGO コイン本体のみ。**Web 側で残高を直接増減しない**（ミント禁止）。
 - Web は bot_kv 名前空間 `worldbox_economy` にオプを積み、Bot 側ワーカー（core/general/circulation/worldbox_economy.py）が pay_house / ウォレット / transfer_coins で適用する。earn はバンクロール（プール+国庫）の利益分のみ（Plan A）。
 - profile 内の独自コイン（profile.coins）は廃止済み。読込互換のためだけに残っている。**復活させない**。
-- オプ種別: spend / earn / transfer / steal。earn 理由はホワイトリスト制。
+- オプ種別: spend / earn / transfer / steal / gamble。earn 理由はホワイトリスト制。
+- カジノ（ロビー右翼）は実働施設: スロットマシンの前=スロット、カジノテーブルの前=ルーレットで実際に賭けられる。位置はサーバー側がプレゼンスで検証する。1プレイは gamble オプ1件（amount=ベット、payout=確定配当）で、ワーカーがベット引き落とし→配当（利益分は pay_house、負けは add_loss 還流）を原子的に適用する。抽選は Web サーバー側。ベット上限はブリッジの金額上限に一致（独自上限なし）。
 
 ### 行動の場所制約
 - 購入はその店の場所でのみ（アイテムショップ等）。合成は作業台、精錬はかまど、というように行動は施設に紐づける。
