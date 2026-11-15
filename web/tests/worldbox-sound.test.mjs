@@ -1,0 +1,175 @@
+// AGO WORLD BOX 音響基盤（BGM/SE）の検証:
+// - BGM 譜面の整合（32ステップ・度数の範囲・場面ごとの密度とテンポ）
+// - 場面選択（カジノ > ロビー > 夜 > 昼）
+// - 周波数計算（半音・度数）
+// - SE の優先度階層と fx バースト → SE の対応
+// - opus っぽさ回避（音声ファイルを使わない・BGM にパッド wash を使わない）
+// - クライアント配線（解錠・場面切替・行為→SE・経済パネル・ミュート切替）
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
+import ts from "typescript";
+
+const rootDir = path.join(import.meta.dirname, "..");
+const libDir = path.join(rootDir, "lib");
+
+function transpile(name, base = libDir) {
+  const src = fs.readFileSync(path.join(base, name), "utf8");
+  return ts.transpileModule(src, {
+    compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
+  }).outputText;
+}
+
+function stripModuleSyntax(code) {
+  const lines = code.split("\n");
+  const out = [];
+  let skippingImport = false;
+  for (const line of lines) {
+    if (skippingImport) {
+      if (line.includes(";")) skippingImport = false;
+      continue;
+    }
+    if (/^import\s/.test(line)) {
+      if (!line.includes(";")) skippingImport = true;
+      continue;
+    }
+    out.push(
+      line
+        .replace(/^export\s+(?=(const|let|var|function|class)\s)/, "")
+        .replace(/^export\s+(?=async\s+function)/, "")
+        .replace(/^export\s*\{[^}]*\};?\s*$/, ""),
+    );
+  }
+  return out.join("\n");
+}
+
+function dataUrl(js) {
+  return "data:text/javascript;base64," + Buffer.from(js).toString("base64");
+}
+
+async function loadBundle(files, exportNames) {
+  const code =
+    files.map((name) => stripModuleSyntax(transpile(name))).join("\n") +
+    `\nexport { ${exportNames.join(", ")} };\n`;
+  return import(dataUrl(code));
+}
+
+const sound = await loadBundle(
+  ["worldbox/sound.ts"],
+  [
+    "BGM_STEPS", "BGM_TRACKS", "bgmSceneFor", "semitoneFreq", "degreeFreq", "leadNoteCount",
+    "WB_SE_TIER_GAIN", "WB_SE_TIERS", "WB_SE_MIN_INTERVAL_MS", "seForFxBurst",
+    "loadWbSoundSettings",
+  ],
+);
+
+const SCENES = ["field-day", "field-night", "lobby", "casino"];
+
+test("sound: 全曲が32ステップで、度数と半音が範囲内に収まる", () => {
+  for (const scene of SCENES) {
+    const track = sound.BGM_TRACKS[scene];
+    assert.equal(track.bass.length, sound.BGM_STEPS, scene);
+    assert.equal(track.lead.length, sound.BGM_STEPS, scene);
+    assert.equal(track.hat.length, sound.BGM_STEPS, scene);
+    assert.equal(track.kick.length, sound.BGM_STEPS, scene);
+    for (const d of track.lead) {
+      if (d === null) continue;
+      assert.ok(d >= 0 && d < track.scale.length, `${scene}: 度数 ${d}`);
+    }
+    for (const s of track.bass) {
+      if (s === null) continue;
+      assert.ok(s >= -12 && s <= 24, `${scene}: ベース半音 ${s}`);
+    }
+    // 音階はペンタトニック（5音＋オクターブ展開）で単調増加
+    for (let i = 1; i < track.scale.length; i++) {
+      assert.ok(track.scale[i] > track.scale[i - 1], `${scene}: 音階が単調`);
+    }
+    assert.ok(track.bpm >= 60 && track.bpm <= 160, scene);
+  }
+});
+
+test("sound: 場面選択は カジノ > ロビー > 夜 > 昼", () => {
+  assert.equal(sound.bgmSceneFor({ space: "world", night: 0, casinoOpen: false }), "field-day");
+  assert.equal(sound.bgmSceneFor({ space: "world", night: 0.9, casinoOpen: false }), "field-night");
+  assert.equal(sound.bgmSceneFor({ space: "lobby", night: 0.9, casinoOpen: false }), "lobby");
+  assert.equal(sound.bgmSceneFor({ space: "lobby", night: 0, casinoOpen: true }), "casino");
+  assert.equal(sound.bgmSceneFor({ space: "world", night: 0.9, casinoOpen: true }), "casino");
+});
+
+test("sound: 夜が一番静かで、カジノが一番速い", () => {
+  const day = sound.BGM_TRACKS["field-day"];
+  const night = sound.BGM_TRACKS["field-night"];
+  const casino = sound.BGM_TRACKS.casino;
+  assert.ok(sound.leadNoteCount(night) < sound.leadNoteCount(day), "夜のリードは疎ら");
+  assert.ok(night.hat.every((h) => !h), "夜はハットなし");
+  assert.ok(night.kick.every((k) => !k), "夜はキックなし");
+  assert.ok(night.bpm < day.bpm, "夜は遅い");
+  assert.ok(casino.bpm > day.bpm, "カジノは速い");
+  assert.ok(casino.hat.filter(Boolean).length >= 16, "カジノはハットが密");
+});
+
+test("sound: 周波数計算（半音は2の12乗根、度数は音階を引く）", () => {
+  assert.equal(sound.semitoneFreq(440, 0), 440);
+  assert.ok(Math.abs(sound.semitoneFreq(440, 12) - 880) < 0.001);
+  assert.ok(Math.abs(sound.semitoneFreq(440, -12) - 220) < 0.001);
+  const track = sound.BGM_TRACKS["field-day"];
+  assert.equal(sound.degreeFreq(track, 0), track.root);
+  assert.ok(sound.degreeFreq(track, 5) > sound.degreeFreq(track, 4), "度数が上がれば音も上がる");
+  assert.ok(Math.abs(sound.degreeFreq(track, 0, 1) - track.root * 2) < 0.001, "オクターブ指定");
+  // 範囲外の度数は端に丸める（落ちない）
+  assert.equal(sound.degreeFreq(track, 999), sound.degreeFreq(track, track.scale.length - 1));
+});
+
+test("sound: SE の階層ゲインは単調に下がり、全語彙に階層がある", () => {
+  const gains = [1, 2, 3, 4, 5].map((t) => sound.WB_SE_TIER_GAIN[t]);
+  for (let i = 1; i < gains.length; i++) assert.ok(gains[i] < gains[i - 1]);
+  const names = Object.keys(sound.WB_SE_TIERS);
+  assert.ok(names.length >= 24, `SE 語彙は24以上 (実際 ${names.length})`);
+  for (const name of names) {
+    assert.ok([1, 2, 3, 4, 5].includes(sound.WB_SE_TIERS[name]), name);
+  }
+  assert.equal(sound.WB_SE_TIERS.kill, 1, "撃破が最優先");
+  assert.equal(sound.WB_SE_TIERS.step, 5, "足音が最下位");
+  assert.ok(sound.WB_SE_MIN_INTERVAL_MS.step >= 100, "足音には連打防止がある");
+});
+
+test("sound: fx バースト → SE の対応（死亡=撃破、出現=煙）", () => {
+  assert.equal(sound.seForFxBurst("death"), "kill");
+  assert.equal(sound.seForFxBurst("spawn"), "poof");
+  assert.equal(sound.seForFxBurst("hit"), "hit");
+  for (const kind of ["chop", "mine", "till", "plant", "harvest", "place", "build", "debris", "splash", "step", "dash", "warp", "poof"]) {
+    assert.equal(sound.seForFxBurst(kind), kind, kind);
+    assert.ok(sound.WB_SE_TIERS[kind], `${kind} の SE がある`);
+  }
+});
+
+test("sound: 設定のデフォルトは BGM/SE とも ON", () => {
+  assert.deepEqual(sound.loadWbSoundSettings(), { bgm: true, se: true });
+});
+
+test("sound: opus っぽさ回避（音声ファイルなし・BGM パッドなし・ローパスで曇らせない）", () => {
+  const src = fs.readFileSync(path.join(libDir, "worldbox/sound.ts"), "utf8");
+  assert.ok(!/\.(opus|mp3|ogg|wav|m4a)["'`]/i.test(src), "音声ファイルの参照を持たない");
+  assert.ok(!/new Audio\(|<audio/i.test(src), "ファイル再生を使わない");
+  assert.ok(!/function pad\(/.test(src), "BGM にパッド wash を使わない");
+  // BGM バスにローパスを掛ける記述がない（SE の素材ノイズの lowpass は対象外）
+  assert.ok(!/bgmFilter/.test(src), "BGM 専用ローパスを持たない");
+});
+
+test("sound: クライアント配線（解錠・場面・行為SE・足音・経済・切替）", () => {
+  const client = fs.readFileSync(path.join(rootDir, "app/games/worldbox/WorldBoxClient.tsx"), "utf8");
+  assert.match(client, /from "@\/lib\/worldbox\/sound"/, "sound 基盤を使う");
+  assert.match(client, /unlockWbAudio\(\)/, "最初の操作で AudioContext を解錠する");
+  assert.match(client, /setWbBgmScene\(bgmSceneFor\(/, "場面で BGM を切り替える");
+  assert.match(client, /playWbSe\(seForFxBurst\(ev\.kind\)\)/, "行為イベントの粒と同じ場所で SE を出す");
+  assert.match(client, /playWbSe\("swing"\)/, "振りに風切り");
+  assert.match(client, /playWbSe\("step"\)/, "足音");
+  assert.match(client, /playWbSe\("warp"\)/, "ワープ音");
+  assert.match(client, /BGMを切る|BGMを入れる/, "≡ メニューに BGM 切替");
+  assert.match(client, /効果音を切る|効果音を入れる/, "≡ メニューに SE 切替");
+  const eco = fs.readFileSync(path.join(rootDir, "app/games/worldbox/WorldBoxEconomyPanel.tsx"), "utf8");
+  assert.match(eco, /from "@\/lib\/worldbox\/sound"/, "経済パネルも sound 基盤を使う");
+  assert.match(eco, /ACTION_SE/, "経済アクションの成功音マップがある");
+  assert.match(eco, /playWbSe\(se\)/, "経済アクション成功で SE");
+});
