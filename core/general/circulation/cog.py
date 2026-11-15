@@ -39,6 +39,8 @@ from core.game.clan import clan as clan_core
 from core.general.user_names import cached_display_name
 from core.game.gacha import gacha as gacha_core
 from core.general.circulation import economy_pool as economy_core
+from core.general.circulation import worldbox_economy as worldbox_economy_core
+from core.support.storage import KVStore
 from core.general.items import items as items_core
 from core.game import lottery as lottery_core
 from core.game import mining as mining_core
@@ -402,7 +404,8 @@ class CirculationCog(commands.Cog):
                  item_store: items_core.ItemStore | None = None,
                  balance_reader: Callable[[str], int] | None = None,
                  economy_store: economy_core.EconomyPoolStore | None = None,
-                 prison_store: prison_core.PrisonStore | None = None):
+                 prison_store: prison_core.PrisonStore | None = None,
+                 worldbox_kv=None):
         self.bot = bot
         self.mining_store = (
             mining_store if mining_store is not None else mining_core.MiningStore())
@@ -422,6 +425,17 @@ class CirculationCog(commands.Cog):
         self._balance_reader = balance_reader
         # 警棒の撃退抽選・泥帽の上乗せ率の抽選用（テストで差し替え可能）。
         self._rng = random.Random()
+        # AGO WORLD BOX の経済ブリッジ: Web が bot_kv に積んだオプを
+        # 既存の経済機構（wallet / pay_house / transfer_coins）で適用する
+        self.worldbox_economy = worldbox_economy_core.WorldBoxEconomyWorker(
+            kv=worldbox_kv if worldbox_kv is not None else KVStore(worldbox_economy_core.NAMESPACE),
+            wallet_provider=self._wallet,
+            economy_store=self.economy_store,
+            record_history=self._record_history,
+            insufficient_marker=lambda: wallet_module.INSUFFICIENT,
+            new_user_balance=lambda: wallet_module.NEW_USER_BALANCE,
+            balance_reader=self._balance,
+        )
 
     def _item_store(self) -> items_core.ItemStore:
         """ItemStore は ItemsCog のものを共有する（二重化すると所持が割れる）。"""
@@ -435,10 +449,14 @@ class CirculationCog(commands.Cog):
     async def cog_load(self) -> None:
         if not self.flush_loop.is_running():
             self.flush_loop.start()
+        if not self.worldbox_economy_loop.is_running():
+            self.worldbox_economy_loop.start()
 
     async def cog_unload(self) -> None:
         if self.flush_loop.is_running():
             self.flush_loop.cancel()
+        if self.worldbox_economy_loop.is_running():
+            self.worldbox_economy_loop.cancel()
         self.mining_store.flush()
         self.lottery_store.flush()
         self.steal_store.flush()
@@ -459,6 +477,15 @@ class CirculationCog(commands.Cog):
 
     @flush_loop.before_loop
     async def _before_flush_loop(self) -> None:
+        await self.bot.wait_until_ready()
+
+    @tasks.loop(seconds=worldbox_economy_core.POLL_SECONDS)
+    async def worldbox_economy_loop(self) -> None:
+        # 失敗は poll_once の中で吸収される（接続エラーは警告1行）
+        await self.worldbox_economy.poll_once()
+
+    @worldbox_economy_loop.before_loop
+    async def _before_worldbox_economy_loop(self) -> None:
         await self.bot.wait_until_ready()
 
     # ------------------------------------------------------------------ 共通

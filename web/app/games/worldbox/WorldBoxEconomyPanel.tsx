@@ -1,12 +1,15 @@
 "use client";
-// AGO WORLD BOX の経済パネル（かばん・ショップ・合成・steal・労働）。
+// AGO WORLD BOX の経済パネル（かばん・ショップ・合成・steal・労働・銀行）。
 // Discord ボット側の経済機能（items / workshop craft / circulation steal）の
-// 規則をそのまま使い、状態は /api/worldbox/profile が正とする。
+// 規則をそのまま使い、かばん・空腹度は /api/worldbox/profile が正とする。
+// コインの正は AGO コイン本体: 残高と移動履歴は経済ブリッジ
+// （/api/worldbox/economy）が返し、移動は Bot 本体が数十秒で適用する。
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { EconomyOp } from "@/lib/worldbox/economy-bridge";
 import { ITEMS, RECIPES, itemById, sellPrice } from "@/lib/worldbox/items";
 import type { PlayerProfile } from "@/lib/worldbox/profile";
 
-type Tab = "bag" | "shop" | "craft" | "steal";
+type Tab = "bag" | "shop" | "craft" | "steal" | "bank";
 type LoadState = "loading" | "ready" | "guest" | "unavailable";
 type StealTarget = { id: string; name: string };
 
@@ -20,6 +23,24 @@ const ERROR_LABEL: Record<string, string> = {
   target_recently_stolen: "その相手は最近盗まれたばかりで保護されています",
   self_target: "自分からは盗めません",
   unauthorized: "ログインが必要です",
+  discord_required: "コインの移動には Discord ログインが必要です",
+  economy_unavailable: "いま経済ブリッジを使えません",
+  economy_failed: "コインの移動を受け付けられませんでした",
+  invalid_recipient: "相手のIDが不正です",
+  self_transfer: "自分には送れません",
+  invalid_amount: "金額が不正です",
+};
+
+const OP_KIND_LABEL: Record<EconomyOp["kind"], string> = {
+  spend: "支払い",
+  earn: "受取",
+  transfer: "送金",
+  steal: "steal",
+};
+const OP_STATUS_LABEL: Record<EconomyOp["status"], string> = {
+  pending: "処理中",
+  done: "完了",
+  failed: "失敗",
 };
 
 const panel: React.CSSProperties = {
@@ -43,7 +64,23 @@ export default function WorldBoxEconomyPanel() {
   const [targets, setTargets] = useState<StealTarget[]>([]);
   const [msg, setMsg] = useState("");
   const [busy, setBusy] = useState(false);
+  const [balance, setBalance] = useState<number | null>(null);
+  const [ops, setOps] = useState<EconomyOp[]>([]);
+  const [transferTo, setTransferTo] = useState("");
+  const [transferAmount, setTransferAmount] = useState("");
   const aliveRef = useRef(true);
+
+  const refreshBridge = useCallback(async () => {
+    try {
+      const res = await fetch("/api/worldbox/economy", { headers: { Accept: "application/json" } });
+      if (!res.ok) return;
+      const data = (await res.json()) as { balance: number; ops: EconomyOp[] };
+      if (aliveRef.current) {
+        setBalance(data.balance);
+        setOps(Array.isArray(data.ops) ? data.ops : []);
+      }
+    } catch { /* ブリッジが読めなくても他の機能は使える */ }
+  }, []);
 
   const refreshProfile = useCallback(async () => {
     try {
@@ -81,10 +118,11 @@ export default function WorldBoxEconomyPanel() {
     aliveRef.current = true;
     void refreshProfile();
     void refreshTargets();
+    void refreshBridge();
     return () => {
       aliveRef.current = false;
     };
-  }, [refreshProfile, refreshTargets]);
+  }, [refreshProfile, refreshTargets, refreshBridge]);
 
   const act = async (payload: Record<string, unknown>, describe: (data: Record<string, unknown>) => string) => {
     setBusy(true);
@@ -104,8 +142,34 @@ export default function WorldBoxEconomyPanel() {
       }
       setProfile(data.profile);
       setMsg(describe(data));
+      void refreshBridge();
     } catch {
       setMsg("できませんでした");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const sendTransfer = async () => {
+    setBusy(true);
+    setMsg("");
+    try {
+      const res = await fetch("/api/worldbox/economy", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ action: "transfer", toDiscordId: transferTo.trim(), amount: Number(transferAmount) }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) {
+        setMsg(ERROR_LABEL[data.error ?? ""] ?? "送金を受け付けられませんでした");
+        return;
+      }
+      setTransferTo("");
+      setTransferAmount("");
+      setMsg("送金を受け付けました");
+      void refreshBridge();
+    } catch {
+      setMsg("送金を受け付けられませんでした");
     } finally {
       setBusy(false);
     }
@@ -139,7 +203,7 @@ export default function WorldBoxEconomyPanel() {
     <div style={panel}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
         <strong>経済</strong>
-        <span>所持金 <strong>{profile.coins}</strong> コイン</span>
+        <span>残高 <strong>{balance === null ? "—" : balance}</strong> コイン</span>
         <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
           空腹度
           <span style={{ width: 90, height: 10, borderRadius: 5, background: "rgba(255,255,255,0.12)", overflow: "hidden", display: "inline-block" }}>
@@ -152,7 +216,7 @@ export default function WorldBoxEconomyPanel() {
           type="button"
           style={btn}
           disabled={busy}
-          onClick={() => void act({ action: "work" }, () => "働いて 20 コイン得た（空腹度 -10）")}
+          onClick={() => void act({ action: "work" }, () => "働いた（報酬 20 コインは処理中）")}
         >
           労働する
         </button>
@@ -163,6 +227,7 @@ export default function WorldBoxEconomyPanel() {
         {tabBtn("shop", "ショップ")}
         {tabBtn("craft", "合成")}
         {tabBtn("steal", "steal")}
+        {tabBtn("bank", "銀行")}
       </div>
 
       {tab === "bag" && (
@@ -181,7 +246,7 @@ export default function WorldBoxEconomyPanel() {
                 </button>
               )}
               <button type="button" style={btn} disabled={busy}
-                onClick={() => void act({ action: "sell", itemId: item.id }, () => `${item.name}を ${sellPrice(item)} コインで売った`)}>
+                onClick={() => void act({ action: "sell", itemId: item.id }, () => `${item.name}を売った（代金 ${sellPrice(item)} コインは処理中）`)}>
                 売る（{sellPrice(item)}）
               </button>
             </div>
@@ -256,6 +321,49 @@ export default function WorldBoxEconomyPanel() {
                 )}>
                 steal
               </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {tab === "bank" && (
+        <div style={{ marginTop: 6 }}>
+          <div style={row}>
+            <strong>送金</strong>
+            <input
+              type="text"
+              inputMode="numeric"
+              placeholder="相手の Discord ID"
+              value={transferTo}
+              onChange={(e) => setTransferTo(e.target.value)}
+              style={{ flex: "1 1 160px", minHeight: 36, padding: "4px 8px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.25)", background: "rgba(255,255,255,0.06)", color: "inherit" }}
+            />
+            <input
+              type="number"
+              min={1}
+              placeholder="金額"
+              value={transferAmount}
+              onChange={(e) => setTransferAmount(e.target.value)}
+              style={{ width: 110, minHeight: 36, padding: "4px 8px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.25)", background: "rgba(255,255,255,0.06)", color: "inherit" }}
+            />
+            <button type="button" style={btn} disabled={busy} onClick={() => void sendTransfer()}>
+              送金する
+            </button>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}>
+            <strong>履歴</strong>
+            <button type="button" style={btn} disabled={busy} onClick={() => void refreshBridge()}>
+              更新
+            </button>
+          </div>
+          {ops.length === 0 && <p className="muted">まだコインの移動はありません。</p>}
+          {ops.map((op) => (
+            <div key={op.id} style={row}>
+              <strong>{OP_KIND_LABEL[op.kind]}</strong>
+              <span className="muted">{op.reason}</span>
+              <span style={{ flex: 1 }} />
+              <span>{op.appliedAmount ?? op.amount} コイン</span>
+              <span className="muted">{OP_STATUS_LABEL[op.status]}</span>
             </div>
           ))}
         </div>

@@ -1,17 +1,20 @@
 // AGO WORLD BOX のプレイヤープロフィール（純粋ロジック）。
 // 仕様書（Discord仮想国家経済MMO 基本仕様書）3.3 の個人データ:
-// 所持金（coins）・空腹度（hunger, 0〜100）に、かばん（items）と
-// steal のクールダウン時刻を加えたもの。
+// 空腹度（hunger, 0〜100）・かばん（items）と steal のクールダウン時刻。
+// 所持金の正は AGO コイン本体（economy-bridge / 案B）であり、
+// coins フィールドは旧ローカル残高の互換のため読み込みだけ許容し、
+// ロジック・表示では一切使わない（書き戻しても値はそのまま）。
 // 保存・通信は profile-online.ts / API ルート側が担い、ここは検証と
 // かばん操作だけを行う。経済の状態遷移は economy.ts。
 import { itemById } from "./items";
 
 /** 空腹度の上限（仕様書 3.3: 0〜100）。 */
 export const HUNGER_MAX = 100;
-/** 新規プレイヤーの初期所持金。 */
+/** 旧ローカル残高の初期値（互換のためだけに残す。実残高はブリッジ側）。 */
 export const STARTING_COINS = 100;
 
 export type PlayerProfile = {
+  /** 廃止: 旧ローカル残高。読み込み互換のためだけに保持し、使わない。 */
   coins: number;
   hunger: number;
   /** アイテムID → 所持数（0 のものは持たない）。 */
