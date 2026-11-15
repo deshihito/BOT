@@ -4,7 +4,7 @@
 // - 南側の前列（y=10）に立て、入口から届く。列の隙間も歩行可（北踊り場への動線を塞がない）
 // - 筐体スプライトは 64x64 RGBA の PNG として存在し、textures.ts に登録済み
 // - station は付けない（筐体パネル・ルーム起動の配線は L4）
-// - 第1弾以外のアーケード筐体は置かない（残り20タイトルは L6 の第2弾）
+// - 第1弾以外のアーケード筐体は 2F 南弧の第2弾6台だけ（3F の14台は cabinets-2 で検証）
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -44,7 +44,7 @@ const floorsUrl = dataUrl(
 const floors = await import(floorsUrl);
 
 const cabinets = () =>
-  floors.buildLobby2().objects.filter((o) => o.sprite.startsWith("arcade_"));
+  floors.buildLobby2().objects.filter((o) => o.sprite.startsWith("arcade_") && o.y === 9);
 
 function walkableTiles(data) {
   const out = new Set();
@@ -137,9 +137,14 @@ test("cabinets: 筐体に station は付いていない（L4 の配線対象）"
   }
 });
 
-test("cabinets: 第1弾以外のアーケード筐体は置かない", () => {
+test("cabinets: 第1弾以外のアーケード筐体は 2F 南弧の第2弾6台だけ", () => {
   const data = floors.buildLobby2();
   const placed = new Set(data.objects.filter((o) => o.sprite.startsWith("arcade_")).map((o) => o.sprite));
-  assert.deepEqual([...placed].sort(), [...arcade.ARCADE_FIRST_WAVE].map((id) => `arcade_${id}`).sort());
-  assert.equal(placed.size, 6);
+  assert.deepEqual(
+    [...placed].sort(),
+    [...arcade.ARCADE_FIRST_WAVE, ...arcade.ARCADE_SECOND_WAVE_2F]
+      .map((id) => `arcade_${id}`)
+      .sort(),
+  );
+  assert.equal(placed.size, 12);
 });
