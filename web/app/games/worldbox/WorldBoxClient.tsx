@@ -848,6 +848,61 @@ export default function WorldBoxClient() {
   partyRef.current = partyUi;
   const myPartyKeyRef = useRef("");
   const [nearDungeonEntrance, setNearDungeonEntrance] = useState(false);
+  /** タップで選択した他プレイヤーのプロフィールチップ。 */
+  const [playerCard, setPlayerCard] = useState<{
+    id: string; name: string; role: AdventureRoleId; rank: number;
+  } | null>(null);
+  const playerCardTimerRef = useRef<number | null>(null);
+  const showPlayerCard = (card: { id: string; name: string; role: AdventureRoleId; rank: number }) => {
+    setPlayerCard(card);
+    if (playerCardTimerRef.current) window.clearTimeout(playerCardTimerRef.current);
+    playerCardTimerRef.current = window.setTimeout(() => setPlayerCard(null), 6000);
+  };
+  const showPlayerCardRef = useRef(showPlayerCard);
+  showPlayerCardRef.current = showPlayerCard;
+  /** チャット（近距離/全体/ユニオン）。サーバーが正、ここは表示と送信だけ。 */
+  const [chatChannel, setChatChannel] = useState<"proximity" | "global" | "union">("proximity");
+  const [chatMsgs, setChatMsgs] = useState<{ name: string; text: string; at: number }[]>([]);
+  const [chatText, setChatText] = useState("");
+  const chatChannelRef = useRef(chatChannel);
+  chatChannelRef.current = chatChannel;
+  useEffect(() => {
+    let disposed = false;
+    const load = async () => {
+      try {
+        const res = await fetch(
+          `/api/worldbox/chat?channel=${chatChannelRef.current}&space=${encodeURIComponent(spaceUi)}`,
+          { headers: { Accept: "application/json" } },
+        );
+        if (!res.ok || disposed) return;
+        const data = (await res.json()) as { messages?: { name: string; text: string; at: number }[] };
+        if (!disposed) setChatMsgs(data.messages ?? []);
+      } catch { /* noop */ }
+    };
+    void load();
+    const timer = window.setInterval(() => { void load(); }, 3000);
+    return () => { disposed = true; window.clearInterval(timer); };
+  }, [spaceUi, chatChannel]);
+  const sendChat = async () => {
+    const text = chatText.trim();
+    if (!text) return;
+    setChatText("");
+    try {
+      const res = await fetch("/api/worldbox/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ channel: chatChannel, text, space: spaceUi }),
+      });
+      if (res.ok) {
+        const data = (await res.json()) as { message?: { name: string; text: string; at: number } };
+        if (data.message) setChatMsgs((prev) => [data.message!, ...prev].slice(0, 50));
+      } else if (res.status === 429) {
+        setTileMsg("少し待って");
+      } else if (res.status === 409) {
+        setTileMsg("ユニオン未所属");
+      }
+    } catch { /* noop */ }
+  };
   const refreshParty = async () => {
     try {
       const res = await fetch("/api/worldbox/party", { headers: { Accept: "application/json" } });
@@ -2028,12 +2083,15 @@ export default function WorldBoxClient() {
       }
       if (space === "world" || parseInstanceSpace(space)) {
         const t = toTile(e);
-        // パーティリーダーが他プレイヤーをタップしたら招待（入口付近の編成導線）
-        if (space === "world" && partyRef.current.isLeader && partyRef.current.party) {
+        // 他プレイヤーをタップしたらプロフィールチップを出す（招待導線もここから）
+        if (space === "world" || parseInstanceSpace(space)) {
           for (const [oid, other] of others) {
             if (Math.floor(other.track.rx) === t.x && Math.floor(other.track.ry) === t.y) {
-              void postPartyRef.current("invite", { targetId: oid }).then((r) => {
-                setTileMsg(r.ok ? "招待した" : "招待できない");
+              showPlayerCardRef.current({
+                id: oid,
+                name: other.track.entry.name || "プレイヤー",
+                role: (other.track.entry.role ?? "free") as AdventureRoleId,
+                rank: other.track.entry.rank ?? 1,
               });
               return;
             }
@@ -2134,6 +2192,7 @@ export default function WorldBoxClient() {
       name: string | null,
       nationColor: string | null = null,
       swim = false,
+      plate: { roleSymbol: string; rank: number } | null = null,
     ) => {
       const size = TILE * AVATAR_TILES;
       // 泳ぎ中は体を沈め、歩行の上下動をゆるい浮き沈みに替える
@@ -2183,19 +2242,57 @@ export default function WorldBoxClient() {
         }
       }
       if (name) {
+        // ネームプレート: ユニオン色の枠 + Discord マーク + 役職シンボル + 名前 + 熟練ドット
         c.font = "600 11px sans-serif";
-        c.textAlign = "center";
+        const nameW = c.measureText(name).width;
+        const symbolW = plate ? c.measureText(plate.roleSymbol).width : 0;
+        const glyphW = 11;
+        const plateW = 6 + glyphW + (plate ? 3 + symbolW : 0) + 4 + nameW + 6;
+        const plateH = plate && plate.rank > 1 ? 24 : 17;
+        const top = sy - size + sink - bob - plateH - 4;
+        const left = sx - plateW / 2;
+        c.beginPath();
+        c.roundRect(left, top, plateW, plateH, 5);
+        c.fillStyle = "rgba(8,10,16,0.62)";
+        c.fill();
+        c.lineWidth = 1.5;
+        c.strokeStyle = nationColor ?? "rgba(255,255,255,0.35)";
+        c.stroke();
+        // Discord マーク（白い角丸＋目2つ）
+        const gx = left + 5;
+        const gy = top + 4;
+        c.fillStyle = "#ffffff";
+        c.beginPath();
+        c.roundRect(gx, gy, 9, 9, 3);
+        c.fill();
+        c.fillStyle = "rgba(8,10,16,0.85)";
+        c.fillRect(gx + 2, gy + 3.5, 2, 2);
+        c.fillRect(gx + 5.5, gy + 3.5, 2, 2);
+        let tx = gx + glyphW + 1;
+        c.textAlign = "left";
+        if (plate) {
+          c.fillStyle = "#ffd75e";
+          c.fillText(plate.roleSymbol, tx, top + 12.5);
+          tx += symbolW + 4;
+        }
         c.lineWidth = 3;
         c.strokeStyle = "rgba(10,16,10,0.65)";
-        const ly = sy - size + sink - 6 - bob;
-        c.strokeText(name, sx, ly);
+        c.strokeText(name, tx, top + 12.5);
         c.fillStyle = "#ffffff";
-        c.fillText(name, sx, ly);
-        if (nationColor) {
-          const w = c.measureText(name).width;
-          c.fillStyle = nationColor;
-          c.fillRect(sx - w / 2, ly + 3, w, 2.5);
+        c.fillText(name, tx, top + 12.5);
+        if (plate && plate.rank > 1) {
+          // 熟練ドット（ランク分だけ金の点）
+          const dotsW = plate.rank * 6 - 2;
+          let dx = sx - dotsW / 2;
+          c.fillStyle = "#f2c53c";
+          for (let i = 0; i < plate.rank; i++) {
+            c.beginPath();
+            c.arc(dx + 2, top + 19.5, 2, 0, Math.PI * 2);
+            c.fill();
+            dx += 6;
+          }
         }
+        c.textAlign = "center";
       }
     };
 
@@ -3317,6 +3414,7 @@ export default function WorldBoxClient() {
               // 足元は当たり円の底（中心 + 半径）に合わせる（中心に置くと手前で止まって見える）
               space !== "world" ? Math.round(lobbyOy + o.track.ry * TILE) + TILE * PLAYER_RADIUS : toScreenY(o.track.ry) + TILE * PLAYER_RADIUS,
               o.track.entry.face, o.phase, Math.min(1, Math.hypot(o.track.entry.vx, o.track.entry.vy) / WALK_SPEED), o.track.entry.name || null, nationColor, oSwim,
+              { roleSymbol: roleById((o.track.entry.role ?? "free") as AdventureRoleId).symbol, rank: o.track.entry.rank ?? 1 },
             ),
         });
       }
@@ -4437,6 +4535,99 @@ export default function WorldBoxClient() {
             ))}
           </div>
         )}
+        {playerCard && (
+          <div
+            style={{
+              position: "absolute", left: "50%", bottom: 108, transform: "translateX(-50%)",
+              display: "flex", alignItems: "center", gap: 8, padding: "6px 10px",
+              borderRadius: 10, background: "rgba(10,12,24,0.9)", color: "#fff", fontSize: 13, zIndex: 5,
+              maxWidth: "calc(100% - 16px)", boxSizing: "border-box",
+            }}
+          >
+            <span aria-hidden style={{ color: "#ffd75e", fontSize: 15 }}>{roleById(playerCard.role).symbol}</span>
+            <strong style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{playerCard.name}</strong>
+            <span aria-hidden style={{ color: "#f2c53c", fontSize: 9, letterSpacing: 1 }}>{"●".repeat(playerCard.rank)}</span>
+            <span style={{ fontSize: 12, opacity: 0.8 }}>{roleById(playerCard.role).name}</span>
+            {partyUi.isLeader && partyUi.party && (
+              <button
+                type="button"
+                style={btn}
+                onClick={() => {
+                  void postParty("invite", { targetId: playerCard.id }).then((r) => {
+                    setTileMsg(r.ok ? "招待した" : "招待できない");
+                  });
+                  setPlayerCard(null);
+                }}
+              >
+                招待
+              </button>
+            )}
+            <button type="button" style={btn} onClick={() => setPlayerCard(null)}>
+              閉じる
+            </button>
+          </div>
+        )}
+        <div
+          style={{
+            position: "absolute", left: 10, bottom: 10, width: "min(300px, calc(100% - 130px))",
+            display: "flex", flexDirection: "column", gap: 4, zIndex: 5,
+          }}
+        >
+          <div style={{ display: "flex", flexDirection: "column", gap: 2, maxHeight: 118, overflow: "hidden", justifyContent: "flex-end" }}>
+            {[...chatMsgs].slice(0, 6).reverse().map((m, i) => (
+              <div
+                key={`${m.at}-${i}`}
+                style={{
+                  alignSelf: "flex-start", maxWidth: "100%", padding: "2px 8px", borderRadius: 8,
+                  background: "rgba(8,10,16,0.55)", color: "#fff", fontSize: 12, lineHeight: 1.35,
+                  overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                }}
+              >
+                <strong style={{ marginRight: 5 }}>{m.name}</strong>
+                {m.text}
+              </div>
+            ))}
+          </div>
+          <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+            {(
+              [
+                ["proximity", "近"],
+                ["global", "全"],
+                ["union", "ユ"],
+              ] as const
+            ).map(([ch, label]) => (
+              <button
+                key={ch}
+                type="button"
+                aria-pressed={chatChannel === ch}
+                onClick={() => setChatChannel(ch)}
+                style={{
+                  ...btn, minHeight: 30, padding: "2px 8px", fontSize: 12,
+                  ...(chatChannel === ch ? { background: "rgba(255,215,94,0.25)", borderColor: "#ffd75e" } : {}),
+                }}
+              >
+                {label}
+              </button>
+            ))}
+            <input
+              value={chatText}
+              onChange={(e) => setChatText(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  void sendChat();
+                }
+                e.stopPropagation();
+              }}
+              maxLength={120}
+              placeholder="チャット"
+              style={{
+                flex: 1, minWidth: 0, padding: "6px 8px", borderRadius: 8, fontSize: 13,
+                border: "1px solid rgba(255,255,255,0.25)", background: "rgba(8,10,16,0.7)", color: "#fff",
+              }}
+            />
+          </div>
+        </div>
         {tileMsg && (
           <div
             role="status"
