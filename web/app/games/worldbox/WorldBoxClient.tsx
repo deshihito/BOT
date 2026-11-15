@@ -15,7 +15,7 @@ import {
   generateChunk, mapTileAt, rectBounds, tileAt, worldBounds, type TopDownMap,
 } from "@/lib/worldbox/mapgen";
 import { pickRandomSpawn } from "@/lib/worldbox/spawn";
-import { DASH_SPEED, PLAYER_RADIUS, SWIM_DASH_SPEED, SWIM_SPEED, WALK_SPEED, findFreeNear, isWaterAt, stepMove } from "@/lib/worldbox/move";
+import { DASH_SPEED, PLAYER_RADIUS, SWIM_DASH_SPEED, SWIM_SPEED, WALK_SPEED, circleHitsSolid, findFreeNear, isWaterAt, stepMove } from "@/lib/worldbox/move";
 import { isNightPhase, nightAmount, phaseAtTime } from "@/lib/worldbox/daynight";
 import { mobById, mobOccupiesTile, type PlacedMob } from "@/lib/worldbox/mobs";
 import {
@@ -793,7 +793,17 @@ export default function WorldBoxClient() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  /** 最後にタイルを取得した中心（タイル座標）。移動で外れたら取り直す。 */
+  const tilesCenterRef = useRef<{ x: number; y: number } | null>(null);
+  const tilesInFlightRef = useRef(false);
+  const tilesQueuedRef = useRef(false);
   const refreshTiles = async () => {
+    // 取得中の追加要求は、完了後に最新位置でもう1回だけ取り直す
+    if (tilesInFlightRef.current) {
+      tilesQueuedRef.current = true;
+      return;
+    }
+    tilesInFlightRef.current = true;
     try {
       const px = Math.floor(playerPosRef.current.x);
       const py = Math.floor(playerPosRef.current.y);
@@ -803,23 +813,34 @@ export default function WorldBoxClient() {
         `/api/worldbox/tiles?x0=${x0}&y0=${y0}&x1=${x0 + 127}&y1=${y0 + 127}`,
         { headers: { Accept: "application/json" } },
       );
-      if (!res.ok) return;
-      const data = (await res.json()) as { overrides?: TileOverridesMap; selfId?: string | null };
-      if (data.selfId !== undefined) selfIdRef.current = data.selfId;
-      const next: TileOverridesMap = { ...tilesRef.current };
-      for (const key of Object.keys(next)) {
-        const m = /^(-?\d+),(-?\d+)$/.exec(key);
-        if (!m) continue;
-        const x = Number(m[1]);
-        const y = Number(m[2]);
-        if (x >= x0 && x <= x0 + 127 && y >= y0 && y <= y0 + 127) delete next[key];
+      if (res.ok) {
+        const data = (await res.json()) as { overrides?: TileOverridesMap; selfId?: string | null };
+        if (data.selfId !== undefined) selfIdRef.current = data.selfId;
+        const next: TileOverridesMap = { ...tilesRef.current };
+        for (const key of Object.keys(next)) {
+          const m = /^(-?\d+),(-?\d+)$/.exec(key);
+          if (!m) continue;
+          const x = Number(m[1]);
+          const y = Number(m[2]);
+          if (x >= x0 && x <= x0 + 127 && y >= y0 && y <= y0 + 127) delete next[key];
+        }
+        Object.assign(next, data.overrides ?? {});
+        tilesRef.current = next;
+        tilesVersionRef.current += 1;
+        tilesCenterRef.current = { x: px, y: py };
+        syncBlockBlocked();
       }
-      Object.assign(next, data.overrides ?? {});
-      tilesRef.current = next;
-      tilesVersionRef.current += 1;
-      syncBlockBlocked();
     } catch { /* 読めなくても歩き続けられる */ }
+    finally {
+      tilesInFlightRef.current = false;
+    }
+    if (tilesQueuedRef.current) {
+      tilesQueuedRef.current = false;
+      void refreshTiles();
+    }
   };
+  const refreshTilesRef = useRef(refreshTiles);
+  refreshTilesRef.current = refreshTiles;
   const postTileAction = async (action: TileActionKind, x: number, y: number, seedId?: string, itemId?: string) => {
     setTileMsg("");
     try {
@@ -1061,6 +1082,18 @@ export default function WorldBoxClient() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // 歩いて取得範囲（128×128）の端に近づいたら先読みで取り直す
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      const c = tilesCenterRef.current;
+      if (!c) return;
+      const dx = Math.abs(Math.floor(playerPosRef.current.x) - c.x);
+      const dy = Math.abs(Math.floor(playerPosRef.current.y) - c.y);
+      if (Math.max(dx, dy) >= 48) void refreshTilesRef.current();
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -1259,6 +1292,9 @@ export default function WorldBoxClient() {
         cam.x = free.x;
         cam.y = free.y;
         setSpaceUi(space);
+        // 初期位置が決まった時点で、その周辺の設置ブロックを取り直す
+        // （マウント時の取得は初期位置 (0.5, 0.5) 中心で、実際の居場所とずれる）
+        void refreshTilesRef.current();
       }
       if (choice.pushLocalToOnline) saveNow();
       else lastSaved = { x: player.x, y: player.y, at: performance.now() };
@@ -1927,6 +1963,8 @@ export default function WorldBoxClient() {
       lastTileKey = `${space}:${Math.floor(free.x)},${Math.floor(free.y)}`;
       saveNow();
       sendHeartbeat();
+      // 移動先エリアの設置ブロックを即時に取り直す（15秒ポーリング待ちにしない）
+      void refreshTilesRef.current();
     };
     const doWarp = (target: SaveSpace) => {
       if (target === space) return;
@@ -2163,6 +2201,18 @@ export default function WorldBoxClient() {
       } else if (dashing) {
         moveSpeed = DASH_SPEED;
         staminaUse = "dash";
+      }
+      // 埋没救済: タイル読み込みの完了で固体が増えた等により、自分の円が
+      // 固体へ深く重なっていたら近くの立てる場所へ出す（読み込み後に
+      // 壁に埋まるケースの対策）。壁に密着しただけの浅い重なりでは
+      // 発火しないよう、半分の半径で重なりを判定する。
+      if (circleHitsSolid(activeMap(), player.x, player.y, PLAYER_RADIUS * 0.5, activeBlocked(), { swim: space === "world" })) {
+        const free = findFreeNear(activeMap(), player.x, player.y, activeBlocked(), { swim: space === "world" });
+        if (free.x !== player.x || free.y !== player.y) {
+          player.x = free.x;
+          player.y = free.y;
+          kbVel = { x: 0, y: 0 };
+        }
       }
       const vel = { x: ix * moveSpeed, y: iy * moveSpeed };
       let prevX = player.x;
