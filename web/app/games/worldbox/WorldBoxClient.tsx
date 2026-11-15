@@ -1,7 +1,7 @@
 "use client";
 // AGO WORLD BOX（見下ろし型・共有ワールド）。
 // 世界は固定シードから生成される 1024×1024 の1枚マップで、全員が同じ場所を歩く。
-// 移動は8方向フリー（スティック＋WASD）、他プレイヤーはプレゼンス API 経由で
+// 移動は8方向フリー（左下の固定式スティック＋WASD）、他プレイヤーはプレゼンス API 経由で
 // アバター＋名前つきで表示される（同時接続）。セーブは空間＋位置（v6）。
 // ロビーは別空間（図形の和集合のホール＋ショップ翼2階）で、ワープパッドと
 // ≡ メニューで行き来する。ロビーの描画はピクセル固定（整数座標・補間オフ）。
@@ -45,9 +45,10 @@ import {
 import { CROPS, ITEMS, itemById } from "@/lib/worldbox/items";
 import { countItem, type ItemSlot, type PlayerProfile, type SlotRef } from "@/lib/worldbox/profile";
 import { loadDungeonTiles, loadFarmSprites, loadLobbySprites, loadTextures } from "@/lib/worldbox/textures";
+import { isStickTouch, stickBase, stickVector } from "@/lib/worldbox/stick";
 import { useGamesNav } from "../GamesShell";
-import WorldBoxEconomyPanel from "./WorldBoxEconomyPanel";
 import WorldBoxCasinoPanel from "./WorldBoxCasinoPanel";
+import WorldBoxEconomyPanel from "./WorldBoxEconomyPanel";
 
 const SAVE_KEY = "ago-worldbox-save-v6";
 /** 1タイルの表示サイズ（CSS px）。 */
@@ -346,15 +347,13 @@ export default function WorldBoxClient() {
       cancelled = true;
     };
   }, []);
-  const [craftOpen, setCraftOpen] = useState(false);
-
   // 空間（ワールド / ロビー）とハンバーガーメニュー、ステーション、掲示板
   const [spaceUi, setSpaceUi] = useState<SaveSpace>("world");
   const [menuOpen, setMenuOpen] = useState(false);
   const [stationUi, setStationUi] = useState<LobbyStation | null>(null);
   const warpActionRef = useRef<(target: SaveSpace) => void>(() => {});
-  const [boardOpen, setBoardOpen] = useState(false);
   const [casinoOpen, setCasinoOpen] = useState(false);
+  const [boardOpen, setBoardOpen] = useState(false);
   const [boardPosts, setBoardPosts] = useState<BoardPost[]>([]);
   const [boardLoggedIn, setBoardLoggedIn] = useState(false);
   const [boardText, setBoardText] = useState("");
@@ -396,6 +395,12 @@ export default function WorldBoxClient() {
     return () => window.clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [boardOpen]);
+
+  // 施設から離れたら、その施設のパネルは閉じる（場所制約の表示側）
+  useEffect(() => {
+    if (stationUi !== "board") setBoardOpen(false);
+    if (stationUi !== "casino") setCasinoOpen(false);
+  }, [stationUi]);
 
   const applyNationsData = (data: NationsResponse) => {
     nationsRef.current = data;
@@ -487,7 +492,7 @@ export default function WorldBoxClient() {
       setShowNations(false);
       setShowEconomy(false);
       setMapView(false);
-      setCraftOpen(false);
+      setCasinoOpen(false);
       setBoardOpen(false);
       setStorageOpen(false);
       setHeldSlot(null);
@@ -681,7 +686,9 @@ export default function WorldBoxClient() {
     const activeBlocked = (): ReadonlySet<string> | undefined =>
       space === "lobby" ? lobby.blocked : blockedRef.current;
     const keys = new Set<string>();
-    const joy = { active: false, pointerId: -1, baseX: 0, baseY: 0, dx: 0, dy: 0 };
+    // 固定式スティック: 基点は左下の固定位置（lib/worldbox/stick）。
+    // 基点を持ち歩くのは「スティックが起動したか」と倒し量だけ。
+    const joy = { active: false, pointerId: -1, dx: 0, dy: 0 };
     const others = new Map<string, OtherRender>();
     // スタミナとダッシュ（キーの2度押し / スティックの強い倒し）
     let stamina: StaminaState = createStamina();
@@ -895,16 +902,18 @@ export default function WorldBoxClient() {
         }
         return;
       }
-      if (space === "world" && handleTileTap(toTile(e))) return;
       const p = canvasPos(e);
-      if (p.x > p.w * 0.62) return; // スティックは左寄りだけ
-      joy.active = true;
-      joy.pointerId = e.pointerId;
-      joy.baseX = p.x;
-      joy.baseY = p.y;
-      joy.dx = 0;
-      joy.dy = 0;
-      canvas.setPointerCapture(e.pointerId);
+      // スティックは固定基点の円の中から始まったタッチだけ。それ以外の
+      // タッチはタイル操作に回し、設置・採掘とスティックを干渉させない。
+      if (isStickTouch(p.x, p.y, stickBase(p.w, p.h))) {
+        joy.active = true;
+        joy.pointerId = e.pointerId;
+        joy.dx = 0;
+        joy.dy = 0;
+        canvas.setPointerCapture(e.pointerId);
+        return;
+      }
+      if (space === "world") handleTileTap(toTile(e));
     };
     const onPointerMove = (e: PointerEvent) => {
       if (buildRef.current.active && space === "world") {
@@ -913,16 +922,9 @@ export default function WorldBoxClient() {
       }
       if (!joy.active || e.pointerId !== joy.pointerId) return;
       const p = canvasPos(e);
-      const R = 52;
-      let dx = (p.x - joy.baseX) / R;
-      let dy = (p.y - joy.baseY) / R;
-      const len = Math.hypot(dx, dy);
-      if (len > 1) {
-        dx /= len;
-        dy /= len;
-      }
-      joy.dx = dx;
-      joy.dy = dy;
+      const v = stickVector(p.x, p.y, stickBase(p.w, p.h));
+      joy.dx = v.dx;
+      joy.dy = v.dy;
     };
     const onPointerUp = (e: PointerEvent) => {
       if (e.pointerId !== joy.pointerId) return;
@@ -1746,15 +1748,16 @@ export default function WorldBoxClient() {
       // 光る粒（蛍・ワープの光）は夜の色づけの上に出す
       if (space === "world") drawParticles(true);
 
-      // スティック
-      if (joy.active) {
-        ctx.fillStyle = "rgba(255,255,255,0.16)";
+      // スティック（固定基点。建築モードでは入力ごと無効なので描かない）
+      if (!buildRef.current.active) {
+        const base = stickBase(cw, ch);
+        ctx.fillStyle = joy.active ? "rgba(255,255,255,0.16)" : "rgba(255,255,255,0.08)";
         ctx.beginPath();
-        ctx.arc(joy.baseX, joy.baseY, 52, 0, Math.PI * 2);
+        ctx.arc(base.x, base.y, 52, 0, Math.PI * 2);
         ctx.fill();
-        ctx.fillStyle = "rgba(255,255,255,0.45)";
+        ctx.fillStyle = joy.active ? "rgba(255,255,255,0.45)" : "rgba(255,255,255,0.22)";
         ctx.beginPath();
-        ctx.arc(joy.baseX + joy.dx * 34, joy.baseY + joy.dy * 34, 22, 0, Math.PI * 2);
+        ctx.arc(base.x + joy.dx * 34, base.y + joy.dy * 34, 22, 0, Math.PI * 2);
         ctx.fill();
       }
 
@@ -1925,7 +1928,6 @@ export default function WorldBoxClient() {
       show: true,
       run: () => warpActionRef.current(spaceUi === "world" ? "lobby" : "world"),
     },
-    { id: "craft", label: "クラフト", show: true, run: () => setCraftOpen(true) },
     {
       id: "map",
       label: showMap ? "マップを隠す" : "マップを出す",
@@ -2323,20 +2325,6 @@ export default function WorldBoxClient() {
         </div>
       )}
 
-      {craftOpen && (
-        <div style={panelOverlay}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <strong>クラフト</strong>
-            <span style={{ flex: 1 }} />
-            <button type="button" style={btn} onClick={() => setCraftOpen(false)}>
-              閉じる
-            </button>
-          </div>
-          {/* 作れるものの一覧はアイテム基盤フェーズでここに並ぶ（今は器だけ） */}
-          <p className="muted" style={{ margin: "10px 0 0", fontSize: 13 }}>作れるものはまだない</p>
-        </div>
-      )}
-
       {mapView && (
         <div style={panelOverlay}>
           <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
@@ -2518,7 +2506,7 @@ export default function WorldBoxClient() {
         </div>
       )}
 
-      {showEconomy && <WorldBoxEconomyPanel space={spaceUi} onClose={() => setShowEconomy(false)} />}
+      {showEconomy && <WorldBoxEconomyPanel space={spaceUi} station={stationUi} onClose={() => setShowEconomy(false)} />}
       {casinoOpen && spaceUi === "lobby" && (
         <WorldBoxCasinoPanel onClose={() => setCasinoOpen(false)} />
       )}

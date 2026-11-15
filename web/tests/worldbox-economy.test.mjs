@@ -207,12 +207,26 @@ test("クライアント配線: 経済パネルと API がつながっている"
   assert.ok(panel.includes("/api/worldbox/economy"), "パネルがブリッジ API を使っていない");
 });
 
-test("ショップはロビー空間でのみ開く（クライアントが空間を渡し、パネルが制限する）", () => {
+test("売買・合成・送金は施設の前でのみ開く（クライアントがステーションを渡し、パネルと API が制限する）", () => {
   const client = fs.readFileSync(path.join(rootDir, "app/games/worldbox/WorldBoxClient.tsx"), "utf8");
-  assert.match(client, /<WorldBoxEconomyPanel space=\{spaceUi\} onClose=\{\(\) => setShowEconomy\(false\)\} \/>/);
+  assert.match(client, /<WorldBoxEconomyPanel space=\{spaceUi\} station=\{stationUi\} onClose=\{\(\) => setShowEconomy\(false\)\} \/>/);
   const panel = fs.readFileSync(path.join(rootDir, "app/games/worldbox/WorldBoxEconomyPanel.tsx"), "utf8");
   assert.match(panel, /space === "lobby"/);
-  assert.match(panel, /inLobby && tabBtn\("shop"/);
+  // タブは「ロビーにいる」だけでは出ない。対応する施設の前にいる時だけ
+  assert.match(panel, /station === "shop"/);
+  assert.match(panel, /atShop && tabBtn\("shop"/);
+  assert.match(panel, /station === "smith"/);
+  assert.match(panel, /atWorkbench && tabBtn\("craft"/);
+  assert.match(panel, /station === "bank"/);
+  assert.match(panel, /atBank && tabBtn\("bank"/);
+  // サーバー側もプレゼンスで位置検証する（表示だけの制限にしない）
+  const profileRoute = fs.readFileSync(path.join(rootDir, "app/api/worldbox/profile/route.ts"), "utf8");
+  assert.match(profileRoute, /loadMyLobbyStation/);
+  assert.match(profileRoute, /not_at_shop/);
+  assert.match(profileRoute, /not_at_workbench/);
+  const economyRoute = fs.readFileSync(path.join(rootDir, "app/api/worldbox/economy/route.ts"), "utf8");
+  assert.match(economyRoute, /loadMyLobbyStation/);
+  assert.match(economyRoute, /not_at_bank/);
   // 共有ノートの方針: 画面内に説明文を置かない（制限の案内文も置かない）
   assert.ok(!panel.includes("ショップ（売買）はロビーでのみ利用できます"), "説明文が残っている");
 });

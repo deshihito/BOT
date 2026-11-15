@@ -1,13 +1,15 @@
 import { NextResponse } from "next/server";
-import { getRequestSession, publicOrigin } from "@/lib/auth";
+import { getRequestSession, publicOrigin, sessionOwnerKey } from "@/lib/auth";
 import { appendBoardPost, sanitizeBoardText } from "@/lib/worldbox/board";
 import { isBoardEnabled, loadBoardPosts, storeBoardPosts } from "@/lib/worldbox/board-online";
+import { loadMyLobbyStation } from "@/lib/worldbox/station-online";
 
 export const runtime = "nodejs";
 
 // AGO WORLD BOX ロビーのグローバル掲示板。
 // GET: { posts, loggedIn }（誰でも読める。posts は新しい順・最大30件）
 // POST { text }: 投稿（ログイン中のみ。本文は最大120文字）
+//   場所制約: ロビーの掲示板の前にいること（サーバー側でプレゼンス検証）。
 // 保存先は bot_kv（名前空間 worldbox_board、キー "messages"）。
 // 表示名はセッションの username を正とする。
 // Bot API 未設定なら 503（クライアントは掲示板なしで遊び続ける）。
@@ -48,6 +50,10 @@ export async function POST(request: Request) {
   const text = sanitizeBoardText((body as { text?: unknown } | null)?.text);
   if (text === null) {
     return NextResponse.json({ error: "invalid_text" }, { status: 400, headers: NO_STORE });
+  }
+  // 場所制約: 投稿は掲示板の前でのみ（本文の検証を通った後に位置を確かめる）
+  if ((await loadMyLobbyStation(sessionOwnerKey(session))) !== "board") {
+    return NextResponse.json({ error: "not_at_board" }, { status: 409, headers: NO_STORE });
   }
   const name = session.username?.trim() || "プレイヤー";
   const posts = appendBoardPost(await loadBoardPosts(), { name, text, at: Date.now() });
