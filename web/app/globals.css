@@ -671,7 +671,7 @@ button.balku-card:hover { box-shadow:0 10px 20px rgba(0,0,0,.45), inset 0 0 0 3p
 
 /* --- 中央：場 --- */
 .balku-fieldrow { position:relative; display:grid; grid-template-columns:minmax(0,1fr); min-height:0; }
-.balku-field { display:grid; gap:10px; min-width:0; min-height:0; align-content:start; overflow:hidden; }
+.balku-field { position:relative; display:grid; gap:10px; min-width:0; min-height:0; align-content:start; overflow:hidden; }
 .balku-myfield { display:flex; align-items:center; gap:10px; min-width:0; cursor:pointer; }
 .balku-auction { display:flex; flex-wrap:wrap; align-items:center; gap:8px 16px; padding:12px; border:2px solid var(--balku-cyan-deep); border-radius:12px; background:rgba(57,191,232,.08); font-size:14px; animation:balku-pulse-once var(--balku-dur) var(--balku-ease); }
 .balku-auction-info { color:#e9f2f4; }
@@ -789,12 +789,25 @@ button.balku-card:hover { box-shadow:0 10px 20px rgba(0,0,0,.45), inset 0 0 0 3p
 .balku-bundle-pullhint { margin-top:auto; font-size:10px; font-weight:700; letter-spacing:.06em; opacity:.75; text-align:center; }
 .balku-bundle-ghost { width:110px; }
 /* 提出パッド（束の放り先） */
-.balku-submitpads { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
-.balku-submitpad { display:grid; gap:2px; place-content:center; min-height:0; padding:10px; border-radius:12px; font-size:15px; font-weight:800; letter-spacing:.08em; text-align:center; cursor:pointer; transition:box-shadow var(--balku-dur) var(--balku-ease), background var(--balku-dur); }
-.balku-submitpad span { font-size:11px; font-weight:400; letter-spacing:0; }
-.balku-submitpad-open { border:2px dashed rgba(120,200,230,.6); background:rgba(57,191,232,.07); color:#aee3f5; }
-.balku-submitpad-down { border:3px solid transparent; background:linear-gradient(#20303a,#20303a) padding-box, repeating-linear-gradient(45deg,#f5c518 0 10px,#191919 10px 20px) border-box; color:#f5c518; }
-.balku-submitpad-locked { opacity:.42; filter:grayscale(.7); }
+/* 提出先は場の左右半分（2026-11-15 第2弾でシート内パッドから移設）。
+   束を持つ間だけ場いっぱいに出現し、半分のどこに放っても落ちる。
+   左＝公開 / 右＝伏せ。狙う面積を最大化して曖昧な放りを受け止める。 */
+.balku-fieldhalves { position:absolute; inset:0; z-index:31; display:grid; grid-template-columns:1fr 1fr; border-radius:12px; overflow:hidden; animation:balku-in var(--balku-dur) var(--balku-ease); }
+.balku-fieldhalf { display:grid; place-content:center; gap:2px; text-align:center; cursor:pointer; transition:background var(--balku-dur), box-shadow var(--balku-dur); }
+.balku-fieldhalf strong { font-size:26px; font-weight:900; letter-spacing:.12em; }
+.balku-fieldhalf span { font-size:12px; opacity:.85; }
+.balku-fieldhalf-open { background:rgba(57,191,232,.13); color:#aee3f5; box-shadow:inset 0 0 0 2px rgba(120,200,230,.55); }
+.balku-fieldhalf-down { background:repeating-linear-gradient(45deg, rgba(245,197,24,.13) 0 14px, rgba(20,20,20,.25) 14px 28px); color:#f5c518; box-shadow:inset 0 0 0 2px rgba(245,197,24,.5); }
+.balku-fieldhalf.balku-drop-hot { filter:brightness(1.5); }
+.balku-fieldhalf-open.balku-drop-hot { background:rgba(57,191,232,.32); }
+.balku-fieldhalf-down.balku-drop-hot { background:repeating-linear-gradient(45deg, rgba(245,197,24,.3) 0 14px, rgba(20,20,20,.3) 14px 28px); }
+.balku-build-hint { margin:0; font-size:12px; color:#9fb6bd; text-align:center; }
+.balku-build-card-held { transform:translateY(-3px); box-shadow:0 14px 28px rgba(0,0,0,.5), 0 0 0 2px rgba(120,200,230,.7); }
+.balku-reqchips { display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
+.balku-legal-badge { font-size:12px; font-weight:800; padding:3px 9px; border-radius:999px; }
+.balku-legal-badge-ok { background:rgba(74,222,128,.16); color:var(--balku-ok); box-shadow:inset 0 0 0 1px rgba(74,222,128,.5); }
+.balku-legal-badge-ng { background:rgba(248,113,113,.14); color:var(--balku-bad); box-shadow:inset 0 0 0 1px rgba(248,113,113,.5); }
+.balku-shake { animation:balku-shake .45s ease; }
 .balku-build-bundle { cursor:grab; border-radius:10px; }
 .balku-build-bundle:active { cursor:grabbing; }
 /* 対象選択は席そのもの */
@@ -894,6 +907,19 @@ button.balku-card:hover { box-shadow:0 10px 20px rgba(0,0,0,.45), inset 0 0 0 3p
 .balku-coinburst { position:absolute; left:50%; top:38%; z-index:34; width:0; height:0; pointer-events:none; }
 .balku-coinburst span { position:absolute; left:-7px; top:-7px; width:14px; height:14px; border-radius:50%; background:radial-gradient(circle at 35% 35%, #ffe9a8, #f5c518 65%, #c99612); animation:balku-burst .85s var(--balku-ease) both; animation-delay:calc(var(--i) * 22ms); }
 @keyframes balku-burst { from { transform:rotate(calc(var(--i) * 45deg)) translateY(0) scale(1); opacity:1; } to { transform:rotate(calc(var(--i) * 45deg)) translateY(-46px) scale(.45); opacity:0; } }
+/* ムーブ解決時のパーティクル（着地点から14粒が放射状に飛ぶ）。
+   色は意味で分ける: 公開=水色 / 伏せ=金 / 購入・入札=コイン金 / BALKU=赤。 */
+.balku-fx { position:fixed; z-index:210; width:0; height:0; pointer-events:none; }
+.balku-fx span { position:absolute; left:-4px; top:-4px; width:8px; height:8px; border-radius:50%; opacity:0; animation:balku-fx-fly .72s cubic-bezier(.17,.67,.35,1) both; animation-delay:calc(var(--i) * 12ms); }
+.balku-fx-open span { background:#7fd8f7; box-shadow:0 0 6px rgba(127,216,247,.9); }
+.balku-fx-down span { background:#f5c518; box-shadow:0 0 6px rgba(245,197,24,.9); }
+.balku-fx-coin span { background:radial-gradient(circle at 35% 35%, #ffe9a8, #f5c518 65%, #c99612); }
+.balku-fx-balku span { width:10px; height:10px; left:-5px; top:-5px; border-radius:2px; background:#ff6b5e; box-shadow:0 0 8px rgba(255,107,94,.9); }
+@keyframes balku-fx-fly { 0% { transform:rotate(calc(var(--i) * 25.7deg)) translateY(0) scale(1); opacity:1; } 100% { transform:rotate(calc(var(--i) * 25.7deg)) translateY(-64px) scale(.3); opacity:0; } }
+@media (prefers-reduced-motion: reduce) {
+  .balku-fx span { animation:none; }
+  .balku-shake { animation:none; }
+}
 /* BALKU失敗：自分の領域が崩れる */
 @keyframes balku-hurt { 0%,100% { transform:none; } 20% { transform:translateX(-5px) rotate(-.5deg); } 45% { transform:translateX(5px) rotate(.5deg); } 70% { transform:translateX(-3px); } }
 .balku-self-hurt { animation:balku-hurt .55s var(--balku-ease); }

@@ -201,7 +201,7 @@ test("拡大プレビューと情報ダイエット: 小カードは絵＋名前
   const sheetIdx = client.indexOf("const renderBuildSheet");
   const sheetBlock = client.slice(sheetIdx, client.indexOf("const latestLogEntry", sheetIdx));
   assert.ok(sheetBlock.includes("balku-build-effect"), "施工シートに効果文がない");
-  assert.ok(sheetBlock.includes("balku-reqrow"), "施工シートに必要素材の行がない");
+  assert.ok(sheetBlock.includes("balku-reqchips"), "施工シートに必要素材チップがない");
   // シートはハンドルのドラッグでも閉じられる
   assert.ok(client.includes("sheetHandle"), "シートのジェスチャ閉じがない");
 });
@@ -269,11 +269,46 @@ test("ムーブの受け付け: 判定は広め・近接とフリックの救済
   // 押して何も起きない面を作らない: 提出パッド/市場/入札コイン/手番
   // トークンはタップでも同じムーブが成立する（ドラッグ後の click は
   // suppressClick で二重実行を防ぐ）
-  assert.ok(client.includes("submitSelected(true);\n            }}\n            onKeyDown") || /balku-submitpad-open[\s\S]{0,600}submitSelected\(true\)/.test(client), "公開パッドのタップ提出がない");
-  assert.ok(/balku-submitpad-down[\s\S]{0,600}submitSelected\(false\)/.test(client), "伏せパッドのタップ提出がない");
+  // 提出先はシート内の小パッドではなく場の左右半分（左=公開/右=伏せ）。
+  // 半分はタップでも提出でき、束はタップで持ち上げられる
+  assert.ok(!client.includes("balku-submitpad"), "旧・提出パッドが残っている");
+  assert.ok(/balku-fieldhalf-open[\s\S]{0,700}submitSelected\(true\)/.test(client), "公開（場の左半分）のタップ提出がない");
+  assert.ok(/balku-fieldhalf-down[\s\S]{0,700}submitSelected\(false\)/.test(client), "伏せ（場の右半分）のタップ提出がない");
+  assert.ok(client.includes("bundleHeld"), "束のタップ持ち上げがない");
+  // 関係ないゾーンが行き先を遮らない: zoneAt はそのドラッグに
+  // 関係するゾーンだけを見る（施工シート全体が "build" で遮っていた）
+  const zoneAtBlock = client.slice(client.indexOf("const zoneAt"), client.indexOf("const directionZone"));
+  assert.ok(zoneAtBlock.includes("wanted.includes(id)"), "zoneAt が関係ないゾーンに遮蔽される");
+  // 方向スワイプ解決（移動の向きで受ける）が近接の後・フリックの前に試される
+  assert.ok(client.includes("const directionZone"), "方向スワイプ解決がない");
+  assert.ok(client.includes("dist < 40") && client.includes("dot > 0.3"), "方向スワイプの閾値（40px / dot 0.3）が固定されていない");
+  assert.ok(endBlock.indexOf("directionZone(") > endBlock.indexOf("nearestZone(") && endBlock.indexOf("directionZone(") < endBlock.indexOf("flickZone("), "近接→方向→フリックの順で救済していない");
+  // ドラッグ中の着地予測（dropHot）も同じ解決順で光る
+  const moveBlock = client.slice(client.indexOf("const moveDrag"), client.indexOf("const endDrag"));
+  assert.ok(moveBlock.includes("nearestZone(track.payload, e.clientX, e.clientY)"), "ドラッグ中の着地予測に近接解決が使われていない");
   const marketIdx = client.indexOf("balku-market-card");
   assert.ok(client.slice(marketIdx, marketIdx + 1400).includes('type: "buyMaterial"'), "市場のタップ購入がない");
   assert.ok(client.includes('aria-label="手番トークン（相手の席へ放つとパス）"'), "手番トークンがない");
+});
+
+test("演出と認知負荷: パーティクル/シェイクと、チップ化した施工情報", () => {
+  // ムーブ解決でパーティクルが弾け、BALKU では画面が揺れる
+  assert.ok(client.includes("const burstAt"), "パーティクル発火がない");
+  assert.ok(client.includes("balku-fx balku-fx-"), "パーティクル層がない");
+  assert.ok(client.includes('burstAt(e.clientX, e.clientY, "balku")'), "BALKU のパーティクルがない");
+  assert.ok(client.includes('burstAt(e.clientX, e.clientY, "coin")'), "購入/入札のパーティクルがない");
+  assert.ok(css.includes(".balku-fx span") && css.includes("@keyframes balku-fx-fly"), "パーティクルの CSS がない");
+  assert.ok(css.includes(".balku-shake {"), "画面シェイクのクラスがない");
+  // 場の左右半分（提出先）の CSS
+  assert.ok(css.includes(".balku-fieldhalves {"), "場の半分の CSS がない");
+  assert.ok(css.includes(".balku-fieldhalf-open {") && css.includes(".balku-fieldhalf-down {"), "公開/伏せ半分の CSS がない");
+  // 施工情報は行＋文章ではなくチップとバッジ（構造で状態が分かる形）
+  assert.ok(client.includes("balku-reqchips"), "必要素材がチップ化されていない");
+  assert.ok(!client.includes("balku-reqrows"), "必要素材の行表示が残っている");
+  assert.ok(!client.includes("素材条件を満たしています（正規完成）。"), "長い合法説明文が残っている");
+  assert.ok(client.includes("balku-legal-badge"), "合法バッジがない");
+  // 情報バーはターンと山札を1チップに統合（常時表示の要素を減らす）
+  assert.ok(/第\{st\.turn\}ターン ・ 山札/.test(client), "情報バーのチップ統合がない");
 });
 
 test("対戦画面とカタログに絵文字が残っていない", () => {
