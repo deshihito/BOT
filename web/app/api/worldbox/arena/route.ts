@@ -7,10 +7,11 @@ import {
 import { clearArenaSession, loadArenaSession, saveArenaSession } from "@/lib/worldbox/arena-online";
 import { buildEconomyOp, type EconomyOp } from "@/lib/worldbox/economy-bridge";
 import {
-  enqueueEconomyOp, findEconomyOp, isEconomyEnabled, loadMyEconomyOps, readUserBalance,
+  enqueueEconomyOp, enqueueEconomyOpOnce, findEconomyOp, isEconomyEnabled, loadMyEconomyOps, readUserBalance,
 } from "@/lib/worldbox/economy-bridge-online";
 import { loadProfile } from "@/lib/worldbox/profile-online";
 import { loadMyLobbyStation } from "@/lib/worldbox/station-online";
+import { withUserLock } from "@/lib/worldbox/user-lock";
 
 export const runtime = "nodejs";
 
@@ -51,14 +52,17 @@ async function enqueue(userKey: string, discordId: string, input: {
   kind: "spend" | "earn";
   amount: number;
   reason: string;
+  /** 決定的 ID（指定時は冪等登録: 同 ID が既にあれば作り直さない）。 */
+  id?: string;
 }): Promise<EconomyOp | null> {
   const op = buildEconomyOp(
     { kind: input.kind, userKey, discordId, amount: input.amount, reason: input.reason },
-    crypto.randomUUID(),
+    input.id ?? crypto.randomUUID(),
     Date.now(),
   );
   if (!op) return null;
-  return (await enqueueEconomyOp(op)) ? op : null;
+  const stored = input.id ? await enqueueEconomyOpOnce(op) : await enqueueEconomyOp(op);
+  return stored ? op : null;
 }
 
 async function stateResponse(ownerKey: string, discordId: string) {
@@ -95,6 +99,17 @@ export async function POST(request: Request) {
   const { session, status } = arenaSession(request);
   if (!session) return errorResponse("unauthorized", status);
   if (!isEconomyEnabled()) return errorResponse("economy_unavailable", 503);
+  // 同一ユーザーのリクエストを直列化する（カジノ #943 と同型の対策）。
+  // セッションの read-modify-write と参加費/賞金のオプ登録が並行すると、
+  // 二重開始（参加費2件）や勝利の二重判定（賞金2件）が起きうる。
+  // 賞金オプの決定的 ID（prize-<参加費オプID>）と合わせて
+  // 「1試合 = 参加費1件・賞金最大1件」を保証する。
+  return withUserLock(sessionOwnerKey(session), () => handlePost(request, session));
+}
+
+type AuthedSession = NonNullable<ReturnType<typeof arenaSession>["session"]>;
+
+async function handlePost(request: Request, session: AuthedSession) {
   const ownerKey = sessionOwnerKey(session);
   const discordId = session.id;
 
@@ -166,7 +181,10 @@ export async function POST(request: Request) {
       log: [...result.events, ...s.log].slice(0, 6),
     };
     if (result.outcome === "win") {
-      await enqueue(ownerKey, discordId, { kind: "earn", amount: next.prize, reason: "arena_prize" });
+      // 賞金は決定的 ID で冪等に積む（再試行・再処理でも1試合1件だけ）
+      await enqueue(ownerKey, discordId, {
+        kind: "earn", amount: next.prize, reason: "arena_prize", id: `prize-${s.feeOpId}`,
+      });
       await clearArenaSession(ownerKey);
       const base = await stateResponse(ownerKey, discordId);
       const data = (await base.json()) as Record<string, unknown>;

@@ -1,11 +1,12 @@
 "use client";
 // ラッシュアワー。ロジックは lib/rushhour.ts（解けた配置から崩す生成で
-// 必ず解ける）。車を選ぶと動かせる方向と距離がボタンで出る。
+// 必ず解ける）。車を選んでスワイプ／矢印キーで1マスずつ動かす。
 // 1回のスライド（距離を問わず）を1手として数える。
 import Link from "next/link";
 import dynamic from "next/dynamic";
 import { useEffect, useRef, useState } from "react";
 import { sfxSlide, sfxTap, sfxWin } from "@/lib/sfx";
+import { useGesture, type GestureDirection } from "@/lib/gesture";
 import { EndScreen } from "../GameJuice";
 import {
   RUSH_EXIT_ROW,
@@ -34,6 +35,9 @@ export default function RushHourClient() {
   );
   const [selected, setSelected] = useState<number | null>(null);
   const [best, setBest] = useState<number | null>(null);
+  // スワイプ開始点の車を特定するための盤面参照と開始点。
+  const boardRef = useRef<HTMLDivElement | null>(null);
+  const startPointRef = useRef<{ x: number; y: number } | null>(null);
 
   useEffect(() => {
     try {
@@ -86,12 +90,88 @@ export default function RushHourClient() {
     setSelected(selected === carId ? null : carId);
   };
 
-  // スライド実行（2D の移動ボタンと 3D のドラッグ確定で共用）。
+  // スライド実行（2D のスワイプと 3D のドラッグ確定で共用）。
   // 1回のスライド（距離を問わず）を1手として数える現行仕様のまま。
   const slideCar = (carId: number, delta: number) => {
     sfxSlide();
     setState((s) => rushSlide(s, carId, delta));
   };
+
+  // 盤面スワイプ=スワイプ開始点の下にある車を軸方向へ1マス動かす
+  // （3D 側のドラッグと同じ1手単位。非法な方向・距離は無音 no-op）。
+  const slideBySwipe = (dir: GestureDirection) => {
+    if (state.status !== "playing") return;
+    const start = startPointRef.current;
+    const board = boardRef.current;
+    if (!start || !board) return;
+    const rect = board.getBoundingClientRect();
+    const fx = (start.x - rect.left) / rect.width;
+    const fy = (start.y - rect.top) / rect.height;
+    const car = state.cars.find((c) => {
+      const left = c.col / 6;
+      const top = c.row / 6;
+      const w = (c.dir === "h" ? c.len : 1) / 6;
+      const h = (c.dir === "v" ? c.len : 1) / 6;
+      return fx >= left && fx < left + w && fy >= top && fy < top + h;
+    });
+    if (!car) return;
+    const delta =
+      car.dir === "h"
+        ? dir === "left"
+          ? -1
+          : dir === "right"
+            ? 1
+            : 0
+        : dir === "up"
+          ? -1
+          : dir === "down"
+            ? 1
+            : 0;
+    if (delta === 0) return;
+    if (!rushSlideOptions(state, car.id).includes(delta)) return;
+    setSelected(car.id);
+    slideCar(car.id, delta);
+  };
+
+  const boardGesture = useGesture({
+    onSwipe: (dir) => slideBySwipe(dir),
+  });
+
+  // 矢印キーでも選んだ車を1マスずつ動かす（2D・3D 両方で使えるよう window リスナー）。
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (state.status !== "playing" || selected === null) return;
+      const t = e.target as HTMLElement | null;
+      if (
+        t &&
+        (t.tagName === "INPUT" ||
+          t.tagName === "TEXTAREA" ||
+          t.tagName === "SELECT" ||
+          t.isContentEditable)
+      )
+        return;
+      const car = state.cars.find((c) => c.id === selected);
+      if (!car) return;
+      const delta =
+        car.dir === "h"
+          ? e.key === "ArrowLeft"
+            ? -1
+            : e.key === "ArrowRight"
+              ? 1
+              : 0
+          : e.key === "ArrowUp"
+            ? -1
+            : e.key === "ArrowDown"
+              ? 1
+              : 0;
+      if (delta === 0) return;
+      e.preventDefault();
+      if (!rushSlideOptions(state, car.id).includes(delta)) return;
+      slideCar(car.id, delta);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [state, selected]);
 
   // 3D ドラッグ用: 車ごとのスライド可能範囲（合法判定は lib が持つ）。
   const ranges: Record<number, { min: number; max: number }> = {};
@@ -101,12 +181,18 @@ export default function RushHourClient() {
     state.status === "won"
       ? `脱出成功！${state.moves}手でクリアです。`
       : selectedCar
-        ? "動かす方向と距離を選んでください。"
+        ? "スワイプまたは矢印キーで1マスずつ動かせます。"
         : "車をタップして選んでください。赤い車を右端の出口へ出せばクリアです。";
 
   // 2D 盤（WebGL が使えない場合のフォールバックとしてそのまま使う）。
   const board2d = (
       <div
+        ref={boardRef}
+        {...boardGesture}
+        onPointerDown={(e) => {
+          boardGesture.onPointerDown(e);
+          startPointRef.current = { x: e.clientX, y: e.clientY };
+        }}
         role="grid"
         aria-label="ラッシュアワーの盤面"
         style={{
@@ -119,6 +205,7 @@ export default function RushHourClient() {
           border: "2px solid #94a3b8",
           borderRadius: 10,
           overflow: "hidden",
+          touchAction: "none",
         }}
       >
         {/* マス目の背景 */}
@@ -153,10 +240,10 @@ export default function RushHourClient() {
           const isSel = selected === car.id;
           const color = car.target ? "#dc2626" : CAR_COLORS[car.id % CAR_COLORS.length];
           return (
-            <button
+            <div
               key={car.id}
-              type="button"
               role="gridcell"
+              tabIndex={0}
               aria-pressed={isSel}
               aria-label={
                 car.target
@@ -165,6 +252,12 @@ export default function RushHourClient() {
               }
               className={isSel ? "juice-pulse" : undefined}
               onClick={() => onCarTap(car.id)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  onCarTap(car.id);
+                }
+              }}
               style={{
                 position: "absolute",
                 left: `${(car.col / 6) * 100 + 0.6}%`,
@@ -184,7 +277,7 @@ export default function RushHourClient() {
               }}
             >
               {car.target ? "★" : ""}
-            </button>
+            </div>
           );
         })}
       </div>
@@ -221,27 +314,16 @@ export default function RushHourClient() {
       >
         {selectedCar && state.status === "playing" ? (
           options.length > 0 ? (
-            options.map((delta) => {
-              const vertical = selectedCar.dir === "v";
-              const arrow = vertical ? (delta < 0 ? "↑" : "↓") : delta < 0 ? "←" : "→";
-              return (
-                <button
-                  key={delta}
-                  type="button"
-                  className="classic-btn classic-btn-active"
-                  onClick={() => slideCar(selectedCar.id, delta)}
-                >
-                  {arrow} {Math.abs(delta)}マス
-                </button>
-              );
-            })
+            <span style={{ fontSize: 14, color: "#64748b" }}>
+              選んだ車をスワイプ（または矢印キー）で1マスずつ動かせます。
+            </span>
           ) : (
             <span style={{ fontSize: 14, color: "#64748b" }}>
               この車は今は動けません。ほかの車をどかしましょう。
             </span>
           )
         ) : (
-          <span style={{ fontSize: 14, color: "#64748b" }}>車を選ぶと移動ボタンが出ます。</span>
+          <span style={{ fontSize: 14, color: "#64748b" }}>車を選ぶとスワイプで動かせます。</span>
         )}
       </div>
 

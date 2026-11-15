@@ -11,6 +11,7 @@ import {
   type SpotDiffState,
 } from "@/lib/spotdiff";
 import { sfxCorrect, sfxWin, sfxWrong } from "@/lib/sfx";
+import { tappableProps } from "@/lib/gesture";
 import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
@@ -154,15 +155,14 @@ export default function SpotDiffClient() {
 
       <div className="classic-controls" role="group" aria-label="難易度">
         {LEVELS.map((level) => (
-          <button
+          <div
             key={level.key}
-            type="button"
+            {...tappableProps(() => restart(level.key))}
             aria-pressed={levelKey === level.key}
             className={levelKey === level.key ? "classic-btn classic-btn-active" : "classic-btn"}
-            onClick={() => restart(level.key)}
           >
             {level.label}
-          </button>
+          </div>
         ))}
         <button type="button" className="classic-btn" onClick={() => restart(levelKey)}>
           もう一度
@@ -228,13 +228,19 @@ export default function SpotDiffClient() {
               const found = state.found.includes(i);
               const missed = lastMiss === i;
               return (
-                <button
+                <div
                   key={i}
-                  type="button"
                   role="gridcell"
+                  tabIndex={0}
                   aria-label={found ? "見つけた間違い" : `${i + 1}番のマス`}
                   className={found ? "juice-pop" : missed ? "juice-shake" : undefined}
                   onClick={() => onTap(i)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      onTap(i);
+                    }
+                  }}
                   style={{
                     aspectRatio: "1",
                     display: "flex",
@@ -250,7 +256,7 @@ export default function SpotDiffClient() {
                   }}
                 >
                   <SpotSymbol id={symbol} />
-                </button>
+                </div>
               );
             })}
           </div>

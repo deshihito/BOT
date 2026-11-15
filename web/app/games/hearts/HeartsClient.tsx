@@ -21,6 +21,7 @@ import {
   type HeartsState,
 } from "@/lib/hearts";
 import { sfxDeal, sfxFlip, sfxLose, sfxTap, sfxWin } from "@/lib/sfx";
+import { tappableProps } from "@/lib/gesture";
 import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
@@ -186,32 +187,26 @@ export default function HeartsClient() {
             const selected = selectedPass.includes(id);
             const disabled = isPassPhase ? false : !playable;
             return (
-              <button
+              <div
                 key={id}
-                type="button"
+                {...tappableProps(() => handleCardTap(id))}
                 aria-label={cardLabel(id)}
                 aria-pressed={isPassPhase ? selected : undefined}
-                disabled={disabled && !isPassPhase}
-                onClick={() => {
-                  if (isPassPhase) togglePassCard(id);
-                  else if (playable) {
-                    sfxFlip();
-                    setState((s) => playCard(s, id));
-                  }
-                }}
+                aria-disabled={disabled || undefined}
+                tabIndex={disabled ? -1 : 0}
                 style={{
                   padding: 2,
                   border: selected ? "2px solid var(--accent, #2f6db3)" : "2px solid transparent",
                   borderRadius: 8,
                   background: "transparent",
-                  cursor: disabled && !isPassPhase ? "default" : "pointer",
+                  cursor: disabled ? "default" : "pointer",
                   opacity: !isPassPhase && state.phase === "play" && !playable ? 0.45 : 1,
                   transform: selected ? "translateY(-6px)" : undefined,
                   minHeight: 44,
                 }}
               >
                 <CardView id={id} />
-              </button>
+              </div>
             );
           })}
         </div>
@@ -239,30 +234,30 @@ export default function HeartsClient() {
           もう一度
         </button>
         {isPassPhase && (
-          <button
-            type="button"
-            className="classic-btn classic-btn-active"
-            disabled={selectedPass.length !== 3}
-            onClick={() => {
+          <div
+            {...tappableProps(() => {
+              if (selectedPass.length !== 3) return;
               sfxDeal();
               setState((s) => submitPass(s, selectedPass));
               setSelectedPass([]);
-            }}
+            })}
+            aria-disabled={selectedPass.length !== 3 || undefined}
+            tabIndex={selectedPass.length !== 3 ? -1 : 0}
+            className="classic-btn classic-btn-active"
           >
             {PASS_DIR_LABELS[state.passDir]}パスする（{selectedPass.length}/3）
-          </button>
+          </div>
         )}
         {state.phase === "handEnd" && (
-          <button
-            type="button"
-            className="classic-btn classic-btn-active"
-            onClick={() => {
+          <div
+            {...tappableProps(() => {
               sfxDeal();
               setState((s) => nextHand(s));
-            }}
+            })}
+            className="classic-btn classic-btn-active"
           >
             次のハンドへ
-          </button>
+          </div>
         )}
       </div>
 

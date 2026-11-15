@@ -138,6 +138,7 @@ const boardOnlineUrl = dataUrl(
     .replaceAll('"../bot-api"', JSON.stringify(botApiStubUrl))
     .replaceAll('"./board"', JSON.stringify(boardUrl)),
 );
+const userLockUrl = dataUrl(transpile("worldbox/user-lock.ts"));
 const nextServerStubUrl = dataUrl(`
 export class NextResponse {
   static json(body, init = {}) {
@@ -161,6 +162,7 @@ const profileRoute = await import(
       .replaceAll('"@/lib/worldbox/shops"', JSON.stringify(shopsUrl))
       .replaceAll('"@/lib/worldbox/station-online"', JSON.stringify(stationOnlineUrl))
       .replaceAll('"@/lib/worldbox/profile-online"', JSON.stringify(profileOnlineUrl))
+      .replaceAll('"@/lib/worldbox/user-lock"', JSON.stringify(userLockUrl))
       .replaceAll('"@/lib/worldbox/roles"', JSON.stringify(rolesUrl)),
   ),
 );
@@ -382,4 +384,23 @@ test("クライアント: 施設パネルは離れたら閉じる（掲示板・
   const nationsRoute = fs.readFileSync(path.join(rootDir, "app/api/worldbox/nations/route.ts"), "utf8");
   assert.match(nationsRoute, /loadMyLobbyStation/);
   assert.match(nationsRoute, /not_at_guild_board/);
+});
+
+test("API(place): sell の並行リクエストでも earn オプは1件だけ（二重売却の回帰防止）", async () => {
+  const store = globalThis.__wbGateStore;
+  for (const k of [...store.keys()]) if (k.startsWith("worldbox_economy ")) store.delete(k);
+  seedProfile({ wood: 1 });
+  setPresence(AT_SHOP.x, AT_SHOP.y);
+  const results = await Promise.all([
+    profileRoute.POST(apiRequest(URL_P, "POST", { action: "sell", itemId: "wood" })),
+    profileRoute.POST(apiRequest(URL_P, "POST", { action: "sell", itemId: "wood" })),
+    profileRoute.POST(apiRequest(URL_P, "POST", { action: "sell", itemId: "wood" })),
+  ]);
+  assert.equal(results.filter((r) => r.status === 200).length, 1);
+  assert.equal(results.filter((r) => r.status === 409).length, 2);
+  let earns = 0;
+  for (const [k, v] of store) {
+    if (k.startsWith("worldbox_economy ") && v && typeof v === "object" && v.kind === "earn" && v.reason === "shop_sale") earns++;
+  }
+  assert.equal(earns, 1, "売却の earn は1件だけ積まれる（同じ木材が二重に売れない）");
 });

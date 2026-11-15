@@ -25,6 +25,7 @@ import {
   createDragRace,
 } from "@/lib/dragrace";
 import { sfxCorrect, sfxLose, sfxSlide, sfxTap, sfxTick, sfxWin, sfxWrong } from "@/lib/sfx";
+import { tappableProps } from "@/lib/gesture";
 import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
@@ -195,6 +196,42 @@ export default function DragRaceClient() {
     }
   };
 
+  // 計測の即時性が本質のため、発進・シフトは pointerdown 直結
+  // （reaction / stopwatch と同じ意図的な例外）。ready 時のタップは
+  // スタートボタンの代わりにカウントダウン開始。
+  const handleActionArea = () => {
+    if (state.phase === "ready") {
+      startCountdown();
+      return;
+    }
+    onAction();
+  };
+  const actionAreaRef = useRef(handleActionArea);
+  actionAreaRef.current = handleActionArea;
+
+  // Space / Enter でも発進・シフト（div 側のハンドラと二重発火しないよう、
+  // 対象物にフォーカスがあるときは window 側は無視する）。
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (
+        t &&
+        (t.tagName === "INPUT" ||
+          t.tagName === "TEXTAREA" ||
+          t.tagName === "SELECT" ||
+          t.isContentEditable)
+      )
+        return;
+      if (e.key === " " || e.key === "Enter") {
+        if (t?.closest?.("[data-dragrace-ui]")) return;
+        e.preventDefault();
+        actionAreaRef.current();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   const rpm = state.phase === "running" ? rpmFraction(state, elapsed) : 0;
   const inZone = state.phase === "running" && rpm >= 0.85 && state.shiftsDone < GEAR_COUNT - 1;
   const lastError =
@@ -207,7 +244,7 @@ export default function DragRaceClient() {
   const statusText =
     notice ??
     (state.phase === "ready"
-      ? "スタートを押すとライトが点きます。グリーンになったらすぐ押そう。"
+      ? "大きな面を押すとライトが点きます。グリーンになったらすぐ押そう。"
       : state.phase === "waiting"
         ? green
           ? "グリーン! 今すぐ押せ!"
@@ -227,15 +264,17 @@ export default function DragRaceClient() {
                 : "負け…反応とシフトを磨こう。");
 
   const actionLabel =
-    state.phase === "waiting"
-      ? green
-        ? "GO!"
-        : "まだ…"
-      : state.phase === "running"
-        ? state.shiftsDone < GEAR_COUNT - 1
-          ? "シフト!"
-          : "走行中…"
-        : "押しても何も起きません";
+    state.phase === "ready"
+      ? "スタート"
+      : state.phase === "waiting"
+        ? green
+          ? "GO!"
+          : "まだ…"
+        : state.phase === "running"
+          ? state.shiftsDone < GEAR_COUNT - 1
+            ? "シフト!"
+            : "走行中…"
+          : "押しても何も起きません";
 
   const board2d = (
     <>
@@ -350,32 +389,24 @@ export default function DragRaceClient() {
       <div className="page-heading compact-heading">
         <h1>ドラッグレース</h1>
         <p className="muted">
-          大きなボタン1つで、発進とシフトアップを操作します。
+          大きな面1つで、スタート・発進とシフトアップを操作します。
         </p>
       </div>
 
       <div className="classic-controls" role="group" aria-label="相手の強さ">
         {DIFFICULTIES.map((d) => (
-          <button
+          <div
             key={d.key}
-            type="button"
+            {...tappableProps(() => restart(d.key))}
+            data-dragrace-ui=""
             aria-pressed={difficulty === d.key}
             className={difficulty === d.key ? "classic-btn classic-btn-active" : "classic-btn"}
-            onClick={() => restart(d.key)}
           >
             {d.label}
-          </button>
+          </div>
         ))}
-        <button type="button" className="classic-btn" onClick={() => restart(difficulty)}>
+        <button type="button" className="classic-btn" data-dragrace-ui="" onClick={() => restart(difficulty)}>
           もう一度
-        </button>
-        <button
-          type="button"
-          className="classic-btn"
-          onClick={startCountdown}
-          disabled={state.phase !== "ready"}
-        >
-          スタート
         </button>
       </div>
 
@@ -404,10 +435,19 @@ export default function DragRaceClient() {
           />
         )}
 
-        <button
-          type="button"
-          onClick={onAction}
-          disabled={state.phase === "ready" || state.phase === "finished" || state.phase === "fouled"}
+        <div
+          role="button"
+          tabIndex={0}
+          data-dragrace-ui=""
+          aria-label={actionLabel}
+          aria-disabled={state.phase === "finished" || state.phase === "fouled" || undefined}
+          onPointerDown={handleActionArea}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              handleActionArea();
+            }
+          }}
           style={{
             display: "block",
             width: "100%",
@@ -432,7 +472,7 @@ export default function DragRaceClient() {
           }}
         >
           {actionLabel}
-        </button>
+        </div>
 
         {state.phase === "finished" && (
           <div style={{ marginTop: 16 }}>
