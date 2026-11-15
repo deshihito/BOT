@@ -19,8 +19,8 @@ import { DASH_SPEED, PLAYER_RADIUS, SWIM_DASH_SPEED, SWIM_SPEED, WALK_SPEED, fin
 import { isNightPhase, nightAmount, phaseAtTime } from "@/lib/worldbox/daynight";
 import { mobById, mobOccupiesTile, type PlacedMob } from "@/lib/worldbox/mobs";
 import {
-  MOB_ATTACK_RANGE, MOB_RESPAWN_MS, attackTarget, knockbackTarget, mobBlockedTiles, mobDistance, mobFootprintTiles,
-  mobHpNow, mobKeyOf, visibleMobs, type MobState,
+  MOB_ATTACK_RANGE, MOB_RESPAWN_MS, MOB_SPRITE, MOB_SPRITE_FALLBACK, attackTarget, knockbackTarget, mobBlockedTiles, mobDistance, mobFootprintTiles,
+  mobHpNow, mobKeyOf, mobRespawnDelayMs, visibleMobs, type MobState,
 } from "@/lib/worldbox/combat";
 import { advanceWalkPhase, attackSwingAngle, damp, moveLean, stepBeatIndex, walkBob, walkSquashY } from "@/lib/worldbox/anim";
 import {
@@ -53,7 +53,7 @@ import {
 } from "@/lib/worldbox/tiles";
 import { CROPS, ITEMS, itemById } from "@/lib/worldbox/items";
 import { countItem, type ItemSlot, type PlayerProfile, type SlotRef } from "@/lib/worldbox/profile";
-import { loadDungeonTiles, loadFarmSprites, loadLobbySprites, loadTextures } from "@/lib/worldbox/textures";
+import { loadDungeonTiles, loadFarmSprites, loadLobbySprites, loadMobSprites, loadTextures } from "@/lib/worldbox/textures";
 import { isStickTouch, stickBase, stickVector } from "@/lib/worldbox/stick";
 import {
   bgmSceneFor, loadWbSoundSettings, playWbSe, saveWbSoundSettings, seForFxBurst, setWbBgmScene,
@@ -163,32 +163,32 @@ const NATION_ERROR_LABEL: Record<string, string> = {
 };
 
 /** タイル行為の失敗ラベル（断片のみ）。 */
-/** モブの描画色（本体色）と特徴。スプライトの代わりに図形で描くための表。 */
-const MOB_STYLE: Record<string, { body: string; sub?: string; feature?: "ears" | "snout" | "comb" | "horns" | "shell" | "wings" | "blob" | "bones" }> = {
-  mouse: { body: "#9a8f85", feature: "ears" },
-  chicken: { body: "#f2ede2", sub: "#e2483a", feature: "comb" },
-  rabbit: { body: "#e8e2d6", feature: "ears" },
-  frog: { body: "#69a84f", feature: "blob" },
-  crab: { body: "#d96b4a", feature: "shell" },
-  bee: { body: "#e8c33c", sub: "#4a3b28", feature: "wings" },
-  slime: { body: "#6fc46a", feature: "blob" },
-  pig: { body: "#e8a0b4", feature: "snout" },
-  sheep: { body: "#ddd6c8", feature: "blob" },
-  cow: { body: "#efe9dd", sub: "#6b543f", feature: "horns" },
-  deer: { body: "#b0824f", feature: "horns" },
-  horse: { body: "#8a6844", feature: "ears" },
-  boar: { body: "#7a5c40", feature: "snout" },
-  wolf: { body: "#8d939e", feature: "ears" },
-  spider: { body: "#4c4453", feature: "blob" },
-  skeleton: { body: "#e9e6da", feature: "bones" },
-  bear: { body: "#6f5138", feature: "ears" },
-  golem: { body: "#8d9291", feature: "shell" },
-  treant: { body: "#5d7a3c", sub: "#7a5c40", feature: "horns" },
-  sea_serpent: { body: "#3f7f9e", feature: "blob" },
-  giant_golem: { body: "#7c8382", feature: "shell" },
-  giant: { body: "#c9a186", feature: "blob" },
-  ancient_turtle: { body: "#5f7f5a", feature: "shell" },
-  world_dragon: { body: "#7a4a8c", feature: "wings" },
+/** モブの色（被弾/死亡エフェクト用）。描画本体は素材スプライト（MOB_SPRITE）が正で、これは色だけを持つ。 */
+const MOB_STYLE: Record<string, { body: string }> = {
+  mouse: { body: "#9a8f85" },
+  chicken: { body: "#f2ede2" },
+  rabbit: { body: "#e8e2d6" },
+  frog: { body: "#69a84f" },
+  crab: { body: "#d96b4a" },
+  bee: { body: "#e8c33c" },
+  slime: { body: "#6fc46a" },
+  pig: { body: "#e8a0b4" },
+  sheep: { body: "#ddd6c8" },
+  cow: { body: "#efe9dd" },
+  deer: { body: "#b0824f" },
+  horse: { body: "#8a6844" },
+  boar: { body: "#7a5c40" },
+  wolf: { body: "#8d939e" },
+  spider: { body: "#4c4453" },
+  skeleton: { body: "#e9e6da" },
+  bear: { body: "#6f5138" },
+  golem: { body: "#8d9291" },
+  treant: { body: "#5d7a3c" },
+  sea_serpent: { body: "#3f7f9e" },
+  giant_golem: { body: "#7c8382" },
+  giant: { body: "#c9a186" },
+  ancient_turtle: { body: "#5f7f5a" },
+  world_dragon: { body: "#7a4a8c" },
 };
 /** モブ被弾/死亡エフェクトの色（本体色に寄せる）。 */
 const MOB_FX_COLOR: Record<string, string> = Object.fromEntries(
@@ -795,7 +795,7 @@ export default function WorldBoxClient() {
         return;
       }
       const next = { ...mobStatesRef.current };
-      if (data.dead) next[key] = { hp: 0, deadUntil: Date.now() + MOB_RESPAWN_MS };
+      if (data.dead) next[key] = { hp: 0, deadUntil: Date.now() + MOB_RESPAWN_MS + mobRespawnDelayMs(key) };
       else if (typeof data.hp === "number") next[key] = { hp: data.hp };
       mobStatesRef.current = next;
       fxEventsRef.current.push({
@@ -871,6 +871,7 @@ export default function WorldBoxClient() {
     const dungeon = loadDungeonTiles();
     const lobbySprites = loadLobbySprites();
     const farmSprites = loadFarmSprites();
+    const mobSprites = loadMobSprites();
     // アイテムアイコン（設置ブロックの描画用。アイコンの無いアイテムは平色）
     const itemIcons: Record<string, HTMLImageElement> = {};
     for (const item of ITEMS) {
@@ -2197,10 +2198,6 @@ export default function WorldBoxClient() {
       const drawMob = (placed: PlacedMob, r: MobRender, hpFrac: number) => {
         const def = mobById(placed.mobId);
         if (!def) return;
-        const style = MOB_STYLE[def.id] ?? {
-          body: def.temperament === "hostile" ? "#a04a4a" : "#b8b0a2",
-          feature: "blob" as const,
-        };
         const sizePx = TILE * Math.max(1, placed.size) * 0.94;
         const bob = walkBob(r.phase) * TILE * 0.045;
         const cxp = toScreenX(r.wx) + r.kx;
@@ -2208,6 +2205,9 @@ export default function WorldBoxClient() {
         const cy = baseY - bob;
         const flash = now - r.flashAt < 130;
         const pop = popScale(popProgress(r.seenAt, now));
+        const w = sizePx;
+        const h = sizePx;
+        const by = baseY - h;
         ctx.save();
         if (pop !== 1) {
           ctx.translate(cxp, baseY);
@@ -2217,95 +2217,41 @@ export default function WorldBoxClient() {
         // 影
         ctx.fillStyle = "rgba(20,26,20,0.25)";
         ctx.beginPath();
-        ctx.ellipse(cxp, baseY + sizePx * 0.30, sizePx * 0.34, sizePx * 0.12, 0, 0, Math.PI * 2);
+        ctx.ellipse(cxp, baseY + sizePx * 0.02, sizePx * 0.34, sizePx * 0.12, 0, 0, Math.PI * 2);
         ctx.fill();
-        // 本体（丸みのある塊。特徴は耳・鼻・トサカ・角・甲羅・羽・骨で描き分ける）
-        const w = sizePx * 0.76;
-        const h = sizePx * 0.60;
-        const by = cy - h / 2;
-        ctx.fillStyle = flash ? "#ffffff" : style.body;
-        ctx.beginPath();
-        ctx.ellipse(cxp, cy, w / 2, h / 2, 0, 0, Math.PI * 2);
-        ctx.fill();
-        if (style.sub && !flash) {
-          ctx.fillStyle = style.sub;
-          ctx.globalAlpha = 0.55;
+        // 本体: 素材スプライト（16×16、ピクセル固定・足元基準・向き反転）
+        const spriteSrc = MOB_SPRITE[def.id];
+        const img = spriteSrc ? mobSprites[def.id] : undefined;
+        ctx.imageSmoothingEnabled = false;
+        if (texReady(img)) {
+          const dx = Math.round(cxp - w / 2);
+          const dy = Math.round(cy - h / 2);
+          const dw = Math.round(w);
+          const dh = Math.round(h);
+          // 被弾フラッシュは filter で白寄せする（オフスクリーン生成はしない）
+          if (flash) ctx.filter = "brightness(2.8) saturate(0.2)";
+          if (r.face < 0) {
+            ctx.save();
+            ctx.translate(dx + dw, 0);
+            ctx.scale(-1, 1);
+            ctx.drawImage(img, 0, dy, dw, dh);
+            ctx.restore();
+          } else {
+            ctx.drawImage(img, dx, dy, dw, dh);
+          }
+          if (flash) ctx.filter = "none";
+        } else if (MOB_SPRITE_FALLBACK.has(def.id) || spriteSrc) {
+          // 明示フォールバック種（素材なし）と、素材の読み込み完了までの間の最小限の図形。
+          ctx.fillStyle = flash ? "#ffffff" : (MOB_STYLE[def.id]?.body ?? (def.temperament === "hostile" ? "#a04a4a" : "#b8b0a2"));
           ctx.beginPath();
-          ctx.ellipse(cxp - w * 0.16, cy + h * 0.08, w * 0.20, h * 0.24, 0, 0, Math.PI * 2);
-          ctx.ellipse(cxp + w * 0.22, cy - h * 0.10, w * 0.13, h * 0.16, 0, 0, Math.PI * 2);
+          ctx.ellipse(cxp, cy, w * 0.38, h * 0.30, 0, 0, Math.PI * 2);
           ctx.fill();
-          ctx.globalAlpha = 1;
-        }
-        ctx.fillStyle = flash ? "#ffffff" : style.body;
-        if (style.feature === "ears") {
+          ctx.fillStyle = def.temperament === "hostile" && !flash ? "#c22e2e" : "#26221e";
           for (const s of [-1, 1]) {
             ctx.beginPath();
-            ctx.ellipse(cxp + s * w * 0.26, by - h * 0.06, w * 0.10, h * 0.20, s * 0.25, 0, Math.PI * 2);
+            ctx.arc(cxp + r.face * w * 0.08 + s * w * 0.11, cy - h * 0.04, Math.max(1.8, sizePx * 0.045), 0, Math.PI * 2);
             ctx.fill();
           }
-        } else if (style.feature === "horns") {
-          ctx.strokeStyle = flash ? "#ffffff" : "#e8e0cc";
-          ctx.lineWidth = Math.max(2, sizePx * 0.045);
-          for (const s of [-1, 1]) {
-            ctx.beginPath();
-            ctx.arc(cxp + s * w * 0.30, by + h * 0.02, w * 0.13, Math.PI * (s > 0 ? 1.15 : 0.55), Math.PI * (s > 0 ? 1.85 : 1.45));
-            ctx.stroke();
-          }
-        } else if (style.feature === "comb") {
-          ctx.fillStyle = flash ? "#ffffff" : (style.sub ?? "#e2483a");
-          for (const o of [-0.14, 0, 0.14]) {
-            ctx.beginPath();
-            ctx.arc(cxp + o * w, by + h * 0.02, w * 0.075, 0, Math.PI * 2);
-            ctx.fill();
-          }
-          // くちばし
-          ctx.fillStyle = flash ? "#ffffff" : "#e8a33c";
-          ctx.beginPath();
-          ctx.ellipse(cxp + r.face * w * 0.30, cy + h * 0.05, w * 0.10, h * 0.09, 0, 0, Math.PI * 2);
-          ctx.fill();
-        } else if (style.feature === "snout") {
-          ctx.fillStyle = flash ? "#ffffff" : "rgba(255,255,255,0.35)";
-          ctx.beginPath();
-          ctx.ellipse(cxp + r.face * w * 0.14, cy + h * 0.10, w * 0.17, h * 0.15, 0, 0, Math.PI * 2);
-          ctx.fill();
-        } else if (style.feature === "shell") {
-          ctx.strokeStyle = "rgba(30,30,30,0.28)";
-          ctx.lineWidth = Math.max(1.5, sizePx * 0.03);
-          for (const rr of [0.30, 0.20]) {
-            ctx.beginPath();
-            ctx.ellipse(cxp, cy, w * rr, h * rr, 0, 0, Math.PI * 2);
-            ctx.stroke();
-          }
-        } else if (style.feature === "wings") {
-          const flap = Math.sin(r.phase * 2.2) * 0.35;
-          ctx.fillStyle = flash ? "#ffffff" : "rgba(240,240,235,0.75)";
-          for (const s of [-1, 1]) {
-            ctx.beginPath();
-            ctx.ellipse(cxp + s * w * 0.52, cy - h * 0.12 + flap * h * 0.2, w * 0.20, h * 0.13, s * (0.5 + flap), 0, Math.PI * 2);
-            ctx.fill();
-          }
-        } else if (style.feature === "bones") {
-          ctx.strokeStyle = "rgba(70,66,58,0.5)";
-          ctx.lineWidth = Math.max(1.5, sizePx * 0.03);
-          for (const o of [-0.16, 0, 0.16]) {
-            ctx.beginPath();
-            ctx.moveTo(cxp + o * w, cy - h * 0.22);
-            ctx.lineTo(cxp + o * w, cy + h * 0.22);
-            ctx.stroke();
-          }
-        } else {
-          // blob: 光沢
-          ctx.fillStyle = "rgba(255,255,255,0.35)";
-          ctx.beginPath();
-          ctx.ellipse(cxp - w * 0.16, cy - h * 0.18, w * 0.14, h * 0.11, -0.5, 0, Math.PI * 2);
-          ctx.fill();
-        }
-        // 目（向き側に寄せる）
-        ctx.fillStyle = def.temperament === "hostile" && !flash ? "#c22e2e" : "#26221e";
-        for (const s of [-1, 1]) {
-          ctx.beginPath();
-          ctx.arc(cxp + r.face * w * 0.10 + s * w * 0.13, cy - h * 0.06, Math.max(1.8, sizePx * 0.045), 0, Math.PI * 2);
-          ctx.fill();
         }
         ctx.restore();
         // HP バー（傷ついた個体だけ）
