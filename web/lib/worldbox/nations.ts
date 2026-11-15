@@ -4,7 +4,9 @@
 // するチェビシェフ半径 TERRITORY_RADIUS の正方形で、他国の領地とは重ならない。
 // 状態遷移（建国・参加・離脱・解散）はここに集約し、API ルートは保存と認証だけ
 // を担う。地形は lib/worldbox/mapgen の決定的マップを参照する。
-import { MAP_H, MAP_W, isSolidMapTile, mapTileAt, type TopDownMap } from "./mapgen";
+import {
+  MAP_H, MAP_W, T_DIRT, T_GRASS, T_SAND, isSolidMapTile, mapTileAt, type TopDownMap,
+} from "./mapgen";
 import { presenceIdFor } from "./presence";
 
 /** 領地の半径（チェビシェフ距離）。首都を中心に (2R+1)×(2R+1) が領地。 */
@@ -218,6 +220,180 @@ export function applyLeave(state: NationsState, ownerKey: string): NationActionR
   return { ok: true, state: { nations: state.nations, members }, disbanded: false };
 }
 
+// ---------- 建物と繁栄度 ----------
+
+export type BuildingType = "house" | "farm" | "tower";
+
+export const BUILDING_TYPES: readonly BuildingType[] = ["house", "farm", "tower"];
+
+/** 建物1棟が繁栄度に与える値。 */
+export const BUILDING_PROSPERITY: Record<BuildingType, number> = { house: 3, farm: 2, tower: 2 };
+/** 国民1人あたりの繁栄度。 */
+export const PROSPERITY_PER_MEMBER = 5;
+/** 建築上限の基礎値と、国民1人あたりの追加枠。 */
+export const BUILDING_CAP_BASE = 10;
+export const BUILDING_CAP_PER_MEMBER = 10;
+
+export type Building = {
+  nationId: string;
+  type: BuildingType;
+  /** 建築者の不透明 ID（presenceIdFor と同じ方式）。 */
+  by: string;
+  at: number;
+};
+
+/** "x,y" → 建物。キーが座標を兼ねる。 */
+export type BuildingsMap = Record<string, Building>;
+
+/** 建てられる地形（草・土・砂。水・岩・木には建てられない）。 */
+const BUILDABLE_TERRAIN: ReadonlySet<number> = new Set([T_GRASS, T_DIRT, T_SAND]);
+
+export function emptyBuildings(): BuildingsMap {
+  return {};
+}
+
+export function buildingKey(x: number, y: number): string {
+  return `${x},${y}`;
+}
+
+export function parseBuildingKey(key: string): { x: number; y: number } | null {
+  const m = /^(-?\d+),(-?\d+)$/.exec(key);
+  if (!m) return null;
+  const x = Number(m[1]);
+  const y = Number(m[2]);
+  if (x < 0 || y < 0 || x >= MAP_W || y >= MAP_H) return null;
+  return { x, y };
+}
+
+export function isBuildingType(raw: unknown): raw is BuildingType {
+  return raw === "house" || raw === "farm" || raw === "tower";
+}
+
+/** その国の建築上限（基礎値 + 国民数 × 追加枠）。 */
+export function buildingCap(memberCount: number): number {
+  return BUILDING_CAP_BASE + BUILDING_CAP_PER_MEMBER * Math.max(0, memberCount);
+}
+
+/** その国の建物数。 */
+export function buildingCount(buildings: BuildingsMap, nationId: string): number {
+  let n = 0;
+  for (const b of Object.values(buildings)) if (b.nationId === nationId) n++;
+  return n;
+}
+
+/** 繁栄度: 建物の合計 + 国民数 × PROSPERITY_PER_MEMBER。 */
+export function prosperityOf(buildings: BuildingsMap, nationId: string, memberCount: number): number {
+  let score = PROSPERITY_PER_MEMBER * Math.max(0, memberCount);
+  for (const b of Object.values(buildings)) {
+    if (b.nationId === nationId) score += BUILDING_PROSPERITY[b.type];
+  }
+  return score;
+}
+
+export type BuildResult =
+  | { ok: true; buildings: BuildingsMap; building: Building }
+  | { ok: false; error: string };
+
+function checkedTile(xRaw: unknown, yRaw: unknown): { x: number; y: number } | null {
+  if (typeof xRaw !== "number" || typeof yRaw !== "number") return null;
+  if (!Number.isFinite(xRaw) || !Number.isFinite(yRaw)) return null;
+  const x = Math.floor(xRaw);
+  const y = Math.floor(yRaw);
+  if (x < 0 || y < 0 || x >= MAP_W || y >= MAP_H) return null;
+  return { x, y };
+}
+
+/**
+ * 建築: 自国の領地内で、歩ける地形（草・土・砂）にだけ建てられる。
+ * 首都タイル・既存建物の上には建てられず、国ごとの上限がある。
+ */
+export function applyBuild(
+  state: NationsState,
+  buildings: BuildingsMap,
+  ownerKey: string,
+  map: TopDownMap,
+  typeRaw: unknown,
+  xRaw: unknown,
+  yRaw: unknown,
+  now: number,
+): BuildResult {
+  if (!isBuildingType(typeRaw)) return { ok: false, error: "invalid_type" };
+  const mine = state.members[ownerKey];
+  if (!mine) return { ok: false, error: "not_in_nation" };
+  const tile = checkedTile(xRaw, yRaw);
+  if (!tile) return { ok: false, error: "tile_blocked" };
+  const owner = territoryOwnerAt(Object.values(state.nations), tile.x, tile.y);
+  if (!owner || owner.id !== mine.nationId) return { ok: false, error: "not_your_territory" };
+  const nation = state.nations[mine.nationId];
+  if (nation && nation.capital.x === tile.x && nation.capital.y === tile.y) {
+    return { ok: false, error: "tile_blocked" };
+  }
+  if (!BUILDABLE_TERRAIN.has(mapTileAt(map, tile.x, tile.y))) return { ok: false, error: "tile_blocked" };
+  const key = buildingKey(tile.x, tile.y);
+  if (buildings[key]) return { ok: false, error: "tile_blocked" };
+  const counts = memberCounts(state);
+  if (buildingCount(buildings, mine.nationId) >= buildingCap(counts[mine.nationId] ?? 0)) {
+    return { ok: false, error: "cap_reached" };
+  }
+  const building: Building = { nationId: mine.nationId, type: typeRaw, by: presenceIdFor(ownerKey), at: now };
+  return { ok: true, buildings: { ...buildings, [key]: building }, building };
+}
+
+/** 取り壊し: 自国の建物のみ、王・大臣だけが行える。 */
+export function applyDemolish(
+  state: NationsState,
+  buildings: BuildingsMap,
+  ownerKey: string,
+  xRaw: unknown,
+  yRaw: unknown,
+): BuildResult {
+  const mine = state.members[ownerKey];
+  if (!mine) return { ok: false, error: "not_in_nation" };
+  if (mine.role !== "king" && mine.role !== "minister") return { ok: false, error: "forbidden" };
+  const tile = checkedTile(xRaw, yRaw);
+  if (!tile) return { ok: false, error: "tile_blocked" };
+  const key = buildingKey(tile.x, tile.y);
+  const target = buildings[key];
+  if (!target) return { ok: false, error: "tile_blocked" };
+  if (target.nationId !== mine.nationId) return { ok: false, error: "forbidden" };
+  const next = { ...buildings };
+  delete next[key];
+  return { ok: true, buildings: next, building: target };
+}
+
+/** 解散した国の建物をすべて取り除く（カスケード）。 */
+export function removeNationBuildings(buildings: BuildingsMap, nationId: string): BuildingsMap {
+  const next: BuildingsMap = {};
+  for (const [key, b] of Object.entries(buildings)) {
+    if (b.nationId !== nationId) next[key] = b;
+  }
+  return next;
+}
+
+function parseBuilding(raw: unknown): Building | null {
+  if (!raw || typeof raw !== "object") return null;
+  const v = raw as Record<string, unknown>;
+  if (typeof v.nationId !== "string" || v.nationId.length === 0) return null;
+  if (!isBuildingType(v.type)) return null;
+  if (typeof v.at !== "number" || !Number.isFinite(v.at)) return null;
+  return { nationId: v.nationId, type: v.type, by: typeof v.by === "string" ? v.by : "", at: v.at };
+}
+
+/** bot_kv の "buildings" 値から建物マップを復元する。壊れた要素・存在しない国の建物は落とす。 */
+export function parseBuildings(raw: unknown, validNationIds?: ReadonlySet<string>): BuildingsMap {
+  const out: BuildingsMap = {};
+  const rec = asRecord(raw);
+  if (!rec) return out;
+  for (const [key, value] of Object.entries(rec)) {
+    if (!parseBuildingKey(key)) continue;
+    const building = parseBuilding(value);
+    if (!building) continue;
+    if (validNationIds && !validNationIds.has(building.nationId)) continue;
+    out[key] = building;
+  }
+  return out;
+}
+
 // ---------- 保存形式 ----------
 
 function asRecord(raw: unknown): Record<string, unknown> | null {
@@ -281,20 +457,41 @@ export type NationView = {
   color: string;
   capital: { x: number; y: number };
   members: number;
+  /** 繁栄度（建物 + 国民数から算出）。 */
+  prosperity: number;
   /** 王の不透明 ID（presenceIdFor と同じ方式）。 */
   kingId: string;
   createdAt: number;
 };
 
+/** クライアント描画・当たり判定用の建物（建築者と時刻は出さない）。 */
+export type BuildingView = {
+  x: number;
+  y: number;
+  nationId: string;
+  type: BuildingType;
+};
+
 export type NationsResponse = {
   nations: NationView[];
+  /** 全建物（描画・当たり判定用）。 */
+  buildings: BuildingView[];
   me: { nationId: string; role: NationRole } | null;
   /** プレゼンス ID → 所属国の色（他プレイヤーの名前表示に色ドットを付ける用）。 */
   playerNations: Record<string, { nationId: string; color: string }>;
   loggedIn: boolean;
 };
 
-export function nationViews(state: NationsState): NationView[] {
+export function buildingViews(buildings: BuildingsMap): BuildingView[] {
+  const out: BuildingView[] = [];
+  for (const [key, b] of Object.entries(buildings)) {
+    const pos = parseBuildingKey(key);
+    if (pos) out.push({ x: pos.x, y: pos.y, nationId: b.nationId, type: b.type });
+  }
+  return out.sort((a, b) => a.y - b.y || a.x - b.x);
+}
+
+export function nationViews(state: NationsState, buildings: BuildingsMap = emptyBuildings()): NationView[] {
   const counts = memberCounts(state);
   return Object.values(state.nations)
     .sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id))
@@ -304,6 +501,7 @@ export function nationViews(state: NationsState): NationView[] {
       color: n.color,
       capital: { ...n.capital },
       members: counts[n.id] ?? 0,
+      prosperity: prosperityOf(buildings, n.id, counts[n.id] ?? 0),
       kingId: presenceIdFor(n.kingKey),
       createdAt: n.createdAt,
     }));
@@ -318,10 +516,15 @@ export function playerNationMap(state: NationsState): Record<string, { nationId:
   return out;
 }
 
-export function buildNationsResponse(state: NationsState, selfKey: string | null): NationsResponse {
+export function buildNationsResponse(
+  state: NationsState,
+  selfKey: string | null,
+  buildings: BuildingsMap = emptyBuildings(),
+): NationsResponse {
   const mine = selfKey ? state.members[selfKey] : undefined;
   return {
-    nations: nationViews(state),
+    nations: nationViews(state, buildings),
+    buildings: buildingViews(buildings),
     me: mine ? { nationId: mine.nationId, role: mine.role } : null,
     playerNations: playerNationMap(state),
     loggedIn: selfKey !== null,

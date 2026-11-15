@@ -55,11 +55,13 @@ async function loadBundle(files, exportNames) {
 const wb = await loadBundle(
   ["worldbox/rng.ts", "worldbox/mapgen.ts", "worldbox/presence.ts", "worldbox/nations.ts"],
   [
-    "MAP_W", "MAP_H", "T_GRASS", "T_WATER", "generateMap",
+    "MAP_W", "MAP_H", "T_GRASS", "T_WATER", "T_DIRT", "T_SAND", "T_TREE", "T_ROCK", "generateMap", "mapTileAt",
     "TERRITORY_RADIUS", "NATION_PALETTE", "emptyNationsState", "validateNationName", "isNameTaken",
     "pickNationColor", "capitalFits", "findCapitalTile", "territoryOwnerAt", "memberCounts",
     "applyFound", "applyJoin", "applyLeave", "parseNationsState", "nationViews", "playerNationMap",
     "buildNationsResponse",
+    "emptyBuildings", "buildingKey", "buildingCap", "buildingCount", "prosperityOf",
+    "applyBuild", "applyDemolish", "removeNationBuildings", "parseBuildings", "buildingViews",
   ],
 );
 
@@ -216,6 +218,149 @@ test("nations: 表示用ビューの人数とプレイヤー色マップ", () =>
   assert.deepEqual(res.me, { nationId: founded.nation.id, role: "citizen" });
   assert.equal(res.loggedIn, true);
   assert.equal(wb.buildNationsResponse(joined.state, null).loggedIn, false);
+});
+
+// ---------- 建物と繁栄度 ----------
+
+test("buildings: 建築の検証マトリクス（所属・種類・領地・地形・占有・首都）", () => {
+  const map = fakeMap(wb.T_GRASS, (t) => {
+    t[64 * 128 + 66] = wb.T_WATER;
+    t[64 * 128 + 67] = wb.T_TREE;
+    t[64 * 128 + 68] = wb.T_ROCK;
+    t[64 * 128 + 69] = wb.T_DIRT;
+    t[64 * 128 + 70] = wb.T_SAND;
+  });
+  const founded = wb.applyFound(wb.emptyNationsState(), KING_A, "あご王国", map, 1000);
+  const state = founded.state;
+  const none = wb.emptyBuildings();
+
+  // 未所属・不正な種類
+  assert.equal(wb.applyBuild(state, none, USER_C, map, "house", 65, 64, 1).error, "not_in_nation");
+  assert.equal(wb.applyBuild(state, none, KING_A, map, "castle", 65, 64, 1).error, "invalid_type");
+  assert.equal(wb.applyBuild(state, none, KING_A, map, null, 65, 64, 1).error, "invalid_type");
+  // 領地外と他国の領地
+  assert.equal(wb.applyBuild(state, none, KING_A, map, "house", 64, 40, 1).error, "not_your_territory");
+  const second = wb.applyFound(state, USER_B, "二国", map, 2000);
+  assert.equal(second.ok, true);
+  assert.equal(
+    wb.applyBuild(second.state, none, KING_A, map, "house", second.nation.capital.x, second.nation.capital.y, 1).error,
+    "not_your_territory",
+  );
+  // 首都・水・木・岩には建てられない
+  assert.equal(wb.applyBuild(state, none, KING_A, map, "house", 64, 64, 1).error, "tile_blocked");
+  assert.equal(wb.applyBuild(state, none, KING_A, map, "house", 66, 64, 1).error, "tile_blocked");
+  assert.equal(wb.applyBuild(state, none, KING_A, map, "house", 67, 64, 1).error, "tile_blocked");
+  assert.equal(wb.applyBuild(state, none, KING_A, map, "house", 68, 64, 1).error, "tile_blocked");
+  // 範囲外・非数値の座標
+  assert.equal(wb.applyBuild(state, none, KING_A, map, "house", 999, 64, 1).error, "tile_blocked");
+  assert.equal(wb.applyBuild(state, none, KING_A, map, "house", "65", 64, 1).error, "tile_blocked");
+  // 草・土・砂には建てられる
+  const onGrass = wb.applyBuild(state, none, KING_A, map, "house", 65, 64, 1);
+  assert.equal(onGrass.ok, true);
+  assert.equal(onGrass.building.nationId, founded.nation.id);
+  assert.equal(onGrass.building.type, "house");
+  assert.equal(wb.applyBuild(state, none, KING_A, map, "farm", 69, 64, 1).ok, true);
+  assert.equal(wb.applyBuild(state, none, KING_A, map, "tower", 70, 64, 1).ok, true);
+  // 既存建物の上には建てられない
+  assert.equal(wb.applyBuild(state, onGrass.buildings, KING_A, map, "farm", 65, 64, 2).error, "tile_blocked");
+});
+
+test("buildings: 建築上限は 10 + 10 × 国民数", () => {
+  assert.equal(wb.buildingCap(0), 10);
+  assert.equal(wb.buildingCap(1), 20);
+  assert.equal(wb.buildingCap(3), 40);
+  const map = fakeMap(wb.T_GRASS);
+  const founded = wb.applyFound(wb.emptyNationsState(), KING_A, "あご王国", map, 1000);
+  let buildings = wb.emptyBuildings();
+  let placed = 0;
+  outer: for (let y = 59; y <= 70; y++) {
+    for (let x = 59; x <= 70; x++) {
+      if (x === 64 && y === 64) continue;
+      const r = wb.applyBuild(founded.state, buildings, KING_A, map, "house", x, y, placed);
+      assert.equal(r.ok, true, `(${x},${y}) に建てられなかった`);
+      buildings = r.buildings;
+      placed++;
+      if (placed === 20) break outer;
+    }
+  }
+  assert.equal(wb.buildingCount(buildings, founded.nation.id), 20);
+  assert.equal(wb.applyBuild(founded.state, buildings, KING_A, map, "house", 67, 60, 99).error, "cap_reached");
+  // 国民が増えれば上限も増える
+  const joined = wb.applyJoin(founded.state, USER_B, founded.nation.id);
+  assert.equal(wb.applyBuild(joined.state, buildings, KING_A, map, "house", 67, 60, 100).ok, true);
+});
+
+test("buildings: 取り壊しは王・大臣のみ、自国の建物だけ", () => {
+  const nation = { id: "n1", name: "一国", color: wb.NATION_PALETTE[0], kingKey: KING_A, capital: { x: 64, y: 64 }, createdAt: 1 };
+  const state = {
+    nations: { n1: nation },
+    members: {
+      [KING_A]: { nationId: "n1", role: "king" },
+      [USER_B]: { nationId: "n1", role: "minister" },
+      [USER_C]: { nationId: "n1", role: "citizen" },
+    },
+  };
+  const buildings = {
+    "65,64": { nationId: "n1", type: "house", by: "x", at: 1 },
+    "30,30": { nationId: "n2", type: "tower", by: "y", at: 1 },
+  };
+  assert.equal(wb.applyDemolish(state, buildings, "discord:999999999999999999", 65, 64).error, "not_in_nation");
+  assert.equal(wb.applyDemolish(state, buildings, USER_C, 65, 64).error, "forbidden");
+  assert.equal(wb.applyDemolish(state, buildings, KING_A, 30, 30).error, "forbidden");
+  assert.equal(wb.applyDemolish(state, buildings, KING_A, 90, 90).error, "tile_blocked");
+  const byMinister = wb.applyDemolish(state, buildings, USER_B, 65, 64);
+  assert.equal(byMinister.ok, true);
+  assert.equal(byMinister.buildings["65,64"], undefined);
+  assert.ok(byMinister.buildings["30,30"], "他国の建物まで消えている");
+  assert.ok(buildings["65,64"], "元のマップを変更している");
+});
+
+test("buildings: 解散カスケードと保存形式の往復", () => {
+  const buildings = {
+    "65,64": { nationId: "n1", type: "house", by: "x", at: 1 },
+    "66,64": { nationId: "n1", type: "farm", by: "x", at: 2 },
+    "30,30": { nationId: "n2", type: "tower", by: "y", at: 3 },
+  };
+  const after = wb.removeNationBuildings(buildings, "n1");
+  assert.deepEqual(Object.keys(after), ["30,30"]);
+  assert.equal(Object.keys(buildings).length, 3, "元のマップを変更している");
+
+  const restored = wb.parseBuildings(JSON.stringify(buildings), new Set(["n1", "n2"]));
+  assert.deepEqual(restored, buildings);
+  const filtered = wb.parseBuildings(JSON.stringify(buildings), new Set(["n2"]));
+  assert.deepEqual(Object.keys(filtered), ["30,30"]);
+  const dirty = wb.parseBuildings(JSON.stringify({
+    "bad-key": { nationId: "n1", type: "house", by: "x", at: 1 },
+    "1,1": { nationId: "n1", type: "castle", by: "x", at: 1 },
+    "2,2": { nationId: "n1", type: "house", by: "x", at: "時刻でない" },
+    "3,3": { nationId: "n1", type: "house", by: "x", at: 5 },
+  }), new Set(["n1"]));
+  assert.deepEqual(Object.keys(dirty), ["3,3"]);
+  assert.deepEqual(wb.parseBuildings("{壊れた"), {});
+});
+
+test("buildings: 繁栄度 = 家3・畑2・塔2 + 国民5、ビューに載る", () => {
+  const buildings = {
+    "1,1": { nationId: "n1", type: "house", by: "x", at: 1 },
+    "2,1": { nationId: "n1", type: "house", by: "x", at: 1 },
+    "3,1": { nationId: "n1", type: "farm", by: "x", at: 1 },
+    "4,1": { nationId: "n1", type: "tower", by: "x", at: 1 },
+    "5,1": { nationId: "n2", type: "house", by: "y", at: 1 },
+  };
+  assert.equal(wb.prosperityOf(buildings, "n1", 3), 3 * 2 + 2 + 2 + 5 * 3);
+  assert.equal(wb.prosperityOf(buildings, "n2", 1), 3 + 5);
+  assert.equal(wb.prosperityOf(wb.emptyBuildings(), "n1", 2), 10);
+
+  const map = wb.generateMap();
+  const founded = wb.applyFound(wb.emptyNationsState(), KING_A, "あご王国", map, 1000);
+  const joined = wb.applyJoin(founded.state, USER_B, founded.nation.id);
+  const built = wb.applyBuild(joined.state, wb.emptyBuildings(), KING_A, fakeMap(wb.T_GRASS), "house", 65, 64, 5);
+  assert.equal(built.ok, true);
+  const views = wb.nationViews(joined.state, built.buildings);
+  assert.equal(views[0].prosperity, 5 * 2 + 3);
+  const res = wb.buildNationsResponse(joined.state, USER_B, built.buildings);
+  assert.deepEqual(res.buildings, [{ x: 65, y: 64, nationId: founded.nation.id, type: "house" }]);
+  assert.ok(!("by" in res.buildings[0]) && !("at" in res.buildings[0]), "建築者・時刻が露出している");
 });
 
 // ---------- 国家 API ----------
@@ -376,6 +521,84 @@ test("API(nations): 不正なアクションは 400、他オリジンは 403", a
   assert.equal(evil.status, 403);
 });
 
+test("API(nations): 建築→繁栄度・取り壊しの権限・解散で建物も消える", async () => {
+  const cookieD = sessionCookie("200000000000000010", "king-d");
+  const cookieE = sessionCookie("200000000000000011", "user-e");
+  const cookieF = sessionCookie("200000000000000012", "user-f");
+
+  // ゲストの建築は 401
+  assert.equal((await nationsRoute.POST(nationsRequest("POST", null, { action: "build", type: "house", x: 1, y: 1 }))).status, 401);
+
+  const found = await nationsRoute.POST(nationsRequest("POST", cookieD, { action: "found", name: "建築王国" }));
+  assert.equal(found.status, 200);
+  const foundBody = await found.json();
+  const nationId = foundBody.nation.id;
+  const capital = foundBody.nation.capital;
+  assert.equal(foundBody.nation.prosperity, 5, "建国直後の繁栄度は国民1人ぶん");
+
+  // 領地内の建てられるタイルを探す（実マップ準拠）
+  const map = wb.generateMap();
+  const buildable = [];
+  for (let y = capital.y - wb.TERRITORY_RADIUS; y <= capital.y + wb.TERRITORY_RADIUS; y++) {
+    for (let x = capital.x - wb.TERRITORY_RADIUS; x <= capital.x + wb.TERRITORY_RADIUS; x++) {
+      if (x === capital.x && y === capital.y) continue;
+      const t = wb.mapTileAt(map, x, y);
+      if (t === wb.T_GRASS || t === wb.T_DIRT || t === wb.T_SAND) buildable.push({ x, y });
+    }
+  }
+  assert.ok(buildable.length >= 2, "領地内に建てられるタイルが足りない");
+  const [t1, t2] = buildable;
+
+  // エラーコード: 未所属・不正な種類・領地外・首都
+  const noNation = await nationsRoute.POST(nationsRequest("POST", cookieF, { action: "build", type: "house", x: t1.x, y: t1.y }));
+  assert.equal(noNation.status, 409);
+  assert.equal((await noNation.json()).error, "not_in_nation");
+  const badType = await nationsRoute.POST(nationsRequest("POST", cookieD, { action: "build", type: "castle", x: t1.x, y: t1.y }));
+  assert.equal(badType.status, 400);
+  assert.equal((await badType.json()).error, "invalid_type");
+  const outside = await nationsRoute.POST(nationsRequest("POST", cookieD, { action: "build", type: "house", x: 0, y: 0 }));
+  assert.equal(outside.status, 409);
+  assert.equal((await outside.json()).error, "not_your_territory");
+  const onCapital = await nationsRoute.POST(nationsRequest("POST", cookieD, { action: "build", type: "house", x: capital.x, y: capital.y }));
+  assert.equal(onCapital.status, 409);
+  assert.equal((await onCapital.json()).error, "tile_blocked");
+
+  // 建築→ GET に建物と繁栄度が載る
+  const built = await nationsRoute.POST(nationsRequest("POST", cookieD, { action: "build", type: "house", x: t1.x, y: t1.y }));
+  assert.equal(built.status, 200);
+  assert.deepEqual((await built.json()).buildings, [{ x: t1.x, y: t1.y, nationId, type: "house" }]);
+  const view = await (await nationsRoute.GET(nationsRequest("GET", null))).json();
+  const mine = view.nations.find((n) => n.id === nationId);
+  assert.equal(mine.prosperity, 5 + 3);
+  assert.deepEqual(view.buildings, [{ x: t1.x, y: t1.y, nationId, type: "house" }]);
+  // 同じ場所には建てられない
+  const dup = await nationsRoute.POST(nationsRequest("POST", cookieD, { action: "build", type: "farm", x: t1.x, y: t1.y }));
+  assert.equal(dup.status, 409);
+  assert.equal((await dup.json()).error, "tile_blocked");
+
+  // 市民は建てられるが、取り壊しはできない
+  assert.equal((await nationsRoute.POST(nationsRequest("POST", cookieE, { action: "join", nationId }))).status, 200);
+  const citizenBuild = await nationsRoute.POST(nationsRequest("POST", cookieE, { action: "build", type: "farm", x: t2.x, y: t2.y }));
+  assert.equal(citizenBuild.status, 200);
+  const citizenDemolish = await nationsRoute.POST(nationsRequest("POST", cookieE, { action: "demolish", x: t1.x, y: t1.y }));
+  assert.equal(citizenDemolish.status, 403);
+  assert.equal((await citizenDemolish.json()).error, "forbidden");
+
+  // 王は取り壊せる
+  const demolished = await nationsRoute.POST(nationsRequest("POST", cookieD, { action: "demolish", x: t1.x, y: t1.y }));
+  assert.equal(demolished.status, 200);
+  assert.deepEqual((await demolished.json()).buildings, [{ x: t2.x, y: t2.y, nationId, type: "farm" }]);
+
+  // 解散すると残りの建物（市民が建てた畑）も消える
+  assert.equal((await nationsRoute.POST(nationsRequest("POST", cookieE, { action: "leave" }))).status, 200);
+  const disband = await nationsRoute.POST(nationsRequest("POST", cookieD, { action: "leave" }));
+  assert.equal(disband.status, 200);
+  assert.equal((await disband.json()).disbanded, true);
+  const after = await (await nationsRoute.GET(nationsRequest("GET", null))).json();
+  assert.equal(after.nations.some((n) => n.id === nationId), false);
+  assert.deepEqual(after.buildings, []);
+});
+
 // ---------- クライアント配線 ----------
 
 test("クライアント: 国家 API・領地・首都マーカーが配線されている", () => {
@@ -385,4 +608,19 @@ test("クライアント: 国家 API・領地・首都マーカーが配線さ�
   assert.ok(client.includes("drawCapital"), "首都マーカーが無い");
   assert.ok(client.includes("建国"), "建国 UI が無い");
   assert.ok(client.includes("playerNations"), "プレゼンスへの国色付けが無い");
+});
+
+test("クライアント: 建築モード・建物描画・繁栄度が配線されている", () => {
+  const client = fs.readFileSync(path.join(rootDir, "app/games/worldbox/WorldBoxClient.tsx"), "utf8");
+  assert.ok(client.includes("drawBuilding"), "建物の描画が無い");
+  assert.ok(client.includes("buildValidity"), "建築可否のハイライトが無い");
+  assert.ok(client.includes("chooseBuildTool"), "建築ツールの選択が無い");
+  assert.ok(client.includes('action: "build"'), "建築アクションを送っていない");
+  assert.ok(client.includes('action: "demolish"'), "取り壊しアクションを送っていない");
+  assert.ok(client.includes("取り壊し"), "取り壊し UI が無い");
+  assert.ok(client.includes("繁栄度"), "繁栄度の表示が無い");
+  assert.ok(client.includes("prosperity - a.prosperity") || client.includes("b.prosperity - a.prosperity"), "国リストが繁栄度順でない");
+  // 建物は移動の当たり判定に入る
+  assert.ok(client.includes("stepMove(map, player, vel, dt, blockedRef.current)"), "建物が当たり判定に入っていない");
+  assert.ok(client.includes("blockedRef"), "建物の固体集合が無い");
 });
