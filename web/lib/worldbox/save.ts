@@ -3,7 +3,7 @@
 // 「状態 ⇄ JSON 文字列」の変換と検証だけを担う（壊れたデータは null を返す）。
 //
 // v6: セーブは { version: 6, space, x, y, worldReturn }。
-// space はプレイヤーがいる空間（"world" | "lobby" | "tent"）。地形はどの空間も
+// space はプレイヤーがいる空間（"world" | "lobby" | "lobby2" | "lobby3" | "tent"）。地形はどの空間も
 // コードから決定的に作られるので保存しない。worldReturn はロビーへ入る直前
 // のワールド位置で、ロビーを出るとそこへ戻る（無ければ null = スポーン）。
 // v5 以前は破棄する（v5 はロビーが無く空間を持たない。v4 以前は旧マップ時代）。
@@ -39,7 +39,7 @@ function instanceKindOf(space: string): string | null {
 }
 
 function sanitizeSpace(raw: unknown): SaveSpace {
-  if (raw === "lobby" || raw === "tent") return raw;
+  if (raw === "lobby" || raw === "lobby2" || raw === "lobby3" || raw === "tent") return raw;
   if (typeof raw === "string" && instanceKindOf(raw)) return raw;
   return "world";
 }
@@ -50,6 +50,10 @@ function sanitizeSpace(raw: unknown): SaveSpace {
  */
 function clampToSpace(space: SaveSpace, x: number, y: number): { x: number; y: number } {
   if (space === "lobby") return { x: clampPos(x, LOBBY_W), y: clampPos(y, LOBBY_H) };
+  // 階の寸法は lobby-floors.ts の正と一致させる（このファイルは単体で
+  // トランスパイルされるため、cave/ruins/dungeon と同じく数値を直書きする）。
+  if (space === "lobby2") return { x: clampPos(x, 40), y: clampPos(y, 28) }; // LOBBY2_W/H = 40/28
+  if (space === "lobby3") return { x: clampPos(x, 32), y: clampPos(y, 24) }; // LOBBY3_W/H = 32/24
   if (space === "tent") return { x: clampPos(x, TENT_W), y: clampPos(y, TENT_H) };
   if (instanceKindOf(space) === "cave") return { x: clampPos(x, 64), y: clampPos(y, 64) }; // CAVE_W/H = 64
   if (instanceKindOf(space) === "ruins") return { x: clampPos(x, 48), y: clampPos(y, 48) }; // RUINS_W/H = 48

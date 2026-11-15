@@ -165,8 +165,9 @@ def support_action_pages(genre: str) -> list:
     """ジャンルのアクションをセレクト上限（25件）ごとのページに分ける。
 
     general の general_action_pages と同じ方式（セレクトは1つに固定し、
-    ページをボタンでめくる）。自動化・通知ジャンルが34件になったため、
-    support でも25件を超えるジャンルを全件選べるようにする。
+    ページをボタンでめくる）。導線最適化 U2 で全ジャンルが25件以下に
+    なったため現行は全て1ページだが、将来25件を超えた場合の受け皿として
+    機構は残す（tests/test_support_pager.py が合成ジャンルで固定）。
     """
     actions = SUPPORT_ACTIONS_BY_GENRE[genre]
     return [actions[i:i + ACTION_PAGE_SIZE]
@@ -364,6 +365,16 @@ class SupportPanelView(discord.ui.View):
         saved_genre = saved.get("genre")
         self.genre = SUPPORT_GENRE_ALIASES.get(genre or saved_genre, genre or saved_genre)
         self.action = saved.get("value")
+        # ジャンル再編でアクションが別ジャンルへ移った旧ショートカットは、
+        # 保存ジャンルを開いても目的の機能が一覧に出ないため、アクション値から
+        # 現行ジャンルを再導出する（導線最適化 U2: automation 分割・rta 吸収）。
+        if self.action:
+            current = support_genre_for_action(self.action)
+            if current is not None and (
+                self.genre not in SUPPORT_ACTIONS_BY_GENRE
+                or self.action not in [v for _l, v in SUPPORT_ACTIONS_BY_GENRE[self.genre]]
+            ):
+                self.genre = current
         # 保存済みショートカットから開いた場合は、その機能が含まれる
         # ページを初期表示にする（general と同じ配慮）。
         self.action_page = 0

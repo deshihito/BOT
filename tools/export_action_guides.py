@@ -28,12 +28,6 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-# /vc のレジストリ値のうち、パネル側のジャンル表（VOICE_ACTIONS_BY_GENRE）に
-# 載っていないものの寄せ先。echo_status（やまびこ状態）は echo 本体と同じ
-# studio（録音・音声制作）ジャンルの機能なので、そこで数える。
-VC_GENRE_FALLBACK = {"echo_status": "studio"}
-
-
 def _genre_meta(root: str) -> dict[str, tuple[str, str]]:
     """ルートごとのジャンル定義（key -> (表示名, 説明)）を正リストから取る。"""
     if root == "general":
@@ -78,8 +72,7 @@ def build_action_guides() -> dict:
         genres: dict[str, dict] = {}
         for spec in registry.by_root(root):
             if root == "vc":
-                genre_key = vc_genres.get(spec.value) or VC_GENRE_FALLBACK.get(
-                    spec.value, "vc")
+                genre_key = vc_genres.get(spec.value, "vc")
             elif root == "game":
                 genre_key = "games"
             elif root == "help":

@@ -279,6 +279,11 @@ const apiTentUrl = dataUrl(
     .replaceAll('"./mapgen"', JSON.stringify(apiMapgenUrl))
     .replaceAll('"./lobby"', JSON.stringify(apiLobbyUrl)),
 );
+const apiFloorsUrl = dataUrl(
+  transpile("worldbox/lobby-floors.ts")
+    .replaceAll('"./mapgen"', JSON.stringify(apiMapgenUrl))
+    .replaceAll('"./lobby"', JSON.stringify(apiLobbyUrl)),
+);
 const apiSaveUrl = dataUrl(
   transpile("worldbox/save.ts")
     .replaceAll('"./lobby"', JSON.stringify(apiLobbyUrl))
@@ -291,6 +296,7 @@ const apiSaveOnlineUrl = dataUrl(
 const apiStationOnlineUrl = dataUrl(
   transpile("worldbox/station-online.ts")
     .replaceAll('"./lobby"', JSON.stringify(apiLobbyUrl))
+    .replaceAll('"./lobby-floors"', JSON.stringify(apiFloorsUrl))
     .replaceAll('"./tent"', JSON.stringify(apiTentUrl))
     .replaceAll('"./presence-online"', JSON.stringify(apiPresenceOnlineUrl))
     .replaceAll('"./save"', JSON.stringify(apiSaveUrl))

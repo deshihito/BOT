@@ -70,17 +70,21 @@ class GenreDescriptionPolicyTest(unittest.TestCase):
         self.assertEqual(GENERAL_GENRES["make_image"][1], "")
 
     def test_support_genres(self):
-        for genre in ("moderation", "roles", "logs", "automation", "rta"):
+        for genre in ("moderation", "roles", "logs", "automation", "notices", "boardnotify"):
             self.assertEqual(SUPPORT_GENRES[genre][1], "", genre)
         # 導線最適化 S7: 1件ジャンル「言語」「イベント」は吸収され、ジャンル自体が無い
         self.assertNotIn("language", SUPPORT_GENRES)
         self.assertNotIn("event", SUPPORT_GENRES)
+        # 導線最適化 U2: 1件ジャンル「rta」は boardnotify へ吸収され、ジャンル自体が無い
+        self.assertNotIn("rta", SUPPORT_GENRES)
         # サーバーアシスト再編: 「サーバーアシスト」ジャンル自体を廃止した
         self.assertNotIn("assist", SUPPORT_GENRES)
 
     def test_voice_genres(self):
-        for genre in ("connection", "music", "studio", "trigger", "community", "gvc_rooms"):
+        for genre in ("connection", "music", "studio", "trigger", "gvc_rooms"):
             self.assertEqual(VOICE_GENRES[genre][1], "", genre)
+        # 導線最適化 U3: 2件ジャンル「community」は gvc_rooms へ吸収され、ジャンル自体が無い
+        self.assertNotIn("community", VOICE_GENRES)
         self.assertEqual(VOICE_GENRES["tts"][1], "VOICEVOXによるテキスト読み上げ")
         self.assertEqual(VOICE_GENRES["effects"][1], "ボイスチェンジャー")
 

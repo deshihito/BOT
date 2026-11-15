@@ -192,6 +192,9 @@ test("API ルート: 実在検証・距離検証・闘技場式ダメージ・�
   assert.ok(route.includes("playerAttack"), "闘技場式のダメージ計算を使っていない");
   assert.ok(route.includes("storeMobState"), "個体状態を保存していない");
   assert.ok(route.includes("addItem"), "ドロップをプロフィールへ入れていない");
+  // S4: 攻撃は個体単位ロックで直列化し、復活時刻はサーバーの正を返す
+  assert.ok(route.includes("withUserLock(`mob:${key}`"), "攻撃が個体単位で直列化されていない（S4）");
+  assert.ok(route.includes("deadUntil: result.state.deadUntil"), "攻撃応答にサーバーの deadUntil が無い（S4）");
   const online = fs.readFileSync(path.join(rootDir, "lib/worldbox/mobs-online.ts"), "utf8");
   assert.ok(online.includes('"worldbox_mobs"'), "bot_kv 名前空間が違う");
 });
@@ -205,6 +208,10 @@ test("クライアント: モブ描画・タップ攻撃・モーションが配
   assert.ok(client.includes('selDef?.tool === "sword"'), "剣選択時の自由振り分岐が無い");
   assert.ok(client.includes('"/api/worldbox/mobs"'), "攻撃 API を呼んでいない");
   assert.ok(client.includes("refreshMobs"), "個体状態の取得が無い");
+  // S4: 復活時刻はサーバーの deadUntil を使い、ダンジョンの状態も取り直す
+  assert.ok(client.includes("data.deadUntil"), "攻撃応答のサーバー deadUntil を使っていない（S4）");
+  assert.ok(client.includes("dungeonSpace"), "refreshMobs にダンジョン分岐が無い（S4）");
+  assert.ok(client.includes("`${dungeonSpace}#`"), "ダンジョン状態の掃除キーが無い（S4）");
   // モーション: スイング・被弾フラッシュ・ノックバック・出現ポップ・HP バー
   assert.ok(client.includes("flashAt"), "被弾フラッシュが無い");
   assert.ok(client.includes("fleeUntil"), "被弾後の逃げが無い");

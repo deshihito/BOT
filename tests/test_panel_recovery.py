@@ -73,10 +73,10 @@ class CustomIdTest(unittest.TestCase):
         self.assertIn("panel:support:commit", child_ids(SupportPanelView(None, shortcut_mode=True)))
 
     def test_voice_panel(self):
-        # 機能再編: VCルート⇔support自動化 のジャンルワープボタンが常駐
+        # 機能再編: VCルート⇔support通知 のジャンルワープボタンが常駐
         self.assertEqual(child_ids(VoicePanelView(None)),
                          {"panel:vc:genre", "panel:vc:register",
-                          "panel:vc:warp_support_automation"})
+                          "panel:vc:warp_support_notices"})
         self.assertEqual(
             child_ids(VoicePanelView(None, genre="connection")),
             {"panel:vc:genre", "panel:vc:action", "panel:vc:register"},
@@ -97,9 +97,12 @@ class CustomIdTest(unittest.TestCase):
         view.genre = "party"
         view.refresh()
         self.assertIn("panel:game:select", child_ids(view))
-        # ラウンド5で party が25件を超えたため、ジャンル絞り込み時も
-        # ページめくりが出る（ページングの一般化）。
-        self.assertIn("panel:game:page_next", child_ids(view))
+        # 導線最適化 U3: party は word への分割で14件となり1ページに収まるため、
+        # ジャンル絞り込み時のページめくりは出ない（word 16件も同じ）。
+        self.assertNotIn("panel:game:page_next", child_ids(view))
+        view.genre = "word"
+        view.refresh()
+        self.assertNotIn("panel:game:page_next", child_ids(view))
         view = GameHubView(None)
         view.genre = "solo"
         view.refresh()

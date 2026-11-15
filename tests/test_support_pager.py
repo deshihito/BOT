@@ -60,11 +60,30 @@ def make_interaction(user_id=1, guild_id=123):
 
 
 class SupportPagerTest(unittest.TestCase):
-    """本番経路（as_panel_v2 でラップ済み）でのページ遷移を検証する。"""
+    """本番経路（as_panel_v2 でラップ済み）でのページ遷移を検証する。
 
-    GENRE = "automation"  # 33件 → 2ページになるジャンル
+    導線最適化 U2 で実ジャンルは全て25件以下・1ページになったため、
+    ページめくりの回帰は合成の30件ジャンルで検証する（実ジャンルの
+    1ページ化は tests/test_panel_warps.py が固定する）。
+    """
+
+    GENRE = "pager_test"  # 合成30件 → 2ページになるジャンル
 
     def setUp(self):
+        import core.support.panel as panel_mod
+        from cogs.support import SUPPORT_ACTIONS_BY_GENRE as real_by_genre
+        from cogs.support import SUPPORT_GENRES as real_genres
+
+        fake = [(f"テスト機能{i}", f"pager_test_{i}") for i in range(30)]
+        self._patchers = [
+            mock.patch.object(panel_mod, "SUPPORT_ACTIONS_BY_GENRE",
+                              {**real_by_genre, self.GENRE: fake}),
+            mock.patch.object(panel_mod, "SUPPORT_GENRES",
+                              {**real_genres, self.GENRE: ("テスト", "")}),
+        ]
+        for patcher in self._patchers:
+            patcher.start()
+            self.addCleanup(patcher.stop)
         self.pages = support_action_pages(self.GENRE)
         self.assertEqual(len(self.pages), 2)
         self.panel = SupportPanelView(None, genre=self.GENRE)
@@ -117,6 +136,27 @@ class SupportPagerTest(unittest.TestCase):
     def test_prev_at_first_page_stays(self):
         asyncio.run(self.rendered()["prev"].callback(make_interaction()))
         self.assert_page_rendered(0)
+
+
+class StaleGenreShortcutTest(unittest.TestCase):
+    """旧ジャンルで保存されたショートカットを開くと、アクション値から
+    現行ジャンルを再導出すること（導線最適化 U2: automation 分割・rta 吸収）。"""
+
+    def _view_for(self, genre, value):
+        return SupportPanelView(
+            None, shortcut_item={"action": {"genre": genre, "value": value}})
+
+    def test_automation_shortcut_moves_to_notices(self):
+        self.assertEqual(
+            self._view_for("automation", "levelup_notify").genre, "notices")
+
+    def test_rta_shortcut_moves_to_boardnotify(self):
+        self.assertEqual(
+            self._view_for("rta", "sokunuke_settings").genre, "boardnotify")
+
+    def test_current_genre_shortcut_unchanged(self):
+        self.assertEqual(
+            self._view_for("automation", "assist_welcome").genre, "automation")
 
 
 class ShortcutManageDeleteTest(unittest.TestCase):
