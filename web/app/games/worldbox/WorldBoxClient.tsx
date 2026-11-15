@@ -2074,9 +2074,6 @@ export default function WorldBoxClient() {
               borderRadius: 10, border: "1px solid rgba(255,255,255,0.35)", background: "rgba(0,0,0,0.25)",
             }}
           />
-          <p className="muted" style={{ margin: "8px 0 0", fontSize: 12 }}>
-            黄色い丸 = あなた ・ 白い丸 = 他のプレイヤー ・ 色つき四角 = 首都 ・ 小さい点 = 建物
-          </p>
         </div>
       )}
 

@@ -255,12 +255,6 @@ export default function WorldBoxEconomyPanel({ space }: { space: SaveSpace }) {
         {tabBtn("steal", "steal")}
         {tabBtn("bank", "銀行")}
       </div>
-      {!inLobby && (
-        <p className="muted" style={{ margin: "8px 0 0", fontSize: 12 }}>
-          ショップ（売買）はロビーでのみ利用できます。
-        </p>
-      )}
-
       {activeTab === "bag" && (
         <div style={{ marginTop: 6 }}>
           {owned.length === 0 && <p className="muted">かばんは空です</p>}
