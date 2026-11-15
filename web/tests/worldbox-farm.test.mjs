@@ -61,7 +61,7 @@ const inv = await import(invUrl);
 const tilesUrl = bundleModule(
   ["worldbox/rng.ts", "worldbox/mapgen.ts", "worldbox/items.ts", "worldbox/profile.ts", "worldbox/presence.ts", "worldbox/tiles.ts"],
   [
-    "generateMap", "T_GRASS", "T_TREE", "T_ROCK", "T_DIRT", "T_SNOW", "T_SNOW_TREE",
+    "worldTileSource", "mapTileAt", "T_GRASS", "T_TREE", "T_ROCK", "T_DIRT", "T_SNOW", "T_SNOW_TREE",
     "parseProfile", "addItem", "countItem",
     "applyTileAction", "applyPlaceBlock", "applyMineBlock", "tileView", "actionForTile", "tileKey",
     "parseTileOverride", "parseTileOverrides", "isOverrideActive", "TREE_REGROW_MS",
@@ -71,7 +71,7 @@ const T = await import(tilesUrl);
 
 const mapgenUrl = bundleModule(
   ["worldbox/rng.ts", "worldbox/mapgen.ts"],
-  ["generateMap", "MAP_W", "MAP_H"],
+  ["worldTileSource", "WORLD_COORD_LIMIT"],
 );
 
 // ---------- カタログ ----------
@@ -197,11 +197,11 @@ test("インベントリ: 枠の入れ替え（swap）と不正な添字", () =>
 
 // ---------- タイル行為 ----------
 
-const map = T.generateMap();
+const map = T.worldTileSource();
 function findTile(id, startX = 60, startY = 60) {
   for (let y = startY; y < startY + 400; y++) {
     for (let x = startX; x < startX + 400; x++) {
-      if (map.tiles[y * map.width + x] === id) return { x, y };
+      if (T.mapTileAt(map, x, y) === id) return { x, y };
     }
   }
   throw new Error(`tile ${id} not found`);
@@ -363,7 +363,7 @@ const auth = await import(authUrl);
 const presenceBundleUrl = bundleModule(["worldbox/presence.ts"], ["presenceIdFor"]);
 const buildingsBundleUrl = bundleModule(
   ["worldbox/rng.ts", "worldbox/mapgen.ts", "worldbox/presence.ts", "worldbox/buildings.ts"],
-  ["isSpawnPlazaTile"],
+  ["applyBuild"],
 );
 const nationsOnlineStubUrl = dataUrl(`
 export function isNationsEnabled() { return true; }
@@ -496,6 +496,20 @@ test("API(tiles): GET は範囲内の有効な上書きだけを返す", async (
   assert.equal(res.status, 200);
   const data = await res.json();
   assert.deepEqual(Object.keys(data.overrides), ["10,10"]);
+});
+
+test("API(tiles): GET rect は旧境界の外（負座標・2000超）でも上書きを返す", async () => {
+  globalThis.__wbFarmTiles.clear();
+  const entry = JSON.stringify({ tile: 0, stump: true, ownerId: "aa", until: Date.now() + 60_000 });
+  globalThis.__wbFarmTiles.set("-40,-40", entry);
+  globalThis.__wbFarmTiles.set("2005,2005", entry);
+  globalThis.__wbFarmTiles.set("10,10", entry);
+  const neg = await tilesRoute.GET(apiRequest(`${URL_T}?x0=-64&y0=-64&x1=-1&y1=-1`, "GET", null));
+  assert.equal(neg.status, 200);
+  assert.deepEqual(Object.keys((await neg.json()).overrides), ["-40,-40"]);
+  const far = await tilesRoute.GET(apiRequest(`${URL_T}?x0=2000&y0=2000&x1=2100&y1=2100`, "GET", null));
+  assert.equal(far.status, 200);
+  assert.deepEqual(Object.keys((await far.json()).overrides), ["2005,2005"]);
 });
 
 // ---------- クライアント配線 ----------

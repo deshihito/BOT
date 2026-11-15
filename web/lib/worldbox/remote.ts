@@ -3,7 +3,7 @@
 // 位置が飛び飛びになる。ここでは「最新スナップショットからの予測位置」を
 // 目標に、臨界減衰バネで描画位置と描画速度をなめらかに追従させる。
 // 予測から大きく離れた更新（ワープ等）はバネで追わず即座に合わせる。
-import { predictPosition, type PresenceEntry } from "./presence";
+import { predictPosition, type CoordBounds, type PresenceEntry } from "./presence";
 
 /** この距離（タイル）を超える更新はワープとみなして即座に合わせる。 */
 export const REMOTE_SNAP_DISTANCE = 8;
@@ -21,7 +21,7 @@ export type RemoteTrack = {
   rvy: number;
 };
 
-type Bounds = { width: number; height: number };
+type Bounds = CoordBounds;
 
 /** 初めて見えたプレイヤーのトラック（予測位置から始める）。 */
 export function createRemoteTrack(entry: PresenceEntry, now: number, bounds: Bounds): RemoteTrack {

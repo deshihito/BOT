@@ -5,7 +5,7 @@
 // 保存は tiles-online.ts（bot_kv、タイルごとのキー）が担う。
 import { ITEMS, cropById, cropBySeedId, itemById, type ItemDef, type ToolKind } from "./items";
 import {
-  MAP_H, MAP_W, T_DIRT, T_GRASS, T_ROCK, T_SAND, T_SNOW, T_SNOW_TREE, T_TREE,
+  T_DIRT, T_GRASS, T_ROCK, T_SAND, T_SNOW, T_SNOW_TREE, T_TREE, WORLD_COORD_LIMIT,
   mapTileAt, type TopDownMap,
 } from "./mapgen";
 import { addItem, countItem, removeItem, type PlayerProfile } from "./profile";
@@ -73,7 +73,7 @@ export function parseTileKey(key: string): { x: number; y: number } | null {
   if (!m) return null;
   const x = Number(m[1]);
   const y = Number(m[2]);
-  if (x < 0 || y < 0 || x >= MAP_W || y >= MAP_H) return null;
+  if (Math.abs(x) > WORLD_COORD_LIMIT || Math.abs(y) > WORLD_COORD_LIMIT) return null;
   return { x, y };
 }
 
@@ -173,7 +173,7 @@ function checkedTile(xRaw: unknown, yRaw: unknown): { x: number; y: number } | n
   if (!Number.isFinite(xRaw) || !Number.isFinite(yRaw)) return null;
   const x = Math.floor(xRaw);
   const y = Math.floor(yRaw);
-  if (x < 0 || y < 0 || x >= MAP_W || y >= MAP_H) return null;
+  if (Math.abs(x) > WORLD_COORD_LIMIT || Math.abs(y) > WORLD_COORD_LIMIT) return null;
   return { x, y };
 }
 
@@ -317,10 +317,9 @@ export function blockMineTool(def: ItemDef): ToolKind | null {
   return def.mineTool ?? "pickaxe";
 }
 
-/** 設置の文脈（首都・スポーン広場・建物レイヤーはルート側が真値を持つ）。 */
+/** 設置の文脈（ユニオンマーク・建物レイヤーはルート側が真値を持つ）。 */
 export type PlaceBlockContext = {
   onCapital: boolean;
-  onSpawnPlaza: boolean;
   hasBuilding: boolean;
 };
 
@@ -349,7 +348,6 @@ export function applyPlaceBlock(
   const { x, y } = tile;
   const key = tileKey(x, y);
   if (ctx.onCapital) return { ok: false, error: "on_capital" };
-  if (ctx.onSpawnPlaza) return { ok: false, error: "on_spawn" };
   if (ctx.hasBuilding) return { ok: false, error: "tile_blocked" };
   const active = isOverrideActive(current, now) ? current : null;
   if (active?.block) return { ok: false, error: "tile_blocked" };

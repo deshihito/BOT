@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getRequestSession, publicOrigin, sessionOwnerKey } from "@/lib/auth";
-import { MAP_H, MAP_W } from "@/lib/worldbox/mapgen";
+import { rectBounds, worldBounds } from "@/lib/worldbox/mapgen";
 import { LOBBY_H, LOBBY_W } from "@/lib/worldbox/lobby";
 import { isPresenceEnabled, listPresence, putPresence, removePresence } from "@/lib/worldbox/presence-online";
 import { presenceIdFor, sanitizeHeartbeat, sanitizePresenceSpace, selectVisiblePlayers } from "@/lib/worldbox/presence";
@@ -62,7 +62,7 @@ export async function PUT(request: Request) {
     return NextResponse.json({ error: "invalid_request" }, { status: 400, headers: NO_STORE });
   }
   const space = sanitizePresenceSpace((body as { space?: unknown } | null)?.space);
-  const bounds = space === "lobby" ? { width: LOBBY_W, height: LOBBY_H } : { width: MAP_W, height: MAP_H };
+  const bounds = space === "lobby" ? rectBounds(LOBBY_W, LOBBY_H) : worldBounds();
   const heartbeat = sanitizeHeartbeat(body, bounds);
   if (!heartbeat) {
     return NextResponse.json({ error: "invalid_heartbeat" }, { status: 400, headers: NO_STORE });

@@ -1,6 +1,6 @@
 // AGO WORLD BOX 見下ろし型の検証:
-// - マップ生成（決定的・分布・スポーン広場）
-// - 移動と当たり判定（固体で止まる・壁ずり・マップ端）
+// - マップ生成（チャンク式・決定的・分布・緯度帯）
+// - 移動と当たり判定（固体で止まる・壁ずり・境界なし）
 // - プレゼンス純粋ロジック（検証・鮮度・自己除外・上限・デッドレコニング）
 // - プレゼンス API（認証・往復・鮮度・自己除外・退室）
 // - セーブ v6（往復・旧バージョン破棄）
@@ -59,43 +59,90 @@ const wb = await loadBundle(
   [
     "worldbox/rng.ts", "worldbox/mapgen.ts", "worldbox/move.ts", "worldbox/presence.ts",
     "worldbox/lobby.ts", "worldbox/save.ts", "worldbox/save-source.ts", "worldbox/daynight.ts",
+    "worldbox/spawn.ts",
   ],
   [
-    "MAP_W", "MAP_H", "MAP_SEED", "T_GRASS", "T_WATER", "T_SAND", "T_TREE", "T_ROCK", "T_DIRT",
-    "T_SNOW", "T_SNOW_TREE", "MINIMAP_SIZE", "sampleMinimapTiles", "snowBoundaryAt",
-    "generateMap", "isSolidMapTile", "mapTileAt", "mapSpawn",
+    "MAP_SEED", "T_GRASS", "T_WATER", "T_SAND", "T_TREE", "T_ROCK", "T_DIRT",
+    "T_SNOW", "T_SNOW_TREE", "snowBoundaryAt", "SNOW_BASE_Y", "WORLD_COORD_LIMIT",
+    "tileAt", "worldTileSource", "tilesSource", "generateChunk", "CHUNK_SIZE",
+    "rectBounds", "worldBounds", "isSolidMapTile", "mapTileAt",
     "WALK_SPEED", "PLAYER_RADIUS", "stepMove", "canStandAt", "findFreeNear", "circleHitsSolid",
     "PRESENCE_FRESH_MS", "PRESENCE_MAX_PLAYERS", "sanitizeHeartbeat", "parsePresenceEntry",
     "isFreshPresence", "selectVisiblePlayers", "predictPosition", "presenceIdFor",
     "SAVE_VERSION", "serializeSave", "parseSave", "chooseInitialSave", "phaseAtTime",
+    "SPAWN_RADIUS", "pickRandomSpawn", "isSpawnableTile",
   ],
 );
 
 // ---------- マップ生成 ----------
 
-test("mapgen: 同じシードでは完全に同じマップ、別シードでは異なる", () => {
-  const a = wb.generateMap();
-  const b = wb.generateMap(wb.MAP_SEED);
-  assert.deepEqual([...a.tiles], [...b.tiles]);
-  const c = wb.generateMap(42);
-  assert.notDeepEqual([...a.tiles], [...c.tiles]);
-  assert.equal(a.width, 1024);
-  assert.equal(a.height, 1024);
-  assert.equal(a.tiles.length, 1024 * 1024);
+test("mapgen: tileAt は決定的（同座標=同タイル、旧境界外・負座標でも）", () => {
+  for (const [x, y] of [[0, 0], [512, 512], [1023, 1023], [1024, 1024], [5000, -3000], [-2000, 777], [-1, -1]]) {
+    assert.equal(wb.tileAt(x, y), wb.tileAt(x, y), `(${x}, ${y})`);
+    assert.equal(wb.tileAt(x, y), wb.tileAt(x, y, wb.MAP_SEED));
+    const id = wb.tileAt(x, y);
+    assert.ok(id >= wb.T_GRASS && id <= wb.T_SNOW_TREE, `未知のタイル ${id}`);
+  }
+  // 別シードでは地形が変わる
+  let differs = false;
+  for (let y = 0; y < 64 && !differs; y++) {
+    for (let x = 0; x < 64; x++) {
+      if (wb.tileAt(x, y, 42) !== wb.tileAt(x, y)) { differs = true; break; }
+    }
+  }
+  assert.ok(differs, "別シードで地形が変わらない");
 });
 
-test("mapgen: 生成時間の回帰ガード（実測は約130ms、1秒を超えたら劣化）", () => {
-  const t0 = performance.now();
-  wb.generateMap();
-  const ms = performance.now() - t0;
-  assert.ok(ms < 1000, `生成が遅すぎる ${ms.toFixed(0)}ms`);
+test("mapgen: チャンク生成は tileAt の寄せ集めと一致し、決定的", () => {
+  for (const [cx, cy] of [[0, 0], [16, 16], [-3, 7], [40, -12]]) {
+    const a = wb.generateChunk(cx, cy);
+    const b = wb.generateChunk(cx, cy, wb.MAP_SEED);
+    assert.deepEqual([...a.tiles], [...b.tiles]);
+    assert.equal(a.size, wb.CHUNK_SIZE);
+    assert.equal(a.tiles.length, wb.CHUNK_SIZE * wb.CHUNK_SIZE);
+    for (let y = 0; y < wb.CHUNK_SIZE; y++) {
+      for (let x = 0; x < wb.CHUNK_SIZE; x++) {
+        assert.equal(
+          a.tiles[y * wb.CHUNK_SIZE + x],
+          wb.tileAt(cx * wb.CHUNK_SIZE + x, cy * wb.CHUNK_SIZE + y),
+          `chunk(${cx}, ${cy}) の (${x}, ${y})`,
+        );
+      }
+    }
+  }
 });
 
-test("mapgen: タイル分布（草が最大、水・砂・森・岩・土・雪がすべて存在する）", () => {
-  const map = wb.generateMap();
+test("mapgen: 生成時間の回帰ガード（tileAt が参照ループ比で極端に遅くなったら劣化）", () => {
+  // 絶対時間は共有 CPU の競合で荒れるため、同プロセスの参照ループとの
+  // 比で見る（ベースライン比は約 10 倍。40 倍を超えたら桁レベルの劣化）。
+  const N = 512 * 512;
+  let refBest = Infinity;
+  let genBest = Infinity;
+  let acc = 0;
+  for (let run = 0; run < 2; run++) {
+    let t0 = performance.now();
+    let s = 0;
+    for (let i = 0; i < N; i++) s += (i * 2654435761) % 97;
+    refBest = Math.min(refBest, performance.now() - t0);
+    t0 = performance.now();
+    acc = 0;
+    for (let y = 0; y < 512; y++) for (let x = 0; x < 512; x++) acc += wb.tileAt(x, y);
+    genBest = Math.min(genBest, performance.now() - t0);
+    acc += s;
+  }
+  assert.ok(acc > 0);
+  assert.ok(genBest < refBest * 40, `生成が遅すぎる ${genBest.toFixed(0)}ms（参照 ${refBest.toFixed(0)}ms）`);
+});
+
+test("mapgen: タイル分布（原点付近 1024×1024 で旧マップと概ね同じ）", () => {
   const counts = new Map();
-  for (const t of map.tiles) counts.set(t, (counts.get(t) ?? 0) + 1);
-  const total = map.tiles.length;
+  for (let y = 0; y < 1024; y++) {
+    for (let x = 0; x < 1024; x++) {
+      const t = wb.tileAt(x, y);
+      counts.set(t, (counts.get(t) ?? 0) + 1);
+    }
+  }
+  const total = 1024 * 1024;
   const share = (id) => (counts.get(id) ?? 0) / total;
   for (const id of counts.keys()) {
     assert.ok(id >= wb.T_GRASS && id <= wb.T_SNOW_TREE, `未知のタイル ${id}`);
@@ -117,103 +164,72 @@ test("mapgen: タイル分布（草が最大、水・砂・森・岩・土・雪
   assert.ok(share(wb.T_GRASS) > maxOther);
 });
 
-test("mapgen: 雪原は北の帯だけにあり、境界は直線でない", () => {
-  const map = wb.generateMap();
+test("mapgen: 雪原は北の緯度帯だけにあり、境界は直線でない", () => {
   const isSnow = (t) => t === wb.T_SNOW || t === wb.T_SNOW_TREE;
-  // 帯の南限（中心22%＋揺れ26）より南には雪は無い
-  const southLimit = Math.floor(wb.MAP_H * 0.35);
-  for (let y = southLimit; y < wb.MAP_H; y++) {
-    for (let x = 0; x < wb.MAP_W; x++) {
-      assert.ok(!isSnow(map.tiles[y * wb.MAP_W + x]), `南に雪がある (${x}, ${y})`);
+  // 帯の南限（基準緯度＋揺れ26）より南には雪は無い（どの x でも）
+  const southLimit = Math.floor(wb.SNOW_BASE_Y + 40);
+  for (let y = southLimit; y < southLimit + 400; y++) {
+    for (let x = -256; x < 1024; x++) {
+      assert.ok(!isSnow(wb.tileAt(x, y)), `南に雪がある (${x}, ${y})`);
     }
   }
-  // 北端の行には雪がある
+  // 北端の行（y=0）には雪がある
   let northSnow = 0;
-  for (let x = 0; x < wb.MAP_W; x++) if (isSnow(map.tiles[x])) northSnow++;
-  assert.ok(northSnow > wb.MAP_W * 0.3, `北端に雪が少ない ${northSnow}`);
+  for (let x = 0; x < 1024; x++) if (isSnow(wb.tileAt(x, 0))) northSnow++;
+  assert.ok(northSnow > 1024 * 0.3, `北端に雪が少ない ${northSnow}`);
   // 境界は列ごとに揺れる（直線でない）
   let min = Infinity;
   let max = -Infinity;
-  for (let x = 0; x < wb.MAP_W; x++) {
+  for (let x = 0; x < 1024; x++) {
     const b = wb.snowBoundaryAt(wb.MAP_SEED, x);
     if (b < min) min = b;
     if (b > max) max = b;
   }
   assert.ok(max - min > 10, `雪原境界が直線すぎる spread=${(max - min).toFixed(1)}`);
-  assert.ok(min >= wb.MAP_H * 0.22 - 27 && max <= wb.MAP_H * 0.22 + 27, "境界が想定帯から外れている");
+  assert.ok(min >= wb.SNOW_BASE_Y - 27 && max <= wb.SNOW_BASE_Y + 27, "境界が想定帯から外れている");
   // 雪は歩行可、雪の木は固体
   assert.equal(wb.isSolidMapTile(wb.T_SNOW), false);
   assert.equal(wb.isSolidMapTile(wb.T_SNOW_TREE), true);
 });
 
-test("mapgen: 川は全列を横切り、スポーン広場は草地のまま", () => {
-  const map = wb.generateMap();
-  for (let x = 0; x < wb.MAP_W; x++) {
+test("mapgen: 川は全列を横切る", () => {
+  for (let x = 0; x < 1024; x++) {
     let hasWater = false;
-    for (let y = 0; y < wb.MAP_H; y++) {
-      if (map.tiles[y * wb.MAP_W + x] === wb.T_WATER) { hasWater = true; break; }
+    for (let y = 0; y < 1024; y++) {
+      if (wb.tileAt(x, y) === wb.T_WATER) { hasWater = true; break; }
     }
     assert.ok(hasWater, `列 ${x} に水が無い（川が途切れている）`);
   }
 });
 
-test("minimap: 間引きサンプリング（ブロック中心を代表値にする）", () => {
-  const tiles = new Uint8Array(8 * 8).fill(wb.T_GRASS);
-  tiles[2 * 8 + 2] = wb.T_WATER;
-  tiles[2 * 8 + 6] = wb.T_SAND;
-  tiles[6 * 8 + 2] = wb.T_ROCK;
-  tiles[6 * 8 + 6] = wb.T_SNOW;
-  const small = { seed: 0, width: 8, height: 8, tiles };
-  const sampled = wb.sampleMinimapTiles(small, 2);
-  assert.deepEqual([...sampled], [wb.T_WATER, wb.T_SAND, wb.T_ROCK, wb.T_SNOW]);
-  // 実マップ: 256×256 で、最北行に雪、最南行に雪は無い
-  const map = wb.generateMap();
-  const mm = wb.sampleMinimapTiles(map);
-  assert.equal(mm.length, wb.MINIMAP_SIZE * wb.MINIMAP_SIZE);
-  let topSnow = 0;
-  for (let x = 0; x < wb.MINIMAP_SIZE; x++) {
-    const t = mm[x];
-    assert.ok(t >= wb.T_GRASS && t <= wb.T_SNOW_TREE, `未知のタイル ${t}`);
-    if (t === wb.T_SNOW || t === wb.T_SNOW_TREE) topSnow++;
-  }
-  assert.ok(topSnow > 0, "ミニマップ最北行に雪が無い");
-  for (let x = 0; x < wb.MINIMAP_SIZE; x++) {
-    const t = mm[(wb.MINIMAP_SIZE - 1) * wb.MINIMAP_SIZE + x];
-    assert.ok(t !== wb.T_SNOW && t !== wb.T_SNOW_TREE, "ミニマップ最南行に雪がある");
-  }
-});
-
-test("mapgen: スポーン周辺は歩ける草地で、範囲外は岩（固体）", () => {
-  const map = wb.generateMap();
-  const s = wb.mapSpawn(map);
-  assert.equal(wb.mapTileAt(map, Math.floor(s.x), Math.floor(s.y)), wb.T_GRASS);
-  for (let dy = -2; dy <= 2; dy++) {
-    for (let dx = -2; dx <= 2; dx++) {
-      assert.equal(wb.mapTileAt(map, Math.floor(s.x) + dx, Math.floor(s.y) + dy), wb.T_GRASS);
-    }
-  }
-  assert.equal(wb.mapTileAt(map, -1, 0), wb.T_ROCK);
-  assert.equal(wb.mapTileAt(map, 0, wb.MAP_H), wb.T_ROCK);
+test("mapgen: 固体の定義と、有限タイル源の範囲外は岩", () => {
   assert.equal(wb.isSolidMapTile(wb.T_WATER), true);
   assert.equal(wb.isSolidMapTile(wb.T_TREE), true);
   assert.equal(wb.isSolidMapTile(wb.T_ROCK), true);
   assert.equal(wb.isSolidMapTile(wb.T_GRASS), false);
   assert.equal(wb.isSolidMapTile(wb.T_SAND), false);
   assert.equal(wb.isSolidMapTile(wb.T_DIRT), false);
+  const small = wb.tilesSource(0, 8, 8, new Uint8Array(64).fill(wb.T_GRASS));
+  assert.equal(wb.mapTileAt(small, 3, 3), wb.T_GRASS);
+  assert.equal(wb.mapTileAt(small, -1, 0), wb.T_ROCK);
+  assert.equal(wb.mapTileAt(small, 0, 8), wb.T_ROCK);
+  // ワールド源はどこまで行ってもタイルを返す
+  const world = wb.worldTileSource();
+  assert.equal(world.tileAt(123456, -654321), wb.tileAt(123456, -654321));
 });
 
 // ---------- 移動と当たり判定 ----------
 
 function fakeMap(fill, paint) {
   const tiles = new Uint8Array(8 * 8).fill(fill);
-  const map = { seed: 0, width: 8, height: 8, tiles };
   paint?.(tiles);
-  return map;
+  return wb.tilesSource(0, 8, 8, tiles);
 }
 
 test("move: 草地では自由に進み、斜めは等速", () => {
-  const map = wb.generateMap();
-  const s = wb.mapSpawn(map);
+  const map = wb.worldTileSource();
+  const s = { x: 512.5, y: 512.5 };
+  assert.equal(wb.mapTileAt(map, 512, 512), wb.T_GRASS);
   const r = wb.stepMove(map, { x: s.x, y: s.y }, { x: wb.WALK_SPEED, y: 0 }, 0.5);
   assert.ok(Math.abs(r.x - (s.x + wb.WALK_SPEED * 0.5)) < 1e-9);
   assert.equal(r.hitX, false);
@@ -238,7 +254,7 @@ test("move: 水には入れず、手前で止まる（めり込まない）", ()
   assert.equal(wb.canStandAt(map, pos.x, pos.y), true);
 });
 
-test("move: 壁ずり（軸分離で縦だけ進む）とマップ端クランプ", () => {
+test("move: 壁ずり（軸分離で縦だけ進む）と有限空間の端", () => {
   const map = fakeMap(wb.T_GRASS, (t) => {
     for (let y = 0; y < 8; y++) t[y * 8 + 4] = wb.T_ROCK;
   });
@@ -249,6 +265,15 @@ test("move: 壁ずり（軸分離で縦だけ進む）とマップ端クラン�
   const edge = wb.stepMove(map, { x: 0.4, y: 0.4 }, { x: -wb.WALK_SPEED, y: -wb.WALK_SPEED }, 1);
   assert.ok(edge.x >= wb.PLAYER_RADIUS - 1e-9);
   assert.ok(edge.y >= wb.PLAYER_RADIUS - 1e-9);
+});
+
+test("move: ワールドに境界クランプは無い（負座標へも進める）", () => {
+  const open = { seed: 0, tileAt: () => wb.T_GRASS };
+  const r = wb.stepMove(open, { x: 0.5, y: 0.5 }, { x: -wb.WALK_SPEED, y: 0 }, 1);
+  assert.ok(Math.abs(r.x - (0.5 - wb.WALK_SPEED)) < 1e-9, `クランプされている x=${r.x}`);
+  assert.equal(r.hitX, false);
+  const far = wb.stepMove(open, { x: 5000.5, y: -5000.5 }, { x: 0, y: wb.WALK_SPEED }, 1);
+  assert.ok(Math.abs(far.y - (-5000.5 + wb.WALK_SPEED)) < 1e-9);
 });
 
 test("move: findFreeNear は固体の中から立てる場所へ救済する", () => {
@@ -267,7 +292,7 @@ test("move: findFreeNear は固体の中から立てる場所へ救済する", (
 // ---------- プレゼンス純粋ロジック ----------
 
 test("presence: ハートビート検証（補正と却下）", () => {
-  const bounds = { width: 128, height: 128 };
+  const bounds = wb.rectBounds(128, 128);
   const ok = wb.sanitizeHeartbeat({ name: "  ago  ", x: 10, y: 20, vx: 3, vy: -3, face: -1 }, bounds);
   assert.equal(ok.name, "ago");
   assert.equal(ok.face, -1);
@@ -305,7 +330,7 @@ test("presence: parse と鮮度・自己除外・上限", () => {
 });
 
 test("presence: デッドレコニング（外挿は1.5秒で頭打ち、範囲内に丸める）", () => {
-  const bounds = { width: 128, height: 128 };
+  const bounds = wb.rectBounds(128, 128);
   const e = { id: "a", name: "n", x: 10, y: 10, vx: 2, vy: -1, face: 1, ts: 1000 };
   assert.deepEqual(wb.predictPosition(e, 1000, bounds), { x: 10, y: 10 });
   const p1 = wb.predictPosition(e, 2000, bounds);
@@ -330,8 +355,12 @@ test("save v6: 往復とクランプ、旧バージョンは破棄される", ()
   assert.equal(wb.SAVE_VERSION, 6);
   const json = wb.serializeSave({ space: "world", x: 10.5, y: 20.25, worldReturn: null });
   assert.deepEqual(wb.parseSave(json), { space: "world", x: 10.5, y: 20.25, worldReturn: null });
-  const clamped = wb.parseSave(wb.serializeSave({ space: "world", x: -3, y: 99999, worldReturn: null }));
-  assert.ok(clamped.x >= 0.5 && clamped.y <= wb.MAP_H - 0.5);
+  // ワールドは境界が無いので負座標・遠方もそのまま保持する（上限だけ丸める）
+  const kept = wb.parseSave(wb.serializeSave({ space: "world", x: -3, y: 99999, worldReturn: null }));
+  assert.deepEqual(kept, { space: "world", x: -3, y: 99999, worldReturn: null });
+  const clamped = wb.parseSave(wb.serializeSave({ space: "world", x: -2_000_000, y: 2_000_000, worldReturn: null }));
+  assert.equal(clamped.x, -wb.WORLD_COORD_LIMIT);
+  assert.equal(clamped.y, wb.WORLD_COORD_LIMIT);
   // v5（空間を持たない）以前のセーブは読み込まない
   assert.equal(wb.parseSave(JSON.stringify({ version: 5, x: 64.5, y: 64.5 })), null);
   assert.equal(wb.parseSave(JSON.stringify({ version: 4, x: 64.5, y: 64.5 })), null);
@@ -381,7 +410,7 @@ const auth = await import(authUrl);
 const rngUrl = dataUrl(transpile("worldbox/rng.ts"));
 const mapgenUrl = dataUrl(transpile("worldbox/mapgen.ts").replaceAll('"./rng"', JSON.stringify(rngUrl)));
 const lobbyUrl = dataUrl(transpile("worldbox/lobby.ts").replaceAll('"./mapgen"', JSON.stringify(mapgenUrl)));
-const presenceUrl = dataUrl(transpile("worldbox/presence.ts"));
+const presenceUrl = dataUrl(transpile("worldbox/presence.ts").replaceAll('"./mapgen"', JSON.stringify(mapgenUrl)));
 const presenceOnlineUrl = dataUrl(
   transpile("worldbox/presence-online.ts")
     .replaceAll('"../bot-api"', JSON.stringify(botApiStubUrl))
@@ -522,7 +551,7 @@ test("クライアント: 地面タイルはダンジョン流用 PNG（grass/di
 
 test("クライアント: 雪タイルもダンジョン流用 PNG（snow/snow-tree）を使う", () => {
   const client = fs.readFileSync(path.join(rootDir, "app/games/worldbox/WorldBoxClient.tsx"), "utf8");
-  assert.ok(client.includes("sampleMinimapTiles"), "ミニマップの間引きを使っていない");
+  assert.ok(client.includes("paintLocalTerrain"), "周辺マップの地形描画を使っていない");
   assert.ok(client.includes("T_SNOW"), "雪タイルを描画していない");
   const textures = fs.readFileSync(path.join(libDir, "worldbox/textures.ts"), "utf8");
   for (const name of ["snow", "snow-tree"]) {
@@ -534,4 +563,30 @@ test("クライアント: 雪タイルもダンジョン流用 PNG（snow/snow-t
     assert.equal(buf.readUInt32BE(16), 64, `${name}.png の幅が 64 でない`);
     assert.equal(buf.readUInt32BE(20), 64, `${name}.png の高さが 64 でない`);
   }
+});
+
+// ---------- 初期スポーン ----------
+
+test("spawn: 初期スポーンは ±2000 以内の歩行可能な陸タイルに落ち、決定的", () => {
+  const lcg = (seed) => () => (seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
+  for (let i = 1; i <= 40; i++) {
+    const p = wb.pickRandomSpawn(lcg(i * 977));
+    const tx = Math.floor(p.x);
+    const ty = Math.floor(p.y);
+    assert.equal(p.x, tx + 0.5);
+    assert.equal(p.y, ty + 0.5);
+    assert.ok(Math.abs(tx) <= wb.SPAWN_RADIUS && Math.abs(ty) <= wb.SPAWN_RADIUS, `範囲外 (${tx}, ${ty})`);
+    assert.ok(wb.isSpawnableTile(wb.tileAt(tx, ty)), `スポーン不可タイル ${wb.tileAt(tx, ty)} at (${tx}, ${ty})`);
+  }
+  // 同じ乱数系列なら同じ結果（サーバー側で再現可能）
+  assert.deepEqual(wb.pickRandomSpawn(lcg(42)), wb.pickRandomSpawn(lcg(42)));
+  // スポーン可能タイルの定義: 草・土・砂・雪のみ（水・木・岩・雪木は不可）
+  assert.equal(wb.isSpawnableTile(wb.T_GRASS), true);
+  assert.equal(wb.isSpawnableTile(wb.T_DIRT), true);
+  assert.equal(wb.isSpawnableTile(wb.T_SAND), true);
+  assert.equal(wb.isSpawnableTile(wb.T_SNOW), true);
+  assert.equal(wb.isSpawnableTile(wb.T_WATER), false);
+  assert.equal(wb.isSpawnableTile(wb.T_TREE), false);
+  assert.equal(wb.isSpawnableTile(wb.T_ROCK), false);
+  assert.equal(wb.isSpawnableTile(wb.T_SNOW_TREE), false);
 });

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getRequestSession, publicOrigin, sessionOwnerKey } from "@/lib/auth";
-import { generateMap } from "@/lib/worldbox/mapgen";
+import { worldTileSource } from "@/lib/worldbox/mapgen";
 import {
   applyBuild, applyDemolish, buildingViews, type BuildResult,
 } from "@/lib/worldbox/buildings";
@@ -74,7 +74,7 @@ export async function POST(request: Request) {
     // 首都タイルの保護にだけ国家データを参照する（所属は不問）。
     const state = await loadNationsState();
     const capitals = Object.values(state.nations).map((n) => n.capital);
-    result = applyBuild(buildings, ownerKey, capitals, generateMap(), fields.type, fields.x, fields.y, Date.now());
+    result = applyBuild(buildings, ownerKey, capitals, worldTileSource(), fields.type, fields.x, fields.y, Date.now());
   } else {
     result = applyDemolish(buildings, ownerKey, fields.x, fields.y);
   }

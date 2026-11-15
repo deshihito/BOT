@@ -59,7 +59,7 @@ const inv = await import(invUrl);
 const tilesUrl = bundleModule(
   ["worldbox/rng.ts", "worldbox/mapgen.ts", "worldbox/items.ts", "worldbox/profile.ts", "worldbox/presence.ts", "worldbox/tiles.ts"],
   [
-    "generateMap", "mapSpawn", "mapTileAt",
+    "worldTileSource", "mapTileAt",
     "T_GRASS", "T_TREE", "T_ROCK", "T_DIRT", "T_SAND", "T_SNOW", "T_WATER",
     "parseProfile", "addItem", "countItem",
     "applyTileAction", "applyPlaceBlock", "applyMineBlock", "tileView", "actionForTile", "isOverrideActive", "placedBlockSolid",
@@ -70,13 +70,13 @@ const T = await import(tilesUrl);
 
 const moveUrl = bundleModule(
   ["worldbox/rng.ts", "worldbox/mapgen.ts", "worldbox/move.ts"],
-  ["generateMap", "circleHitsSolid", "canStandAt", "PLAYER_RADIUS"],
+  ["worldTileSource", "circleHitsSolid", "canStandAt", "PLAYER_RADIUS"],
 );
 const MV = await import(moveUrl);
 
 const mapgenUrl = bundleModule(
   ["worldbox/rng.ts", "worldbox/mapgen.ts"],
-  ["generateMap", "MAP_W", "MAP_H"],
+  ["worldTileSource", "WORLD_COORD_LIMIT"],
 );
 
 // ---------- アイコン ----------
@@ -118,11 +118,11 @@ test("アイコン: ブロックと種は全種、全体で100種以上にアイ
 
 // ---------- 設置・採掘（純粋ロジック） ----------
 
-const map = T.generateMap();
+const map = T.worldTileSource();
 function findTile(id) {
-  for (let y = 0; y < map.height; y++) {
-    for (let x = 0; x < map.width; x++) {
-      if (map.tiles[y * map.width + x] === id) return { x, y };
+  for (let y = 0; y < 1024; y++) {
+    for (let x = 0; x < 1024; x++) {
+      if (T.mapTileAt(map, x, y) === id) return { x, y };
     }
   }
   throw new Error(`tile ${id} not found`);
@@ -138,7 +138,7 @@ const treeAt = findTile(T.T_TREE);
 const NOW = 1_700_000_000_000;
 const ME_KEY = "discord:611111111111111111";
 const OTHER_KEY = "discord:622222222222222222";
-const NO_CTX = { onCapital: false, onSpawnPlaza: false, hasBuilding: false };
+const NO_CTX = { onCapital: false, hasBuilding: false };
 const withItems = (items) => inv.parseProfile({ items });
 const place = (current, profile, key, at, itemId, ctx = NO_CTX) =>
   T.applyPlaceBlock(current, profile, map, key, at.x, at.y, itemId, NOW, ctx);
@@ -173,7 +173,6 @@ test("設置: ブロック以外・在庫なし・置けない地形は拒む", 
 test("設置: 首都・スポーン広場・建物のあるタイルは保護される", () => {
   const p = withItems({ dirt_block: 1 });
   assert.equal(place(null, p, ME_KEY, grassAt, "dirt_block", { ...NO_CTX, onCapital: true }).error, "on_capital");
-  assert.equal(place(null, p, ME_KEY, grassAt, "dirt_block", { ...NO_CTX, onSpawnPlaza: true }).error, "on_spawn");
   assert.equal(place(null, p, ME_KEY, grassAt, "dirt_block", { ...NO_CTX, hasBuilding: true }).error, "tile_blocked");
 });
 
@@ -281,7 +280,7 @@ const auth = await import(authUrl);
 const presenceBundleUrl = bundleModule(["worldbox/presence.ts"], ["presenceIdFor"]);
 const buildingsBundleUrl = bundleModule(
   ["worldbox/rng.ts", "worldbox/mapgen.ts", "worldbox/presence.ts", "worldbox/buildings.ts"],
-  ["isSpawnPlazaTile"],
+  ["applyBuild"],
 );
 const profileOnlineStubUrl = dataUrl(`
 import { parseProfile, serializeProfile } from ${JSON.stringify(invUrl)};
@@ -407,7 +406,7 @@ test("API(blocks): 設置→GET(selfId)→採掘の往復", async () => {
   assert.equal(globalThis.__wbBlockTiles.has(KEY), false);
 });
 
-test("API(blocks): 首都・スポーン広場・建物タイルは 409 で保護される", async () => {
+test("API(blocks): 首都・建物タイルは 409 で保護され、旧スポーン地点は保護されない", async () => {
   resetStores();
   const cookie = sessionCookie(ME, "builder");
   globalThis.__wbBlockProfiles.set(MY_KEY, inv.serializeProfile(inv.parseProfile({ items: { dirt_block: 5 } })));
@@ -423,13 +422,9 @@ test("API(blocks): 首都・スポーン広場・建物タイルは 409 で保�
   assert.equal(occ.status, 409);
   assert.equal((await occ.json()).error, "tile_blocked");
   globalThis.__wbBlockBuildings = {};
-  // スポーン広場（マップ中央）
-  const spawn = T.mapSpawn(map);
-  const sx = Math.floor(spawn.x);
-  const sy = Math.floor(spawn.y);
-  const sp = await tilesRoute.POST(apiRequest(URL_T, "POST", cookie, { action: "place_block", x: sx, y: sy, itemId: "dirt_block" }));
-  assert.equal(sp.status, 409);
-  assert.equal((await sp.json()).error, "on_spawn");
+  // 固定のスポーン広場は無い（旧マップ中央の草タイルにも置ける）
+  const center = await tilesRoute.POST(apiRequest(URL_T, "POST", cookie, { action: "place_block", x: 512, y: 512, itemId: "dirt_block" }));
+  assert.equal(center.status, 200);
 });
 
 // ---------- 施設（占有あり・当たり判定なし） ----------

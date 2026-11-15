@@ -3,20 +3,9 @@
 // 国はあくまで所属区分であり、領地や所属が建築を制限することはない。
 // （国の繁栄度には国民の建物が算入される。集計は nations.ts 側。）
 import {
-  MAP_H, MAP_W, T_DIRT, T_GRASS, T_SAND, mapSpawn, mapTileAt, type TopDownMap,
+  T_DIRT, T_GRASS, T_SAND, WORLD_COORD_LIMIT, mapTileAt, type TopDownMap,
 } from "./mapgen";
 import { presenceIdFor } from "./presence";
-
-/** スポーン広場の二乗距離（mapgen が生成時に草地へ均す範囲と一致させる）。 */
-const SPAWN_PLAZA_R2 = 20;
-
-/** そのタイルがスポーン広場（マップ中央の保護範囲）かどうか。 */
-export function isSpawnPlazaTile(map: TopDownMap, x: number, y: number): boolean {
-  const spawn = mapSpawn(map);
-  const sx = Math.floor(spawn.x);
-  const sy = Math.floor(spawn.y);
-  return (x - sx) * (x - sx) + (y - sy) * (y - sy) <= SPAWN_PLAZA_R2;
-}
 
 export type BuildingType = "house" | "farm" | "tower";
 
@@ -53,7 +42,7 @@ export function parseBuildingKey(key: string): { x: number; y: number } | null {
   if (!m) return null;
   const x = Number(m[1]);
   const y = Number(m[2]);
-  if (x < 0 || y < 0 || x >= MAP_W || y >= MAP_H) return null;
+  if (Math.abs(x) > WORLD_COORD_LIMIT || Math.abs(y) > WORLD_COORD_LIMIT) return null;
   return { x, y };
 }
 
@@ -77,13 +66,14 @@ function checkedTile(xRaw: unknown, yRaw: unknown): { x: number; y: number } | n
   if (!Number.isFinite(xRaw) || !Number.isFinite(yRaw)) return null;
   const x = Math.floor(xRaw);
   const y = Math.floor(yRaw);
-  if (x < 0 || y < 0 || x >= MAP_W || y >= MAP_H) return null;
+  if (Math.abs(x) > WORLD_COORD_LIMIT || Math.abs(y) > WORLD_COORD_LIMIT) return null;
   return { x, y };
 }
 
 /**
  * 建築: ログインしていれば誰でも（所属は不問）、歩ける地形（草・土・砂）の
- * 空きタイルに建てられる。どの国の首都タイルとスポーン広場は保護される。
+ * 空きタイルに建てられる。保護されるのは各国のユニオンマーク（首都）
+ * タイルだけ。
  */
 export function applyBuild(
   buildings: BuildingsMap,
@@ -99,7 +89,6 @@ export function applyBuild(
   const tile = checkedTile(xRaw, yRaw);
   if (!tile) return { ok: false, error: "tile_blocked" };
   if (capitals.some((c) => c.x === tile.x && c.y === tile.y)) return { ok: false, error: "on_capital" };
-  if (isSpawnPlazaTile(map, tile.x, tile.y)) return { ok: false, error: "on_spawn" };
   if (!BUILDABLE_TERRAIN.has(mapTileAt(map, tile.x, tile.y))) return { ok: false, error: "tile_blocked" };
   const key = buildingKey(tile.x, tile.y);
   if (buildings[key]) return { ok: false, error: "tile_blocked" };

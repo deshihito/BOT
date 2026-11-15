@@ -8,7 +8,7 @@
 // のワールド位置で、ロビーを出るとそこへ戻る（無ければ null = スポーン）。
 // v5 以前は破棄する（v5 はロビーが無く空間を持たない。v4 以前は旧マップ時代）。
 import { LOBBY_H, LOBBY_W } from "./lobby";
-import { MAP_H, MAP_W } from "./mapgen";
+import { WORLD_COORD_LIMIT } from "./mapgen";
 
 export const SAVE_VERSION = 6;
 
@@ -32,13 +32,14 @@ function sanitizeSpace(raw: unknown): SaveSpace {
   return raw === "lobby" ? "lobby" : "world";
 }
 
-function boundsFor(space: SaveSpace): { width: number; height: number } {
-  return space === "lobby" ? { width: LOBBY_W, height: LOBBY_H } : { width: MAP_W, height: MAP_H };
-}
-
+/**
+ * 空間に合わせて座標を丸める。ロビーは有限グリッド内、ワールドは境界が
+ * 無いので健全な絶対上限（WORLD_COORD_LIMIT）でだけ抑える。
+ */
 function clampToSpace(space: SaveSpace, x: number, y: number): { x: number; y: number } {
-  const b = boundsFor(space);
-  return { x: clampPos(x, b.width), y: clampPos(y, b.height) };
+  if (space === "lobby") return { x: clampPos(x, LOBBY_W), y: clampPos(y, LOBBY_H) };
+  const lim = (v: number) => Math.max(-WORLD_COORD_LIMIT, Math.min(WORLD_COORD_LIMIT, v));
+  return { x: lim(x), y: lim(y) };
 }
 
 function parseWorldReturn(raw: unknown): { x: number; y: number } | null {
