@@ -473,6 +473,7 @@ export default function WorldBoxClient() {
     }
   };
   const respawnActionRef = useRef<(point: { x: number; y: number }) => void>(() => {});
+  const instanceWarpRef = useRef<(target: string, entry: { x: number; y: number }) => void>(() => {});
   const bedKeyRef = useRef<string>("");
   const [casinoOpen, setCasinoOpen] = useState(false);
   const [arenaOpen, setArenaOpen] = useState(false);
@@ -794,7 +795,15 @@ export default function WorldBoxClient() {
       respawnActionRef.current(data.respawn);
       setTileMsg("倒れた");
     } else if (data.teleport) {
-      respawnActionRef.current({ x: data.teleport.x, y: data.teleport.y });
+      // 蘇生のテレポートは死亡した空間へ戻す（洞窟・遺跡・ダンジョン）。
+      // 従来は respawnActionRef が space を "world" に固定していたため、
+      // インスタンス内で蘇生されるとワールドの同座標へ飛ばされていた（S5）。
+      const t = data.teleport;
+      if (t.space && parseInstanceSpace(t.space)) {
+        instanceWarpRef.current(t.space, { x: t.x, y: t.y });
+      } else {
+        respawnActionRef.current({ x: t.x, y: t.y });
+      }
       playWbSe("warp");
     }
   };
@@ -807,6 +816,7 @@ export default function WorldBoxClient() {
       });
       const data = (await res.json().catch(() => ({}))) as {
         profile?: PlayerProfile; died?: boolean; respawn?: { x: number; y: number };
+        teleport?: { space: string; x: number; y: number };
       };
       if (res.ok) applyVitalsResult(data);
     } catch { /* バイタルが届かなくても歩き続けられる（次回同期で精算される） */ }
@@ -2561,6 +2571,7 @@ export default function WorldBoxClient() {
         }
       });
     };
+    instanceWarpRef.current = warpToInstance;
     /** ダンジョン入場フロー: セッション作成（サーバー検証）を待ってから遷移する。 */
     enterDungeonRef.current = (ex: number, ey: number) => {
       void (async () => {

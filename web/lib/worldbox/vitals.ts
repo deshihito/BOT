@@ -87,11 +87,15 @@ export function stepVitals(
     ? elapsedSec
     : Math.max(0, elapsedSec - hungerBefore / HUNGER_DRAIN_PER_SEC);
   hp -= STARVE_HP_PER_SEC * starveSec;
-  // 毒: 生存区間の tick 回数ぶん削り、期限切れは掃除する
+  // 毒: 生存区間の tick 回数ぶん削り、期限切れは掃除する。
+  // 毒の有効窓は [until - POISON_DURATION_MS, until] で、vitalAt は起点に
+  // しない。罠は精算なしで毒を付けるため vitalAt が古いままになることが
+  // あり、vitalAt 起点だと古さぶん tick を過剰に数えて即死する（S5）。
   let status: StatusEffect[] = [];
   for (const e of statusOf(profile)) {
     if (e.kind === "poison") {
-      const activeMs = Math.max(0, Math.min(e.until, now) - profile.vitalAt);
+      const poisonStart = Math.max(profile.vitalAt, e.until - POISON_DURATION_MS);
+      const activeMs = Math.max(0, Math.min(e.until, now) - poisonStart);
       const ticks = Math.floor(activeMs / POISON_TICK_MS);
       hp -= POISON_DAMAGE * ticks;
       if (e.until > now) status.push(e);
