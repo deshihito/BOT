@@ -878,12 +878,9 @@ export default async function WebGamePage({ params }: { params: Promise<{ id: st
     );
   }
   if (game.slug === "worldbox" && game.status === "playable") {
-    return (
-      <>
-        <GameDetailHeader game={game} />
-        <WorldBoxClient />
-      </>
-    );
+    // WORLD BOX は独立シェル（100svh 全画面）で完結させるため、
+    // ゲーム詳細ヘッダー（パンくず・判断材料）も出さない。
+    return <WorldBoxClient />;
   }
   return (
     <>

@@ -17,10 +17,11 @@ test("ステージをフルスクリーン化できる（ボタンは対応環�
   assert.match(client, /isFullscreen \? "戻す" : "全画面"/);
 });
 
-test("フルスクリーン中はキャンバスがステージいっぱいになる", () => {
-  assert.match(client, /height: isFullscreen \? "100%" : "min\(62vh, 560px\)"/);
-  assert.match(client, /minHeight: isFullscreen \? 0 : 340/);
-  assert.match(client, /isFullscreen \? \{ width: "100%", height: "100%"/);
+test("キャンバスは常時ステージいっぱいになる（独立シェル 100svh）", () => {
+  // ステージはシェルの残り全高を占め、キャンバスは常にその全面を使う
+  assert.match(client, /flex: "1 1 auto", minHeight: 0/);
+  assert.match(client, /width: "100%", height: "100%", display: "block"/);
+  assert.match(client, /isFullscreen \? \{ height: "100%", background: "#0b0e14" \}/);
 });
 
 test("ホットバーのスロットは画面幅でスケーリングする（縦画面ではみ出さない）", () => {

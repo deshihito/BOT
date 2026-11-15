@@ -14,6 +14,10 @@ export const CHROMELESS_PATHS: readonly string[] = [
   // ポートフォリオ枠（1人1ファイル割り当て）。各ページは専用ヘッダー/
   // フッターを含めてページ内で完結させるため、共通クロームは出さない。
   "/folio",
+  // AGO WORLD BOX は独立シェル（.wb-shell、100svh 全画面）で完結させる
+  // ゲーム画面のため、共通ヘッダー/フッターは出さない。戻り導線は
+  // 画面内の ≡ メニューに一本化する（docs/world-box-shared.md）。
+  "/games/worldbox",
 ];
 
 /** 指定パスでサイト共通クロームを省くかどうか。 */
