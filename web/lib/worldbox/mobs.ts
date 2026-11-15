@@ -10,7 +10,8 @@
 // 大型（size>=4）はチャンク密度では出さず、スーパーセル方式で疎らに置く
 // （占有が広いため、密集させるとマップが埋まる）。
 import { itemById } from "./items";
-import { CHUNK_SIZE, biomeAt, chunkHash, type BiomeId } from "./maplogic";
+import { biomeAt, chunkHash, type BiomeId } from "./maplogic";
+import { CHUNK_SIZE } from "./mapgen";
 
 /** モブサイズの下限・上限（マス）。全モブはこの範囲の整数で規定する。 */
 export const MOB_SIZE_MIN = 1;

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getRequestSession, publicOrigin, sessionOwnerKey } from "@/lib/auth";
-import { MAP_H, MAP_W } from "@/lib/worldbox/mapgen";
+import { rectBounds, worldBounds } from "@/lib/worldbox/mapgen";
 import { LOBBY_H, LOBBY_W } from "@/lib/worldbox/lobby";
 import { TENT_H, TENT_W } from "@/lib/worldbox/tent";
 import { isPresenceEnabled, listPresence, putPresence, removePresence } from "@/lib/worldbox/presence-online";
@@ -9,7 +9,7 @@ import { presenceIdFor, sanitizeHeartbeat, sanitizePresenceSpace, selectVisibleP
 export const runtime = "nodejs";
 
 // AGO WORLD BOX の同時接続プレゼンス。
-// GET ?space=world|lobby: { players }（誰でも読める。同じ空間の者だけ返す）
+// GET ?space=world|lobby|tent: { players }（誰でも読める。同じ空間の者だけ返す）
 // PUT { name, x, y, vx, vy, face, space }: ハートビート（ログイン中のみ、約1秒間隔）
 // DELETE: 退室（自分のキーを消す）
 // 保存先は bot_kv（名前空間 worldbox_presence、キー = 所有者キー）。
@@ -64,7 +64,7 @@ export async function PUT(request: Request) {
     return NextResponse.json({ error: "invalid_request" }, { status: 400, headers: NO_STORE });
   }
   const space = sanitizePresenceSpace((body as { space?: unknown } | null)?.space);
-  const bounds = space === "lobby" ? { width: LOBBY_W, height: LOBBY_H } : space === "tent" ? { width: TENT_W, height: TENT_H } : { width: MAP_W, height: MAP_H };
+  const bounds = space === "lobby" ? rectBounds(LOBBY_W, LOBBY_H) : space === "tent" ? rectBounds(TENT_W, TENT_H) : worldBounds();
   const heartbeat = sanitizeHeartbeat(body, bounds);
   if (!heartbeat) {
     return NextResponse.json({ error: "invalid_heartbeat" }, { status: 400, headers: NO_STORE });

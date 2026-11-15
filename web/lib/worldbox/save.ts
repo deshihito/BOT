@@ -3,13 +3,13 @@
 // 「状態 ⇄ JSON 文字列」の変換と検証だけを担う（壊れたデータは null を返す）。
 //
 // v6: セーブは { version: 6, space, x, y, worldReturn }。
-// space はプレイヤーがいる空間（"world" | "lobby"）。地形はどちらの空間も
+// space はプレイヤーがいる空間（"world" | "lobby" | "tent"）。地形はどの空間も
 // コードから決定的に作られるので保存しない。worldReturn はロビーへ入る直前
 // のワールド位置で、ロビーを出るとそこへ戻る（無ければ null = スポーン）。
 // v5 以前は破棄する（v5 はロビーが無く空間を持たない。v4 以前は旧マップ時代）。
 import { LOBBY_H, LOBBY_W } from "./lobby";
 import { TENT_H, TENT_W } from "./tent";
-import { MAP_H, MAP_W } from "./mapgen";
+import { WORLD_COORD_LIMIT } from "./mapgen";
 
 export const SAVE_VERSION = 6;
 
@@ -33,15 +33,15 @@ function sanitizeSpace(raw: unknown): SaveSpace {
   return raw === "lobby" ? "lobby" : raw === "tent" ? "tent" : "world";
 }
 
-function boundsFor(space: SaveSpace): { width: number; height: number } {
-  if (space === "lobby") return { width: LOBBY_W, height: LOBBY_H };
-  if (space === "tent") return { width: TENT_W, height: TENT_H };
-  return { width: MAP_W, height: MAP_H };
-}
-
+/**
+ * 空間に合わせて座標を丸める。ロビーとテントは有限グリッド内、ワールドは
+ * 境界が無いので健全な絶対上限（WORLD_COORD_LIMIT）でだけ抑える。
+ */
 function clampToSpace(space: SaveSpace, x: number, y: number): { x: number; y: number } {
-  const b = boundsFor(space);
-  return { x: clampPos(x, b.width), y: clampPos(y, b.height) };
+  if (space === "lobby") return { x: clampPos(x, LOBBY_W), y: clampPos(y, LOBBY_H) };
+  if (space === "tent") return { x: clampPos(x, TENT_W), y: clampPos(y, TENT_H) };
+  const lim = (v: number) => Math.max(-WORLD_COORD_LIMIT, Math.min(WORLD_COORD_LIMIT, v));
+  return { x: lim(x), y: lim(y) };
 }
 
 function parseWorldReturn(raw: unknown): { x: number; y: number } | null {

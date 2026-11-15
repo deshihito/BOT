@@ -1,6 +1,7 @@
 "use client";
 // AGO WORLD BOX（見下ろし型・共有ワールド）。
-// 世界は固定シードから生成される 1024×1024 の1枚マップで、全員が同じ場所を歩く。
+// 世界は固定シード＋座標の純関数で決まるチャンク式マップで、広さは実質
+// 無制限。全員が同じ場所を歩く。初期スポーンはサーバーがランダムに決める。
 // 移動は8方向フリー（左下の固定式スティック＋WASD）、他プレイヤーはプレゼンス API 経由で
 // アバター＋名前つきで表示される（同時接続）。セーブは空間＋位置（v6）。
 // ロビーは別空間（図形の和集合のホール＋ショップ翼2階）で、ワープパッドと
@@ -10,9 +11,10 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import {
-  MAP_H, MAP_SEED, MAP_W, MINIMAP_SIZE, T_DIRT, T_GRASS, T_ROCK, T_SAND, T_SNOW, T_SNOW_TREE, T_TREE, T_WATER,
-  generateMap, mapSpawn, mapTileAt, sampleMinimapTiles, type TopDownMap,
+  CHUNK_SIZE, MAP_SEED, T_DIRT, T_GRASS, T_ROCK, T_SAND, T_SNOW, T_SNOW_TREE, T_TREE, T_WATER,
+  generateChunk, mapTileAt, rectBounds, tileAt, worldBounds, type TopDownMap,
 } from "@/lib/worldbox/mapgen";
+import { pickRandomSpawn } from "@/lib/worldbox/spawn";
 import { DASH_SPEED, PLAYER_RADIUS, SWIM_DASH_SPEED, SWIM_SPEED, WALK_SPEED, findFreeNear, isWaterAt, stepMove } from "@/lib/worldbox/move";
 import { isNightPhase, nightAmount, phaseAtTime } from "@/lib/worldbox/daynight";
 import { mobById, mobOccupiesTile, type PlacedMob } from "@/lib/worldbox/mobs";
@@ -33,14 +35,14 @@ import {
 } from "@/lib/worldbox/stamina";
 import { createRemoteTrack, stepRemoteTrack, updateRemoteTrack, type RemoteTrack } from "@/lib/worldbox/remote";
 import type { NationView, NationsResponse } from "@/lib/worldbox/nations";
-import { USER_BUILDING_CAP, isSpawnPlazaTile, type BuildingType, type BuildingView } from "@/lib/worldbox/buildings";
+import { USER_BUILDING_CAP, type BuildingType, type BuildingView } from "@/lib/worldbox/buildings";
 import {
   L_PLAZA, L_SAND, L_VOID,
-  LOBBY_ENTRY, LOBBY_FLOOR_FALLBACK, LOBBY_FLOOR_SPRITE, LOBBY_STAIRS_DOWN, LOBBY_STAIRS_UP,
-  LOBBY_DOWN_LANDING, LOBBY_UP_LANDING, LOBBY_WARP_PAD, WORLD_WARP_PAD,
+  LOBBY_ENTRY, LOBBY_FLOOR_FALLBACK, LOBBY_FLOOR_SPRITE, LOBBY_H, LOBBY_STAIRS_DOWN, LOBBY_STAIRS_UP,
+  LOBBY_DOWN_LANDING, LOBBY_UP_LANDING, LOBBY_W, LOBBY_WARP_PAD,
   buildLobby, lobbyTileAt, stationNear, type LobbyData, type LobbyObject, type LobbyStation,
 } from "@/lib/worldbox/lobby";
-import { TENT_ENTRY, TENT_EXIT, buildTent, tentTileAt } from "@/lib/worldbox/tent";
+import { TENT_ENTRY, TENT_EXIT, TENT_H, TENT_W, buildTent, tentTileAt } from "@/lib/worldbox/tent";
 import type { BoardPost } from "@/lib/worldbox/board";
 import { parseSave, serializeSave, type SaveSpace } from "@/lib/worldbox/save";
 import { chooseInitialSave } from "@/lib/worldbox/save-source";
@@ -102,11 +104,15 @@ const MINIMAP_COLOR: Record<number, string> = {
   [T_SNOW]: "#f4f8fa",
   [T_SNOW_TREE]: "#9fc4bb",
 };
-/** ミニマップ上の1タイルの大きさ（256px / 1024タイル）。 */
-const MINIMAP_SCALE = MINIMAP_SIZE / MAP_W;
-/** マップ表示モード（全体を大きく見る）のキャンバス解像度と縮尺。 */
+/** ミニマップ: プレイヤー中心の周辺図。キャンバス解像度と表示範囲（タイル）。 */
+const MINIMAP_PX = 256;
+const MINIMAP_TILES = 128;
+/** ミニマップ上の1タイルの大きさ（256px / 128タイル）。 */
+const MINIMAP_SCALE = MINIMAP_PX / MINIMAP_TILES;
+/** マップ表示モード（周辺を大きく見る）のキャンバス解像度と表示範囲。 */
 const BIGMAP_SIZE = 512;
-const BIGMAP_SCALE = BIGMAP_SIZE / MAP_W;
+const BIGMAP_TILES = 256;
+const BIGMAP_SCALE = BIGMAP_SIZE / BIGMAP_TILES;
 
 type PlayerState = {
   x: number;
@@ -153,7 +159,6 @@ const NATION_ERROR_LABEL: Record<string, string> = {
   forbidden: "その権限がありません",
   invalid_type: "建物の種類が不正です",
   on_capital: "首都には建てられません",
-  on_spawn: "スポーン広場には建てられません",
 };
 
 /** タイル行為の失敗ラベル（断片のみ）。 */
@@ -199,7 +204,6 @@ const TILE_ERROR_LABEL: Record<string, string> = {
   unknown_block: "ブロックが不正",
   no_block: "ブロックがない",
   on_capital: "首都には置けない",
-  on_spawn: "広場には置けない",
   not_enough_items: "足りない",
   too_far: "遠すぎる",
   unauthorized: "ログインが必要",
@@ -301,11 +305,11 @@ export default function WorldBoxClient() {
   showMapRef.current = showMap;
   // 国家レイヤー（描画ループは ref、パネルは state で同じデータを見る）
   const nationsRef = useRef<NationsResponse>(EMPTY_NATIONS);
-  const playerPosRef = useRef({ x: MAP_W / 2 + 0.5, y: MAP_H / 2 + 0.5 });
+  const playerPosRef = useRef({ x: 0.5, y: 0.5 });
   const [nationsUi, setNationsUi] = useState<NationsResponse>(EMPTY_NATIONS);
   const [showNations, setShowNations] = useState(false);
   const [showEconomy, setShowEconomy] = useState(false);
-  // マップ表示モード（全体マップを大きく見る。描画ループは ref で見る）
+  // マップ表示モード（周辺マップを大きく見る。描画ループは ref で見る）
   const [mapView, setMapView] = useState(false);
   const mapViewRef = useRef(false);
   mapViewRef.current = mapView;
@@ -330,7 +334,7 @@ export default function WorldBoxClient() {
     }
   };
   // 座標表示（タイル単位の整数。ループが毎フレーム書く playerPosRef から拾う）
-  const [coords, setCoords] = useState({ x: Math.floor(MAP_W / 2), y: Math.floor(MAP_H / 2) });
+  const [coords, setCoords] = useState({ x: 0, y: 0 });
   const [nationMsg, setNationMsg] = useState("");
   // 建築モード（描画・入力ループは ref、パネルは state で見る）
   const [buildMode, setBuildMode] = useState(false);
@@ -399,6 +403,27 @@ export default function WorldBoxClient() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [stationUi, setStationUi] = useState<LobbyStation | null>(null);
   const warpActionRef = useRef<(target: SaveSpace) => void>(() => {});
+  /** 所属国への移動（ゲームループ側のテレポート実体）。 */
+  const teleportActionRef = useRef<(x: number, y: number) => void>(() => {});
+  /** 所属国へ移動: 所属の検証と移動先の決定はサーバー側が行う。 */
+  const travelToNation = async () => {
+    setNationMsg("");
+    try {
+      const res = await fetch("/api/worldbox/nations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "travel" }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { error?: string; x?: number; y?: number };
+      if (!res.ok || typeof data.x !== "number" || typeof data.y !== "number") {
+        setNationMsg(NATION_ERROR_LABEL[data.error ?? ""] ?? "失敗しました");
+        return;
+      }
+      teleportActionRef.current(data.x, data.y);
+    } catch {
+      setNationMsg("失敗しました");
+    }
+  };
   const [casinoOpen, setCasinoOpen] = useState(false);
   const [arenaOpen, setArenaOpen] = useState(false);
   const [plazaMsg, setPlazaMsg] = useState("");
@@ -655,8 +680,8 @@ export default function WorldBoxClient() {
     try {
       const px = Math.floor(playerPosRef.current.x);
       const py = Math.floor(playerPosRef.current.y);
-      const x0 = Math.max(0, Math.min(MAP_W - 128, px - 64));
-      const y0 = Math.max(0, Math.min(MAP_H - 128, py - 64));
+      const x0 = px - 64;
+      const y0 = py - 64;
       const res = await fetch(
         `/api/worldbox/tiles?x0=${x0}&y0=${y0}&x1=${x0 + 127}&y1=${y0 + 127}`,
         { headers: { Accept: "application/json" } },
@@ -723,8 +748,8 @@ export default function WorldBoxClient() {
     try {
       const px = Math.floor(playerPosRef.current.x);
       const py = Math.floor(playerPosRef.current.y);
-      const x0 = Math.max(0, Math.min(MAP_W - 128, px - 64));
-      const y0 = Math.max(0, Math.min(MAP_H - 128, py - 64));
+      const x0 = px - 64;
+      const y0 = py - 64;
       const res = await fetch(
         `/api/worldbox/mobs?x0=${x0}&y0=${y0}&x1=${x0 + 127}&y1=${y0 + 127}`,
         { headers: { Accept: "application/json" } },
@@ -835,7 +860,6 @@ export default function WorldBoxClient() {
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    const map: TopDownMap = generateMap(MAP_SEED);
     const lobby = buildLobby();
     const tent = buildTent();
     /** 現在の室内空間（ロビー/テント）のデータ。ワールドでは lobby を返す（使われない）。 */
@@ -855,33 +879,48 @@ export default function WorldBoxClient() {
     const avatar = new Image();
     avatar.src = "/img/nomal.png";
 
-    // 実効マップ: 生成地形へタイル上書き（伐採・採掘の地形置き換え）を
-    // 適用したもの。移動・描画・建築可否はこちらを見る。
-    const effTiles = new Uint8Array(map.tiles);
-    const effMap: TopDownMap = { seed: map.seed, width: map.width, height: map.height, tiles: effTiles };
-    let effVersion = -1;
-    const syncEffMap = () => {
-      if (effVersion === tilesVersionRef.current) return;
-      effVersion = tilesVersionRef.current;
-      effTiles.set(map.tiles);
-      const now = Date.now();
-      for (const [key, ov] of Object.entries(tilesRef.current)) {
-        if (!isOverrideActive(ov, now) || ov.tile === undefined) continue;
-        const m = /^(-?\d+),(-?\d+)$/.exec(key);
-        if (!m) continue;
-        const x = Number(m[1]);
-        const y = Number(m[2]);
-        if (x >= 0 && y >= 0 && x < MAP_W && y < MAP_H) effTiles[y * MAP_W + x] = ov.tile;
+    // 地形はチャンク単位で生成してキャッシュする。実効タイル源は
+    // 「チャンク地形＋タイル上書き（伐採・採掘の地形置き換え）」で、
+    // 移動・描画・建築可否はこちらを見る。全体グリッドは持たない。
+    const chunkCache = new Map<string, Uint8Array>();
+    const baseTileAt = (x: number, y: number): number => {
+      const cx = Math.floor(x / CHUNK_SIZE);
+      const cy = Math.floor(y / CHUNK_SIZE);
+      const key = `${cx},${cy}`;
+      let tiles = chunkCache.get(key);
+      if (tiles) {
+        chunkCache.delete(key);
+        chunkCache.set(key, tiles);
+      } else {
+        tiles = generateChunk(cx, cy, MAP_SEED).tiles;
+        chunkCache.set(key, tiles);
+        if (chunkCache.size > 96) {
+          const oldest = chunkCache.keys().next().value;
+          if (oldest !== undefined) chunkCache.delete(oldest);
+        }
       }
+      return tiles[(y - cy * CHUNK_SIZE) * CHUNK_SIZE + (x - cx * CHUNK_SIZE)];
     };
+    const effTileAt = (x: number, y: number): number => {
+      const ov = tilesRef.current[tileKey(x, y)];
+      if (ov && ov.tile !== undefined && isOverrideActive(ov, Date.now())) return ov.tile;
+      return baseTileAt(x, y);
+    };
+    /** 素の地形（タイル行為の判定用。上書きは tiles.ts 側で重ねる）。 */
+    const terrainMap: TopDownMap = { seed: MAP_SEED, tileAt: (x, y) => tileAt(x, y, MAP_SEED) };
+    /** 実効地形（上書き込み）。 */
+    const worldMap: TopDownMap = { seed: MAP_SEED, tileAt: effTileAt };
 
-    const spawn = mapSpawn(map);
+    // 初期スポーンはサーバー（セーブ初回作成時）が決めるのが正。ここでの
+    // 値はセーブ読込前の仮置きで、同じ規則でランダムに選ぶ。
+    const spawn = pickRandomSpawn(Math.random);
     const player: PlayerState = { x: spawn.x, y: spawn.y, vx: 0, vy: 0, face: 1, phase: 0 };
     const cam = { x: player.x, y: player.y };
     // 空間（ワールド / ロビー）。ロビーでは建物・国家・ミニマップは扱わない。
     let space: SaveSpace = "world";
     let worldReturn: { x: number; y: number } | null = null;
-    const activeMap = (): TopDownMap => (space === "world" ? effMap : indoorData().moveMap);
+    const activeMap = (): TopDownMap => (space === "world" ? worldMap : indoorData().moveMap);
+    const activeBounds = () => (space === "lobby" ? rectBounds(LOBBY_W, LOBBY_H) : space === "tent" ? rectBounds(TENT_W, TENT_H) : worldBounds());
     // モブ占有を差し引いた今フレームの固体集合（モブの真上に立つ間の救済用）
     let mobFrameBlocked: ReadonlySet<string> | undefined;
     const activeBlocked = (): ReadonlySet<string> | undefined =>
@@ -1015,9 +1054,9 @@ export default function WorldBoxClient() {
     const applyPresenceEntry = (entry: PresenceEntry, now: number) => {
       const cur = others.get(entry.id);
       if (!cur) {
-        others.set(entry.id, { track: createRemoteTrack(entry, now, activeMap()), phase: 0 });
+        others.set(entry.id, { track: createRemoteTrack(entry, now, activeBounds()), phase: 0 });
       } else {
-        cur.track = updateRemoteTrack(cur.track, entry, now, activeMap());
+        cur.track = updateRemoteTrack(cur.track, entry, now, activeBounds());
       }
     };
     /** サーバー時刻とのずれサンプルを取り込む（急な振れを抑えるため平滑化する）。 */
@@ -1284,7 +1323,7 @@ export default function WorldBoxClient() {
         if (wantsPlace) setTileMsg(TILE_ERROR_LABEL.too_far);
         return false;
       }
-      const view = tileView(map, tilesRef.current, t.x, t.y, Date.now(), null);
+      const view = tileView(terrainMap, tilesRef.current, t.x, t.y, Date.now(), null);
       // 自分のブロックかどうかは、サーバーが返した自分の ID で判定する
       if (view.block) {
         const ov = tilesRef.current[tileKey(t.x, t.y)];
@@ -1319,9 +1358,7 @@ export default function WorldBoxClient() {
         // 建築モードではタップそのものが確定（スティックは無効）
         const t = toTile(e);
         hoverTile = t;
-        if (t.x >= 0 && t.y >= 0 && t.x < MAP_W && t.y < MAP_H) {
-          buildActionRef.current(buildRef.current.tool, t.x, t.y);
-        }
+        buildActionRef.current(buildRef.current.tool, t.x, t.y);
         return;
       }
       const p = canvasPos(e);
@@ -1368,40 +1405,25 @@ export default function WorldBoxClient() {
     };
     window.addEventListener("pagehide", onPageHide);
 
-    // ---- ミニマップ地形（1回だけ描く。1024×1024 を 256×256 へ間引いた
-    // オフスクリーンに描き、毎フレームはこれを転写するだけにする） ----
-    const terrainCanvas = document.createElement("canvas");
-    terrainCanvas.width = MINIMAP_SIZE;
-    terrainCanvas.height = MINIMAP_SIZE;
-    {
-      const tctx = terrainCanvas.getContext("2d");
-      if (tctx) {
-        const sampled = sampleMinimapTiles(map);
-        for (let y = 0; y < MINIMAP_SIZE; y++) {
-          for (let x = 0; x < MINIMAP_SIZE; x++) {
-            tctx.fillStyle = MINIMAP_COLOR[sampled[y * MINIMAP_SIZE + x]] ?? "#57a639";
-            tctx.fillRect(x, y, 1, 1);
-          }
-        }
-      }
-    }
-
-    // ---- マップ表示モード用地形（512×512 へ間引いて1回だけ描く） ----
+    // ---- 周辺マップ地形（プレイヤー中心の周辺図。全体図は持たない） ----
+    // 1タイル=1px のオフスクリーンへ範囲分だけ描き、表示キャンバスへ
+    // 拡大転写する。範囲の原点（左上のワールド座標）を引数で受け取る。
+    const miniTerrainCanvas = document.createElement("canvas");
+    miniTerrainCanvas.width = MINIMAP_TILES;
+    miniTerrainCanvas.height = MINIMAP_TILES;
     const bigTerrainCanvas = document.createElement("canvas");
-    bigTerrainCanvas.width = BIGMAP_SIZE;
-    bigTerrainCanvas.height = BIGMAP_SIZE;
-    {
-      const tctx = bigTerrainCanvas.getContext("2d");
-      if (tctx) {
-        const sampled = sampleMinimapTiles(map, BIGMAP_SIZE);
-        for (let y = 0; y < BIGMAP_SIZE; y++) {
-          for (let x = 0; x < BIGMAP_SIZE; x++) {
-            tctx.fillStyle = MINIMAP_COLOR[sampled[y * BIGMAP_SIZE + x]] ?? "#57a639";
-            tctx.fillRect(x, y, 1, 1);
-          }
+    bigTerrainCanvas.width = BIGMAP_TILES;
+    bigTerrainCanvas.height = BIGMAP_TILES;
+    const paintLocalTerrain = (target: HTMLCanvasElement, ox: number, oy: number, size: number) => {
+      const tctx = target.getContext("2d");
+      if (!tctx) return;
+      for (let y = 0; y < size; y++) {
+        for (let x = 0; x < size; x++) {
+          tctx.fillStyle = MINIMAP_COLOR[baseTileAt(ox + x, oy + y)] ?? "#57a639";
+          tctx.fillRect(x, y, 1, 1);
         }
       }
-    }
+    };
 
     // ---- サイズ追従 ----
     const resize = () => {
@@ -1616,8 +1638,7 @@ export default function WorldBoxClient() {
         return !!b && b.mine;
       }
       if (nationsRef.current.nations.some((n) => n.capital.x === tx && n.capital.y === ty)) return false;
-      if (isSpawnPlazaTile(map, tx, ty)) return false;
-      const t = mapTileAt(effMap, tx, ty);
+      const t = mapTileAt(worldMap, tx, ty);
       if (t !== T_GRASS && t !== T_DIRT && t !== T_SAND) return false;
       if (data.buildings.some((v) => v.x === tx && v.y === ty)) return false;
       if (data.buildings.filter((v) => v.mine).length >= USER_BUILDING_CAP) return false;
@@ -1628,7 +1649,6 @@ export default function WorldBoxClient() {
     let lastTileKey = "";
     let lastStation: LobbyStation | null = null;
     const placePlayer = (x: number, y: number) => {
-      syncEffMap();
       const free = findFreeNear(activeMap(), x, y, activeBlocked(), { swim: space === "world" });
       player.x = free.x;
       player.y = free.y;
@@ -1678,6 +1698,23 @@ export default function WorldBoxClient() {
       void pollOthers();
     };
     warpActionRef.current = doWarp;
+    /** 所属国への移動: サーバーが決めた移動先へそのままテレポートする。 */
+    teleportActionRef.current = (x: number, y: number) => {
+      if (space !== "world") {
+        space = "world";
+        setSpaceUi("world");
+        setStatusText("共有ワールド");
+        lastStation = null;
+        setStationUi(null);
+        setBoardOpen(false);
+        if (buildRef.current.active) {
+          buildRef.current.active = false;
+          setBuildMode(false);
+        }
+      }
+      placePlayer(x, y);
+      void pollOthers();
+    };
     /** タイルへ「踏み込んだ」ときだけ発火する（着地したタイルでは再発火しない）。 */
     const checkTileTriggers = () => {
       const tx = Math.floor(player.x);
@@ -1690,8 +1727,8 @@ export default function WorldBoxClient() {
       if (key === lastTileKey) return;
       lastTileKey = key;
       if (space === "world") {
-        if (tx === WORLD_WARP_PAD.x && ty === WORLD_WARP_PAD.y) doWarp("lobby");
-        else if (tilesRef.current[tileKey(tx, ty)]?.block?.itemId === "tent") doWarp("tent");
+        // ロビー行きは ≡ メニュー。ワールド側の踏むトリガーはテント入場だけ。
+        if (tilesRef.current[tileKey(tx, ty)]?.block?.itemId === "tent") doWarp("tent");
         return;
       }
       if (space === "tent") {
@@ -1735,7 +1772,7 @@ export default function WorldBoxClient() {
         ix /= ilen;
         iy /= ilen;
       }
-      syncEffMap();
+      // 実効タイルは effTileAt が上書きを都度読むため、タイル配列の同期は不要。
       // モブ占有: 現在位置の footprint を移動の当たり判定へ合成する。
       // 占有の真上に立っている間は、そのモブの占有だけ通す（閉じ込め防止）。
       mobFrameBlocked = undefined;
@@ -1763,7 +1800,7 @@ export default function WorldBoxClient() {
         }
       }
       // ダッシュ（キーの2度押しを持ち続け / スティックの強い倒し）と泳ぎで速さと消費が変わる
-      const swimming = space === "world" && isWaterAt(effMap, player.x, player.y);
+      const swimming = space === "world" && isWaterAt(worldMap, player.x, player.y);
       const wantDash =
         ilen > 0.01 && ((dashKey !== null && keys.has(dashKey)) || (joy.active && isStickDash(joy.dx, joy.dy)));
       const dashing = wantDash && canDash(stamina);
@@ -1792,7 +1829,7 @@ export default function WorldBoxClient() {
         if (Math.hypot(kbVel.x, kbVel.y) < 0.5) kbVel = { x: 0, y: 0 };
       }
       // スタミナ増減・陸の記録・入出水の波紋・水中で力尽きたら陸へ帰還
-      const inWaterNow = space === "world" && isWaterAt(effMap, player.x, player.y);
+      const inWaterNow = space === "world" && isWaterAt(worldMap, player.x, player.y);
       if (space === "world" && !inWaterNow) lastLand = { x: player.x, y: player.y };
       if (inWaterNow !== wasSwimming) {
         splashes.push({ x: player.x, y: player.y, at: now });
@@ -1947,7 +1984,7 @@ export default function WorldBoxClient() {
       const nowMs = Date.now();
       const presenceNowMs = presenceNow();
       for (const o of others.values()) {
-        o.track = stepRemoteTrack(o.track, presenceNowMs, dt, activeMap());
+        o.track = stepRemoteTrack(o.track, presenceNowMs, dt, activeBounds());
         const ospeed = Math.hypot(o.track.entry.vx, o.track.entry.vy);
         o.phase = advanceWalkPhase(o.phase, ospeed, dt);
       }
@@ -1973,15 +2010,15 @@ export default function WorldBoxClient() {
       let lobbyOy = 0;
       let drawLobbySprite: (o: LobbyObject) => void = () => {};
       if (space === "world") {
-      const tx0 = Math.max(0, Math.floor(cam.x - cw / TILE / 2 - 1));
-      const tx1 = Math.min(MAP_W - 1, Math.ceil(cam.x + cw / TILE / 2 + 1));
-      const ty0 = Math.max(0, Math.floor(cam.y - ch / TILE / 2 - 1));
-      const ty1 = Math.min(MAP_H - 1, Math.ceil(cam.y + ch / TILE / 2 + 1));
+      const tx0 = Math.floor(cam.x - cw / TILE / 2 - 1);
+      const tx1 = Math.ceil(cam.x + cw / TILE / 2 + 1);
+      const ty0 = Math.floor(cam.y - ch / TILE / 2 - 1);
+      const ty1 = Math.ceil(cam.y + ch / TILE / 2 + 1);
       // 流用タイルはピクセルアートなので補間を切ってクッキリ描く（アバター側は後で戻す）
       ctx.imageSmoothingEnabled = false;
       for (let ty = ty0; ty <= ty1; ty++) {
         for (let tx = tx0; tx <= tx1; tx++) {
-          const id = mapTileAt(effMap, tx, ty);
+          const id = mapTileAt(worldMap, tx, ty);
           const sx = toScreenX(tx);
           const sy = toScreenY(ty);
           const dungeonKey = TILE_DUNGEON[id];
@@ -2052,8 +2089,7 @@ export default function WorldBoxClient() {
             for (let dx = -1; dx <= 1; dx++) {
               const vx = px + dx;
               const vy = py + dy;
-              if (vx < 0 || vy < 0 || vx >= MAP_W || vy >= MAP_H) continue;
-              const v = tileView(map, tilesRef.current, vx, vy, nowMs, null);
+              const v = tileView(terrainMap, tilesRef.current, vx, vy, nowMs, null);
               if (actionForTile(v, { blockId: selDef.id })?.action !== "place_block") continue;
               ctx.fillStyle = "rgba(140,255,150,0.20)";
               ctx.fillRect(toScreenX(vx), toScreenY(vy), TILE, TILE);
@@ -2270,10 +2306,10 @@ export default function WorldBoxClient() {
       if (space === "world") {
         const nowMs = Date.now();
         const isNight = isNightPhase(phaseAtTime(nowMs / 1000));
-        const vx0 = Math.max(0, Math.floor(cam.x - cw / TILE / 2) - 3);
-        const vy0 = Math.max(0, Math.floor(cam.y - ch / TILE / 2) - 3);
-        const vx1 = Math.min(MAP_W - 1, Math.ceil(cam.x + cw / TILE / 2) + 3);
-        const vy1 = Math.min(MAP_H - 1, Math.ceil(cam.y + ch / TILE / 2) + 3);
+        const vx0 = Math.floor(cam.x - cw / TILE / 2) - 3;
+        const vy0 = Math.floor(cam.y - ch / TILE / 2) - 3;
+        const vx1 = Math.ceil(cam.x + cw / TILE / 2) + 3;
+        const vy1 = Math.ceil(cam.y + ch / TILE / 2) + 3;
         const cacheKey = `${vx0 >> 5},${vy0 >> 5},${vx1 >> 5},${vy1 >> 5},${isNight ? 1 : 0}`;
         if (cacheKey !== mobCacheKey) {
           mobCacheKey = cacheKey;
@@ -2351,7 +2387,7 @@ export default function WorldBoxClient() {
       const drawList: { y: number; draw: () => void }[] = [];
       for (const o of others.values()) {
         const nationColor = nationsRef.current.playerNations[o.track.entry.id]?.color ?? null;
-        const oSwim = space === "world" && isWaterAt(effMap, o.track.rx, o.track.ry);
+        const oSwim = space === "world" && isWaterAt(worldMap, o.track.rx, o.track.ry);
         drawList.push({
           y: o.track.ry + PLAYER_RADIUS,
           draw: () =>
@@ -2502,7 +2538,7 @@ export default function WorldBoxClient() {
       // 天候は fx.ts の決定的サイクルで全員一致。時間帯が切り替わったフレームは数粒追加で出す
       if (space === "world" && now - lastAmbientAt > 150 && !reducedMotion) {
         lastAmbientAt = now;
-        const ptile = mapTileAt(effMap, Math.floor(player.x), Math.floor(player.y));
+        const ptile = mapTileAt(worldMap, Math.floor(player.x), Math.floor(player.y));
         const nowSec = nowMs / 1000;
         const phase = phaseAtTime(nowSec);
         const kind = weatherAmbientKind(weatherAt(nowSec), ptile, ptile === T_TREE || ptile === T_SNOW_TREE, nightAmount(phase));
@@ -2591,69 +2627,95 @@ export default function WorldBoxClient() {
         ctx.stroke();
       }
 
-      // ミニマップ（約5Hz。ロビーでは出さない）
+      // ミニマップ（プレイヤー中心の周辺図、約5Hz。ロビーでは出さない）
       if (space === "world" && showMapRef.current && now - lastMinimapAt > 200) {
         lastMinimapAt = now;
         const mm = minimapRef.current;
         const mctx = mm?.getContext("2d");
         if (mm && mctx) {
+          const ox = Math.floor(player.x) - MINIMAP_TILES / 2;
+          const oy = Math.floor(player.y) - MINIMAP_TILES / 2;
+          const toMapX = (wx: number) => (wx - ox) * MINIMAP_SCALE;
+          const toMapY = (wy: number) => (wy - oy) * MINIMAP_SCALE;
+          paintLocalTerrain(miniTerrainCanvas, ox, oy, MINIMAP_TILES);
           mctx.clearRect(0, 0, mm.width, mm.height);
-          mctx.drawImage(terrainCanvas, 0, 0);
-          // 首都
+          mctx.imageSmoothingEnabled = false;
+          mctx.drawImage(miniTerrainCanvas, 0, 0, mm.width, mm.height);
+          mctx.imageSmoothingEnabled = true;
+          // 首都（範囲内だけ）
           for (const n of nationsRef.current.nations) {
+            const mx = toMapX(n.capital.x);
+            const my = toMapY(n.capital.y);
+            if (mx < -4 || my < -4 || mx > mm.width + 4 || my > mm.height + 4) continue;
             mctx.fillStyle = n.color;
-            mctx.fillRect(n.capital.x * MINIMAP_SCALE - 1, n.capital.y * MINIMAP_SCALE - 1, 3, 3);
+            mctx.fillRect(mx - 1, my - 1, 3, 3);
           }
           // 建物は所有者の所属色（無所属は灰色）の小ドット
           for (const b of buildingsRef.current.buildings) {
+            const mx = toMapX(b.x);
+            const my = toMapY(b.y);
+            if (mx < -2 || my < -2 || mx > mm.width + 2 || my > mm.height + 2) continue;
             mctx.fillStyle = nationsRef.current.playerNations[b.ownerId]?.color ?? "#d8d8d8";
-            mctx.fillRect(b.x * MINIMAP_SCALE, b.y * MINIMAP_SCALE, 2, 2);
+            mctx.fillRect(mx, my, 2, 2);
           }
           mctx.fillStyle = "#ffffff";
           for (const o of others.values()) {
-            mctx.fillRect(Math.floor(o.track.rx * MINIMAP_SCALE) - 1, Math.floor(o.track.ry * MINIMAP_SCALE) - 1, 2, 2);
+            mctx.fillRect(Math.floor(toMapX(o.track.rx)) - 1, Math.floor(toMapY(o.track.ry)) - 1, 2, 2);
           }
           mctx.fillStyle = "#ffd23e";
           mctx.strokeStyle = "rgba(0,0,0,0.6)";
           mctx.beginPath();
-          mctx.arc(player.x * MINIMAP_SCALE, player.y * MINIMAP_SCALE, 2.6, 0, Math.PI * 2);
+          mctx.arc(toMapX(player.x), toMapY(player.y), 2.6, 0, Math.PI * 2);
           mctx.fill();
           mctx.stroke();
         }
       }
 
-      // マップ表示モード（全体を大きく、約5Hz。ロビーでは出さない）
+      // マップ表示モード（プレイヤー中心の周辺図を大きく、約5Hz。ロビーでは出さない）
       if (space === "world" && mapViewRef.current && now - lastBigMapAt > 200) {
         lastBigMapAt = now;
         const bm = bigMapRef.current;
         const bctx = bm?.getContext("2d");
         if (bm && bctx) {
+          const ox = Math.floor(player.x) - BIGMAP_TILES / 2;
+          const oy = Math.floor(player.y) - BIGMAP_TILES / 2;
+          const toMapX = (wx: number) => (wx - ox) * BIGMAP_SCALE;
+          const toMapY = (wy: number) => (wy - oy) * BIGMAP_SCALE;
+          paintLocalTerrain(bigTerrainCanvas, ox, oy, BIGMAP_TILES);
           bctx.clearRect(0, 0, bm.width, bm.height);
-          bctx.drawImage(bigTerrainCanvas, 0, 0);
+          bctx.imageSmoothingEnabled = false;
+          bctx.drawImage(bigTerrainCanvas, 0, 0, bm.width, bm.height);
+          bctx.imageSmoothingEnabled = true;
           // 建物は所有者の所属色（無所属は灰色）の小ドット
           for (const b of buildingsRef.current.buildings) {
+            const mx = toMapX(b.x);
+            const my = toMapY(b.y);
+            if (mx < -4 || my < -4 || mx > bm.width + 4 || my > bm.height + 4) continue;
             bctx.fillStyle = nationsRef.current.playerNations[b.ownerId]?.color ?? "#d8d8d8";
-            bctx.fillRect(b.x * BIGMAP_SCALE - 1, b.y * BIGMAP_SCALE - 1, 2.5, 2.5);
+            bctx.fillRect(mx - 1, my - 1, 2.5, 2.5);
           }
           // 首都（国の色の四角＋白枠）
           for (const n of nationsRef.current.nations) {
+            const mx = toMapX(n.capital.x);
+            const my = toMapY(n.capital.y);
+            if (mx < -8 || my < -8 || mx > bm.width + 8 || my > bm.height + 8) continue;
             bctx.fillStyle = n.color;
             bctx.strokeStyle = "rgba(255,255,255,0.85)";
-            bctx.fillRect(n.capital.x * BIGMAP_SCALE - 3, n.capital.y * BIGMAP_SCALE - 3, 7, 7);
-            bctx.strokeRect(n.capital.x * BIGMAP_SCALE - 3, n.capital.y * BIGMAP_SCALE - 3, 7, 7);
+            bctx.fillRect(mx - 3, my - 3, 7, 7);
+            bctx.strokeRect(mx - 3, my - 3, 7, 7);
           }
           // 他のプレイヤー
           bctx.fillStyle = "#ffffff";
           for (const o of others.values()) {
             bctx.beginPath();
-            bctx.arc(o.track.rx * BIGMAP_SCALE, o.track.ry * BIGMAP_SCALE, 2.6, 0, Math.PI * 2);
+            bctx.arc(toMapX(o.track.rx), toMapY(o.track.ry), 2.6, 0, Math.PI * 2);
             bctx.fill();
           }
           // 自分
           bctx.fillStyle = "#ffd23e";
           bctx.strokeStyle = "rgba(0,0,0,0.65)";
           bctx.beginPath();
-          bctx.arc(player.x * BIGMAP_SCALE, player.y * BIGMAP_SCALE, 4.4, 0, Math.PI * 2);
+          bctx.arc(toMapX(player.x), toMapY(player.y), 4.4, 0, Math.PI * 2);
           bctx.fill();
           bctx.stroke();
         }
@@ -2742,6 +2804,12 @@ export default function WorldBoxClient() {
       label: spaceUi === "world" ? "ロビーへ行く" : "ワールドへ戻る",
       show: true,
       run: () => warpActionRef.current(spaceUi === "world" ? "lobby" : "world"),
+    },
+    {
+      id: "travel",
+      label: "国へ移動",
+      show: nationsUi.me !== null,
+      run: () => { void travelToNation(); },
     },
     {
       id: "map",
@@ -3003,9 +3071,9 @@ export default function WorldBoxClient() {
         {showMap && spaceUi === "world" && (
           <canvas
             ref={minimapRef}
-            width={MINIMAP_SIZE}
-            height={MINIMAP_SIZE}
-            aria-label="全体マップ"
+            width={MINIMAP_PX}
+            height={MINIMAP_PX}
+            aria-label="周辺マップ"
             style={{
               position: "absolute", right: 10, top: 10, width: 112, height: 112,
               borderRadius: 10, border: "1px solid rgba(255,255,255,0.35)",
@@ -3214,7 +3282,7 @@ export default function WorldBoxClient() {
             ref={bigMapRef}
             width={BIGMAP_SIZE}
             height={BIGMAP_SIZE}
-            aria-label="全体マップ（大きく表示）"
+            aria-label="周辺マップ（大きく表示）"
             style={{
               width: "100%", height: "auto", display: "block", marginTop: 10,
               borderRadius: 10, border: "1px solid rgba(255,255,255,0.35)", background: "rgba(0,0,0,0.25)",
