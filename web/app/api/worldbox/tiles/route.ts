@@ -11,6 +11,8 @@ import {
   type TileActionResult, type TileOverridesMap,
 } from "@/lib/worldbox/tiles";
 import { loadNationsState } from "@/lib/worldbox/nations-online";
+import { loadWarState } from "@/lib/worldbox/war-online";
+import { canBreakOthersBlock } from "@/lib/worldbox/war";
 import { containerIsEmpty, isContainerItem } from "@/lib/worldbox/containers";
 import { loadContainer, storeContainer } from "@/lib/worldbox/containers-online";
 import {
@@ -168,7 +170,33 @@ export async function POST(request: Request) {
       }
       minedContainerItem = blockItemId;
     }
-    result = applyMineBlock(current, profile, map, ownerKey, fields.x, fields.y, Date.now());
+    // 戦争中の他者ブロック破壊: 攻撃側の国民が、防衛側の首都の
+    // WAR_TERRITORY_RADIUS 以内にある防衛側国民のブロックだけ掘れる。
+    // ブロック所有者の国は、所属マップの所有者キーから不透明 ID を
+    // 逆引きして求める（プレゼンスに居ない所有者にも届く）。
+    let warBreakAllowed = false;
+    const activeBlock =
+      current && isOverrideActive(current, Date.now()) ? current.block : undefined;
+    if (activeBlock && activeBlock.ownerId !== presenceIdFor(ownerKey)) {
+      const [warState, nationsState] = await Promise.all([loadWarState(), loadNationsState()]);
+      const members = nationsState.members ?? {};
+      const mine = members[ownerKey];
+      let ownerNationId: string | null = null;
+      for (const [memberKey, m] of Object.entries(members)) {
+        if (presenceIdFor(memberKey) === activeBlock.ownerId) {
+          ownerNationId = m.nationId;
+          break;
+        }
+      }
+      const defender = ownerNationId ? (nationsState.nations ?? {})[ownerNationId] : undefined;
+      warBreakAllowed = Boolean(
+        mine && defender &&
+        canBreakOthersBlock(warState, mine.nationId, defender.guildId, tx, ty, defender.capital),
+      );
+    }
+    result = applyMineBlock(
+      current, profile, map, ownerKey, fields.x, fields.y, Date.now(), { warBreakAllowed },
+    );
   } else {
     result = applyTileAction(
       current, profile, map, ownerKey,
