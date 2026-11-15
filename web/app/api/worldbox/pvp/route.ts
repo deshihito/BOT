@@ -12,6 +12,7 @@ import {
 } from "@/lib/worldbox/pvp";
 import { clearPvpDuel, loadMyPvpDuel, loadPvpQueue, savePvpDuel, savePvpQueue } from "@/lib/worldbox/pvp-online";
 import { loadMyLobbyStation } from "@/lib/worldbox/station-online";
+import { advanceTournamentMatch } from "@/lib/worldbox/tournament-online";
 import { withUserLock } from "@/lib/worldbox/user-lock";
 
 export const runtime = "nodejs";
@@ -191,7 +192,7 @@ async function handlePost(request: Request, session: AuthedSession) {
     }
     const loser = duel.players[0].discordId === discordId ? 0 : 1;
     const winner = (1 - loser) as 0 | 1;
-    await awardPrize(duel, winner);
+    await finishDuel(duel, winner);
     await clearPvpDuel(duel);
     const base = await stateResponse(ownerKey, discordId);
     const data = (await base.json()) as Record<string, unknown>;
@@ -230,7 +231,7 @@ async function handlePost(request: Request, session: AuthedSession) {
       log: [...stepped.result.events, ...duel.log].slice(0, 6),
     };
     if (stepped.result.winner !== null) {
-      await awardPrize(next, stepped.result.winner);
+      await finishDuel(next, stepped.result.winner);
       await clearPvpDuel(next);
       const base = await stateResponse(ownerKey, discordId);
       const data = (await base.json()) as Record<string, unknown>;
@@ -259,4 +260,23 @@ async function awardPrize(duel: PvpDuel, winner: 0 | 1): Promise<void> {
   await enqueue(p.ownerKey, p.discordId, {
     kind: "earn", amount: PVP_PRIZE, reason: "arena_pvp_prize", id: pvpPrizeOpId(duel.code),
   });
+}
+
+/**
+ * 決闘の決着。大会の対戦は賞金を払わず、勝者を大会へ返す（大会の
+ * 進行が失敗しても決闘の決着は変えない。決着しなかった試合は
+ * 大会側が期限切れでシード上位の進出として扱う）。
+ */
+async function finishDuel(duel: PvpDuel, winner: 0 | 1): Promise<void> {
+  if (!duel.tournament) {
+    await awardPrize(duel, winner);
+    return;
+  }
+  try {
+    await advanceTournamentMatch(
+      duel.tournament.tournamentId, duel.tournament.matchId, duel.players[winner].discordId,
+    );
+  } catch {
+    // 大会側の進行失敗は決闘の決着を壊さない
+  }
 }

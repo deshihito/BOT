@@ -291,6 +291,42 @@ class TestEarn(WorkerCase):
         self.assertEqual(record["status"], "done")
         self.assertEqual(record["appliedAmount"], 240)
 
+    async def test_earn_arena_tournament_prize_reason(self):
+        # 闘技場大会の優勝賞金（バッチ7c）: 参加費の総額を優勝者が受け取る
+        self.store.pool = 5000
+        op = self.add_op(kind="earn", amount=1600, reason="arena_tournament_prize")
+        await self.worker.poll_once()
+        record = self.record(op["id"])
+        self.assertEqual(record["status"], "done")
+        self.assertEqual(record["appliedAmount"], 1600)
+
+    async def test_earn_arena_tournament_refund_reason(self):
+        # 闘技場大会の不成立時の返金（バッチ7c）: 参加費を返す
+        self.store.pool = 5000
+        op = self.add_op(kind="earn", amount=200, reason="arena_tournament_refund")
+        await self.worker.poll_once()
+        record = self.record(op["id"])
+        self.assertEqual(record["status"], "done")
+        self.assertEqual(record["appliedAmount"], 200)
+
+    async def test_earn_casino_tournament_prize_reason(self):
+        # カジノ大会の賞金（バッチ7c）: 純益上位への配分
+        self.store.pool = 5000
+        op = self.add_op(kind="earn", amount=800, reason="casino_tournament_prize")
+        await self.worker.poll_once()
+        record = self.record(op["id"])
+        self.assertEqual(record["status"], "done")
+        self.assertEqual(record["appliedAmount"], 800)
+
+    async def test_earn_casino_tournament_refund_reason(self):
+        # カジノ大会の不成立時の返金（バッチ7c）: 参加費を返す
+        self.store.pool = 5000
+        op = self.add_op(kind="earn", amount=200, reason="casino_tournament_refund")
+        await self.worker.poll_once()
+        record = self.record(op["id"])
+        self.assertEqual(record["status"], "done")
+        self.assertEqual(record["appliedAmount"], 200)
+
     async def test_earn_work_reason_rejected(self):
         # 労働は廃止（2026-11-16）: earn の許可リストから外れたため適用しない
         self.store.pool = 5000

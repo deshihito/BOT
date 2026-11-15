@@ -53,6 +53,12 @@ export interface PvpDuel {
   startedAt: number;
   /** 直近の経過（新しい順、最大6件）。 */
   log: string[];
+  /**
+   * 大会の対戦のときだけ付く。大会の対戦は参加費に含まれ、試合ごとの
+   * 参加費・賞金は無い（決闘は fighting から始まり、賞金は優勝時に
+   * 大会側が払う）。決着は pvp ルートが大会へ返す。
+   */
+  tournament?: { tournamentId: string; matchId: string };
 }
 
 export interface PvpStepResult {
@@ -115,6 +121,15 @@ export function createDuel(a: PvpQueueEntry, b: PvpQueueEntry, now: number): Pvp
     startedAt: now,
     log: [],
   };
+}
+
+/** 大会の対戦を作る（参加費は大会の参加時に払い済みのため fighting から始める）。 */
+export function createTournamentDuel(
+  a: PvpQueueEntry, b: PvpQueueEntry, now: number,
+  tournamentId: string, matchId: string,
+): PvpDuel {
+  const duel = createDuel(a, b, now);
+  return { ...duel, state: "fighting", tournament: { tournamentId, matchId } };
 }
 
 export function duelExpired(duel: PvpDuel, now: number): boolean {
@@ -181,8 +196,8 @@ export function publicPvpView(duel: PvpDuel, viewerDiscordId: string) {
     opponentHpMax: PVP_PLAYER_HP,
     yourTurn: duel.turn === you,
     turnNo: duel.turnNo,
-    fee: PVP_FEE,
-    prize: PVP_PRIZE,
+    fee: duel.tournament ? 0 : PVP_FEE,
+    prize: duel.tournament ? 0 : PVP_PRIZE,
     log: duel.log,
   };
 }
@@ -198,6 +213,11 @@ export function parsePvpDuel(raw: unknown): PvpDuel | null {
   if (v.turn !== 0 && v.turn !== 1) return null;
   if (v.state !== "paying" && v.state !== "fighting") return null;
   if (!Array.isArray(v.feeOpIds) || v.feeOpIds.length !== 2) return null;
+  if (v.tournament !== undefined) {
+    if (typeof v.tournament !== "object" || v.tournament === null) return null;
+    const t = v.tournament as Record<string, unknown>;
+    if (typeof t.tournamentId !== "string" || typeof t.matchId !== "string") return null;
+  }
   if (typeof v.startedAt !== "number" || typeof v.turnNo !== "number") return null;
   if (!Array.isArray(v.log)) return null;
   for (const p of v.players as unknown[]) {
