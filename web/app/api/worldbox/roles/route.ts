@@ -6,7 +6,8 @@ import { addItem, type PlayerProfile } from "@/lib/worldbox/profile";
 import { playerAttack } from "@/lib/worldbox/arena";
 import { mobById, type PlacedMob } from "@/lib/worldbox/mobs";
 import {
-  applyMobAttack, mobKeyOf, visibleMobs, type MobState,
+  applyMobAttack, mobKeyOf, resolveMobPosition, visibleMobs,
+  MOB_REPORT_LEASH, type MobState,
 } from "@/lib/worldbox/combat";
 import { isMobsEnabled, loadMobState, storeMobState } from "@/lib/worldbox/mobs-online";
 import { listPresence, listPresenceWithOwners } from "@/lib/worldbox/presence-online";
@@ -153,6 +154,7 @@ export async function POST(request: Request) {
   const fields = (body ?? {}) as {
     action?: unknown; role?: unknown; skill?: unknown;
     tx?: unknown; ty?: unknown; space?: unknown; px?: unknown; py?: unknown;
+    mobs?: unknown;
   };
   const ownerKey = sessionOwnerKey(session);
   const now = Date.now();
@@ -238,6 +240,29 @@ export async function POST(request: Request) {
     const tx = typeof fields.tx === "number" && Number.isFinite(fields.tx) ? fields.tx : pos.x;
     const ty = typeof fields.ty === "number" && Number.isFinite(fields.ty) ? fields.ty : pos.y;
 
+    // クライアントが見ているモブの現在タイル（キー=アンカー、値=現在位置）。
+    // 対象解決はアンカーでなく実位置で行う（通常攻撃と同じ理由: 見た目が
+    // アンカーから離れて追跡してくるため、アンカー基準だと画面で目の前に
+    // いるモブに技が当たらず no_target になっていた）。
+    const reportedByKey = new Map<string, { x: number; y: number }>();
+    if (Array.isArray(fields.mobs)) {
+      for (const entry of fields.mobs.slice(0, 32)) {
+        const e = (entry ?? {}) as { mobId?: unknown; x?: unknown; y?: unknown; mx?: unknown; my?: unknown };
+        if (typeof e.mobId !== "string" || !mobById(e.mobId)) continue;
+        if (typeof e.x !== "number" || typeof e.y !== "number" || typeof e.mx !== "number" || typeof e.my !== "number") continue;
+        if (![e.x, e.y, e.mx, e.my].every((v) => Number.isFinite(v) && Math.abs(v) <= 1_000_000)) continue;
+        reportedByKey.set(
+          mobKeyOf({ mobId: e.mobId, x: Math.floor(e.x), y: Math.floor(e.y) }),
+          { x: e.mx, y: e.my },
+        );
+      }
+    }
+    /** 対象解決に使う実位置の中心（申告がリーシュ内なら申告、なければアンカー）。 */
+    const effCenter = (m: PlacedMob): { x: number; y: number } => {
+      const eff = resolveMobPosition(m, reportedByKey.get(mobKeyOf(m)));
+      return { x: eff.x + 0.5, y: eff.y + 0.5 };
+    };
+
     let next: PlayerProfile = {
       ...profile,
       skillAt: { ...profile.skillAt, [skillId]: now },
@@ -282,23 +307,33 @@ export async function POST(request: Request) {
     let targets: PlacedMob[] = [];
     const baseAttack = playerAttack(profile.items, profile.enhance) * (profile.role === "blade" ? 1.25 : 1);
     if (skillId === "sweep" || skillId === "whirlwind") {
-      targets = await mobsInSpace(ownerKey, space, pos.x, pos.y, skill.radius + 2);
-      targets = targets.filter((m) => Math.hypot(m.x + 0.5 - pos.x, m.y + 0.5 - pos.y) <= skill.radius + m.size * 0.5);
+      targets = await mobsInSpace(ownerKey, space, pos.x, pos.y, skill.radius + 2 + MOB_REPORT_LEASH);
+      targets = targets.filter((m) => {
+        const c = effCenter(m);
+        return Math.hypot(c.x - pos.x, c.y - pos.y) <= skill.radius + m.size * 0.5;
+      });
     } else if (skillId === "ice_lance" || skillId === "thunder_strike" || skillId === "fireball") {
       const range = skillId === "ice_lance" ? 4.5 : 5.5;
       if (Math.hypot(tx - pos.x, ty - pos.y) > range + 1.5) return err("too_far", 409);
-      const near = await mobsInSpace(ownerKey, space, tx, ty, 3);
-      near.sort((a, b) =>
-        Math.hypot(a.x + 0.5 - tx, a.y + 0.5 - ty) - Math.hypot(b.x + 0.5 - tx, b.y + 0.5 - ty));
-      if (near.length === 0) return err("no_target", 409);
+      const near = await mobsInSpace(ownerKey, space, tx, ty, 3 + MOB_REPORT_LEASH);
+      near.sort((a, b) => {
+        const ca = effCenter(a);
+        const cb = effCenter(b);
+        return Math.hypot(ca.x - tx, ca.y - ty) - Math.hypot(cb.x - tx, cb.y - ty);
+      });
       const primary = near[0];
-      cx = primary.x + 0.5;
-      cy = primary.y + 0.5;
+      if (!primary) return err("no_target", 409);
+      const pc = effCenter(primary);
+      if (Math.hypot(pc.x - tx, pc.y - ty) > 3.5) return err("no_target", 409);
+      cx = pc.x;
+      cy = pc.y;
       targets = [primary];
       if (skillId === "fireball") {
-        const splash = await mobsInSpace(ownerKey, space, cx, cy, skill.radius + 1.5);
+        const splash = await mobsInSpace(ownerKey, space, cx, cy, skill.radius + 1.5 + MOB_REPORT_LEASH);
         for (const m of splash) {
-          if (m !== primary && Math.hypot(m.x + 0.5 - cx, m.y + 0.5 - cy) <= skill.radius + m.size * 0.5) targets.push(m);
+          if (m === primary) continue;
+          const c = effCenter(m);
+          if (Math.hypot(c.x - cx, c.y - cy) <= skill.radius + m.size * 0.5) targets.push(m);
         }
       }
     } else {
@@ -306,8 +341,11 @@ export async function POST(request: Request) {
       if (Math.hypot(tx - pos.x, ty - pos.y) > 6.5) return err("too_far", 409);
       cx = tx;
       cy = ty;
-      targets = await mobsInSpace(ownerKey, space, tx, ty, skill.radius + 2);
-      targets = targets.filter((m) => Math.hypot(m.x + 0.5 - tx, m.y + 0.5 - ty) <= skill.radius + m.size * 0.5);
+      targets = await mobsInSpace(ownerKey, space, tx, ty, skill.radius + 2 + MOB_REPORT_LEASH);
+      targets = targets.filter((m) => {
+        const c = effCenter(m);
+        return Math.hypot(c.x - tx, c.y - ty) <= skill.radius + m.size * 0.5;
+      });
       if (targets.length === 0) return err("no_target", 409);
     }
 
