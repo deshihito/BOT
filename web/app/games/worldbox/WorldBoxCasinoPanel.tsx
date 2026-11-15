@@ -14,6 +14,7 @@ import {
   type CasinoMachine, type RouletteColor, type RoulettePick,
 } from "@/lib/worldbox/casino";
 import { DICE_RANGES } from "@/lib/worldbox/casino-games";
+import { createPollGuard, type PollGuard } from "@/lib/poll-guard";
 import {
   confettiParticles, countUpValue, isReach, tierFx, winTier, type WinTier,
 } from "@/lib/worldbox/casino-fx";
@@ -292,6 +293,9 @@ export default function WorldBoxCasinoPanel({ onClose }: { onClose: () => void }
   const [diceFace, setDiceFace] = useState(1);
   const [rolling7, setRolling7] = useState<number[] | null>(null);
   const aliveRef = useRef(true);
+  // カジノ状態のポーリングガード（S6）: 3s 間隔で重ねて走らせず、古い
+  // レスポンスでプレイ後の残高表示を巻き戻さない。
+  const refreshGuardRef = useRef<PollGuard>(createPollGuard());
   const timersRef = useRef<number[]>([]);
 
   const later = useCallback((fn: () => void, ms: number) => {
@@ -315,7 +319,9 @@ export default function WorldBoxCasinoPanel({ onClose }: { onClose: () => void }
     later(() => setCelebration(null), 700);
   }, [later]);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (force = false) => {
+    const ticket = refreshGuardRef.current.begin(force ? { force: true } : undefined);
+    if (ticket === null) return;
     try {
       const res = await fetch("/api/worldbox/casino", { headers: { Accept: "application/json" } });
       if (res.status === 401 || res.status === 403) {
@@ -327,12 +333,14 @@ export default function WorldBoxCasinoPanel({ onClose }: { onClose: () => void }
         return;
       }
       const data = (await res.json()) as CasinoState;
-      if (aliveRef.current) {
+      if (aliveRef.current && refreshGuardRef.current.isCurrent(ticket)) {
         setState(data);
         setLoadState("ready");
       }
     } catch {
       if (aliveRef.current) setLoadState((prev) => (prev === "ready" ? prev : "unavailable"));
+    } finally {
+      refreshGuardRef.current.end(ticket);
     }
   }, []);
 
@@ -389,7 +397,7 @@ export default function WorldBoxCasinoPanel({ onClose }: { onClose: () => void }
       if (r.payout > 0) celebrate(r.payout, betAmount);
       else sfxWrong();
     }
-    void refresh();
+    void refresh(true);
   }, [celebrate, refresh]);
 
   const play = async () => {
@@ -467,7 +475,7 @@ export default function WorldBoxCasinoPanel({ onClose }: { onClose: () => void }
         return;
       }
       onOk?.(data);
-      void refresh();
+      void refresh(true);
     } catch {
       if (aliveRef.current) setMsg("受け付けられませんでした");
     } finally {
