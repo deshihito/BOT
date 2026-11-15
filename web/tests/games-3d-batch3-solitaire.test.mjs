@@ -23,7 +23,6 @@ const countButtons = (dir) => {
 
 const BATCH = [
   { dir: "solitaire", client: "SolitaireClient.tsx", scene: "SolitaireScene3D.tsx", buttons: 1 },
-  { dir: "spider", client: "SpiderClient.tsx", scene: "SpiderScene3D.tsx", buttons: 1 },
   { dir: "freecell", client: "FreeCellClient.tsx", scene: "FreeCellScene3D.tsx", buttons: 2 },
 ];
 
@@ -76,18 +75,6 @@ test("3D solitaire: 山札タップ・場札タップ・組札タップ・ダブ
   assert.match(scene, /tableauOffsets/, "重なり間隔は列の長さに応じて調整する");
 });
 
-test("3D spider: カードタップ・空列タップ・配布が既存ハンドラへ接続される", () => {
-  const client = read("app", "games", "spider", "SpiderClient.tsx");
-  assert.match(client, /onCardTap=\{onCardClick\}/, "カードタップ = 既存の選択/移動処理");
-  assert.match(client, /onEmptyColumnTap=\{onEmptyColumnClick\}/, "空列タップ = 既存処理");
-  assert.match(client, /onDealTap=\{tryDeal\}/, "山札タップ/下フリック = 既存の配布処理");
-  assert.match(client, /onDragDrop=\{onDragDrop\}/, "ドラッグ落下が接続される");
-  assert.match(client, /canMoveSpiderRun/, "移動判定は lib の canMoveSpiderRun を使う");
-  const scene = read("app", "games", "spider", "SpiderScene3D.tsx");
-  assert.match(scene, /SPIDER_COLUMNS/, "10列の配置は lib の列数定義を使う");
-  assert.match(scene, /columnOffsets/, "重なり間隔は列の長さに応じて圧縮する");
-  assert.match(scene, /spiderStockDeals/, "山札の残り配布回数は lib から取る");
-});
 
 test("3D freecell: 列・フリーセル・組札タップが既存ハンドラへ接続される", () => {
   const client = read("app", "games", "freecell", "FreeCellClient.tsx");
@@ -104,9 +91,3 @@ test("3D freecell: 列・フリーセル・組札タップが既存ハンドラ�
   assert.match(scene, /FC_COLUMNS/, "8列の配置は lib の列数定義を使う");
 });
 
-test("3D solitaire-family: ロジック層（lib/solitaire.ts, lib/spider.ts, lib/freecell.ts）に three が混入していない", () => {
-  for (const f of ["solitaire.ts", "spider.ts", "freecell.ts"]) {
-    assert.doesNotMatch(read("lib", f), /from "three"/, `lib/${f}`);
-    assert.doesNotMatch(read("lib", f), /three-kit/, `lib/${f}`);
-  }
-});

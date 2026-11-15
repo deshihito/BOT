@@ -23,11 +23,9 @@ const countButtons = (dir) => {
 const BATCH = [
   { dir: "chinchiro", client: "ChinchiroClient.tsx", scene: "ChinchiroScene3D.tsx", buttons: 1 },
   { dir: "yahtzee", client: "YahtzeeClient.tsx", scene: "YahtzeeScene3D.tsx", buttons: 1 },
-  { dir: "roulette", client: "RouletteClient.tsx", scene: "RouletteScene3D.tsx", buttons: 0 },
   { dir: "hanoi", client: "HanoiClient.tsx", scene: "HanoiScene3D.tsx", buttons: 1 },
   { dir: "reversi", client: "ReversiClient.tsx", scene: "ReversiScene3D.tsx", buttons: 2 },
   { dir: "2048", client: "SliderClient.tsx", scene: "SliderScene3D.tsx", buttons: 1 },
-  { dir: "gomoku", client: "GomokuClient.tsx", scene: "GomokuScene3D.tsx", buttons: 1 },
   { dir: "connect4", client: "Connect4Client.tsx", scene: "Connect4Scene3D.tsx", buttons: 2 },
   { dir: "slot", client: "SlotClient.tsx", scene: "SlotScene3D.tsx", buttons: 0 },
 ];

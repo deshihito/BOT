@@ -1,6 +1,5 @@
 // A4フェーズの新規4本のロジック検証。
 // - lib/quiz.ts: 出題決定性・選択肢シャッフルの正解追跡・採点と連続ボーナス
-// - lib/numbercode.ts: EAT/BITE 判定・勝敗・回数制限
 // - lib/online/games/quizbattle.ts: 得点計算・秘匿ビュー・tick 締切・退出処理
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -42,7 +41,6 @@ async function loadQuizBattle() {
 }
 
 const quiz = await loadLib("quiz.ts");
-const nc = await loadLib("numbercode.ts");
 const qb = await loadQuizBattle();
 
 // 決定的 rng（LCG）。オンライン基盤の Rng は () => number。
@@ -134,47 +132,6 @@ test("クイズ: 不正な回答とフェーズ外の操作は同状態を返す
   assert.equal(quiz.nextQuestion(s), s);
   const revealed = quiz.answerQuestion(s, 0);
   assert.equal(quiz.answerQuestion(revealed, 1), revealed);
-});
-
-// ---------------------------------------------------------------- numbercode
-
-test("ナンバーコード: コードは重複なし3桁で、シード決定的", () => {
-  const a = nc.createNumberCodeGame(42);
-  const b = nc.createNumberCodeGame(42);
-  assert.deepEqual(a.code, b.code);
-  assert.equal(a.code.length, 3);
-  assert.equal(new Set(a.code).size, 3);
-  assert.ok(a.code.every((d) => Number.isInteger(d) && d >= 0 && d <= 9));
-});
-
-test("ナンバーコード: EAT/BITE の判定", () => {
-  assert.deepEqual(nc.judgeCode([1, 2, 3], [1, 2, 3]), { eat: 3, bite: 0 });
-  assert.deepEqual(nc.judgeCode([1, 2, 3], [1, 3, 2]), { eat: 1, bite: 2 });
-  assert.deepEqual(nc.judgeCode([1, 2, 3], [3, 2, 1]), { eat: 1, bite: 2 });
-  assert.deepEqual(nc.judgeCode([1, 2, 3], [4, 5, 6]), { eat: 0, bite: 0 });
-  assert.deepEqual(nc.judgeCode([0, 5, 9], [0, 9, 5]), { eat: 1, bite: 2 });
-});
-
-test("ナンバーコード: 正解で勝ち、不正な推測は受理されない", () => {
-  let s = nc.createNumberCodeGame(9);
-  assert.equal(nc.submitNcGuess(s, [1, 1, 2]), s);
-  assert.equal(nc.submitNcGuess(s, [1, 2]), s);
-  assert.equal(nc.submitNcGuess(s, [1, 2, 10]), s);
-  s = nc.submitNcGuess(s, s.code);
-  assert.equal(s.status, "won");
-  assert.equal(s.guesses[s.guesses.length - 1].eat, 3);
-  assert.equal(nc.submitNcGuess(s, [0, 1, 2]), s);
-});
-
-test("ナンバーコード: 10回外すと負けになり残り回数が0になる", () => {
-  let s = nc.createNumberCodeGame(9);
-  // コードと1桁も重ならない推測は存在しない場合があるため、重ならない桁集合から作る。
-  const rest = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9].filter((d) => !s.code.includes(d));
-  const wrong = rest.slice(0, 3);
-  for (let i = 0; i < 10; i++) s = nc.submitNcGuess(s, wrong);
-  assert.equal(s.status, "lost");
-  assert.equal(nc.ncRemainingTries(s), 0);
-  assert.equal(nc.submitNcGuess(s, wrong), s);
 });
 
 // ---------------------------------------------------------------- quizbattle

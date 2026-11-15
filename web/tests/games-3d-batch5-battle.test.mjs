@@ -25,8 +25,6 @@ const countButtons = (dir) => {
 };
 
 const BATCH = [
-  { dir: "dartsbattle", client: "DartsBattleClient.tsx", scene: "DartsBattleScene3D.tsx", buttons: 0 },
-  { dir: "simonbattle", client: "SimonBattleClient.tsx", scene: "SimonBattleScene3D.tsx", buttons: 1 },
 ];
 
 for (const g of BATCH) {
@@ -49,48 +47,12 @@ for (const g of BATCH) {
   });
 }
 
-test("3D batch5-battle dartsbattle: ボードタップが既存の投擲ハンドラへ正規化座標で接続され、セグメント造形がある", () => {
-  const scene = read("app", "games", "dartsbattle", "DartsBattleScene3D.tsx");
-  assert.match(scene, /DART_SECTORS/, "セクター列は lib の定義を使う（対戦サーバーと同一）");
-  assert.match(scene, /DART_RADII/, "リング境界は lib の定義を使う（対戦サーバーと同一）");
-  assert.match(scene, /wedgeGeo/, "同心円セグメントを扇形ジオメトリで作る");
-  assert.match(scene, /onThrow\(hit\.point\.x, hit\.point\.y\)/, "着弾点をそのまま onThrow へ渡す（ソロ版と同じ座標系）");
-  const client = read("app", "games", "dartsbattle", "DartsBattleClient.tsx");
-  assert.match(client, /onThrow=\{handleThrow\}/, "既存の投擲ハンドラへ接続する");
-  assert.match(client, /\(bx \+ 1\.2\) \/ 2\.4\) \* 1000/, "正規化座標を提出形式 0〜1000 へ変換する");
-  assert.match(client, /\(1\.2 - by\) \/ 2\.4\) \* 1000/, "y は上下反転して変換する（サーバー変換の逆）");
-  assert.match(client, /api\.move\(\{ type: "throw", x, y \}\)/, "提出は従来どおり api.move の throw");
-  assert.match(client, /if \(!myTurn\) return;/, "手番判定はクライアント側ハンドラのまま");
-});
 
-test("3D batch5-battle dartsbattle: 投擲はキー差分同期で、自他の新規投擲が飛翔アニメーションになる", () => {
-  const scene = read("app", "games", "dartsbattle", "DartsBattleScene3D.tsx");
-  assert.match(scene, /entries: Map<string, DartEntry>/, "ダーツはキー（seat-連番）で管理する");
-  assert.match(scene, /rt\.entries\.has\(d\.key\)/, "既存の投擲は再生成しない（差分同期）");
-  assert.match(scene, /makeDart\(d\.seat\)/, "ダーツは席色で作り、相手の投擲も同じ経路で表示する");
-  assert.match(scene, /Math\.hypot\(d\.x, d\.y\) <= 1\.18/, "盤外の着弾（時間切れミス）は描かない");
-  const client = read("app", "games", "dartsbattle", "DartsBattleClient.tsx");
-  assert.match(client, /roundDarts\.map\(\(\{ hit, seat, key \}\)/, "このラウンドの全プレイヤーの投擲をシーンへ渡す");
-});
 
-test("3D batch5-battle simonbattle: パッドタップが既存 press へ接続され、発光は lit/pressed に追従する", () => {
-  const scene = read("app", "games", "simonbattle", "SimonBattleScene3D.tsx");
-  assert.match(scene, /emissiveIntensity/, "発光は emissive で表現する");
-  assert.match(scene, /pressed === i/, "押し込み表現は pressed に追従する");
-  assert.match(scene, /onPad\(Number\(/, "パッドタップが onPad へ接続される");
-  const client = read("app", "games", "simonbattle", "SimonBattleClient.tsx");
-  assert.match(client, /onPad=\{press\}/, "既存の press ハンドラへ接続する");
-  assert.match(client, /lit=\{state\.phase === "showing" \? state\.flash : null\}/, "再生中の flash を lit として渡す");
-  assert.match(client, /pressed=\{pressed\}/, "自分の押下状態を pressed として渡す");
-  assert.match(client, /if \(!canPress\) return;/, "フェーズ・手番判定（canPress）はクライアント側のまま");
-  assert.match(client, /api\.move\(\{ type: "press", color \}\)/, "提出は従来どおり api.move の press");
-});
 
 test("3D batch5-battle: ロジック層（lib/darts.ts, lib/online/games/*）に three が混入していない", () => {
   for (const p of [
     ["lib", "darts.ts"],
-    ["lib", "online", "games", "dartsbattle.ts"],
-    ["lib", "online", "games", "simonbattle.ts"],
   ]) {
     assert.doesNotMatch(read(...p), /from "three"/, p.join("/"));
   }

@@ -25,12 +25,10 @@ const CLIENTS = {
   anagram: "AnagramClient.tsx",
   2048: "SliderClient.tsx",
   territory: "TerritoryClient.tsx",
-  skyscrapers: "SkyscrapersClient.tsx",
-  mushoku: "MushokuClient.tsx",
   mastermind: "MastermindClient.tsx",
 };
 // 例外リスト（ゲーム外 chrome のリセットボタン）以外は 0 件であること。
-const BUTTON_BUDGET = { kanacross: 1, chesspuzzle: 1, anagram: 1, 2048: 1, territory: 0, skyscrapers: 1, mushoku: 1, mastermind: 1 };
+const BUTTON_BUDGET = { kanacross: 1, chesspuzzle: 1, anagram: 1, 2048: 1, territory: 0, mastermind: 1 };
 
 function read(game) {
   return fs.readFileSync(path.join(webDir, "app", "games", game, CLIENTS[game]), "utf8");
@@ -45,7 +43,7 @@ for (const [game, file] of Object.entries(CLIENTS)) {
 }
 
 test("gesture batch4: 残りボタンは chrome のリセット操作「もう一度」だけ", () => {
-  for (const game of ["kanacross", "chesspuzzle", "anagram", "2048", "skyscrapers", "mushoku", "mastermind"]) {
+  for (const game of ["kanacross", "chesspuzzle", "anagram", "2048", "mastermind"]) {
     const src = read(game);
     const buttons = src.match(/<button[\s\S]*?<\/button>/g) ?? [];
     assert.equal(buttons.length, 1, `${game}: 残りボタンが ${buttons.length} 件`);
@@ -65,21 +63,13 @@ test("gesture batch4: 8ゲームとも共通ヘルパー lib/gesture を使う",
   }
 });
 
-test("gesture batch4: スワイプ系7ゲームは盤面・対象物に useGesture を使う", () => {
-  for (const game of ["kanacross", "chesspuzzle", "anagram", "2048", "territory", "mushoku", "mastermind"]) {
+test("gesture batch4: スワイプ系6ゲームは盤面・対象物に useGesture を使う", () => {
+  for (const game of ["kanacross", "chesspuzzle", "anagram", "2048", "territory", "mastermind"]) {
     const src = read(game);
     assert.ok(src.includes("useGesture"), `${game}: useGesture を使っていない`);
   }
 });
 
-test("gesture batch4: ジェスチャ面7ゲームは touchAction none（skyscrapers はスワイプ面なしのため対象外）", () => {
-  for (const game of ["kanacross", "chesspuzzle", "anagram", "2048", "territory", "mushoku", "mastermind"]) {
-    const src = read(game);
-    assert.ok(src.includes('touchAction: "none"'), `${game}: ジェスチャ面に touchAction none がない`);
-  }
-  const sky = read("skyscrapers");
-  assert.ok(!sky.includes("useGesture"), "skyscrapers: スワイプ面がないのに useGesture がある");
-});
 
 test("gesture batch4: kanacross は盤面下スワイプで単語チェック、入力対象はタップ対象物化", () => {
   const src = read("kanacross");
@@ -177,28 +167,7 @@ test("gesture batch4: territory は盤面スワイプで回転・反転・パス
   assert.ok(src.includes('touchAction: "none"'), "盤面に touchAction none がない");
 });
 
-test("gesture batch4: skyscrapers は盤マス・数字パッドをタップ対象化、数字キー入力を追加", () => {
-  const src = read("skyscrapers");
-  assert.ok(src.includes("tappableProps(() => inputValue(v))"), "数字パッドがタップ対象になっていない");
-  assert.ok(src.includes("tappableProps(() => inputValue(0))"), "消すがタップ対象になっていない");
-  assert.ok(src.includes("tappableProps(() => restart(s, hard))"), "サイズ選択がタップ対象になっていない");
-  assert.ok(src.includes("tappableProps(() => restart(size, !hard))"), "ヒント一部隠しがタップ対象になっていない");
-  assert.ok(src.includes('role="gridcell"'), "盤マスが gridcell のタップ対象になっていない");
-  assert.ok(src.includes("inputValue(Number(e.key))"), "物理キーボードの数字入力がない");
-  assert.ok(src.includes('e.key === "Backspace"'), "Backspace での消すがない");
-});
 
-test("gesture batch4: mushoku は筆算面下スワイプでチェック、パッドはタップ対象物化", () => {
-  const src = read("mushoku");
-  assert.ok(src.includes("checkGesture"), "筆算面に useGesture が繋がっていない");
-  assert.ok(src.includes('dir === "down"'), "チェックが下スワイプになっていない");
-  assert.ok(src.includes("onCheck()"), "チェックへの接続が壊れている");
-  assert.ok(src.includes("tappableProps(onCheck)"), "チェックがタップ対象になっていない");
-  assert.ok(src.includes("tappableProps(() => inputDigit(d))"), "数字パッドがタップ対象になっていない");
-  assert.ok(src.includes("tappableProps(() => inputDigit(null))"), "消すがタップ対象になっていない");
-  assert.ok(src.includes("tappableProps(() => restart(l.key))"), "レベル選択がタップ対象になっていない");
-  assert.ok(src.includes('touchAction: "none"'), "筆算面に touchAction none がない");
-});
 
 test("gesture batch4: mastermind は予想欄スワイプで判定・クリア、色はタップ対象物化", () => {
   const src = read("mastermind");

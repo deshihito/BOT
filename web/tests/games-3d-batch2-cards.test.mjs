@@ -23,7 +23,6 @@ const countButtons = (dir) => {
 
 const BATCH = [
   { dir: "blackjack", client: "BlackjackClient.tsx", scene: "BlackjackScene3D.tsx", buttons: 0 },
-  { dir: "baccarat", client: "BaccaratClient.tsx", scene: "BaccaratScene3D.tsx", buttons: 0 },
 ];
 
 for (const g of BATCH) {
@@ -68,8 +67,10 @@ test("3D cards: createCard の複合ラベルは文字数に応じてフォン�
   assert.match(prim, /label\.length/, "ランク+スート等の複数文字ラベル対応");
 });
 
-test("3D cards: ロジック層（lib/blackjack.ts, lib/baccarat.ts, lib/drawpoker.ts）に three が混入していない", () => {
-  for (const f of ["blackjack.ts", "baccarat.ts", "drawpoker.ts"]) {
+
+test("3D cards: ロジック層（lib/blackjack.ts）に three が混入していない", () => {
+  for (const f of ["blackjack.ts"]) {
     assert.doesNotMatch(read("lib", f), /from "three"/, `lib/${f}`);
+    assert.doesNotMatch(read("lib", f), /three-kit/, `lib/${f}`);
   }
 });

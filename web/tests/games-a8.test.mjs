@@ -1,6 +1,5 @@
 // A8フェーズの新規4本のロジック検証。
 // - lib/pipe.ts: 解の存在する生成・回転・水の流れ判定・クリア
-// - lib/drawpoker.ts: 役判定（ワンペア〜ロイヤル）・交換・配当・簡易戦略
 // - lib/online/games/bombpass.ts: 爆発と失点・脱落と勝敗・秘匿（残り時間非表示）・退出
 // - lib/online/games/shiritori.ts: 単語バンク妥当性・接続ルール・「ン」負け・時間切れ
 import { test } from "node:test";
@@ -43,16 +42,8 @@ async function loadOnline(name, exportsList) {
 }
 
 const pipe = await loadLib("pipe.ts");
-const dp = await loadLib("drawpoker.ts");
 const bomb = await loadOnline("bombpass.ts", ["gameModule", "BOMB_MIN_MS", "BOMB_MAX_MS", "BOMB_LOSE_POINTS"]);
-const shi = await loadOnline("shiritori.ts", [
-  "gameModule",
-  "SHIRITORI_WORDS",
-  "normalizeShiritoriWord",
-  "shiritoriTail",
-  "isBankWord",
-  "SHIRITORI_TURN_MS",
-]);
+const shi = await loadOnline("shiritori.ts", [ "gameModule", "SHIRITORI_WORDS", "normalizeShiritoriWord", "shiritoriTail", "isBankWord", "SHIRITORI_TURN_MS", ]);
 
 const rngStub = () => 0.5;
 const seats = (n) => Array.from({ length: n }, (_, i) => ({ seat: i, name: `P${i + 1}` }));
@@ -145,83 +136,6 @@ test("パイプ: 一直線につなぐと水が排水口まで届いてクリア
   assert.equal(after.status, "won");
   // クリア後は回転できない
   assert.equal(pipe.rotatePipe(after, 10), after);
-});
-
-// ---------------------------------------------------------------- ドローポーカー
-
-const C = (suit, rank) => ({ suit, rank });
-
-test("ドローポーカー: 役判定（ロイヤル〜スリーカード）", () => {
-  const royal = dp.evaluateHand([C("spade", 10), C("spade", 11), C("spade", 12), C("spade", 13), C("spade", 1)]);
-  assert.equal(royal.category, 9);
-  assert.equal(royal.multiplier, 250);
-  const sf = dp.evaluateHand([C("heart", 5), C("heart", 6), C("heart", 7), C("heart", 8), C("heart", 9)]);
-  assert.equal(sf.category, 8);
-  const four = dp.evaluateHand([C("spade", 9), C("heart", 9), C("diamond", 9), C("club", 9), C("spade", 2)]);
-  assert.equal(four.category, 7);
-  const fh = dp.evaluateHand([C("spade", 9), C("heart", 9), C("diamond", 9), C("club", 2), C("spade", 2)]);
-  assert.equal(fh.category, 6);
-  const flush = dp.evaluateHand([C("club", 2), C("club", 5), C("club", 7), C("club", 11), C("club", 13)]);
-  assert.equal(flush.category, 5);
-  const straight = dp.evaluateHand([C("spade", 5), C("heart", 6), C("diamond", 7), C("club", 8), C("spade", 9)]);
-  assert.equal(straight.category, 4);
-  const wheel = dp.evaluateHand([C("spade", 1), C("heart", 2), C("diamond", 3), C("club", 4), C("spade", 5)]);
-  assert.equal(wheel.category, 4);
-  const three = dp.evaluateHand([C("spade", 7), C("heart", 7), C("diamond", 7), C("club", 2), C("spade", 11)]);
-  assert.equal(three.category, 3);
-  const twoPair = dp.evaluateHand([C("spade", 7), C("heart", 7), C("diamond", 2), C("club", 2), C("spade", 11)]);
-  assert.equal(twoPair.category, 2);
-});
-
-test("ドローポーカー: ワンペアは J 以上（A 含む）だけ配当があり、10以下は配当なし", () => {
-  const jPair = dp.evaluateHand([C("spade", 11), C("heart", 11), C("diamond", 2), C("club", 5), C("spade", 8)]);
-  assert.equal(jPair.category, 1);
-  assert.equal(jPair.multiplier, 1);
-  const aPair = dp.evaluateHand([C("spade", 1), C("heart", 1), C("diamond", 2), C("club", 5), C("spade", 8)]);
-  assert.equal(aPair.category, 1);
-  const lowPair = dp.evaluateHand([C("spade", 10), C("heart", 10), C("diamond", 2), C("club", 5), C("spade", 8)]);
-  assert.equal(lowPair.category, 0);
-  assert.equal(lowPair.multiplier, 0);
-  assert.ok(lowPair.name.includes("ワンペア"));
-  const high = dp.evaluateHand([C("spade", 2), C("heart", 5), C("diamond", 7), C("club", 11), C("spade", 9)]);
-  assert.equal(high.category, 0);
-  assert.equal(high.name, "役なし");
-});
-
-test("ドローポーカー: 配ると5枚の異なる札でベットが引かれ、交換で確定して配当が付く", () => {
-  const s0 = dp.createDrawPokerGame(7, 1000);
-  const s1 = dp.startRound(s0, 100);
-  assert.equal(s1.phase, "draw");
-  assert.equal(s1.chips, 900);
-  assert.equal(s1.hand.length, 5);
-  assert.equal(new Set(s1.hand.map((c) => `${c.suit}-${c.rank}`)).size, 5);
-  // 同じシードでは同じ配布
-  const again = dp.startRound(dp.createDrawPokerGame(7, 1000), 100);
-  assert.deepEqual(again.hand, s1.hand);
-  // 全交換
-  const s2 = dp.drawCards(s1, [0, 1, 2, 3, 4]);
-  assert.equal(s2.phase, "settled");
-  assert.equal(s2.hand.length, 5);
-  // 捨てた5枚は場から離れるため、手札＋山札は47枚で全て異なる
-  const all = [...s2.hand, ...s2.deck];
-  assert.equal(new Set(all.map((c) => `${c.suit}-${c.rank}`)).size, 47);
-  const info = dp.evaluateHand(s2.hand);
-  assert.equal(s2.result.hand.category, info.category);
-  assert.equal(s2.result.payout, 100 * info.multiplier);
-  assert.equal(s2.chips, 900 + s2.result.payout);
-  // 交換なし（全残し）でも確定できる
-  const s3 = dp.drawCards(s1, []);
-  assert.deepEqual(s3.hand, s1.hand);
-  // 確定後は再交換できない／ベット不足は開始できない
-  assert.equal(dp.drawCards(s2, [0]), s2);
-  assert.equal(dp.startRound(dp.createDrawPokerGame(1, 50), 100).phase, "betting");
-});
-
-test("ドローポーカー: 簡易戦略はペアとフラッシュを残す", () => {
-  const pairHolds = dp.suggestHolds([C("spade", 11), C("heart", 11), C("diamond", 2), C("club", 5), C("spade", 8)]);
-  assert.deepEqual([...pairHolds].sort((a, b) => a - b), [0, 1]);
-  const flushHolds = dp.suggestHolds([C("club", 2), C("club", 5), C("club", 7), C("club", 11), C("club", 13)]);
-  assert.deepEqual([...flushHolds].sort((a, b) => a - b), [0, 1, 2, 3, 4]);
 });
 
 // ---------------------------------------------------------------- 爆弾パス

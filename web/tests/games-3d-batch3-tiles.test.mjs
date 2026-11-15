@@ -24,7 +24,6 @@ const countButtons = (dir) => {
 const BATCH = [
   { dir: "minesweeper", client: "MinesweeperClient.tsx", scene: "MinesweeperScene3D.tsx", buttons: 1 },
   { dir: "pentomino", client: "PentominoClient.tsx", scene: "PentominoScene3D.tsx", buttons: 1 },
-  { dir: "blockpuzzle", client: "BlockPuzzleClient.tsx", scene: "BlockPuzzleScene3D.tsx", buttons: 3 },
   { dir: "mahjong", client: "MahjongClient.tsx", scene: "MahjongScene3D.tsx", buttons: 3 },
 ];
 
@@ -76,19 +75,6 @@ test("3D pentomino: ピースは立体ブロック、入力はタップ配置と
   assert.match(client, /previewCells=\{previewCells\}/, "プレビュー計算は親（canPlacePent）側のまま");
 });
 
-test("3D blockpuzzle: タップ配置が正で、ドラッグは planePoint 追従のゴーストとして補助する", () => {
-  const scene = read("app", "games", "blockpuzzle", "BlockPuzzleScene3D.tsx");
-  assert.match(scene, /onDragMove/, "ドラッグ中は平面上の点でゴーストを追従させる");
-  assert.match(scene, /onDragEnd/, "ドラッグを離したマスへ配置する");
-  assert.match(scene, /pointToCell/, "平面上の点をマスへ変換する");
-  assert.match(scene, /ghostGroup/, "ドラッグ/ホバー中のゴーストを立体ブロックで出す");
-  assert.match(scene, /ghostOk/, "置ける位置かどうかでゴーストの色を変える");
-  assert.match(scene, /planeY/, "ドラッグ平面の高さを attachPickPointer へ渡す");
-  const client = read("app", "games", "blockpuzzle", "BlockPuzzleClient.tsx");
-  assert.match(client, /onCell=\{onCellClick\}/, "タップ配置は既存ハンドラへ接続する");
-  assert.match(client, /onHover=\{setHover\}/, "ホバーは既存の hover 状態へ接続する");
-  assert.match(client, /ghost=\{ghost\}/, "ゴースト計算（canPlacePiece）は親側のまま");
-});
 
 test("3D mahjong: 牌は MJ_KINDS の上面テクスチャつき直方体で、layer が段差になる", () => {
   const scene = read("app", "games", "mahjong", "MahjongScene3D.tsx");
@@ -103,9 +89,3 @@ test("3D mahjong: 牌は MJ_KINDS の上面テクスチャつき直方体で、l
   assert.match(client, /free=\{free\}/, "フリー判定は親（freeTileIds）のまま");
 });
 
-test("3D batch3: ロジック層（minesweeper / pentomino / blockpuzzle / mahjong）に three が混入していない", () => {
-  for (const f of ["minesweeper.ts", "pentomino.ts", "blockpuzzle.ts", "mahjong.ts"]) {
-    assert.doesNotMatch(read("lib", f), /from "three"/, `lib/${f}`);
-    assert.doesNotMatch(read("lib", f), /three-kit/, `lib/${f}`);
-  }
-});

@@ -1,7 +1,9 @@
 // 第1バッチ ジェスチャ移行（2026-11-13 ユーザー裁定）の回帰テスト。
 // - 共通ヘルパー lib/gesture.ts のスワイプ判定（純粋関数）
-// - 対象8ゲームのクライアントに実行ボタンが残っていないこと（静的検査）
-// diceroll の「もう一度/最初から」と chinchiro の「もう一度」はゲーム外 chrome
+// - 対象ゲームのクライアントに実行ボタンが残っていないこと（静的検査）
+// （対象は当初8ゲーム。2026-11-15 のカタログ削減で highlow / diceroll /
+// roulette / janken を削除したため残り4ゲームが対象。）
+// chinchiro の「もう一度」はゲーム外 chrome
 // （リセット操作）として例外リスト入り済みのため、上限件数だけを固定する。
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -48,14 +50,10 @@ const CLIENTS = {
   snake: "SnakeClient.tsx",
   blackjack: "BlackjackClient.tsx",
   slot: "SlotClient.tsx",
-  highlow: "HighLowClient.tsx",
-  diceroll: "DiceRollClient.tsx",
   chinchiro: "ChinchiroClient.tsx",
-  roulette: "RouletteClient.tsx",
-  janken: "JankenClient.tsx",
 };
 // 例外リスト（ゲーム外 chrome のリセットボタン）以外は 0 件であること。
-const BUTTON_BUDGET = { snake: 0, blackjack: 0, slot: 0, highlow: 0, diceroll: 2, chinchiro: 1, roulette: 0, janken: 0 };
+const BUTTON_BUDGET = { snake: 0, blackjack: 0, slot: 0, chinchiro: 1 };
 
 for (const [game, file] of Object.entries(CLIENTS)) {
   test(`gesture batch1: ${game} の実行ボタン廃止（<button> <= ${BUTTON_BUDGET[game]}）`, () => {
@@ -65,17 +63,11 @@ for (const [game, file] of Object.entries(CLIENTS)) {
   });
 }
 
-test("gesture batch1: スワイプ系7ゲームは共通ヘルパー lib/gesture を使う", () => {
-  for (const game of ["snake", "blackjack", "slot", "highlow", "diceroll", "chinchiro", "roulette"]) {
+test("gesture batch1: スワイプ系4ゲームは共通ヘルパー lib/gesture を使う", () => {
+  for (const game of ["snake", "blackjack", "slot", "chinchiro"]) {
     const src = fs.readFileSync(path.join(webDir, "app", "games", game, CLIENTS[game]), "utf8");
     assert.ok(src.includes('from "@/lib/gesture"'), `${game}: lib/gesture を import していない`);
     assert.ok(src.includes("useGesture"), `${game}: useGesture を使っていない`);
   }
 });
 
-test("gesture batch1: janken の手は button でなく手カード（div role=button）のタップ", () => {
-  const src = fs.readFileSync(path.join(webDir, "app", "games", "janken", CLIENTS.janken), "utf8");
-  assert.ok(!src.includes("<button"), "janken に button が残っている");
-  assert.ok(src.includes('role="button"'), "手カードが対象物タップになっていない");
-  assert.ok(src.includes('api.move({ type: "throw", hand })'), "提出アクションへの接続が壊れている");
-});

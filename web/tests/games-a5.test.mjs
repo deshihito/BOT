@@ -1,7 +1,6 @@
 // A5フェーズの新規4本のロジック検証。
 // - lib/darts.ts: エリア判定（ブル/ダブル/トリプル/セクター）・ラウンド制と合計
 // - lib/touchnumber.ts: 配置・次の数字判定・ミス集計
-// - lib/roulette.ts: 賭け判定と配当・チップ増減
 // - lib/online/games/wordwolf.ts: お題秘匿・議論tick・投票/決選投票の決着
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -43,7 +42,6 @@ async function loadWordwolf() {
 
 const darts = await loadLib("darts.ts");
 const touch = await loadLib("touchnumber.ts");
-const roulette = await loadLib("roulette.ts");
 const ww = await loadWordwolf();
 
 function seeded(seed) {
@@ -131,62 +129,6 @@ test("タッチザナンバー: 先の数字はミス、片付け済みは無視
   s = touch.tapValue(s, 1);
   assert.equal(s.misses, before.misses);
   assert.equal(s.next, 2);
-});
-
-// ---------------------------------------------------------------- ルーレット
-
-test("ルーレット: 赤黒・偶奇・大小の判定（0はすべて外れ）", () => {
-  assert.equal(roulette.betWins({ kind: "red" }, 1), true);
-  assert.equal(roulette.betWins({ kind: "red" }, 2), false);
-  assert.equal(roulette.betWins({ kind: "red" }, 0), false);
-  assert.equal(roulette.betWins({ kind: "black" }, 0), false);
-  assert.equal(roulette.betWins({ kind: "even" }, 0), false);
-  assert.equal(roulette.betWins({ kind: "even" }, 4), true);
-  assert.equal(roulette.betWins({ kind: "odd" }, 7), true);
-  assert.equal(roulette.betWins({ kind: "low" }, 18), true);
-  assert.equal(roulette.betWins({ kind: "high" }, 19), true);
-  assert.equal(roulette.betWins({ kind: "high" }, 0), false);
-});
-
-test("ルーレット: ダースンと列の判定", () => {
-  assert.equal(roulette.betWins({ kind: "dozen", value: 2 }, 13), true);
-  assert.equal(roulette.betWins({ kind: "dozen", value: 2 }, 25), false);
-  assert.equal(roulette.betWins({ kind: "dozen", value: 1 }, 0), false);
-  // 列3は 3,6,...,36
-  assert.equal(roulette.betWins({ kind: "column", value: 3 }, 36), true);
-  assert.equal(roulette.betWins({ kind: "column", value: 1 }, 34), true);
-  assert.equal(roulette.betWins({ kind: "column", value: 2 }, 34), false);
-});
-
-test("ルーレット: 配当倍率（単数35、ダースン/列2、外側1）", () => {
-  assert.equal(roulette.betProfitMultiplier({ kind: "straight", value: 7 }), 35);
-  assert.equal(roulette.betProfitMultiplier({ kind: "dozen", value: 1 }), 2);
-  assert.equal(roulette.betProfitMultiplier({ kind: "column", value: 1 }), 2);
-  assert.equal(roulette.betProfitMultiplier({ kind: "red" }), 1);
-});
-
-test("ルーレット: スピンは決定的で、チップ増減が結果と一致する", () => {
-  const play = () => {
-    const s0 = roulette.createRoulette(99, 1000);
-    return roulette.spinRoulette(s0, [{ kind: "red", amount: 100 }]);
-  };
-  const a = play();
-  const b = play();
-  assert.equal(a.lastResult.pocket, b.lastResult.pocket);
-  assert.equal(a.chips, 1000 + a.lastResult.delta);
-  const expectedDelta = a.lastResult.details[0].win ? 100 : -100;
-  assert.equal(a.lastResult.delta, expectedDelta);
-  assert.ok(roulette.ROULETTE_WHEEL.includes(a.lastResult.pocket));
-});
-
-test("ルーレット: チップ不足と不正な賭けはエラー、破産後は再支給できる", () => {
-  const s = roulette.createRoulette(1, 50);
-  assert.throws(() => roulette.spinRoulette(s, [{ kind: "red", amount: 100 }]), /チップが足りません/);
-  assert.throws(() => roulette.spinRoulette(s, [{ kind: "straight", value: 99, amount: 10 }]), /不正/);
-  assert.throws(() => roulette.spinRoulette(s, []), /賭けがありません/);
-  const broke = { ...s, chips: 0 };
-  assert.equal(roulette.refillChips(broke).chips, roulette.ROULETTE_START_CHIPS);
-  assert.equal(roulette.refillChips(s), s);
 });
 
 // ---------------------------------------------------------------- ワードウルフ

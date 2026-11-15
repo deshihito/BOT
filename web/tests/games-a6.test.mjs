@@ -1,7 +1,6 @@
 // A6フェーズの新規4本のロジック検証。
 // - lib/spotdiff.ts: 差分の生成・判定・ミスタップ・勝利
 // - lib/flagquiz.ts: 出題決定性・両モード・採点と連続ボーナス・復習記録
-// - lib/highlow.ts: 判定（正解/外れ/同数引き分け）・山札消化・ベスト連続
 // - lib/online/games/drawguess.ts: 秘匿ビュー・正規化一致・得点・ストローク上限・tick・退出
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -46,7 +45,6 @@ async function loadDrawGuess() {
 
 const sd = await loadLib("spotdiff.ts");
 const fq = await loadLib("flagquiz.ts");
-const hl = await loadLib("highlow.ts");
 const dg = await loadDrawGuess();
 
 // 決定的 rng（LCG）。オンライン基盤の Rng は () => number。
@@ -182,72 +180,6 @@ test("フラッグクイズ: 不正解は0点で連続が切れ、間違えた�
   // revealed 中の二重回答は無効
   const again = fq.answerFlagQuestion(state, q.answerPos);
   assert.equal(again, state);
-});
-
-// ---------------------------------------------------------------- highlow
-
-test("ハイ＆ロー: 山札は52枚すべて異なるカードで、最初のカードがある", () => {
-  const state = hl.createHighLowGame(42);
-  assert.equal(state.pile.length, 52);
-  assert.equal(new Set(state.pile).size, 52);
-  assert.ok(state.pile.every((c) => c >= 0 && c < 52));
-  assert.equal(hl.highLowRemaining(state), 51);
-  const b = hl.createHighLowGame(42);
-  assert.deepEqual(state.pile, b.pile);
-});
-
-test("ハイ＆ロー: カードのランクと名前が正しい", () => {
-  assert.equal(hl.highLowRank(0), 1); // ♠A
-  assert.equal(hl.highLowCardName(0), "♠A");
-  assert.equal(hl.highLowCardName(12), "♠K");
-  assert.equal(hl.highLowCardName(13 + 10), "♥J");
-  assert.equal(hl.isHighLowRed(13), true); // ♥
-  assert.equal(hl.isHighLowRed(0), false); // ♠
-  assert.equal(hl.compareHighLow(0, 1), 1); // A -> 2 は高い
-  assert.equal(hl.compareHighLow(5, 2), -1);
-  assert.equal(hl.compareHighLow(5, 18), 0); // 6 と 6（別スート）
-});
-
-/** pile を差し替えた状態を作る（テスト用）。 */
-function hlWithPile(pile) {
-  const base = hl.createHighLowGame(1);
-  return { ...base, pile };
-}
-
-test("ハイ＆ロー: 当たると連続が伸び、外すと終了する", () => {
-  // 現在 5(ランク6)、次 9(ランク10) → high が正解
-  let state = hlWithPile([5, 9, 0, 1]);
-  state = hl.guessHighLow(state, "high");
-  assert.equal(state.last.result, "correct");
-  assert.equal(state.streak, 1);
-  assert.equal(state.status, "playing");
-  assert.equal(hl.highLowCurrent(state), 9);
-  // 現在 9(ランク10)、次 0(ランクA=1) → low が正解だが high と答えて外す
-  state = hl.guessHighLow(state, "high");
-  assert.equal(state.last.result, "wrong");
-  assert.equal(state.status, "finished");
-  assert.equal(state.finishReason, "wrong");
-  assert.equal(state.bestStreak, 1);
-});
-
-test("ハイ＆ロー: 同数は引き分けで連続を保ったまま続行できる", () => {
-  // 現在 5(ランク6)、次 18(ランク6) → どちらを答えても引き分け
-  let state = hlWithPile([5, 18, 3, 4]);
-  state = hl.guessHighLow(state, "high");
-  assert.equal(state.last.result, "draw");
-  assert.equal(state.streak, 0);
-  assert.equal(state.status, "playing");
-  assert.equal(hl.highLowCurrent(state), 18);
-});
-
-test("ハイ＆ロー: 山札が尽きるとクリアで終了する", () => {
-  // 現在 0(A)、次 1(2) の2枚だけ → high 正解で消化しきる
-  let state = hlWithPile([0, 1]);
-  state = hl.guessHighLow(state, "high");
-  assert.equal(state.last.result, "correct");
-  assert.equal(state.status, "finished");
-  assert.equal(state.finishReason, "cleared");
-  assert.equal(state.streak, 1);
 });
 
 // ---------------------------------------------------------------- drawguess

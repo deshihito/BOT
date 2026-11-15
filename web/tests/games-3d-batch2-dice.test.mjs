@@ -22,9 +22,7 @@ const countButtons = (dir) => {
 
 const BATCH = [
   { dir: "liarsdice", client: "LiarsDiceClient.tsx", scene: "LiarsDiceScene3D.tsx", buttons: 2 },
-  { dir: "diceroll", client: "DiceRollClient.tsx", scene: "DiceRollScene3D.tsx", buttons: 2 },
   { dir: "dicequest", client: "DiceQuestClient.tsx", scene: "DiceQuestScene3D.tsx", buttons: 1 },
-  { dir: "sugoroku", client: "SugorokuClient.tsx", scene: "SugorokuScene3D.tsx", buttons: 1 },
 ];
 
 for (const g of BATCH) {
@@ -47,15 +45,6 @@ for (const g of BATCH) {
   });
 }
 
-test("3D batch2: サイコロ系シーンは DiceSet で転がす（diceroll を除く）", () => {
-  for (const dir of ["liarsdice", "dicequest", "sugoroku"]) {
-    const files = fs.readdirSync(path.join(webDir, "app", "games", dir)).filter((f) => f.endsWith("Scene3D.tsx"));
-    assert.equal(files.length, 1, dir);
-    const scene = read("app", "games", dir, files[0]);
-    assert.match(scene, /DiceSet/, dir);
-    assert.match(scene, /\.roll\(/, `${dir} は DiceSet.roll で結果へ収束させる`);
-  }
-});
 
 test("3D batch2 liarsdice: 相手のダイスはカップで伏せ、自分のダイスだけ DiceSet で見せる", () => {
   const scene = read("app", "games", "liarsdice", "LiarsDiceScene3D.tsx");
@@ -66,33 +55,7 @@ test("3D batch2 liarsdice: 相手のダイスはカップで伏せ、自分の�
   assert.match(client, /diceCount/, "個数は DOM 併記のまま");
 });
 
-test("3D batch2 diceroll: 向きは lib の orientation から quaternion を組み、上面が一致する", () => {
-  const scene = read("app", "games", "diceroll", "DiceRollScene3D.tsx");
-  assert.match(scene, /orientationQuaternion/);
-  assert.match(scene, /makeBasis/, "基底行列から向きを決める");
-  assert.match(scene, /slerpQuaternions|slerp/, "転がしは quaternion 補間");
-  assert.match(scene, /onFlick/, "盤面フリック（スワイプ）入力を維持する");
-  // 面配置 [東3,西4,上1,下6,南5,北2]: 向かい合う面の合計が7。
-  const m = scene.match(/FACE_BY_AXIS = \[([0-9, ]+)\]/);
-  assert.ok(m, "FACE_BY_AXIS が見つかる");
-  const values = m[1].split(",").map((s) => Number(s.trim()));
-  assert.equal(values.length, 6);
-  for (const [a, b] of [[0, 1], [2, 3], [4, 5]]) {
-    assert.equal(values[a] + values[b], 7, `face ${a}+${b}`);
-  }
-  // 初期向き（上1・北2・東3）: 上=+y の値1、北=-z の値2、東=+x の値3。
-  assert.equal(values[2], 1, "上面は1");
-  assert.equal(values[5], 2, "北面は2");
-  assert.equal(values[0], 3, "東面は3");
-});
 
-test("3D batch2 diceroll: ロジック層の向き変換と整合する（rollOrientation の転がし）", async () => {
-  // lib/diceroll.ts の rollOrientation と同じ規則で、開始向きから各方向へ
-  // 転がした後の上面が、シーンの FACE_BY_AXIS 配置と矛盾しないことを確認する。
-  const lib = read("lib", "diceroll.ts");
-  assert.match(lib, /DICE_START_ORIENTATION/);
-  assert.match(lib, /top: 1,\s+bottom: 6,\s+north: 2,\s+south: 5,\s+east: 3,\s+west: 4/);
-});
 
 test("3D batch2 dicequest: 白2個＋色4個の6ダイス構成で DiceSet を使う", () => {
   const scene = read("app", "games", "dicequest", "DiceQuestScene3D.tsx");
@@ -102,13 +65,6 @@ test("3D batch2 dicequest: 白2個＋色4個の6ダイス構成で DiceSet を�
   assert.match(client, /白 \{state\.dice\.white/, "目は DOM 併記で読める");
 });
 
-test("3D batch2 sugoroku: 立体タイル列＋駒＋DiceSet で、振った後に駒が進む", () => {
-  const scene = read("app", "games", "sugoroku", "SugorokuScene3D.tsx");
-  assert.match(scene, /createStone/, "駒はプリミティブで作る");
-  assert.match(scene, /SUGOROKU_GOAL/);
-  assert.match(scene, /queue/, "駒はマス単位の跳躍キューで進む");
-  assert.match(scene, /tileTexture/, "タイルには番号と効果を描く");
-});
 
 test("3D batch2: ロジック層（lib/*.ts 本体）に three が混入していない", () => {
   for (const f of fs.readdirSync(path.join(webDir, "lib"))) {
@@ -123,5 +79,15 @@ test("3D batch2: 絵文字UIを持ち込んでいない（シーン内に絵文�
   for (const g of BATCH) {
     const scene = read("app", "games", g.dir, g.scene);
     assert.doesNotMatch(scene, emoji, g.dir);
+  }
+});
+
+test("3D batch2: サイコロ系シーンは DiceSet で転がす（diceroll を除く）", () => {
+  for (const dir of ["liarsdice", "dicequest"]) {
+    const files = fs.readdirSync(path.join(webDir, "app", "games", dir)).filter((f) => f.endsWith("Scene3D.tsx"));
+    assert.equal(files.length, 1, dir);
+    const scene = read("app", "games", dir, files[0]);
+    assert.match(scene, /DiceSet/, dir);
+    assert.match(scene, /\.roll\(/, `${dir} は DiceSet.roll で結果へ収束させる`);
   }
 });

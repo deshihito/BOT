@@ -26,10 +26,7 @@ const countButtons = (dir) => {
 
 const BATCH = [
   { dir: "maze", client: "MazeClient.tsx", scene: "MazeScene3D.tsx", buttons: 1 },
-  { dir: "icemaze", client: "IceMazeClient.tsx", scene: "IceMazeScene3D.tsx", buttons: 3 },
   { dir: "snake", client: "SnakeClient.tsx", scene: "SnakeScene3D.tsx", buttons: 0 },
-  { dir: "tictactoe", client: "TictactoeClient.tsx", scene: "TictactoeScene3D.tsx", buttons: 1 },
-  { dir: "domino", client: "DominoClient.tsx", scene: "DominoScene3D.tsx", buttons: 3 },
 ];
 
 for (const g of BATCH) {
@@ -79,26 +76,7 @@ test("3D batch7-board maze: スワイプはシーン onFlick から既存 doMove
   assert.match(client, /movePlayer\(current, dir\)/, "移動は lib の movePlayer が決める");
 });
 
-test("3D batch7-board icemaze: 氷は半透明の青タイル、壁はグレーの岩、ゴールは発光円盤", () => {
-  const scene = read("app", "games", "icemaze", "IceMazeScene3D.tsx");
-  assert.match(scene, /transparent: true, opacity: 0\.82/, "氷タイルは半透明寄りにする");
-  assert.match(scene, /0xd6f0ff/, "氷タイルは明るい青");
-  assert.match(scene, /0x607080/, "岩／壁はグレーで造形する");
-  assert.match(scene, /createBall/, "プレイヤーは球で造形する");
-  assert.match(scene, /emissive/, "ゴール円盤は発光させる");
-  assert.match(scene, /fitCamera/, "盤の大きさに合わせてカメラを寄せる");
-});
 
-test("3D batch7-board icemaze: 滑走は lib の到達セルへアニメーション追従するだけ（再計算しない）", () => {
-  const scene = read("app", "games", "icemaze", "IceMazeScene3D.tsx");
-  assert.match(scene, /slideAnim/, "滑走区間を補間アニメーションで見せる");
-  assert.match(scene, /onFlick: \(flick\)/, "スワイプは onFlick で受ける");
-  assert.match(scene, /propsRef\.current\.onSlide\(flick\.dir\)/, "FlickInfo.dir をそのまま親へ渡す");
-  assert.doesNotMatch(scene, /slideIce|slideDestination/, "停止位置の計算を 3D 側で再実装しない");
-  const client = read("app", "games", "icemaze", "IceMazeClient.tsx");
-  assert.match(client, /onSlide=\{slide\}/, "既存の slide ハンドラへ接続する");
-  assert.match(client, /slideIce\(state, dir\)/, "滑走は lib の slideIce が決める");
-});
 
 test("3D batch7-board snake: 蛇体は目つきの頭＋立方体列、餌は赤い球で、getState 補間追従する", () => {
   const scene = read("app", "games", "snake", "SnakeScene3D.tsx");
@@ -125,73 +103,16 @@ test("3D batch7-board snake: スワイプ=方向転換、タップ=開始/ポー
   assert.match(client, /pauseSnake\(s\) : startSnake\(s\)/, "開始/ポーズは lib の関数が決める");
 });
 
-test("3D batch7-board tictactoe: ○はトーラス、×は斜めの直方体、勝ち筋は発光ライン", () => {
-  const scene = read("app", "games", "tictactoe", "TictactoeScene3D.tsx");
-  assert.match(scene, /TorusGeometry/, "○はトーラスで造形する");
-  assert.match(scene, /createCrossMark/, "×は2本の直方体を組んで造形する");
-  assert.match(scene, /rotation\.y = Math\.PI \/ 4/, "×の棒は斜めに組む");
-  assert.match(scene, /winLine/, "勝ち筋は発光ラインで示す");
-  assert.match(scene, /winCells/, "ライン位置は view の winCells から導く");
-  assert.doesNotMatch(scene, /api\.move/, "シーンはアクション送信をしない");
-});
 
-test("3D batch7-board tictactoe: マスタップは既存の着手ハンドラ（api.move 経路）へ接続される", () => {
-  const scene = read("app", "games", "tictactoe", "TictactoeScene3D.tsx");
-  assert.match(scene, /pickId = `cell-\$\{i\}`/, "マスに pickId を付ける");
-  assert.match(scene, /propsRef\.current\.onCell\(Number\(id\.slice\(5\)\)\)/, "タップが onCell を呼ぶ");
-  const client = read("app", "games", "tictactoe", "TictactoeClient.tsx");
-  assert.match(client, /onCell=\{onCell\}/, "既存の着手ハンドラへ接続する");
-  assert.match(client, /api\.move\(\{ type: "place", index \}\)/, "送信アクションは既存の place のまま");
-});
 
-test("3D batch7-board domino: 牌は dominoTilePips の目を canvasTexture で大きく描く", () => {
-  const scene = read("app", "games", "domino", "DominoScene3D.tsx");
-  assert.match(scene, /dominoTilePips/, "目は lib の dominoTilePips を使う");
-  assert.match(scene, /canvasTexture/, "目の描画は canvasTexture を使う");
-  assert.match(scene, /createDominoTile/, "牌は直方体で造形する");
-  assert.match(scene, /drawPips/, "ピップを描く");
-});
 
-test("3D batch7-board domino: チェーンは両端へ連なり、長くなったら fitCamera で全体を収める", () => {
-  const scene = read("app", "games", "domino", "DominoScene3D.tsx");
-  assert.match(scene, /layoutChain/, "チェーン配置を計算する");
-  assert.match(scene, /fitCamera/, "配置範囲でカメラを再計算する");
-  assert.match(scene, /chainSig/, "チェーンの変化でカメラを更新する");
-  assert.match(scene, /handSpacing/, "手札は扇状に、枚数に応じて間隔を圧縮する");
-});
 
-test("3D batch7-board domino: 秘匿 — 相手は枚数表現のみ（裏向き・目なし）、中身を渡さない", () => {
-  const scene = read("app", "games", "domino", "DominoScene3D.tsx");
-  const otherType = scene.match(/interface DominoSceneOther \{[^}]*\}/)?.[0] ?? "";
-  assert.match(otherType, /count: number/, "相手は count のみ");
-  assert.doesNotMatch(otherType, /hand|tiles/, "相手の型に手札の中身がない");
-  assert.match(scene, /createDominoTile\(null, null\)/, "相手と山は裏向き（目なし）で生成する");
-  assert.match(scene, /other\.count/, "生成枚数は count だけから決まる");
-  assert.doesNotMatch(scene, /other\.hand|othersHand|hands\[/, "他人の手札の中身を参照しない");
-  const client = read("app", "games", "domino", "DominoClient.tsx");
-  assert.match(client, /others=\{state\.others\.map\(\(o\) => \(\{ seat: o\.seat, count: o\.count \}\)\)\}/, "クライアントは seat と count だけを渡す");
-});
 
-test("3D batch7-board domino: 牌タップは既存の配置/選択ハンドラへ、引く・パスは DOM のまま", () => {
-  const scene = read("app", "games", "domino", "DominoScene3D.tsx");
-  assert.match(scene, /pickId = `tile-\$\{tile\}`/, "手札の牌に pickId を付ける");
-  assert.match(scene, /propsRef\.current\.onHandTap\(tile\)/, "牌タップが onHandTap を呼ぶ");
-  assert.match(scene, /end-left|end-right/, "両端マーカーで置く側を選べる");
-  assert.match(scene, /propsRef\.current\.onEndTap\(/, "両端タップが onEndTap を呼ぶ");
-  const client = read("app", "games", "domino", "DominoClient.tsx");
-  assert.match(client, /onHandTap=\{handleHandTap\}/, "既存の配置/選択ハンドラへ接続する");
-  assert.match(client, /onEndTap=\{handleEndTap\}/, "置く側の選択ハンドラへ接続する");
-  assert.match(client, /api\.move\(\{ type: "place", tile, side \}\)/, "配置は従来どおり api.move の place");
-  assert.match(client, /api\.move\(\{ type: "draw" \}\)/, "引くは従来どおり api.move の draw");
-  assert.match(client, /api\.move\(\{ type: "pass" \}\)/, "パスは従来どおり api.move の pass");
-});
 
 test("3D batch7-board: ロジック層に three が混入していない", () => {
   for (const p of [
     ["lib", "maze.ts"],
-    ["lib", "icemaze.ts"],
     ["lib", "snake.ts"],
-    ["lib", "online", "games", "domino.ts"],
   ]) {
     assert.doesNotMatch(read(...p), /from "three"/, p.join("/"));
     assert.doesNotMatch(read(...p), /three-kit/, p.join("/"));

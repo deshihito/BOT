@@ -25,7 +25,6 @@ const countButtons = (dir) => {
 
 const BATCH = [
   { dir: "darts", client: "DartsClient.tsx", scene: "DartsScene3D.tsx", buttons: 2 },
-  { dir: "golf", client: "GolfClient.tsx", scene: "GolfScene3D.tsx", buttons: 3 },
   { dir: "watersort", client: "WaterSortClient.tsx", scene: "WaterSortScene3D.tsx", buttons: 3 },
   { dir: "simon", client: "SimonClient.tsx", scene: "SimonScene3D.tsx", buttons: 2 },
 ];
@@ -61,20 +60,6 @@ test("3D batch4-a darts: ボードタップが既存 onThrow へ正規化座標�
   assert.match(client, /throwDart\(state, tx, ty\)/, "判定は lib の throwDart のまま");
 });
 
-test("3D batch4-a golf: 列タップ→handleTake / 山札タップ→handleFlip へ接続され、合法条件は2Dと同じ", () => {
-  const scene = read("app", "games", "golf", "GolfScene3D.tsx");
-  assert.match(scene, /createCard/, "カードは createCard で作る");
-  assert.match(scene, /pickId = `card-\$\{col\}-\$\{index\}`|pickId.*card-/, "カードに列・位置入りの pickId を付ける");
-  assert.match(scene, /playable\.includes\(col\)/, "取れる条件（playable）はクライアント/lib の判定を使う");
-  assert.match(scene, /onTake\(col\)/, "列タップが onTake へ接続される");
-  assert.match(scene, /onFlip\(\)/, "山札タップが onFlip へ接続される");
-  const client = read("app", "games", "golf", "GolfClient.tsx");
-  assert.match(client, /onTake=\{handleTake\}/, "既存の handleTake へ接続する");
-  assert.match(client, /onFlip=\{handleFlip\}/, "既存の handleFlip へ接続する");
-  // puttgolf は第5バッチで正式対象化したため、ここでは golf ソリティア側シーンを
-  // 直接 import していないことだけを確認する（"./PuttGolfScene3D" は一致しない）。
-  assert.doesNotMatch(read("app", "games", "puttgolf", "PuttGolfClient.tsx"), /\.\/GolfScene3D/, "puttgolf は golf ソリティアのシーンを使わない");
-});
 
 test("3D batch4-a watersort: 管タップが既存 onBottle へ接続され、注ぎは状態差分で検出する", () => {
   const scene = read("app", "games", "watersort", "WaterSortScene3D.tsx");
@@ -97,11 +82,6 @@ test("3D batch4-a simon: パッドタップが既存 onPad へ接続され、発
   assert.match(client, /showSequence/, "再生シーケンスはクライアント側のまま");
 });
 
-test("3D batch4-a: ロジック層（lib/darts.ts, lib/golf.ts, lib/watersort.ts）に three が混入していない", () => {
-  for (const f of ["darts.ts", "golf.ts", "watersort.ts"]) {
-    assert.doesNotMatch(read("lib", f), /from "three"/, `lib/${f}`);
-  }
-});
 
 test("3D batch4-a: シーンに絵文字UIがない（色は材質で表現）", () => {
   for (const g of BATCH) {

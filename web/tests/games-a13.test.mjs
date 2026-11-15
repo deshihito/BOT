@@ -1,6 +1,4 @@
 // A13フェーズの新規4本のロジック検証。
-// - lib/mushoku.ts: 生成の整合・決定性・整合ベースの判定（別の解でもクリア）・誤答検出
-// - lib/floodit.ts: 領域計算・貪欲で制限手数内に解けること・手数切れ負け
 // - lib/laser.ts: 反射規則・光路シミュレーション・生成パズルの可解性（全探索）
 // - lib/online/games/countdown.ts: 式評価の規則・秘匿・採点（完全一致ボーナス/先着）・完走
 import { test } from "node:test";
@@ -42,16 +40,8 @@ async function loadOnline(name, exportsList) {
   return import("data:text/javascript;base64," + Buffer.from(code).toString("base64"));
 }
 
-const mushoku = await loadLib("mushoku.ts");
-const floodit = await loadLib("floodit.ts");
 const laser = await loadLib("laser.ts");
-const cd = await loadOnline("countdown.ts", [
-  "gameModule",
-  "evaluateCountdown",
-  "CD_TOTAL_ROUNDS",
-  "CD_POINTS_EXACT",
-  "CD_POINTS_CLOSEST",
-]);
+const cd = await loadOnline("countdown.ts", [ "gameModule", "evaluateCountdown", "CD_TOTAL_ROUNDS", "CD_POINTS_EXACT", "CD_POINTS_CLOSEST", ]);
 
 function lcg(seed) {
   let s = seed >>> 0 || 1;
@@ -62,124 +52,6 @@ function lcg(seed) {
 }
 
 const seats = (n) => Array.from({ length: n }, (_, i) => ({ seat: i, name: `P${i + 1}` }));
-
-// ---------------------------------------------------------------- 虫食い算
-
-function rowAnswerValue(state, row) {
-  const digits = state.cells
-    .filter((c) => c.row === row)
-    .sort((a, b) => a.col - b.col)
-    .map((c) => String(c.answer))
-    .join("");
-  return Number(digits);
-}
-
-test("虫食い算: 生成した筆算は整合している（部分積と積が A×B と一致）", () => {
-  for (const level of ["2x2", "3x2"]) {
-    for (const seed of [1, 7, 42, 1234]) {
-      const state = mushoku.createMushoku(level, seed);
-      assert.equal(state.rowKinds.length, 5);
-      const a = rowAnswerValue(state, 0);
-      const b = rowAnswerValue(state, 1);
-      assert.equal(rowAnswerValue(state, 2), a * (b % 10), `${level}/${seed} 部分積1`);
-      assert.equal(rowAnswerValue(state, 3), a * (Math.floor(b / 10) % 10), `${level}/${seed} 部分積2`);
-      assert.equal(rowAnswerValue(state, 4), a * b, `${level}/${seed} 積`);
-      // 各行に最低1つは隠れたマスと見えるマスがある。
-      for (let row = 0; row < 5; row++) {
-        const cells = state.cells.filter((c) => c.row === row);
-        assert.ok(cells.some((c) => !c.given), `${level}/${seed} row${row} に隠しがある`);
-        assert.ok(cells.some((c) => c.given), `${level}/${seed} row${row} に見える数字がある`);
-      }
-    }
-  }
-});
-
-test("虫食い算: 同じシードでは同じ問題になる", () => {
-  const a = mushoku.createMushoku("3x2", 99);
-  const b = mushoku.createMushoku("3x2", 99);
-  assert.deepEqual(a.cells, b.cells);
-});
-
-test("虫食い算: 正解を全部埋めるとクリア、1つ間違えると wrongIds に出る", () => {
-  let state = mushoku.createMushoku("2x2", 5);
-  for (const cell of state.cells) {
-    if (!cell.given) state = mushoku.setMushokuInput(state, cell.id, cell.answer);
-  }
-  const ok = mushoku.checkMushoku(state);
-  assert.equal(ok.evaluation.consistent, true);
-  assert.equal(ok.state.status, "solved");
-
-  let wrong = mushoku.createMushoku("2x2", 5);
-  const hidden = wrong.cells.filter((c) => !c.given);
-  for (const cell of hidden) {
-    wrong = mushoku.setMushokuInput(wrong, cell.id, cell.answer);
-  }
-  // A・B 行は期待値の源泉なので、誤答検出の対象は部分積・積の行から選ぶ。
-  const victim = hidden.find((c) => c.row >= 2);
-  assert.ok(victim, "部分積・積の行にも隠しがある");
-  wrong = mushoku.setMushokuInput(wrong, victim.id, (victim.answer + 1) % 10);
-  const ng = mushoku.checkMushoku(wrong);
-  assert.equal(ng.evaluation.consistent, false);
-  assert.ok(ng.evaluation.wrongIds.includes(victim.id));
-  assert.equal(ng.state.status, "playing");
-});
-
-test("虫食い算: 見えている数字のセルは変更できない", () => {
-  const state = mushoku.createMushoku("2x2", 3);
-  const given = state.cells.find((c) => c.given);
-  const after = mushoku.setMushokuInput(state, given.id, (given.answer + 1) % 10);
-  assert.equal(after, state);
-});
-
-// ---------------------------------------------------------------- フラッドフィル
-
-test("フラッドフィル: 同じシードでは同じ盤面・領域は左上と同色", () => {
-  const a = floodit.createFloodGame(11);
-  const b = floodit.createFloodGame(11);
-  assert.deepEqual(a.cells, b.cells);
-  const region = floodit.floodRegionIndices(a.cells, a.size);
-  assert.ok(region.includes(0));
-  for (const idx of region) assert.equal(a.cells[idx], a.cells[0]);
-});
-
-test("フラッドフィル: 領域と同じ色は無効、貪欲に進めれば制限手数内に必ず解ける", () => {
-  for (const seed of [1, 2, 3, 4, 5, 6]) {
-    let state = floodit.createFloodGame(seed);
-    assert.equal(floodit.applyFloodMove(state, state.cells[0]), state);
-    while (state.status === "playing") {
-      // いちばん広がる色を選ぶ（lib の生成時と同じ貪欲法）。
-      let best = null;
-      for (let color = 0; color < state.colorCount; color++) {
-        if (color === state.cells[0]) continue;
-        const trial = floodit.applyFloodMove(state, color);
-        const size = floodit.floodRegionIndices(trial.cells, trial.size).length;
-        if (!best || size > best.size) best = { color, size };
-      }
-      state = floodit.applyFloodMove(state, best.color);
-    }
-    assert.equal(state.status, "won", `seed ${seed}`);
-    assert.ok(state.movesUsed <= state.maxMoves, `seed ${seed}: ${state.movesUsed} <= ${state.maxMoves}`);
-    assert.equal(state.movesUsed, state.parMoves, `seed ${seed}: 貪欲手数と一致`);
-  }
-});
-
-test("フラッドフィル: 制限手数を使い切ると負け", () => {
-  const manual = {
-    size: 2,
-    colorCount: 6,
-    cells: [0, 1, 2, 3],
-    movesUsed: 0,
-    maxMoves: 1,
-    parMoves: 3,
-    status: "playing",
-    seed: 0,
-  };
-  const after = floodit.applyFloodMove(manual, 1);
-  assert.equal(after.cells[0], 1);
-  assert.equal(after.status, "lost");
-  // 終了後の手は無効。
-  assert.equal(floodit.applyFloodMove(after, 2), after);
-});
 
 // ---------------------------------------------------------------- レーザーミラー
 

@@ -1,10 +1,12 @@
 // 櫻井流バッチ3「テンポ監査・詰み救済・CPU の人間らしさ」の検証。
 // - A テンポ: numbermemory の正解→次問の待ち 1100→650ms、simon の再生
-//   リードイン 550→350ms。ゲーム性のある演出（slot のリール停止、
-//   roulette の回転）は対象外として不変を固定する。
-// - B 救済: lib にソルバー/解データがあるのに導線が無かった lightsout と
-//   shikaku へヒントを追加。remainingPresses / nextShikakuHint の正しさと
-//   クライアント配線を検証する。
+//   リードイン 550→350ms。ゲーム性のある演出（slot のリール停止）は
+//   対象外として不変を固定する。
+// - B 救済: lib にソルバー/解データがあるのに導線が無かった lightsout へ
+//   ヒントを追加。remainingPresses の正しさとクライアント配線を検証する。
+//   （同時に追加した shikaku のヒントは、2026-11-15 のカタログ削減で
+//   shikaku 自体を削除したため、このファイルからも検証ごと外した。
+//   roulette の回転時間の固定も同様に削除した。）
 // - C 人間らしさ: chess CPU に最小思考時間 280〜450ms（手の選択は不変）。
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -27,7 +29,6 @@ function read(rel) {
 }
 
 const lights = await loadLib("lightsout.ts");
-const shikaku = await loadLib("shikaku.ts");
 
 // ---- B: lightsout remainingPresses ----
 
@@ -60,35 +61,11 @@ test("ライツアウト: 残り解を順に押せば必ず全消灯する（偶
   }
 });
 
-// ---- B: shikaku nextShikakuHint ----
-
-test("しかく: ヒントは未完成の解の長方形を返し、完成後は null", () => {
-  const state = shikaku.createShikakuGame(5, 42);
-  const hint = shikaku.nextShikakuHint(state);
-  assert.ok(hint, "初期盤ではヒントがある");
-  assert.ok(
-    state.solution.some((r) => r.r1 === hint.r1 && r.c1 === hint.c1 && r.r2 === hint.r2 && r.c2 === hint.c2),
-    "ヒントは解の長方形そのもの",
-  );
-  const afterOne = shikaku.applyShikakuRect(state, hint);
-  const hint2 = shikaku.nextShikakuHint(afterOne);
-  assert.ok(
-    !hint2 || hint2.r1 !== hint.r1 || hint2.c1 !== hint.c1 || hint2.r2 !== hint.r2 || hint2.c2 !== hint.c2,
-    "描けた長方形は次のヒントに出ない",
-  );
-  const solved = shikaku.solveShikaku(state);
-  assert.equal(shikaku.nextShikakuHint(solved), null);
-});
-
-test("しかく/ライツアウト: クライアントに回数制限つきヒント導線がある", () => {
+test("ライツアウト: クライアントに回数制限つきヒント導線がある", () => {
   const lo = read("app/games/lightsout/LightsOutClient.tsx");
   assert.match(lo, /remainingPresses/);
   assert.match(lo, /ヒント（残り/);
   assert.match(lo, /HINT_LIMIT = 3/);
-  const sk = read("app/games/shikaku/ShikakuClient.tsx");
-  assert.match(sk, /nextShikakuHint/);
-  assert.match(sk, /ヒント（残り/);
-  assert.match(sk, /HINT_LIMIT = 3/);
 });
 
 // ---- A: テンポ ----
@@ -102,11 +79,9 @@ test("テンポ: numbermemory の正解→次問は 650ms、simon のリード�
   assert.ok(!simon.includes("550 +"), "旧 550ms リードインが残っていない");
 });
 
-test("テンポ: ゲーム性の演出時間は対象外として不変（slot リール/roulette 回転）", () => {
+test("テンポ: ゲーム性の演出時間は対象外として不変（slot リール）", () => {
   const slot = read("app/games/slot/SlotClient.tsx");
   assert.match(slot, /\[650, 1150, 1650\]/);
-  const roulette = read("app/games/roulette/RouletteClient.tsx");
-  assert.match(roulette, /\}, 2600\)/);
 });
 
 // ---- C: chess CPU の最小思考時間 ----

@@ -2,7 +2,6 @@
 // - lib/hearts.ts: ルール（パス/2♣/フォロー/点計算/ムーン）・CPU込み全進行・決定性
 // - lib/puttgolf.ts: シミュレーション決定性・ガイド経由の自動プレイで全ホール到達
 // - lib/online/games/majority.ts: バンク 75問・4択形式・重複なし
-// - lib/online/games/minority.ts: バンク 55問・2択形式・重複なし
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -45,7 +44,6 @@ async function loadOnline(name, exportsList) {
 const hearts = await loadLib("hearts.ts");
 const putt = await loadLib("puttgolf.ts");
 const mj = await loadOnline("majority.ts", ["MAJORITY_QUESTIONS"]);
-const mn = await loadOnline("minority.ts", ["MINORITY_QUESTIONS"]);
 
 // ---------------------------------------------------------------- ハーツ
 
@@ -287,28 +285,4 @@ test("パットゴルフ: 入力検証（範囲外の強さ・終了後の打撃
   assert.throws(() => putt.shoot(s, 0, 101));
   assert.throws(() => putt.shoot(s, Number.NaN, 50));
   assert.throws(() => putt.nextHole(s)); // まだカップインしていない
-});
-
-// ---------------------------------------------------------------- バンク増量
-
-test("多数決: バンクは100問・全て4択・トピックと選択肢に重複なし", () => {
-  assert.equal(mj.MAJORITY_QUESTIONS.length, 100);
-  const topics = mj.MAJORITY_QUESTIONS.map((q) => q.topic);
-  assert.equal(new Set(topics).size, topics.length);
-  for (const q of mj.MAJORITY_QUESTIONS) {
-    assert.equal(q.choices.length, 4);
-    assert.equal(new Set(q.choices).size, 4);
-    for (const c of q.choices) assert.ok(typeof c === "string" && c.length > 0);
-  }
-});
-
-test("少数決: バンクは75問・全て2択タプル・トピックに重複なし", () => {
-  assert.equal(mn.MINORITY_QUESTIONS.length, 75);
-  const topics = mn.MINORITY_QUESTIONS.map((q) => q.topic);
-  assert.equal(new Set(topics).size, topics.length);
-  for (const q of mn.MINORITY_QUESTIONS) {
-    assert.equal(q.choices.length, 2);
-    assert.notEqual(q.choices[0], q.choices[1]);
-    for (const c of q.choices) assert.ok(typeof c === "string" && c.length > 0);
-  }
 });

@@ -32,7 +32,6 @@ const sceneJsxOf = (client, sceneName) => {
 
 const BATCH = [
   { dir: "memory", client: "MemoryClient.tsx", scene: "MemoryScene3D.tsx", buttons: 3 },
-  { dir: "janken", client: "JankenClient.tsx", scene: "JankenScene3D.tsx", buttons: 0 },
   { dir: "bombpass", client: "BombPassClient.tsx", scene: "BombPassScene3D.tsx", buttons: 1 },
   { dir: "hagetaka", client: "HagetakaClient.tsx", scene: "HagetakaScene3D.tsx", buttons: 1 },
 ];
@@ -94,32 +93,8 @@ test("3D batch8-cards memory: 裏向きカードの絵柄をシーンへ渡さ�
   assert.match(scene, /icon: string \| null/, "シーンは絵柄を nullable で受け取る");
 });
 
-test("3D batch8-cards janken: 手は造形で判別できる（グー=塊 / チョキ=2指 / パー=平板）", () => {
-  const scene = read("app", "games", "janken", "JankenScene3D.tsx");
-  assert.match(scene, /createHandMesh/, "手を造形する");
-  assert.match(scene, /IcosahedronGeometry\(0\.46/, "グーは角ばった塊で表す");
-  assert.match(scene, /CylinderGeometry\(0\.085, 0\.105, 0\.92/, "チョキは細長い指で表す");
-  assert.match(scene, /rotation\.z = 0\.38/, "チョキの指は V 字に開く");
-  assert.match(scene, /BoxGeometry\(1\.02, 0\.14, 1\.18\)/, "パーは平らな平板で表す");
-  assert.match(scene, /createBall/, "手のひらは球も使う");
-});
 
-test("3D batch8-cards janken: 手のタップが既存の提出ハンドラへ接続され、勝敗判定を 3D 側で再実装しない", () => {
-  const scene = read("app", "games", "janken", "JankenScene3D.tsx");
-  assert.match(scene, /propsRef\.current\.onThrow\(id\.slice\(5\) as JankenHand3D\)/, "タップが onThrow を呼ぶ");
-  assert.doesNotMatch(scene, /api\.move/, "シーンは move を直接送らない");
-  const client = read("app", "games", "janken", "JankenClient.tsx");
-  assert.match(client, /onThrow=\{doThrow\}/, "既存の提出ラッパへ接続する");
-  assert.match(client, /void api\.move\(\{ type: "throw", hand \}\)/, "提出は既存の throw move のまま");
-});
 
-test("3D batch8-cards janken: 公開前の相手の手をシーンへ渡さない（submitted のみ）", () => {
-  const client = read("app", "games", "janken", "JankenClient.tsx");
-  assert.match(client, /players=\{state\.players\.map\(\(p\) => \(\{ seat: p\.seat, submitted: p\.submitted/, "choosing で渡すのは提出状況だけ");
-  assert.match(client, /revealed=\{state\.phase === "reveal" \?/, "手の中身は reveal のときだけ渡す");
-  const scene = read("app", "games", "janken", "JankenScene3D.tsx");
-  assert.match(scene, /submitted: boolean/, "シーンは提出状況だけを受け取る型を持つ");
-});
 
 test("3D batch8-cards bombpass: 爆弾は立体造形で、所持者の変化に補間追従して受け渡される", () => {
   const scene = read("app", "games", "bombpass", "BombPassScene3D.tsx");
@@ -180,7 +155,7 @@ test("3D batch8-cards hagetaka: 他人の未公開入札をシーンへ渡さな
 
 test("3D batch8-cards: ロジック層（lib/memory-match.ts, lib/online/games/*.ts）に three が混入していない", () => {
   assert.doesNotMatch(read("lib", "memory-match.ts"), /from "three"/, "lib/memory-match.ts");
-  for (const f of ["janken.ts", "bombpass.ts", "hagetaka.ts"]) {
+  for (const f of ["bombpass.ts", "hagetaka.ts"]) {
     assert.doesNotMatch(read("lib", "online", "games", f), /from "three"/, `lib/online/games/${f}`);
     assert.doesNotMatch(read("lib", "online", "games", f), /three-kit/, `lib/online/games/${f}`);
   }

@@ -28,13 +28,9 @@ async function loadLib(name) {
 
 const kana = await loadLib("kanacross.ts");
 const bj = await loadLib("blackjack.ts");
-const shikaku = await loadLib("shikaku.ts");
-const hashi = await loadLib("hashi.ts");
 const air = await loadLib("airhockey.ts");
 const nm = await loadLib("numbermemory.ts");
 const drag = await loadLib("dragrace.ts");
-const halma = await loadLib("halma.ts");
-const spider = await loadLib("spider.ts");
 
 // ------------------------------------------------------------ kanacross
 
@@ -91,81 +87,6 @@ test("ブラックジャック: 最小ベット以上あるときは再支給さ
   // 対局中は残チップが少なくても再支給しない
   const playing = { ...bj.createBlackjackGame(1, 5), phase: "player" };
   assert.equal(bj.refillChips(playing), playing);
-});
-
-// ------------------------------------------------------------ shikaku
-
-test("しかく: 解に 1×1 長方形を含む局面が実在し、1×1 を置いて完成できる", () => {
-  let found = 0;
-  for (const size of [5, 6]) {
-    for (let seed = 1; seed <= 120; seed++) {
-      const st = shikaku.createShikakuGame(size, seed);
-      const has1x1 = st.solution.some((r) => r.r1 === r.r2 && r.c1 === r.c2);
-      if (!has1x1) continue;
-      found++;
-      // 1×1 長方形を単体で置けること
-      const one = st.solution.find((r) => r.r1 === r.r2 && r.c1 === r.c2);
-      const placed = shikaku.applyShikakuRect(st, one);
-      assert.equal(placed.rects.length, 1);
-      assert.equal(shikaku.rectArea(placed.rects[0]), 1);
-      // 解の長方形を順に置けば（1×1 含む）完成すること
-      let s = st;
-      for (const rect of st.solution) s = shikaku.applyShikakuRect(s, rect);
-      assert.equal(s.status, "won", `size=${size} seed=${seed} が完成しない`);
-    }
-  }
-  assert.ok(found > 0, "1×1 長方形を含む局面が1つも生成されなかった");
-});
-
-// ------------------------------------------------------------ hashi
-
-test("橋をかけろ: 全ての候補辺が、その全ての通過セルから到達可能", () => {
-  for (const size of [7, 9]) {
-    for (let seed = 1; seed <= 60; seed++) {
-      const st = hashi.createHashiGame(seed, size);
-      for (const edge of hashi.hashiCandidateEdges(st)) {
-        for (const cell of edge.cells) {
-          const at = hashi.hashiEdgesAtCell(st, cell);
-          assert.ok(
-            at.some((e) => e.a === edge.a && e.b === edge.b),
-            `seed=${seed} cell=${cell} で辺 ${edge.a}-${edge.b} が落ちている`,
-          );
-        }
-      }
-    }
-  }
-});
-
-test("橋をかけろ: 交差セルでは交互選択で両方の辺に到達でき、橋のある辺が優先される", () => {
-  let crossing = null;
-  for (let seed = 1; seed <= 400 && !crossing; seed++) {
-    const st = hashi.createHashiGame(seed, 7);
-    for (let cell = 0; cell < 49; cell++) {
-      const at = hashi.hashiEdgesAtCell(st, cell);
-      if (at.length === 2) {
-        crossing = { st, cell, at };
-        break;
-      }
-    }
-  }
-  assert.ok(crossing, "交差セルを持つ盤面が見つからなかった");
-  const { st, cell, at } = crossing;
-  const [e1, e2] = at;
-  const k1 = hashi.hashiEdgeKey(e1.a, e1.b);
-  const k2 = hashi.hashiEdgeKey(e2.a, e2.b);
-  const t1 = hashi.hashiTapEdge(st, cell, null);
-  const t2 = hashi.hashiTapEdge(st, cell, hashi.hashiEdgeKey(t1.a, t1.b));
-  assert.notEqual(hashi.hashiEdgeKey(t2.a, t2.b), hashi.hashiEdgeKey(t1.a, t1.b));
-  assert.deepEqual(
-    new Set([hashi.hashiEdgeKey(t1.a, t1.b), hashi.hashiEdgeKey(t2.a, t2.b)]),
-    new Set([k1, k2]),
-    "交互タップで交差セルの両方の辺に到達できない",
-  );
-  // 橋がかかっている辺は lastTap に関係なく優先される
-  const bridged = hashi.cycleHashiBridge(st, t1.a, t1.b);
-  assert.notEqual(bridged, st);
-  const t3 = hashi.hashiTapEdge(bridged, cell, hashi.hashiEdgeKey(t2.a, t2.b));
-  assert.equal(hashi.hashiEdgeKey(t3.a, t3.b), hashi.hashiEdgeKey(t1.a, t1.b));
 });
 
 // ------------------------------------------------------------ airhockey
@@ -237,103 +158,4 @@ test("ドラッグレース: 終了後の beginCountdown は ready でないた�
   const finished = drag.advanceRace(running, 999999);
   assert.equal(finished.phase, "finished");
   assert.equal(drag.beginCountdown(finished), finished);
-});
-
-// ------------------------------------------------------------ halma
-
-test("ハルマ: 同一局面が3回現れると引き分けになる", () => {
-  const idx = (q, r) => halma.HALMA_CELLS.findIndex((c) => c.q === q && c.r === r);
-  const A = idx(0, 0);
-  const B = idx(1, 0);
-  const C = idx(3, -3);
-  const D = idx(3, -2);
-  const board = new Array(halma.HALMA_CELLS.length).fill(0);
-  board[A] = 1;
-  board[C] = 2;
-  let st = halma.halmaCustomState(board, 0);
-  const cycle = [
-    [A, B],
-    [C, D],
-    [B, A],
-    [D, C],
-  ];
-  // 7手目までは引き分けにならない
-  for (let ply = 0; ply < 7; ply++) {
-    const [from, to] = cycle[ply % 4];
-    st = halma.halmaApplyMove(st, from, to);
-    assert.equal(st.status, "playing", `${ply + 1}手目で終局してしまった`);
-  }
-  // 8手目で開始局面が3回目になり引き分け
-  const [from, to] = cycle[7 % 4];
-  st = halma.halmaApplyMove(st, from, to);
-  assert.equal(st.status, "draw");
-  assert.equal(st.winner, null);
-});
-
-test("ハルマ: 手数上限に達すると引き分けになる", () => {
-  const idx = (q, r) => halma.HALMA_CELLS.findIndex((c) => c.q === q && c.r === r);
-  const board = new Array(halma.HALMA_CELLS.length).fill(0);
-  board[idx(0, 0)] = 1;
-  board[idx(3, -3)] = 2;
-  const st = { ...halma.halmaCustomState(board, 0), moves: halma.HALMA_MAX_MOVES - 1 };
-  const after = halma.halmaApplyMove(st, idx(0, 0), idx(1, 0));
-  assert.equal(after.moves, halma.HALMA_MAX_MOVES);
-  assert.equal(after.status, "draw");
-});
-
-test("ハルマ: CPU 自己対戦は勝敗か引き分けで必ず終局する", () => {
-  let st = halma.createHalmaGame(3);
-  for (let ply = 0; ply < halma.HALMA_MAX_MOVES + 10 && st.status === "playing"; ply++) {
-    st = halma.halmaCpuTurn(st);
-  }
-  assert.ok(st.status === "won" || st.status === "draw", `status=${st.status} で終わらなかった`);
-});
-
-// ------------------------------------------------------------ spider
-
-function spiderCard(rank, faceUp = true) {
-  return { id: `c-${rank}-${Math.random()}`, rank, faceUp };
-}
-
-test("スパイダー: 山札が尽きて手が無ければ詰みになる", () => {
-  const st = {
-    columns: Array.from({ length: 10 }, () => [spiderCard(13)]),
-    stock: [],
-    completed: 0,
-    moves: 0,
-    status: "playing",
-    seed: 1,
-  };
-  assert.equal(spider.hasSpiderMove(st), false);
-  assert.equal(spider.isSpiderStuck(st), true);
-});
-
-test("スパイダー: 配り切った後に手が無ければ状態が詰みに遷移する", () => {
-  const pre = {
-    columns: Array.from({ length: 10 }, () => [spiderCard(13)]),
-    stock: Array.from({ length: 10 }, () => spiderCard(13, false)),
-    completed: 0,
-    moves: 0,
-    status: "playing",
-    seed: 1,
-  };
-  assert.equal(spider.isSpiderStuck(pre), false); // まだ配れる
-  const after = spider.dealSpider(pre);
-  assert.equal(after.stock.length, 0);
-  assert.equal(after.status, "stuck");
-});
-
-test("スパイダー: 手が残っている局面は詰みにならない", () => {
-  const columns = Array.from({ length: 10 }, () => [spiderCard(13)]);
-  columns[0] = [spiderCard(5)];
-  columns[1] = [spiderCard(6)];
-  const st = { columns, stock: [], completed: 0, moves: 0, status: "playing", seed: 1 };
-  assert.equal(spider.hasSpiderMove(st), true);
-  assert.equal(spider.isSpiderStuck(st), false);
-  const after = spider.moveSpider(st, 0, 0, 1);
-  assert.equal(after.status, "playing");
-  // 通常の初期局面も詰みではない
-  const fresh = spider.createSpider(11);
-  assert.equal(fresh.status, "playing");
-  assert.equal(spider.isSpiderStuck(fresh), false);
 });

@@ -22,8 +22,6 @@ return n;
 
 const BATCH = [
 { dir: "backgammon", client: "BackgammonClient.tsx", scene: "BackgammonScene3D.tsx", buttons: 1},
-{ dir: "checkers", client: "CheckersClient.tsx", scene: "CheckersScene3D.tsx", buttons: 1},
-{ dir: "halma", client: "HalmaClient.tsx", scene: "HalmaScene3D.tsx", buttons: 1},
 ];
 
 for (const g of BATCH) {
@@ -58,25 +56,11 @@ assert.match(client, /onPoint=\{onPointClick\}/, "入力は既存のマスタッ
 assert.match(client, /onBearOff=\{bearOff\}/, "上がりは既存処理へ接続する");
 });
 
-test("3D checkers: 駒は createDisc、キング化と入力接続がある", () => {
-const scene = read("app", "games", "checkers", "CheckersScene3D.tsx");
-assert.match(scene, /createDisc/, "駒は共通プリミティブで作る");
-assert.match(scene, /kingDisc/, "キング化は2段目で表現する");
-const client = read("app", "games", "checkers", "CheckersClient.tsx");
-assert.match(client, /onCell=\{onCell\}/, "入力は既存のマスタップ処理へ接続する");
-});
 
-test("3D halma: 駒配置は lib/halma の HALMA_CELLS を使い、弧アニメーションがある", () => {
-const scene = read("app", "games", "halma", "HalmaScene3D.tsx");
-assert.match(scene, /HALMA_CELLS/, "マス配置はロジック層の定義を再利用する");
-assert.match(scene, /createStone/, "駒は共通プリミティブで作る");
-assert.match(scene, /arc/, "移動は弧を描くアニメーションにする");
-const client = read("app", "games", "halma", "HalmaClient.tsx");
-assert.match(client, /onCell=\{onCell\}/, "入力は既存のマスタップ処理へ接続する");
-});
 
-test("3D batch2: ロジック層（backgammon / halma）に three が混入していない", () => {
-for (const f of ["backgammon.ts", "halma.ts"]) {
+
+test("3D batch2: ロジック層（backgammon）に three が混入していない", () => {
+for (const f of ["backgammon.ts"]) {
 assert.doesNotMatch(read("lib", f), /from "three"/, `lib/${f}`);
 assert.doesNotMatch(read("lib", f), /three-kit/, `lib/${f}`);
 }

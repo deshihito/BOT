@@ -1,5 +1,4 @@
 // A10フェーズの新規4本のロジック検証。
-// - lib/hashi.ts: 解の存在する生成・橋の循環・交差拒否・過剰/連結の検証
 // - lib/dicequest.ts: 候補・方向ルール・最後の数字の条件・失敗と集計
 // - lib/pentomino.ts: 向き集合・回転/反転・配置検証・ソルバによる可解性
 // - lib/online/games/texas.ts: 7枚役判定・秘匿ビュー・チップ増減・5ハンド完走
@@ -42,135 +41,12 @@ async function loadOnline(name, exportsList) {
   return import("data:text/javascript;base64," + Buffer.from(code).toString("base64"));
 }
 
-const hashi = await loadLib("hashi.ts");
 const dq = await loadLib("dicequest.ts");
 const pent = await loadLib("pentomino.ts");
-const texas = await loadOnline("texas.ts", [
-  "gameModule",
-  "evaluateTexasHand",
-  "compareTexasScores",
-  "TX_START_CHIPS",
-  "TX_ANTE",
-  "TX_BET",
-  "TX_TOTAL_HANDS",
-  "TX_HAND_END_MS",
-]);
+const texas = await loadOnline("texas.ts", [ "gameModule", "evaluateTexasHand", "compareTexasScores", "TX_START_CHIPS", "TX_ANTE", "TX_BET", "TX_TOTAL_HANDS", "TX_HAND_END_MS", ]);
 
 const rngStub = () => 0.42;
 const seats = (n) => Array.from({ length: n }, (_, i) => ({ seat: i, name: `P${i + 1}` }));
-
-// ---------------------------------------------------------------- 橋をかけろ
-
-test("橋をかけろ: 同じシードでは同じ問題になる", () => {
-  const a = hashi.createHashiGame(123, 7);
-  const b = hashi.createHashiGame(123, 7);
-  assert.deepEqual(a.islands, b.islands);
-  assert.deepEqual(a.solution, b.solution);
-  assert.equal(a.status, "playing");
-  assert.deepEqual(a.bridges, {});
-});
-
-test("橋をかけろ: 生成した問題は解を当てると必ずクリアになる（複数シード・両サイズ）", () => {
-  for (const size of [7, 9]) {
-    for (let seed = 1; seed <= 12; seed++) {
-      let state = hashi.createHashiGame(seed * 977 + size, size);
-      assert.ok(state.islands.length >= (size === 7 ? 8 : 11), `島の数 seed=${seed} size=${size}`);
-      assert.ok(state.islands.every((i) => i.need >= 1 && i.need <= 8));
-      assert.equal(hashi.isHashiComplete(state), false);
-      // 解のとおりに橋をかける（解同士は交差しないので全て通るはず）。
-      for (const [key, count] of Object.entries(state.solution)) {
-        const [a, b] = key.split("-").map(Number);
-        for (let k = 0; k < count; k++) {
-          const next = hashi.cycleHashiBridge(state, a, b);
-          assert.notEqual(next, state, `解の橋が置けない seed=${seed} size=${size} edge=${key}`);
-          state = next;
-        }
-      }
-      assert.equal(state.status, "won", `クリアにならない seed=${seed} size=${size}`);
-      assert.equal(hashi.isHashiComplete(state), true);
-      assert.deepEqual(hashi.hashiViolations(state, true), []);
-      // 数字と実際の本数が一致している。
-      const degrees = hashi.hashiDegrees(state);
-      state.islands.forEach((island, i) => assert.equal(degrees[i], island.need));
-    }
-  }
-});
-
-test("橋をかけろ: 解を置いた後に余分な橋を足すと「数字超え」になる", () => {
-  let state = hashi.createHashiGame(555, 7);
-  for (const [key, count] of Object.entries(state.solution)) {
-    const [a, b] = key.split("-").map(Number);
-    for (let k = 0; k < count; k++) state = hashi.cycleHashiBridge(state, a, b);
-  }
-  assert.equal(state.status, "won");
-  // won の後は操作できないので、解を1つ手前まで戻した盤面で試す。
-  let s2 = hashi.createHashiGame(555, 7);
-  const entries = Object.entries(s2.solution);
-  const [lastKey, lastCount] = entries[entries.length - 1];
-  for (const [key, count] of entries) {
-    const [a, b] = key.split("-").map(Number);
-    const times = key === lastKey ? count - 1 : count;
-    for (let k = 0; k < times; k++) s2 = hashi.cycleHashiBridge(s2, a, b);
-  }
-  assert.equal(s2.status, "playing");
-  // どこかの候補辺をさらに1本増やすと、解で飽和した島が数字を超える。
-  let exceeded = null;
-  for (const edge of hashi.hashiCandidateEdges(s2)) {
-    const next = hashi.cycleHashiBridge(s2, edge.a, edge.b);
-    if (next === s2) continue; // 交差で置けない辺は除く
-    const overs = hashi.hashiViolations(next, false).filter((v) => v.type === "over");
-    if (overs.length > 0) {
-      exceeded = next;
-      break;
-    }
-    // 解の最後の辺を正しく戻しただけなら超えないので次を探す
-    if (hashi.hashiBridgeCount(next, edge.a, edge.b) === lastCount && hashi.hashiEdgeKey(edge.a, edge.b) === lastKey) {
-      continue;
-    }
-  }
-  assert.ok(exceeded, "数字超えになる辺が見つからない");
-  void state;
-});
-
-test("橋をかけろ: 交差する橋は置けず、強制すると違反になる", () => {
-  // 十字に島を置いた人工盤面。横の辺 (1-2) と縦の辺 (0-3) が中央で交差する。
-  const islands = [
-    { id: 0, index: 3, need: 2 }, // (0,3)
-    { id: 1, index: 21, need: 2 }, // (3,0)
-    { id: 2, index: 27, need: 2 }, // (3,6)
-    { id: 3, index: 45, need: 2 }, // (6,3)
-  ];
-  const base = { size: 7, seed: 1, islands, solution: {}, bridges: {}, moves: 0, status: "playing" };
-  const edges = hashi.hashiCandidateEdges(base);
-  const horizontal = edges.find((e) => e.orientation === "h");
-  const vertical = edges.find((e) => e.orientation === "v");
-  assert.ok(horizontal && vertical, "候補辺が不足");
-  // 中央セルは両辺の通り道。
-  const center = 24; // (3,3)
-  assert.ok(horizontal.cells.includes(center));
-  assert.ok(vertical.cells.includes(center));
-  const atCell = hashi.hashiEdgeAtCell(base, center);
-  assert.ok(atCell);
-
-  let state = hashi.cycleHashiBridge(base, horizontal.a, horizontal.b);
-  assert.notEqual(state, base);
-  assert.deepEqual(hashi.hashiCellBridge(state, center), { orientation: "h", count: 1 });
-  // 交差する縦橋は置けない（同じ状態が返る）。
-  const blocked = hashi.cycleHashiBridge(state, vertical.a, vertical.b);
-  assert.equal(blocked, state);
-  // 両方を強制的に置いた状態は交差違反。
-  const forced = {
-    ...base,
-    bridges: {
-      [hashi.hashiEdgeKey(horizontal.a, horizontal.b)]: 1,
-      [hashi.hashiEdgeKey(vertical.a, vertical.b)]: 1,
-    },
-  };
-  const violations = hashi.hashiViolations(forced, false);
-  assert.ok(violations.some((v) => v.type === "crossing"));
-  // 島でない・候補でないペアは無効。
-  assert.equal(hashi.cycleHashiBridge(base, 0, 1), base);
-});
 
 // ---------------------------------------------------------------- ダイスクエスト
 

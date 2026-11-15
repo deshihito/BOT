@@ -1,7 +1,5 @@
 // A15フェーズ新規4本のロジック検証。
-// - lib/halma.ts: 星形盤（121マス）・合法手列挙・ジャンプ連鎖・勝敗・CPU
 // - lib/rushhour.ts: 生成の決定性・可解性（solution の再生）・スライド検証
-// - lib/montecarlo.ts: ペア除去（隣接・同ランク）・詰める・手詰まり/クリア
 // - lib/online/games/cheat.ts: 配布・秘匿ビュー・宣言とチャレンジ決着・
 //   上がり候補の確定・退出
 import { test } from "node:test";
@@ -53,106 +51,8 @@ function makeRng(seed) {
 
 const seats = (n) => Array.from({ length: n }, (_, i) => ({ seat: i, name: `P${i + 1}` }));
 
-const halma = await loadLib("halma.ts");
 const rush = await loadLib("rushhour.ts");
-const mc = await loadLib("montecarlo.ts");
 const cheat = await loadOnline("cheat.ts", ["gameModule", "cheatRankOf", "cheatSortHand"]);
-
-// ---------------------------------------------------------------- ハルマ
-
-test("ハルマ: 盤は121マス、陣地は各10マスで重ならない", () => {
-  assert.equal(halma.HALMA_CELL_COUNT, 121);
-  assert.equal(halma.HALMA_CAMPS[0].length, 10);
-  assert.equal(halma.HALMA_CAMPS[1].length, 10);
-  const overlap = halma.HALMA_CAMPS[0].filter((i) => halma.HALMA_CAMPS[1].includes(i));
-  assert.equal(overlap.length, 0);
-  // 目標陣地は相手の初期陣地
-  assert.deepEqual(halma.HALMA_TARGETS[0], halma.HALMA_CAMPS[1]);
-  assert.deepEqual(halma.HALMA_TARGETS[1], halma.HALMA_CAMPS[0]);
-});
-
-test("ハルマ: 初期配置は両軍10個ずつで、合法手が存在する", () => {
-  const st = halma.createHalmaGame(1);
-  assert.equal(st.board.filter((v) => v === 1).length, 10);
-  assert.equal(st.board.filter((v) => v === 2).length, 10);
-  assert.equal(st.turn, 0);
-  const moves = halma.halmaLegalMoves(st);
-  assert.ok(moves.length > 0);
-  for (const m of moves) {
-    assert.equal(st.board[m.from], 1);
-    assert.equal(st.board[m.to], 0);
-  }
-});
-
-test("ハルマ: ジャンプとジャンプ連鎖が合法手に含まれる", () => {
-  const idx = (q, r) => halma.HALMA_CELLS.findIndex((c) => c.q === q && c.r === r);
-  const from = idx(0, 0);
-  const board = new Array(halma.HALMA_CELL_COUNT).fill(0);
-  board[from] = 1;
-  board[idx(1, -1)] = 2; // 隣の障害物
-  let st = halma.halmaCustomState(board, 0);
-  const land1 = idx(2, -2);
-  const single = halma.halmaMovesFrom(st, from).find((m) => m.to === land1);
-  assert.ok(single && single.jump && single.path.length === 2);
-
-  // 連鎖: land1 の先にもう1つ障害物と空きを置く
-  board[idx(3, -3)] = 2;
-  st = halma.halmaCustomState(board, 0);
-  const land2 = idx(4, -4);
-  const chained = halma.halmaMovesFrom(st, from).find((m) => m.to === land2);
-  assert.ok(chained && chained.jump && chained.path.length === 3);
-});
-
-test("ハルマ: 移動で手番が交代し、不正な移動は同じ state を返す", () => {
-  const st = halma.createHalmaGame(2);
-  const move = halma.halmaLegalMoves(st)[0];
-  const next = halma.halmaApplyMove(st, move.from, move.to);
-  assert.notEqual(next, st);
-  assert.equal(next.board[move.to], 1);
-  assert.equal(next.board[move.from], 0);
-  assert.equal(next.turn, 1);
-  assert.equal(next.moves, 1);
-  // 相手陣地の占有マスへの移動のような不正手は受け付けない
-  const deep = halma.HALMA_CAMPS[0][0];
-  assert.equal(halma.halmaApplyMove(st, deep, halma.HALMA_CAMPS[1][0]), st);
-  // 手番でない側のコマも動かせない
-  assert.equal(halma.halmaApplyMove(st, halma.HALMA_CAMPS[1][0], deep), st);
-});
-
-test("ハルマ: 目標陣地をすべて占めると勝ち", () => {
-  const targets = halma.HALMA_TARGETS[0];
-  const board = new Array(halma.HALMA_CELL_COUNT).fill(0);
-  const empty = targets[0];
-  for (const t of targets) {
-    if (t !== empty) board[t] = 1;
-  }
-  // empty の隣（陣地の外）に自コマを置く
-  const outside = halma.HALMA_NEIGHBORS[empty].find(
-    (n) => n >= 0 && !targets.includes(n),
-  );
-  assert.ok(outside !== undefined && outside >= 0);
-  board[outside] = 1;
-  const st = halma.halmaCustomState(board, 0);
-  assert.equal(st.status, "playing");
-  const next = halma.halmaApplyMove(st, outside, empty);
-  assert.equal(next.winner, 0);
-  assert.equal(next.status, "won");
-});
-
-test("ハルマ: CPU は合法手を返し、対局シミュレーションでコマ数が保存される", () => {
-  let st = halma.createHalmaGame(9);
-  for (let ply = 0; ply < 300 && st.status === "playing"; ply++) {
-    const before = st;
-    st = halma.halmaCpuTurn(st);
-    assert.notEqual(st, before);
-    if (ply % 50 === 0) {
-      assert.equal(st.board.filter((v) => v === 1).length, 10);
-      assert.equal(st.board.filter((v) => v === 2).length, 10);
-    }
-  }
-  assert.equal(st.board.filter((v) => v === 1).length, 10);
-  assert.equal(st.board.filter((v) => v === 2).length, 10);
-});
 
 // ---------------------------------------------------------------- ラッシュアワー
 
@@ -223,81 +123,6 @@ test("ラッシュアワー: スライドの検証（範囲外・0・進路妨�
   const moved = next.cars.find((c) => c.id === movable.id);
   if (movable.dir === "h") assert.equal(moved.col, movable.col + delta);
   else assert.equal(moved.row, movable.row + delta);
-});
-
-// ---------------------------------------------------------------- モンテカルロ
-
-const mcCard = (id, rank, suit = 0) => ({ id, suit, rank });
-
-test("モンテカルロ: 配布は盤25枚・山札27枚で全52枚が一意", () => {
-  const st = mc.createMonteCarlo(11);
-  assert.equal(st.board.length, 25);
-  assert.ok(st.board.every((c) => c !== null));
-  assert.equal(st.stock.length, 27);
-  const ids = new Set([...st.board.map((c) => c.id), ...st.stock.map((c) => c.id)]);
-  assert.equal(ids.size, 52);
-  const again = mc.createMonteCarlo(11);
-  assert.deepEqual(
-    again.board.map((c) => c.id),
-    st.board.map((c) => c.id),
-  );
-});
-
-test("モンテカルロ: 隣接判定（縦横斜め・行の折り返しなし）", () => {
-  assert.equal(mc.mcAreAdjacent(0, 1), true);
-  assert.equal(mc.mcAreAdjacent(0, 5), true);
-  assert.equal(mc.mcAreAdjacent(0, 6), true);
-  assert.equal(mc.mcAreAdjacent(0, 2), false);
-  assert.equal(mc.mcAreAdjacent(4, 5), false); // 行をまたがない
-  assert.equal(mc.mcAreAdjacent(7, 7), false);
-});
-
-test("モンテカルロ: ペア除去と詰める（補充）", () => {
-  const board = new Array(25).fill(null);
-  board[0] = mcCard(4, 5, 0);
-  board[1] = mcCard(17, 5, 1);
-  board[2] = mcCard(8, 9, 0);
-  const stock = [mcCard(51, 13, 3)];
-  let st = mc.montecarloCustomState(board, stock);
-  const pairs = mc.montecarloPairs(st);
-  assert.deepEqual(pairs, [[0, 1]]);
-  st = mc.montecarloRemovePair(st, 0, 1);
-  assert.equal(st.board[0], null);
-  assert.equal(st.board[1], null);
-  assert.equal(st.removed, 50);
-  st = mc.montecarloConsolidate(st);
-  assert.equal(st.board[0]?.id, 8);
-  assert.equal(st.board[1]?.id, 51);
-  assert.equal(st.stock.length, 0);
-});
-
-test("モンテカルロ: 不正な除去は不変（同ランクでも非隣接・異ランク隣接）", () => {
-  const board = new Array(25).fill(null);
-  board[0] = mcCard(4, 5, 0);
-  board[24] = mcCard(17, 5, 1); // 同ランクだが遠い
-  board[1] = mcCard(8, 9, 0); // 隣接だが異ランク
-  const st = mc.montecarloCustomState(board, []);
-  assert.equal(mc.montecarloRemovePair(st, 0, 24), st);
-  assert.equal(mc.montecarloRemovePair(st, 0, 1), st);
-  assert.equal(mc.montecarloRemovePair(st, 0, 3), st); // 空きマス
-});
-
-test("モンテカルロ: 手詰まりとクリアの判定", () => {
-  // 隣接同ランクができない配置: rank = (r + 2c) mod 13 + 1
-  const board = [];
-  let id = 0;
-  for (let r = 0; r < 5; r++) {
-    for (let c = 0; c < 5; c++) {
-      board.push(mcCard(id++, ((r + 2 * c) % 13) + 1, id % 4));
-    }
-  }
-  const stuck = mc.montecarloCustomState(board, []);
-  assert.equal(mc.montecarloPairs(stuck).length, 0);
-  assert.equal(stuck.status, "stuck");
-
-  const won = mc.montecarloCustomState(new Array(25).fill(null), []);
-  assert.equal(won.status, "won");
-  assert.equal(won.removed, 52);
 });
 
 // ---------------------------------------------------------------- ブラフ

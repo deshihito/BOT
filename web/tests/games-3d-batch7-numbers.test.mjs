@@ -24,9 +24,6 @@ const countButtons = (dir) => {
 
 const BATCH = [
   { dir: "sudoku", client: "SudokuClient.tsx", scene: "SudokuScene3D.tsx", buttons: 1, lib: "sudoku.ts" },
-  { dir: "kenken", client: "KenkenClient.tsx", scene: "KenkenScene3D.tsx", buttons: 1, lib: "kenken.ts" },
-  { dir: "kakuro", client: "KakuroClient.tsx", scene: "KakuroScene3D.tsx", buttons: 1, lib: "kakuro.ts" },
-  { dir: "binairo", client: "BinairoClient.tsx", scene: "BinairoScene3D.tsx", buttons: 2, lib: "binairo.ts" },
 ];
 
 for (const g of BATCH) {
@@ -87,44 +84,5 @@ test("3D batch7-numbers sudoku: 数字は大きく、メモは細字でなくド
   assert.match(client, /notesSummary/, "メモの正を DOM 注記でも担保する");
 });
 
-test("3D batch7-numbers kenken: ケージ境界は壁、ラベルは先頭マスの上面に大きく描く", () => {
-  const scene = read("app", "games", "kenken", "KenkenScene3D.tsx");
-  assert.match(scene, /addWall/, "ケージ境界を壁（溝）で表現する");
-  assert.match(scene, /cageOf\[i - size\] !== cageOf\[i\]/, "境界は cageOf の隣接比較で決める");
-  assert.match(scene, /labelOf/, "ケージラベルを持つ");
-  assert.match(scene, /cage\.target/, "ラベルは目標値と演算から作る");
-  assert.match(scene, /34px/, "ラベルを大きく描く");
-  assert.match(scene, /propsRef\.current\.onCell\(Number\(id\.slice\(5\)\)\)/, "タップが onCell を呼ぶ");
-  assert.match(scene, /flick\.dir === "down"/, "下フリックでチェック");
-  assert.match(scene, /propsRef\.current\.onCheck\(\)/, "下フリックが onCheck を呼ぶ");
-  const client = read("app", "games", "kenken", "KenkenClient.tsx");
-  assert.match(client, /onCell=\{selectCell\}/, "既存の選択ハンドラへ接続する");
-  assert.match(client, /onCheck=\{onCheck\}/, "既存のチェックへ接続する");
-  assert.doesNotMatch(scene, /setKenkenValue|checkKenken|evaluateCage/, "入力・判定を 3D 側で再実装しない");
-});
 
-test("3D batch7-numbers kakuro: 黒マスは 192px テクスチャに斜め仕切りと 2 合計を描く", () => {
-  const scene = read("app", "games", "kakuro", "KakuroScene3D.tsx");
-  assert.match(scene, /createBlackTile/, "黒マスを造形する");
-  assert.match(scene, /192, 192/, "黒マスは大きめキャンバスで描く");
-  assert.match(scene, /58px/, "合計を大きく描く");
-  assert.match(scene, /cell\.across/, "右向き合計を描く");
-  assert.match(scene, /cell\.down/, "下向き合計を描く");
-  assert.match(scene, /propsRef\.current\.onCell\(Number\(id\.slice\(5\)\)\)/, "タップが onCell を呼ぶ");
-  assert.match(scene, /flick\.dir === "down"/, "下フリックでチェック");
-  assert.match(scene, /propsRef\.current\.onCheck\(\)/, "下フリックが onCheck を呼ぶ");
-  const client = read("app", "games", "kakuro", "KakuroClient.tsx");
-  assert.match(client, /onCell=\{selectCell\}/, "既存の選択ハンドラへ接続する");
-  assert.match(client, /onCheck=\{handleCheck\}/, "既存のチェックへ接続する");
-  assert.doesNotMatch(scene, /setKakuroValue|checkKakuro/, "入力・判定を 3D 側で再実装しない");
-});
 
-test("3D batch7-numbers binairo: タップが既存の循環ハンドラへ接続される", () => {
-  const scene = read("app", "games", "binairo", "BinairoScene3D.tsx");
-  assert.match(scene, /propsRef\.current\.onCell\(Number\(id\.slice\(5\)\)\)/, "タップが onCell を呼ぶ");
-  assert.match(scene, /88px/, "0/1 を大きく描く");
-  assert.doesNotMatch(scene, /cycleBinairoCell|setBinairoCell|checkBinairo/, "循環・判定を 3D 側で再実装しない");
-  const client = read("app", "games", "binairo", "BinairoClient.tsx");
-  assert.match(client, /onCell=\{cycleCell\}/, "既存の循環ハンドラへ接続する");
-  assert.match(client, /cycleBinairoCell\(s, i\)/, "循環は既存 lib 経路のまま");
-});

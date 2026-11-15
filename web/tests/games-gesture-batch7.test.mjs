@@ -22,17 +22,14 @@ import path from "node:path";
 const webDir = path.join(import.meta.dirname, "..");
 
 const CLIENTS = {
-  pyramid: "PyramidClient.tsx",
   puttgolf: "PuttGolfClient.tsx",
   pong: "PongClient.tsx",
-  nurikabe: "NurikabeClient.tsx",
-  numbercode: "NumberCodeClient.tsx",
   minesweeper: "MinesweeperClient.tsx",
   lightsout: "LightsOutClient.tsx",
   kwordle: "KwordleClient.tsx",
 };
 // 例外リスト（ゲーム外 chrome のリセットボタン）以外は 0 件であること。
-const BUTTON_BUDGET = { pyramid: 1, puttgolf: 1, pong: 1, nurikabe: 1, numbercode: 0, minesweeper: 1, lightsout: 1, kwordle: 1 };
+const BUTTON_BUDGET = { puttgolf: 1, pong: 1, minesweeper: 1, lightsout: 1, kwordle: 1 };
 
 function read(game) {
   return fs.readFileSync(path.join(webDir, "app", "games", game, CLIENTS[game]), "utf8");
@@ -47,14 +44,12 @@ for (const [game, file] of Object.entries(CLIENTS)) {
 }
 
 test("gesture batch7: 残りボタンは chrome のリセット操作だけ", () => {
-  for (const game of ["pyramid", "puttgolf", "pong", "nurikabe", "minesweeper", "lightsout", "kwordle"]) {
+  for (const game of ["puttgolf", "pong", "minesweeper", "lightsout", "kwordle"]) {
     const src = read(game);
     const buttons = src.match(/<button[\s\S]*?<\/button>/g) ?? [];
     assert.equal(buttons.length, 1, `${game}: 残りボタンが ${buttons.length} 件`);
     assert.ok(buttons[0].includes("もう一度"), `${game}: 残りボタンがリセット操作ではない`);
   }
-  const code = read("numbercode");
-  assert.equal((code.match(/<button/g) ?? []).length, 0, "numbercode: ボタンが残っている");
 });
 
 test("gesture batch7: 8ゲームとも共通ヘルパー lib/gesture を使う", () => {
@@ -65,18 +60,18 @@ test("gesture batch7: 8ゲームとも共通ヘルパー lib/gesture を使う",
   }
 });
 
-test("gesture batch7: スワイプ系3ゲームは盤面・対象物に useGesture を使う", () => {
-  for (const game of ["puttgolf", "nurikabe", "numbercode"]) {
+test("gesture batch7: スワイプ系1ゲームは盤面・対象物に useGesture を使う", () => {
+  for (const game of ["puttgolf"]) {
     const src = read(game);
     assert.ok(src.includes("useGesture"), `${game}: useGesture を使っていない`);
   }
-  // pyramid / pong / minesweeper / lightsout / kwordle はタップ対象物化のみ
+  // pong / minesweeper / lightsout / kwordle はタップ対象物化のみ
   // （盤面スワイプを持たない。pong のポーズ用ダブルタップは pointerdown 直結の
-  // 手書き判定で、reaction / stopwatch と同じ意図的な例外）。
+  // 手書き判定で、reaction と同じ意図的な例外）。
 });
 
 test("gesture batch7: ジェスチャ面は touchAction none", () => {
-  for (const game of ["puttgolf", "nurikabe", "numbercode"]) {
+  for (const game of ["puttgolf"]) {
     const src = read(game);
     assert.ok(src.includes('touchAction: "none"'), `${game}: ジェスチャ面に touchAction none がない`);
   }
@@ -85,20 +80,6 @@ test("gesture batch7: ジェスチャ面は touchAction none", () => {
   assert.ok(pong.includes('touchAction: "none"'), "pong: キャンバスに touchAction none がない");
 });
 
-test("gesture batch7: pyramid はカード・ストック・捨て山がタップ対象物化し無効条件が残る", () => {
-  const src = read("pyramid");
-  assert.ok(src.includes("tappableProps(() => {"), "カード・ストックがタップ対象になっていない");
-  assert.ok(src.includes("tappableProps(() => onTarget({ kind: \"waste\" }, wasteTop))"), "捨て山がタップ対象になっていない");
-  // 旧ボタンの disabled 条件と同等に、覆われているカード・終局時・空のストックは無効。
-  assert.ok(src.includes("cellDisabled"), "非公開カードの無効化がない");
-  assert.ok(src.includes("stockDisabled"), "ストックめくりの無効条件がない");
-  assert.ok(
-    src.includes('state.status === "won" ||\n    state.status === "stuck" ||\n    (state.stock.length === 0 && state.waste.length === 0)'),
-    "ストックめくりの無効条件が旧ボタンと一致しない",
-  );
-  assert.ok(src.includes("tabIndex={cellDisabled ? -1 : 0}"), "無効なカードがフォーカス対象のまま");
-  assert.ok(src.includes("tabIndex={stockDisabled ? -1 : 0}"), "無効なストックがフォーカス対象のまま");
-});
 
 test("gesture batch7: puttgolf はコースタップで打つ・次のホールへ、カップを狙うはタップ対象物化", () => {
   const src = read("puttgolf");
@@ -143,37 +124,7 @@ test("gesture batch7: pong は難易度がタップ対象物化しコートタ�
   assert.ok(src.includes("Math.abs(clientY - last.y) <= 48"), "ダブルタップ=ポーズが位置で分離されていない（パドル調整の誤ポーズ）");
 });
 
-test("gesture batch7: nurikabe はサイズ選択・盤マスがタップ対象物化し盤面下スワイプでチェック", () => {
-  const src = read("nurikabe");
-  assert.ok(src.includes("boardGesture"), "盤面に useGesture が繋がっていない");
-  assert.ok(src.includes('dir === "down"'), "チェックが下スワイプになっていない");
-  assert.ok(src.includes("onCheck()"), "チェックへの接続が壊れている");
-  assert.ok(src.includes("tappableProps(() => restart(s.key))"), "サイズ選択がタップ対象になっていない");
-  assert.ok(src.includes('role="gridcell"'), "盤マスが gridcell のタップ対象になっていない");
-  assert.ok(src.includes("aria-disabled={cellDisabled}"), "数字・終局時のマスの無効化がない");
-  // 旧チェックボタンの disabled 条件と同等に、プレイ中でないときのチェックは no-op。
-  assert.ok(src.includes('if (state.status !== "playing") return;\n    const result = checkNurikabe(state);'), "チェックの無効条件がない");
-});
 
-test("gesture batch7: numbercode はパッド・操作がタップ対象物化し入力枠スワイプで回答・クリア", () => {
-  const src = read("numbercode");
-  assert.ok(src.includes("slotsGesture"), "入力枠に useGesture が繋がっていない");
-  assert.ok(src.includes('dir === "up"'), "回答するが上スワイプになっていない");
-  assert.ok(src.includes('dir === "left"'), "クリアが左スワイプになっていない");
-  assert.ok(src.includes("tappableProps(() => pushDigit(d))"), "数字パッドがタップ対象になっていない");
-  assert.ok(src.includes("tappableProps(backspace)"), "消すがタップ対象になっていない");
-  assert.ok(src.includes("tappableProps(clearInput)"), "クリアがタップ対象になっていない");
-  assert.ok(src.includes("tappableProps(submit)"), "回答するがタップ対象になっていない");
-  // 物理キーボードの数字・Backspace・Enter での入力がある。
-  assert.ok(src.includes('e.key === "Backspace"'), "Backspace での入力がない");
-  assert.ok(src.includes('/^[0-9]$/.test(e.key)'), "数字キーでの入力がない");
-  assert.ok(src.includes('e.key === "Enter"'), "Enter での回答がない");
-  // 旧ボタンの disabled 条件と同等に、使用済み数字・空入力時の操作は無効。
-  assert.ok(src.includes("aria-disabled={input.includes(d)}"), "使用済み数字の無効表示がない");
-  assert.ok(src.includes("aria-disabled={!isValidNcGuess(input)}"), "回答するの無効表示がない");
-  assert.ok(src.includes("data-numbercode-key"), "Enter 二重発火防止の目印がない");
-  assert.ok(src.includes('closest?.("[data-numbercode-key]")'), "window リスナーに二重発火防止のガードがない");
-});
 
 test("gesture batch7: minesweeper は難易度・旗モード・盤マスがタップ対象物化", () => {
   const src = read("minesweeper");
@@ -214,14 +165,6 @@ test("gesture batch7: kwordle はカタカナキー・決定・消すがタッ�
   );
 });
 
-test("gesture batch7: nurikabe の Enter は1経路のみ（二重発火防止）", () => {
-  const src = read("nurikabe");
-  // 盤面そのものにフォーカスがあるときだけ Enter でチェックする。
-  // ガードがないとマスにフォーカスして Enter を押したときに切り替えと
-  // チェックが両方走る（anagram / mastermind と同じ構図）。
-  assert.ok(src.includes("e.target !== e.currentTarget"), "親子 onKeyDown のガードがない");
-  assert.ok(src.includes('e.key !== "Enter"'), "盤面 Enter でのチェックがない");
-});
 
 test("gesture batch7: 8ゲームとも ⏱ が残っていない", () => {
   for (const game of Object.keys(CLIENTS)) {

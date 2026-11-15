@@ -1,6 +1,7 @@
-// 盤面3ゲーム（lib/online/games/{reversi,connect4,gomoku}.ts）のルール検証。
+// 盤面2ゲーム（lib/online/games/{reversi,connect4}.ts）のルール検証。
+// （gomoku は 2026-11-15 のカタログ削減で削除したため対象から外した。）
 // balku.test.mjs と同じ loadBundle 方式（TS transpile＋import 除去＋連結）で読む。
-// 3モジュールとも `export const gameModule` を持つため、連結時に名前を付け替える。
+// 両モジュールとも `export const gameModule` を持つため、連結時に名前を付け替える。
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -33,17 +34,16 @@ async function loadBoardGames() {
   const parts = [
     ["reversi.ts", "reversiModule"],
     ["connect4.ts", "connect4Module"],
-    ["gomoku.ts", "gomokuModule"],
   ].map(([file, name]) =>
     stripModuleSyntax(transpileFile(file)).replace(/\bgameModule\b/g, name),
   );
   const code =
     parts.join("\n") +
-    `\nexport { reversiModule, connect4Module, gomokuModule };\n`;
+    `\nexport { reversiModule, connect4Module };\n`;
   return import("data:text/javascript;base64," + Buffer.from(code).toString("base64"));
 }
 
-const { reversiModule: reversi, connect4Module: connect4, gomokuModule: gomoku } =
+const { reversiModule: reversi, connect4Module: connect4 } =
   await loadBoardGames();
 
 const players = () => [
@@ -62,11 +62,10 @@ const rng = makeRng();
 
 /* ---------------- 共通メタ ---------------- */
 
-test("共通: 3モジュールとも2人固定・CPU対応・チャット有効で id が一致する", () => {
+test("共通: 両モジュールとも2人固定・CPU対応・チャット有効で id が一致する", () => {
   for (const [mod, id] of [
     [reversi, "reversi"],
     [connect4, "connect4"],
-    [gomoku, "gomoku"],
   ]) {
     assert.equal(mod.id, id);
     assert.equal(mod.minPlayers, 2);
@@ -79,7 +78,7 @@ test("共通: 3モジュールとも2人固定・CPU対応・チャット有効�
 });
 
 test("共通: parseAction は不正な入力に null を返す", () => {
-  for (const mod of [reversi, connect4, gomoku]) {
+  for (const mod of [reversi, connect4]) {
     assert.equal(mod.parseAction(null), null);
     assert.equal(mod.parseAction("place"), null);
     assert.equal(mod.parseAction({}), null);
@@ -91,8 +90,6 @@ test("共通: parseAction は不正な入力に null を返す", () => {
   assert.deepEqual(reversi.parseAction({ type: "pass" }), { type: "pass" });
   assert.equal(connect4.parseAction({ type: "drop", col: 7 }), null);
   assert.deepEqual(connect4.parseAction({ type: "drop", col: 3 }), { type: "drop", col: 3 });
-  assert.equal(gomoku.parseAction({ type: "place", index: 225 }), null);
-  assert.deepEqual(gomoku.parseAction({ type: "place", index: 112 }), { type: "place", index: 112 });
 });
 
 /* ---------------- reversi ---------------- */
@@ -400,136 +397,4 @@ test("connect4: onPlayerLeft は相手の勝ちで終了させる", () => {
   const left = connect4.onPlayerLeft(s, 1);
   assert.equal(left.finished, true);
   assert.equal(left.winner, 0);
-});
-
-/* ---------------- gomoku ---------------- */
-
-function gomokuStateWith(board, turn = 0) {
-  return {
-    players: players(),
-    board,
-    turn,
-    lastMove: null,
-    winCells: [],
-    finished: false,
-    winner: null,
-  };
-}
-
-test("gomoku: 初期状態は空の15×15・先手 seat0", () => {
-  const s = gomoku.createState(players(), rng, {});
-  assert.equal(s.board.length, 225);
-  assert.ok(s.board.every((v) => v === 0));
-  assert.equal(s.turn, 0);
-  const next = gomoku.applyAction(s, 0, { type: "place", index: 112 }, rng);
-  assert.equal(next.board[112], 1);
-  assert.equal(next.turn, 1);
-  assert.equal(s.board[112], 0, "元の state を破壊しない");
-  const view = gomoku.viewFor(next, 0);
-  assert.equal(view.lastMove, 112);
-  assert.equal(view.winner, null);
-});
-
-test("gomoku: 違法な手は throw する（手番違い・占有・範囲外）", () => {
-  const s = gomoku.createState(players(), rng, {});
-  const a = gomoku.applyAction(s, 0, { type: "place", index: 112 }, rng);
-  assert.throws(() => gomoku.applyAction(a, 0, { type: "place", index: 0 }, rng), /手番ではありません/);
-  assert.throws(() => gomoku.applyAction(a, 1, { type: "place", index: 112 }, rng), /既に石があります/);
-  assert.throws(() => gomoku.applyAction(a, 1, { type: "place", index: 225 }, rng), /範囲外/);
-});
-
-test("gomoku: 横5つで勝ち、winCells に5マスが入る", () => {
-  let s = gomoku.createState(players(), rng, {});
-  const moves = [
-    [0, 108], [1, 0],
-    [0, 109], [1, 1],
-    [0, 110], [1, 2],
-    [0, 111], [1, 3],
-    [0, 112],
-  ];
-  for (const [seat, index] of moves) s = gomoku.applyAction(s, seat, { type: "place", index }, rng);
-  assert.equal(s.finished, true);
-  assert.equal(s.winner, 0);
-  assert.deepEqual(s.winCells, [108, 109, 110, 111, 112]);
-  assert.throws(() => gomoku.applyAction(s, 1, { type: "place", index: 50 }, rng), /終了しています/);
-});
-
-test("gomoku: 縦5つで勝つ", () => {
-  const board = new Array(225).fill(0);
-  for (const i of [52, 67, 82, 97]) board[i] = 1; // col7, rows3-6
-  board[0] = 2;
-  board[1] = 2;
-  const s = gomokuStateWith(board, 0);
-  const end = gomoku.applyAction(s, 0, { type: "place", index: 112 }, rng);
-  assert.equal(end.finished, true);
-  assert.equal(end.winner, 0);
-  assert.deepEqual(end.winCells, [52, 67, 82, 97, 112]);
-});
-
-test("gomoku: 長連（6つ）も勝ちで、winCells は並んだ全マス", () => {
-  let s = gomoku.createState(players(), rng, {});
-  const moves = [
-    [0, 108], [1, 0],
-    [0, 109], [1, 1],
-    [0, 110], [1, 2],
-    [0, 111], [1, 3],
-    [0, 113], [1, 210],
-    [0, 112], // 隙間を埋めて 108-113 の6連
-  ];
-  for (const [seat, index] of moves) s = gomoku.applyAction(s, seat, { type: "place", index }, rng);
-  assert.equal(s.finished, true);
-  assert.equal(s.winner, 0);
-  assert.deepEqual(s.winCells, [108, 109, 110, 111, 112, 113]);
-});
-
-test("gomoku: 埋まった盤面（5つ並び無し）は引き分け", () => {
-  const board = new Array(225).fill(0);
-  for (let r = 0; r < 15; r++) {
-    for (let c = 0; c < 15; c++) {
-      const even = r % 2 === 0;
-      const v = c % 4 < 2 ? (even ? 1 : 2) : (even ? 2 : 1);
-      board[r * 15 + c] = v;
-    }
-  }
-  board[0] = 0; // 左上だけ空き。パターン上このマスは 1（seat0）。
-  const s = gomokuStateWith(board, 0);
-  const end = gomoku.applyAction(s, 0, { type: "place", index: 0 }, rng);
-  assert.equal(end.finished, true);
-  assert.equal(end.winner, "draw");
-});
-
-test("gomoku: CPU は空盤面で中央、勝ち手を完成させ、相手の4を止める", () => {
-  const empty = gomoku.createState(players(), rng, {});
-  assert.deepEqual(gomoku.cpuAction(empty, 0, makeRng(1)), { type: "place", index: 112 });
-
-  // オープン4（両端が空き）: どちらかの端で勝てる。
-  const openBoard = new Array(225).fill(0);
-  for (const i of [108, 109, 110, 111]) openBoard[i] = 1;
-  openBoard[0] = 2;
-  const openState = gomokuStateWith(openBoard, 0);
-  const winAct = gomoku.cpuAction(openState, 0, makeRng(1));
-  assert.equal(winAct.type, "place");
-  assert.ok([107, 112].includes(winAct.index), `勝ち手は両端のどちらか: ${winAct.index}`);
-
-  // 片側が塞がれた4: 勝ち手は 112 のみ。
-  const closedBoard = new Array(225).fill(0);
-  for (const i of [108, 109, 110, 111]) closedBoard[i] = 1;
-  closedBoard[107] = 2;
-  const closedState = gomokuStateWith(closedBoard, 0);
-  assert.deepEqual(gomoku.cpuAction(closedState, 0, makeRng(1)), { type: "place", index: 112 });
-
-  // 相手の片側4: 阻止手は 112 のみ。
-  const threatBoard = new Array(225).fill(0);
-  for (const i of [108, 109, 110, 111]) threatBoard[i] = 2;
-  threatBoard[107] = 1;
-  threatBoard[0] = 1;
-  const threatState = gomokuStateWith(threatBoard, 0);
-  assert.deepEqual(gomoku.cpuAction(threatState, 0, makeRng(1)), { type: "place", index: 112 });
-});
-
-test("gomoku: onPlayerLeft は相手の勝ちで終了させる", () => {
-  const s = gomoku.createState(players(), rng, {});
-  const left = gomoku.onPlayerLeft(s, 0);
-  assert.equal(left.finished, true);
-  assert.equal(left.winner, 1);
 });

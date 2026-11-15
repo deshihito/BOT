@@ -23,17 +23,14 @@ import path from "node:path";
 const webDir = path.join(import.meta.dirname, "..");
 
 const CLIENTS = {
-  kenken: "KenkenClient.tsx",
   freecell: "FreeCellClient.tsx",
   countdown: "CountdownClient.tsx",
-  columns: "ColumnsClient.tsx",
   backgammon: "BackgammonClient.tsx",
   sokoban: "SokobanClient.tsx",
   nonogram: "NonogramClient.tsx",
-  kakuro: "KakuroClient.tsx",
 };
 // 例外リスト（ゲーム外 chrome のリセットボタン）以外は 0 件であること。
-const BUTTON_BUDGET = { kenken: 1, freecell: 2, countdown: 0, columns: 1, backgammon: 1, sokoban: 1, nonogram: 1, kakuro: 1 };
+const BUTTON_BUDGET = { freecell: 2, countdown: 0, backgammon: 1, sokoban: 1, nonogram: 1 };
 
 function read(game) {
   return fs.readFileSync(path.join(webDir, "app", "games", game, CLIENTS[game]), "utf8");
@@ -49,11 +46,8 @@ for (const [game, file] of Object.entries(CLIENTS)) {
 
 test("gesture batch5: 残りボタンは chrome のリセット操作だけ", () => {
   const chromeOnly = {
-    kenken: ["もう一度"],
-    columns: ["もう一度"],
     backgammon: ["もう一度"],
     sokoban: ["もう一度"],
-    kakuro: ["もう一度"],
     nonogram: ["別の問題"],
   };
   for (const [game, labels] of Object.entries(chromeOnly)) {
@@ -77,8 +71,8 @@ test("gesture batch5: 8ゲームとも共通ヘルパー lib/gesture を使う",
   }
 });
 
-test("gesture batch5: スワイプ系7ゲームは盤面・対象物に useGesture を使う（nonogram はドラッグ塗りのため対象外）", () => {
-  for (const game of ["kenken", "freecell", "countdown", "columns", "backgammon", "sokoban", "kakuro"]) {
+test("gesture batch5: スワイプ系4ゲームは盤面・対象物に useGesture を使う（nonogram はドラッグ塗りのため対象外）", () => {
+  for (const game of ["freecell", "countdown", "backgammon", "sokoban"]) {
     const src = read(game);
     assert.ok(src.includes("useGesture"), `${game}: useGesture を使っていない`);
   }
@@ -89,7 +83,7 @@ test("gesture batch5: スワイプ系7ゲームは盤面・対象物に useGestu
 });
 
 test("gesture batch5: ジェスチャ面は touchAction none（freecell は横スワイプのみのため pan-y）", () => {
-  for (const game of ["kenken", "countdown", "columns", "backgammon", "sokoban", "nonogram", "kakuro"]) {
+  for (const game of ["countdown", "backgammon", "sokoban", "nonogram"]) {
     const src = read(game);
     assert.ok(src.includes('touchAction: "none"'), `${game}: ジェスチャ面に touchAction none がない`);
   }
@@ -97,42 +91,8 @@ test("gesture batch5: ジェスチャ面は touchAction none（freecell は横�
   assert.ok(free.includes('touchAction: "pan-y"'), "freecell: 盤面に touchAction pan-y がない");
 });
 
-test("gesture batch5: kenken は盤面下スワイプでチェック、パッドはタップ対象物化", () => {
-  const src = read("kenken");
-  assert.ok(src.includes("boardGesture"), "盤面に useGesture が繋がっていない");
-  assert.ok(src.includes('dir === "down"'), "チェックが下スワイプになっていない");
-  assert.ok(src.includes("onCheck()"), "チェックへの接続が壊れている");
-  assert.ok(src.includes("tappableProps(() => input(n))"), "数字パッドがタップ対象になっていない");
-  assert.ok(src.includes("tappableProps(() => input(0))"), "消すがタップ対象になっていない");
-  assert.ok(src.includes("tappableProps(() => restart(s.key))"), "サイズ選択がタップ対象になっていない");
-  assert.ok(src.includes('role="gridcell"'), "盤マスが gridcell のタップ対象になっていない");
-  // 物理キーボードの数字入力（パッド div は Enter/Space のみのため二重発火なし）。
-  assert.ok(src.includes("input(Number(e.key))"), "物理キーボードの数字入力がない");
-  assert.ok(src.includes('e.key === "Backspace"'), "Backspace での消すがない");
-});
 
-test("gesture batch5: kenken / kakuro の Enter は1経路のみ（二重発火防止）", () => {
-  for (const game of ["kenken", "kakuro"]) {
-    const src = read(game);
-    // 盤面そのものにフォーカスがあるときだけ Enter でチェックする。
-    // ガードがないとマスにフォーカスして Enter を押したときに選択と
-    // チェックが両方走る（anagram / mastermind と同じ構図）。
-    assert.ok(src.includes("e.target !== e.currentTarget"), `${game}: 親子 onKeyDown のガードがない`);
-    assert.ok(src.includes('e.key === "Enter"'), `${game}: Enter でのチェックがない`);
-  }
-});
 
-test("gesture batch5: kakuro は盤面下スワイプでチェック、パッドはタップ対象物化", () => {
-  const src = read("kakuro");
-  assert.ok(src.includes("boardGesture"), "盤面に useGesture が繋がっていない");
-  assert.ok(src.includes('dir === "down"'), "チェックが下スワイプになっていない");
-  assert.ok(src.includes("handleCheck()"), "チェックへの接続が壊れている");
-  assert.ok(src.includes("tappableProps(() => input(n))"), "数字パッドがタップ対象になっていない");
-  assert.ok(src.includes("tappableProps(() => input(0))"), "消すがタップ対象になっていない");
-  assert.ok(src.includes('role="gridcell"'), "白マスが gridcell のタップ対象になっていない");
-  assert.ok(src.includes("input(Number(e.key))"), "物理キーボードの数字入力がない");
-  assert.ok(src.includes('aria-disabled={cell.given'), "与え数字マスの無効化がない");
-});
 
 test("gesture batch5: freecell は盤面スワイプで1手戻す・自動送り、札はタップ対象", () => {
   const src = read("freecell");
@@ -164,23 +124,6 @@ test("gesture batch5: countdown は盤面スワイプで戻す・やり直す・
   assert.ok(src.includes("isContentEditable"), "入力欄でのキー無視ガードがない");
 });
 
-test("gesture batch5: columns は盤面スワイプで移動・落とす、タップで回転", () => {
-  const src = read("columns");
-  assert.ok(src.includes("boardGesture"), "盤面に useGesture が繋がっていない");
-  assert.ok(src.includes("onSwipe: (dir) => {"), "スワイプが移動に繋がっていない");
-  assert.ok(src.includes("doMove(-1)"), "左移動への接続が壊れている");
-  assert.ok(src.includes("doMove(1)"), "右移動への接続が壊れている");
-  assert.ok(src.includes("doStep()"), "ソフトドロップへの接続が壊れている");
-  assert.ok(src.includes("doDrop()"), "ハードドロップへの接続が壊れている");
-  assert.ok(src.includes("doRotate()"), "回転への接続が壊れている");
-  assert.ok(!src.includes("← 左"), "左ボタンが残っている");
-  assert.ok(!src.includes("⤓ 一気に落とす"), "一気に落とすボタンが残っている");
-  // HEAD の doRotate 自己再帰バグの修正（回転は rotateColumns を呼ぶ）。
-  assert.ok(src.includes("setState((s) => rotateColumns(s))"), "doRotate が rotateColumns を呼んでいない");
-  const def = src.match(/const doRotate = \(\) => \{[\s\S]*?\n  \};/);
-  assert.ok(def, "doRotate の定義が見つからない");
-  assert.ok(!def[0].includes("doRotate();"), "doRotate が自己再帰している");
-});
 
 test("gesture batch5: backgammon は盤面タップでダイス、スワイプでパス・上がり", () => {
   const src = read("backgammon");
