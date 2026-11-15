@@ -68,6 +68,7 @@ import { HP_MAX, HUNGER_MAX, countItem, maxHpFor, type AdventureRoleId, type Ite
 import {
   containerCapacity, isContainerItem, type ContainerSlotRef,
 } from "@/lib/worldbox/containers";
+import { isMachineItem } from "@/lib/worldbox/machines";
 import { DUNGEON_TILE_SRC, FARM_SPRITE_SRC, LOBBY_SPRITE_SRC, loadDungeonTiles, loadFarmSprites, loadLobbySprites, loadMobSprites, loadTextures } from "@/lib/worldbox/textures";
 import { preloadImages, transitionAlpha, transitionDone, transitionSwapDue, SPRITE_PRELOAD_TIMEOUT_MS, TRANSITION_OVERLAY_RGB, type TransitionKind } from "@/lib/worldbox/transition";
 import { isStickTouch, stickBase, stickVector } from "@/lib/worldbox/stick";
@@ -82,6 +83,7 @@ import {
 import { useGamesNav } from "../GamesShell";
 import WorldBoxCasinoPanel from "./WorldBoxCasinoPanel";
 import WorldBoxArenaPanel from "./WorldBoxArenaPanel";
+import WorldBoxMachinePanel from "./WorldBoxMachinePanel";
 import WorldBoxEconomyPanel from "./WorldBoxEconomyPanel";
 import WorldBoxGuildBoardPanel from "./WorldBoxGuildBoardPanel";
 
@@ -648,6 +650,7 @@ export default function WorldBoxClient() {
   const [heldSlot, setHeldSlot] = useState<SlotRef | null>(null);
   /** 開いている収納コンテナ（自分の樽・宝箱）とその中身。 */
   const [containerPanel, setContainerPanel] = useState<{ x: number; y: number; itemId: string } | null>(null);
+  const [machinePanel, setMachinePanel] = useState<{ x: number; y: number } | null>(null);
   const [containerSlots, setContainerSlots] = useState<ItemSlot[] | null>(null);
   /** コンテナパネルで持ち上げ中のスロット（プロフィール側も含む）。 */
   const [heldPanelSlot, setHeldPanelSlot] = useState<ContainerSlotRef | null>(null);
@@ -2181,6 +2184,15 @@ export default function WorldBoxClient() {
         } else {
           setTileMsg(TILE_ERROR_LABEL.not_owner);
           denyAtTile(t.x, t.y);
+        }
+        return true;
+      }
+      if (view.block && isMachineItem(view.block.itemId)) {
+        // 自分の装置は採掘ではなくパネルを開く。他人の装置は開けない。
+        if (view.block.mine) {
+          setMachinePanel({ x: t.x, y: t.y });
+        } else {
+          setTileMsg(TILE_ERROR_LABEL.not_owner);
         }
         return true;
       }
@@ -5119,6 +5131,14 @@ export default function WorldBoxClient() {
       )}
       {arenaOpen && spaceUi === "lobby" && (
         <WorldBoxArenaPanel onClose={() => setArenaOpen(false)} />
+      )}
+      {machinePanel && spaceUi === "world" && (
+        <WorldBoxMachinePanel
+          x={machinePanel.x}
+          y={machinePanel.y}
+          onProfileChange={(profile) => setInvProfile(profile)}
+          onClose={() => setMachinePanel(null)}
+        />
       )}
       {guildBoardOpen && spaceUi === "lobby" && (
         <WorldBoxGuildBoardPanel
