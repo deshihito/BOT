@@ -1,6 +1,9 @@
-// BALKU ジェスチャ一本化＋ステージ固定比率の回帰（2026-11-13 ユーザー裁定）。
+// BALKU ジェスチャ一本化＋ステージ形状の回帰（2026-11-13 ユーザー裁定、
+// 2026-11-15 ユーザー報告で形状方針を改訂）。
 // - 対戦中のゲームアクションはタップ/スワイプ/ドラッグに一本化し、ボタン全廃
-// - 対戦画面は固定比率のステージ（横 16:10 / 縦 3:4）で、市場は引き出し
+// - 対戦画面の固定比率は廃止（2026-11-15: 比率と床と svh 幅が喧嘩して
+//   ステージが歪み、ほとんどのムーブができなくなった）。形は比率でなく
+//   ゾーンの床（最低高）で守り、幅100%・高さは自然高・市場は引き出し
 // - 可読下限（手札 104px / 束 96px / 主要テキスト 12px）を絶対値で守り、
 //   収まらない分は「縮小」ではなく「同時表示を減らす」（要約スタック＋
 //   詳細シート＋拡大プレビュー＋中央帯1コンテキスト）で解く
@@ -88,10 +91,21 @@ test("フリック解決とファンの横スワイプが配線されている",
   assert.ok(css.includes(".balku-draggable { touch-action:none;"));
 });
 
-test("レイアウト: 固定比率ステージ・市場の引き出し・施工ゾーンと手札の隣接", () => {
-  assert.ok(css.includes("aspect-ratio:16/10"), "横向きの固定比率がない");
-  assert.ok(css.includes("aspect-ratio:3/4"), "縦持ちの固定比率（3:4）がない");
-  assert.ok(css.includes("container-type:size"), "ステージがコンテナになっていない");
+test("レイアウト: 比率固定を廃止したステージ・市場の引き出し・施工ゾーンと手札の隣接", () => {
+  // 固定比率（16:10 / 3:4）と min-height の床、svh 由来の幅は三つ巴で
+  // ステージを歪ませたため全廃（2026-11-15）。幅100%＋自然高＋床で守る
+  const stageStart = css.indexOf(".balku-table-game {");
+  const stageRule = css.slice(stageStart, css.indexOf("}", stageStart));
+  assert.ok(!stageRule.includes("aspect-ratio"), "ステージに固定比率が残っている");
+  assert.ok(!stageRule.includes("min-height"), "ステージに比率と喧嘩する床が残っている");
+  assert.ok(stageRule.includes("width:100%"), "ステージ幅が100%でない");
+  assert.ok(css.includes("container-type:inline-size"), "ステージが幅コンテナになっていない（size だと高さが中身に依存できない）");
+  // どのブレークポイントの .balku-table-game ルールにも比率と床を戻さない
+  for (const m of css.matchAll(/\.balku-table-game \{[^}]*\}/g)) {
+    assert.ok(!m[0].includes("aspect-ratio"), "どこかのステージルールに固定比率が残っている");
+    assert.ok(!m[0].includes("min-height"), "どこかのステージルールに床が残っている");
+    assert.ok(!m[0].includes("100svh"), "どこかのステージルールに svh 由来の寸法が残っている");
+  }
   assert.ok(css.includes("cqw"), "ステージ相対単位が使われていない");
   assert.ok(/\.balku-shelf \{[^}]*position:absolute/.test(css), "市場が通常フローに残っている");
   // 未選択時の施工バーは自分の領域（.balku-self）の中＝手札の真上にある
@@ -109,9 +123,8 @@ test("可読下限: カード幅とテキストの下限を絶対値で守る", 
   // 手札の企画カードは縦・横とも最低 104px
   assert.ok(css.includes("clamp(104px, 30cqw, 126px)"), "縦持ちの手札カード下限がない");
   assert.ok(css.includes("clamp(104px, 13.5cqw, 140px)"), "横向きの手札カード下限がない");
-  // ステージ予約は実測 chrome ベースの 96px、基準は svh（ツールバー裏まで
-  // 数える dvh は Safari でステージを過大評価し、潰れの原因になった）
-  assert.ok(css.includes("100svh - 96px"), "ステージ予約が svh 96px になっていない");
+  // ステージ寸法は svh/dvh 由来にしない（2026-11-15: svh 由来の幅が
+  // 比率・床と喧嘩して歪みの原因になった）
   assert.ok(!css.includes("100dvh"), "dvh 基準が残っている");
   // 高さ連動で束を潰す旧ルール（12.5cqh）は撤去済み
   assert.ok(!css.includes("12.5cqh"), "束の cqh 連動縮小が残っている");
@@ -119,24 +132,21 @@ test("可読下限: カード幅とテキストの下限を絶対値で守る", 
   assert.ok(/\.balku-bundle \{[^}]*width:148px/.test(css), "束の全サイズ表示がない");
 });
 
-test("床: ゾーンの最低高が比率より優先され、席と中央帯は潰れて消えない", () => {
-  // ステージ：高さの上限で比率を壊さず、min-height の床が比率由来の
-  // 高さを上回ったらステージが伸びる（旧 max-height＋minmax(0,1fr) は
-  // iPhone 横向きで席・場が0に潰れて消えた）
+test("床: ゾーンの最低高で形を守り、席と中央帯は潰れて消えない", () => {
+  // ステージ全体の寸法は固定しない（比率も全体の床も廃止）。形を守るのは
+  // 行ごとの床だけ：席86/中央128 があれば、どの画面でも席と場は消えない
+  // （旧 max-height＋minmax(0,1fr) は iPhone 横向きで席・場が0に潰れた）
   const stageStart = css.indexOf(".balku-table-game {");
   const stageRule = css.slice(stageStart, css.indexOf("}", stageStart));
   assert.ok(stageRule.includes("grid-template-rows:minmax(86px, auto) minmax(128px, 1fr) auto"), "行の床（席86/中央128）がない");
-  assert.ok(stageRule.includes("min-height:632px"), "ステージの床（横向き）がない");
   assert.ok(!stageRule.includes("max-height"), "ステージに高さ上限が残っている");
   assert.ok(!stageRule.includes("minmax(0,1fr)"), "中央行が0まで潰れる指定が残っている");
   // 列は minmax(0,1fr) で固定する（列定義がないと中身の min-content で
   // ステージ幅より列が広がり、席や自領域が右にはみ出して切れた）
   assert.ok(stageRule.includes("grid-template-columns:minmax(0, 1fr)"), "ステージの列固定がない");
   assert.ok(/\.balku-self \{[^}]*grid-template-columns:minmax\(0, 1fr\)/.test(css), "自領域の列固定がない（情報バーの min-content で列が広がる）");
-  // 狭幅ではオークションが折り返す分、中央の床を上げる。縦持ちの床は
-  // 中央228＋自領域の実測合計まで含めて固定する
+  // 狭幅ではオークションが折り返す分、中央の行の床を上げる
   assert.ok(css.includes("minmax(228px, 1fr)"), "狭幅の中央の床（228）がない");
-  assert.ok(css.includes("min-height:724px"), "ステージの床（縦持ち/狭幅）がない");
   // 情報バーは常に1行（折り返して自領域を押し上げない）
   assert.ok(/\.balku-infobar \{[^}]*flex-wrap:nowrap/.test(css), "情報バーが1行に固定されていない");
   // 席は固定高ストリップ（顔は小型版、名前と所持情報は右の列）
@@ -226,6 +236,44 @@ test("感触とエフェクト: フリップ/タイマーバー/素材SVG/ドロ
   assert.ok(css.includes("@keyframes balku-burst"));
   assert.ok(css.includes("@keyframes balku-seize"));
   assert.ok(css.includes("prefers-reduced-motion"));
+});
+
+test("施工シート: ステージ上の重なりで、TSX のクラスに CSS が一致する", () => {
+  // 2026-11-15 回帰: 施工シートが通常フローに入ってステージを歪ませ、
+  // 提出パッドが切れていた。シートは absolute の重なりでなければならない
+  assert.ok(/\.balku-buildsheet \{[^}]*position:absolute/.test(css), "施工シートがステージ上の重なりになっていない");
+  assert.ok(/\.balku-buildsheet \{[^}]*max-height:calc\(100% - 16px\)/.test(css), "施工シートの高さ上限がない");
+  // TSX が使う部品クラス（body/card/main/effect/info/timer）に実ルールがある
+  for (const cls of ["balku-buildsheet-body", "balku-build-card", "balku-build-card-main", "balku-build-effect", "balku-build-info", "balku-build-timer"]) {
+    assert.ok(css.includes(`.${cls} {`) || css.includes(`.${cls},`), `${cls} の CSS ルールがない（無スタイル部品）`);
+    assert.ok(client.includes(cls), `${cls} がクライアントで使われていない`);
+  }
+});
+
+test("ムーブの受け付け: 判定は広め・近接とフリックの救済・タップ代替（桜井 #223）", () => {
+  // ドロップ判定はゾーン矩形より四方 24px 広い
+  assert.ok(client.includes("const DROP_PAD = 24"), "ドロップ判定の拡大がない");
+  assert.ok(client.includes("r.left - DROP_PAD"), "zoneAt が判定を広げていない");
+  // ゾーン外でも近くのゾーンへ寄せる近接解決があり、フリックより先に試す
+  assert.ok(client.includes("const nearestZone"), "近接解決がない");
+  assert.ok(client.includes("const DROP_NEAR = 96"), "近接解決の距離がない");
+  const endIdx = client.indexOf("const endDrag");
+  const endBlock = client.slice(endIdx, client.indexOf("const cancelDrag", endIdx));
+  assert.ok(endBlock.indexOf("nearestZone(") > 0 && endBlock.indexOf("nearestZone(") < endBlock.indexOf("flickZone("), "近接→フリックの順で救済していない");
+  // フリックの閾値は緩い方に固定（速さ 0.35 / 向き 0.5、引き寄せ 40px）
+  assert.ok(client.includes("speed < 0.35"), "フリック速度の閾値が緩んでいない");
+  assert.ok(client.includes("dot > 0.5"), "フリック方向の閾値が緩んでいない");
+  assert.ok(client.includes("dy > 40 && vy > 0.05"), "BALKU 引き寄せの閾値が緩んでいない");
+  // ファンの横スワイプからドラッグへの昇格（途中で縦に切ったら持ち上がる）
+  assert.ok(client.includes('track.mode = "drag";\n      } else {') || client.includes("ドラッグへ昇格"), "fan→drag 昇格がない");
+  // 押して何も起きない面を作らない: 提出パッド/市場/入札コイン/手番
+  // トークンはタップでも同じムーブが成立する（ドラッグ後の click は
+  // suppressClick で二重実行を防ぐ）
+  assert.ok(client.includes("submitSelected(true);\n            }}\n            onKeyDown") || /balku-submitpad-open[\s\S]{0,600}submitSelected\(true\)/.test(client), "公開パッドのタップ提出がない");
+  assert.ok(/balku-submitpad-down[\s\S]{0,600}submitSelected\(false\)/.test(client), "伏せパッドのタップ提出がない");
+  const marketIdx = client.indexOf("balku-market-card");
+  assert.ok(client.slice(marketIdx, marketIdx + 1400).includes('type: "buyMaterial"'), "市場のタップ購入がない");
+  assert.ok(client.includes('aria-label="手番トークン（相手の席へ放つとパス）"'), "手番トークンがない");
 });
 
 test("対戦画面とカタログに絵文字が残っていない", () => {
