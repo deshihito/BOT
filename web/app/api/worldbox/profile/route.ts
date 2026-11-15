@@ -1,3 +1,4 @@
+import { addMasteryXp } from "@/lib/worldbox/roles";
 import { NextResponse } from "next/server";
 import { getRequestSession, publicOrigin, sessionOwnerKey } from "@/lib/auth";
 import {
@@ -199,6 +200,10 @@ export async function POST(request: Request) {
     }
     case "eat": {
       const result = eatItem(current, data.itemId);
+      if (result.ok && current.role === "medic" && result.item.heal) {
+        const withXp = { ...result, profile: addMasteryXp(result.profile, "medic", 2).profile };
+        return saveAndReturn(withXp, { itemName: result.item.name });
+      }
       return saveAndReturn(result, result.ok ? { itemName: result.item.name } : {});
     }
     case "craft": {

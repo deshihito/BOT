@@ -52,6 +52,10 @@ export type Heartbeat = {
   face: 1 | -1;
   /** いる空間（ワールド / ロビー）。 */
   space: PresenceSpace;
+  /** 冒険役職（ネームプレートと守護オーラ用。未送信は free）。 */
+  role?: string;
+  /** 冒険役職の熟練ランク（1〜5）。 */
+  rank?: number;
 };
 
 export type PresenceEntry = Heartbeat & {
@@ -99,6 +103,8 @@ export function sanitizeHeartbeat(raw: unknown, bounds: CoordBounds): Heartbeat 
     vy: vel(v.vy),
     face: v.face === -1 ? -1 : 1,
     space: sanitizePresenceSpace(v.space),
+    role: typeof v.role === "string" && ["blade", "guard", "scout", "miner", "medic"].includes(v.role) ? v.role : "free",
+    rank: typeof v.rank === "number" && Number.isFinite(v.rank) ? Math.max(1, Math.min(5, Math.floor(v.rank))) : 1,
   };
 }
 

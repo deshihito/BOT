@@ -357,6 +357,7 @@ export async function findPresenceOwnerKey(id) { return map.has(id) ? map.get(id
 `);
 await import(presenceStubUrl); // ルートはもう presence-online を読まないため、状態だけ先に作る
 const profileSwapUrl = bundleModule(["worldbox/items.ts", "worldbox/profile.ts"], ["swapSlots", "moveSlot"]);
+const rolesUrl = bundleModule(["worldbox/items.ts", "worldbox/profile.ts", "worldbox/roles.ts"], ["addMasteryXp"]);
 const shopsUrl = bundleModule(["worldbox/items.ts", "worldbox/shops.ts"], ["checkBuyGenre", "checkBuySold"]);
 const profileRoute = await import(
   dataUrl(
@@ -370,7 +371,8 @@ const profileRoute = await import(
       .replaceAll('"@/lib/worldbox/shops"', JSON.stringify(shopsUrl))
       .replaceAll('"@/lib/worldbox/station-online"', JSON.stringify(stationStubUrl))
       .replaceAll('"@/lib/worldbox/profile-online"', JSON.stringify(profileOnlineStubUrl))
-      .replaceAll('"@/lib/worldbox/profile"', JSON.stringify(profileSwapUrl)),
+      .replaceAll('"@/lib/worldbox/profile"', JSON.stringify(profileSwapUrl))
+      .replaceAll('"@/lib/worldbox/roles"', JSON.stringify(rolesUrl)),
   ),
 );
 const URL_P = "http://localhost/api/worldbox/profile";
