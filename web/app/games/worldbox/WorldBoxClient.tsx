@@ -1,19 +1,20 @@
 "use client";
-// AGO WORLD BOX（横スクロール2Dサンドボックス）v2。
-// v1 の基底（生成・歩行・掘る/置く・保存）に、夜の敵と体力、道具と
-// クラフト/精錬、崩落、5枠インベントリ、オンラインセーブを足した版。
+// AGO WORLD BOX（横スクロール2Dサンドボックス）v3。
+// v2 までに基底（生成・歩行・掘る/置く）＋敵と体力・道具とクラフト/精錬・
+// 崩落・5枠・オンラインセーブを実装。v3 で世界は全員共有の1つになり、
+// セーブはプレイヤー状態だけ、昼夜は共有時計になった。
 // ゲームループと描画は canvas + refs で回し、React state は HUD 表示だけに使う。
 // 純粋ロジックは lib/worldbox/ に分離（生成・物理・在庫・敵・体力・工作・崩落・保存）。
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
-import { AIR, BEDROCK, BLOCKS, COAL_ORE, COPPER_ORE, DIRT, GRASS, LEAVES, SAND, STONE, TORCH, WOOD, WORKBENCH, canDigBlock, dropOf } from "@/lib/worldbox/blocks";
+import { AIR, BEDROCK, BLOCKS, COAL_ORE, COPPER_ORE, DIRT, GRASS, LEAVES, SAND, STONE, TORCH, WOOD, WORKBENCH, canDigBlock, dropOf, isFullSolidBlock } from "@/lib/worldbox/blocks";
 import { generateWorld, getTile, findSpawn, WORLD_H, WORLD_SEED, WORLD_W, type World } from "@/lib/worldbox/worldgen";
 import { createBody, stepPlayer, PLAYER_H, PLAYER_W, type PlayerBody } from "@/lib/worldbox/physics";
 import { crackStage, digTile, placeTile, placeTorch, pressModeFor, withinReach, type PressMode } from "@/lib/worldbox/rules";
 import { buildLightField, lightLevelAt, type LightField } from "@/lib/worldbox/light";
 import { SLOT_COUNT, addItem, canAdd, cloneInventory, countOf, createInventory, isInventoryFull, type InventoryV2, type InvSlot } from "@/lib/worldbox/inventory";
 import { attackDamageOf, canDigWith, digSecondsFor, isTool, itemDef, requiredTier, tierOfTool, COPPER_INGOT, COPPER_PICKAXE, DEEP_STONE_Y, STONE_PICKAXE, SWORD, WOODEN_PICKAXE } from "@/lib/worldbox/items";
-import { advancePhase, isNightPhase, nightAmount } from "@/lib/worldbox/daynight";
+import { isNightPhase, nightAmount, phaseAtTime } from "@/lib/worldbox/daynight";
 import { CONTACT_DAMAGE, ENEMY_H, ENEMY_MAX_HP, ENEMY_W, SPAWN_INTERVAL_SEC, attackEnemy, burnEnemiesAtDawn, enemyTouches, rollsHeartDrop, stepEnemy, trySpawnEnemy, type Enemy } from "@/lib/worldbox/enemies";
 import { HEART_HEAL, PICKUP_SIZE, createPickup, pickupTouches, stepPickup, type Pickup } from "@/lib/worldbox/pickups";
 import { PLAYER_MAX_HP, createHealth, damagePlayer, deathDrops, fallDamageFor, healPlayer, isDead, type HealthState } from "@/lib/worldbox/health";
@@ -21,6 +22,7 @@ import { RECIPES, SMELT_SECONDS, applyCraft, canStartSmelt, checkCraft, collectS
 import { FALL_BLOCK_DAMAGE, settleAfterChange, stepFalling, type FallingBlock } from "@/lib/worldbox/collapse";
 import { parseSave, serializeSave, type WorldBoxState } from "@/lib/worldbox/save";
 import { chooseInitialSave } from "@/lib/worldbox/save-source";
+import { MAX_CHANGE_BATCH, applyDiffs, diffKey, diffTilesAgainst } from "@/lib/worldbox/world-sync";
 import { TEXTURE_DATA, loadTextures } from "@/lib/worldbox/textures";
 import { sfxHit, sfxKo, sfxPlace, sfxPop, sfxTap, sfxTick } from "@/lib/sfx";
 import { useGamesNav } from "../GamesShell";
@@ -253,6 +255,16 @@ export default function WorldBoxClient() {
   const lastHudRef = useRef(0);
   const seedRef = useRef(0);
   const onlineRef = useRef<{ enabled: boolean; lastPutAt: number }>({ enabled: false, lastPutAt: 0 });
+  /** 共有ワールド同期の状態（v3）。known はサーバーと同期済みのタイル列。 */
+  const worldSyncRef = useRef<{
+    shared: boolean;
+    loggedIn: boolean;
+    epoch: number;
+    known: Uint8Array | null;
+    recentLocal: Map<string, number>;
+    lastFlushAt: number;
+    lastPollAt: number;
+  }>({ shared: false, loggedIn: false, epoch: 0, known: null, recentLocal: new Map(), lastFlushAt: 0, lastPollAt: 0 });
 
   const [hud, setHud] = useState<Hud>({
     slots: createInventory().slots, hp: PLAYER_MAX_HP, depth: 0, night: false, gate: null, full: false,
@@ -265,6 +277,7 @@ export default function WorldBoxClient() {
   const [craftOpen, setCraftOpen] = useState(false);
   const [deathFlash, setDeathFlash] = useState(false);
   const [onlineMode, setOnlineMode] = useState(false);
+  const [sharedMode, setSharedMode] = useState(false);
 
   const selectSlot = (i: number) => {
     selectedRef.current = i;
@@ -301,8 +314,43 @@ export default function WorldBoxClient() {
 
   const syncHud = () => setHud(buildHud());
 
-  /** 状態（セーブ or 新規）を各 ref へ反映する。 */
-  const applyState = (state: WorldBoxState | null) => {
+  /** 共有ワールド（生成地形＋サーバー差分を適用済みのタイル列）を worldRef へ置く。 */
+  const installWorld = (tiles: Uint8Array) => {
+    worldRef.current = {
+      seed: WORLD_SEED,
+      width: WORLD_W,
+      height: WORLD_H,
+      tiles,
+      surfaces: computeSurfaces(tiles),
+    };
+    seedRef.current = WORLD_SEED;
+    setSeedShown(WORLD_SEED);
+    lightDirtyRef.current = true;
+  };
+
+  /** 読み込んだ位置が固体に埋まっていたら、その列の地表へ出す（共有世界の変更対策）。 */
+  const ensureSafePosition = (world: World, body: PlayerBody) => {
+    const x0 = Math.max(0, Math.floor(body.x));
+    const x1 = Math.min(WORLD_W - 1, Math.floor(body.x + PLAYER_W - 0.001));
+    const y0 = Math.max(0, Math.floor(body.y));
+    const y1 = Math.min(WORLD_H - 1, Math.floor(body.y + PLAYER_H - 0.001));
+    let buried = false;
+    for (let ty = y0; ty <= y1 && !buried; ty++) {
+      for (let tx = x0; tx <= x1; tx++) {
+        if (isFullSolidBlock(getTile(world, tx, ty))) {
+          buried = true;
+          break;
+        }
+      }
+    }
+    if (!buried) return;
+    const col = Math.max(0, Math.min(WORLD_W - 1, Math.floor(body.x + PLAYER_W / 2)));
+    body.y = world.surfaces[col] - PLAYER_H;
+    body.vy = 0;
+  };
+
+  /** プレイヤー状態（セーブ or 新規）を各 ref へ反映する。ワールド自体は触らない。 */
+  const applyPlayerState = (state: WorldBoxState | null) => {
     enemiesRef.current = [];
     pickupsRef.current = [];
     fallingRef.current = [];
@@ -311,46 +359,30 @@ export default function WorldBoxClient() {
     digRef.current = null;
     gatedRef.current = null;
     if (state) {
-      worldRef.current = {
-        seed: state.seed,
-        width: WORLD_W,
-        height: WORLD_H,
-        tiles: state.tiles,
-        surfaces: computeSurfaces(state.tiles),
-      };
       invRef.current = cloneInventory(state.inventory);
       bodyRef.current = createBody(state.player.x, state.player.y);
       healthRef.current.hp = state.hp;
-      dayRef.current = state.dayPhase;
-      seedRef.current = state.seed;
     } else {
-      // 世界は全員共通の固定シード1つだけ（ランダムシードは作らない）。
-      // 「新しいワールド」は地形を変えず、進行（所持品・位置・体力）だけを戻す。
-      const world = generateWorld(WORLD_SEED);
-      worldRef.current = world;
+      // 「進行をリセット」は世界を変えず、所持品・位置・体力だけを初期化する。
       invRef.current = createInventory();
-      const spawn = findSpawn(world);
-      bodyRef.current = createBody(spawn.x + 0.1, spawn.y + 2 - PLAYER_H);
-      dayRef.current = 0.3;
-      seedRef.current = WORLD_SEED;
+      const world = worldRef.current;
+      if (world) {
+        const spawn = findSpawn(world);
+        bodyRef.current = createBody(spawn.x + 0.1, spawn.y + 2 - PLAYER_H);
+      }
       dirtyRef.current = true;
     }
-    lightDirtyRef.current = true;
-    setSeedShown(seedRef.current);
+    if (worldRef.current && bodyRef.current) ensureSafePosition(worldRef.current, bodyRef.current);
     syncHud();
   };
 
   const currentSaveJson = (): string | null => {
-    const world = worldRef.current;
     const body = bodyRef.current;
-    if (!world || !body) return null;
+    if (!body) return null;
     return serializeSave({
-      seed: world.seed,
-      tiles: world.tiles,
       inventory: invRef.current,
       player: { x: body.x, y: body.y },
       hp: healthRef.current.hp,
-      dayPhase: dayRef.current,
     });
   };
 
@@ -385,6 +417,105 @@ export default function WorldBoxClient() {
       })
       .catch(() => {
         /* 次の自動保存で再試行する */
+      });
+  };
+
+  /** 自分のタイル変更を共有ワールドへ送る（ログイン中・共有接続時のみ、最大256件ずつ）。 */
+  const flushWorldChanges = (keepalive = false) => {
+    const ws = worldSyncRef.current;
+    const world = worldRef.current;
+    if (!ws.shared || !ws.loggedIn || !ws.known || !world) return;
+    ws.lastFlushAt = performance.now();
+    const changes = diffTilesAgainst(world.tiles, ws.known);
+    if (changes.length === 0) return;
+    const now = performance.now();
+    for (const c of changes) ws.recentLocal.set(diffKey(c.x, c.y), now);
+    const batch = changes.slice(0, MAX_CHANGE_BATCH);
+    fetch("/api/worldbox/world", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ changes: batch }),
+      keepalive,
+    })
+      .then(async (res) => {
+        if (res.status === 401) {
+          ws.loggedIn = false;
+          return;
+        }
+        if (!res.ok) return;
+        const data = (await res.json()) as { epoch?: number; rejected?: { x: number; y: number }[] };
+        const rejectedKeys = new Set((data.rejected ?? []).map((r) => diffKey(r.x, r.y)));
+        const w = worldRef.current;
+        for (const c of batch) {
+          const idx = c.y * WORLD_W + c.x;
+          if (rejectedKeys.has(diffKey(c.x, c.y))) {
+            // 拒否されたセルは、その後触っていない場合だけ同期済みの値へ戻す
+            if (w && ws.known && w.tiles[idx] === c.tile) w.tiles[idx] = ws.known[idx];
+          } else if (ws.known) {
+            ws.known[idx] = c.tile;
+          }
+        }
+        if (typeof data.epoch === "number") ws.epoch = data.epoch;
+        if (rejectedKeys.size > 0) lightDirtyRef.current = true;
+      })
+      .catch(() => {
+        /* 次のフラッシュで再送する */
+      });
+  };
+
+  /** 共有ワールドの最新状態を取り込み、他人の変更を反映する（ゲストも読む）。 */
+  const pollWorld = () => {
+    const ws = worldSyncRef.current;
+    const world = worldRef.current;
+    if (!ws.shared || !ws.known || !world) return;
+    ws.lastPollAt = performance.now();
+    fetch("/api/worldbox/world", { headers: { Accept: "application/json" } })
+      .then(async (res) => {
+        if (!res.ok) {
+          if (res.status === 503) {
+            ws.shared = false;
+            setSharedMode(false);
+          }
+          return;
+        }
+        const data = (await res.json()) as { epoch?: number; diffs?: Record<string, number> };
+        if (typeof data.epoch !== "number" || !data.diffs || typeof data.diffs !== "object") return;
+        if (data.epoch === ws.epoch) return;
+        ws.epoch = data.epoch;
+        const w = worldRef.current;
+        const known = ws.known;
+        if (!w || !known) return;
+        // サーバー状態 = 生成地形 + diffs
+        const serverWorld = generateWorld(WORLD_SEED);
+        applyDiffs(serverWorld, data.diffs);
+        const serverTiles = serverWorld.tiles;
+        const now = performance.now();
+        let appliedAny = false;
+        for (let i = 0; i < serverTiles.length; i++) {
+          if (serverTiles[i] === known[i]) continue;
+          const key = diffKey(i % WORLD_W, Math.floor(i / WORLD_W));
+          const recent = ws.recentLocal.get(key);
+          known[i] = serverTiles[i];
+          // 自分が直近（3秒以内）に変えたタイルは上書きしない（自分の送信が LWW で勝つ）
+          if (recent !== undefined && now - recent < 3000) continue;
+          if (w.tiles[i] !== serverTiles[i]) {
+            w.tiles[i] = serverTiles[i];
+            appliedAny = true;
+          }
+        }
+        if (ws.recentLocal.size > 1024) {
+          for (const [k, at] of ws.recentLocal) {
+            if (now - at > 3000) ws.recentLocal.delete(k);
+          }
+        }
+        if (appliedAny) {
+          w.surfaces = computeSurfaces(w.tiles);
+          lightDirtyRef.current = true;
+          if (bodyRef.current) ensureSafePosition(w, bodyRef.current);
+        }
+      })
+      .catch(() => {
+        /* 次のポーリングで再試行する */
       });
   };
 
@@ -463,7 +594,8 @@ export default function WorldBoxClient() {
       }
       gameTimeRef.current += dt;
       const gt = gameTimeRef.current;
-      dayRef.current = advancePhase(dayRef.current, dt);
+      // 昼夜は共有時計（unix 時刻から決まる。全員が同じ時刻を生きる）
+      dayRef.current = phaseAtTime(Date.now() / 1000);
 
       // ---- 入力（キーボード or ジョイスティック） ----
       const joy = joyRef.current;
@@ -756,6 +888,12 @@ export default function WorldBoxClient() {
       if (onlineRef.current.enabled && dirtyRef.current && now - onlineRef.current.lastPutAt >= 8000) {
         putOnlineSave();
       }
+      // 共有ワールド: 自分の変更は最大8秒に1回送り、他人の変更は約15秒ごとに取り込む
+      const ws = worldSyncRef.current;
+      if (ws.shared) {
+        if (ws.loggedIn && now - ws.lastFlushAt >= 8000) flushWorldChanges();
+        if (now - ws.lastPollAt >= 15000) pollWorld();
+      }
     };
 
     const init = async () => {
@@ -780,9 +918,40 @@ export default function WorldBoxClient() {
       } catch {
         /* オフライン等ではローカルで続ける */
       }
+      // 共有ワールド: 生成地形にサーバーの差分を重ねる（ゲストも読める）
+      const world = generateWorld(WORLD_SEED);
+      let shared = false;
+      let epoch = 0;
+      try {
+        const res = await fetch("/api/worldbox/world", {
+          headers: { Accept: "application/json" },
+          signal: AbortSignal.timeout(3500),
+        });
+        if (res.ok) {
+          const data = (await res.json()) as { epoch?: unknown; diffs?: unknown };
+          if (typeof data.epoch === "number" && data.diffs && typeof data.diffs === "object") {
+            applyDiffs(world, data.diffs as Record<string, number>);
+            shared = true;
+            epoch = data.epoch;
+          }
+        }
+      } catch {
+        /* 共有に届かなければ生成地形だけで遊ぶ */
+      }
       if (cancelled) return;
+      installWorld(world.tiles);
+      worldSyncRef.current = {
+        shared,
+        loggedIn,
+        epoch,
+        known: shared ? world.tiles.slice() : null,
+        recentLocal: new Map(),
+        lastFlushAt: performance.now(),
+        lastPollAt: performance.now(),
+      };
+      setSharedMode(shared);
       const choice = chooseInitialSave(online, local, loggedIn);
-      applyState(choice.state);
+      applyPlayerState(choice.state);
       onlineRef.current.enabled = loggedIn;
       setOnlineMode(loggedIn);
       if (choice.pushLocalToOnline) {
@@ -798,6 +967,7 @@ export default function WorldBoxClient() {
       if (document.hidden) {
         saveNow();
         putOnlineSave(true);
+        flushWorldChanges(true);
       }
     };
     document.addEventListener("visibilitychange", onHide);
@@ -807,6 +977,7 @@ export default function WorldBoxClient() {
       document.removeEventListener("visibilitychange", onHide);
       saveNow();
       putOnlineSave(true);
+      flushWorldChanges(true);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -1475,7 +1646,7 @@ export default function WorldBoxClient() {
     `深さ ${hud.depth} m ・ ${hud.night ? "夜" : "昼"} ・ 選択中: ${selectedName}` +
     (selectedSlot && !isTool(selectedSlot.id) ? `（所持 ${selectedSlot.count}）` : "") +
     (hud.gate ? ` ・ ${hud.gate}` : "") +
-    (onlineMode ? " ・ オンライン保存" : "");
+    (sharedMode ? " ・ 共有ワールド" : onlineMode ? " ・ オンライン保存" : "");
 
   const invForPanel = invRef.current;
 
@@ -1713,7 +1884,7 @@ export default function WorldBoxClient() {
               onClick={() => {
                 setConfirmNew(false);
                 try { localStorage.removeItem(SAVE_KEY); } catch { /* noop */ }
-                applyState(null);
+                applyPlayerState(null);
                 saveNow();
                 putOnlineSave();
               }}

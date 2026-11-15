@@ -1,40 +1,34 @@
-// AGO WORLD BOX のセーブデータ変換（純粋ロジック）。
+// AGO WORLD BOX のプレイヤーセーブ変換（純粋ロジック）。
 // localStorage / サーバー（bot_kv）の読み書き自体は呼び出し側で行い、ここは
 // 「状態 ⇄ JSON 文字列」の変換と検証だけを担う（壊れたデータは null を返す）。
 //
-// v2: インベントリが5枠スロット形になり、HP と昼夜の位相も保存する。
-// v1（枠なし Record 形）のセーブは読み込み時に v2 へ移行する:
-// ホットバーの並び順に先頭から5種までをスロットへ入れ、残りは切り捨てる
-// （v1 で6種以上を持っていた場合のみ発生。HP は満タン、位相は昼から）。
+// v3: 世界は全員で共有する1つになったため、セーブはプレイヤー状態だけ
+// （5枠スロット・HP・位置）を持つ。タイルと昼夜の位相は保存しない
+// （位相は共有時計 daynight.phaseAtTime が決める）。
+// v2 以前のセーブは読み込み時に移行する: 所持品・HP・位置を引き継ぎ、
+// 保存されていたタイルは破棄する（世界は共有側が正）。
+// v1（枠なし Record 形）は所持品を先着5種でスロット化する。
 import { HOTBAR_BLOCKS } from "./blocks";
 import { PLAYER_MAX_HP } from "./health";
 import { SLOT_COUNT, createInventory, type InventoryV2, type InvSlot } from "./inventory";
 import { isTool } from "./items";
-import { START_PHASE } from "./daynight";
 import { WORLD_H, WORLD_W } from "./worldgen";
 
-export const SAVE_VERSION = 2;
+export const SAVE_VERSION = 3;
 
 export type WorldBoxSaveData = {
   version: number;
-  seed: number;
-  /** タイル配列（WORLD_W * WORLD_H）を base64 化したもの。 */
-  tilesB64: string;
   /** 5枠スロット（空きは null）。 */
   slots: ({ id: number; count: number } | null)[];
   player: { x: number; y: number };
   hp: number;
-  /** 昼夜の位相 0〜1。 */
-  dayPhase: number;
 };
 
+/** プレイヤー状態（世界タイルは含まない）。 */
 export type WorldBoxState = {
-  seed: number;
-  tiles: Uint8Array;
   inventory: InventoryV2;
   player: { x: number; y: number };
   hp: number;
-  dayPhase: number;
 };
 
 export function encodeTiles(tiles: Uint8Array): string {
@@ -82,28 +76,28 @@ function sanitizeSlots(raw: unknown): InvSlot[] {
   return slots;
 }
 
+function sanitizeHp(raw: unknown): number {
+  return typeof raw === "number" && Number.isFinite(raw)
+    ? Math.max(1, Math.min(PLAYER_MAX_HP, Math.floor(raw)))
+    : PLAYER_MAX_HP;
+}
+
 export function serializeSave(state: WorldBoxState): string {
   const data: WorldBoxSaveData = {
     version: SAVE_VERSION,
-    seed: state.seed,
-    tilesB64: encodeTiles(state.tiles),
     slots: state.inventory.slots.map((slot) => (slot ? { id: slot.id, count: slot.count } : null)),
     player: { x: state.player.x, y: state.player.y },
-    hp: Math.max(1, Math.min(PLAYER_MAX_HP, Math.floor(state.hp) || PLAYER_MAX_HP)),
-    dayPhase: ((state.dayPhase % 1) + 1) % 1,
+    hp: sanitizeHp(state.hp),
   };
   return JSON.stringify(data);
 }
 
 type RawSave = {
   version?: unknown;
-  seed?: unknown;
-  tilesB64?: unknown;
   inventory?: unknown;
   slots?: unknown;
   player?: { x?: unknown; y?: unknown };
   hp?: unknown;
-  dayPhase?: unknown;
 };
 
 /** v1 の Record 形インベントリを5枠スロットへ移行する（ホットバー順に先着5種）。 */
@@ -122,42 +116,26 @@ function migrateV1Inventory(raw: unknown): InventoryV2 {
   return inv;
 }
 
-/** 壊れている・形が違う・寸法が合わない場合は null（新規ワールドにフォールバック）。 */
+/**
+ * 壊れている・形が違う場合は null（新規プレイヤー状態にフォールバック）。
+ * v1/v2 のセーブはタイルを破棄してプレイヤー状態だけ移行する。
+ */
 export function parseSave(json: string | null | undefined): WorldBoxState | null {
   if (!json) return null;
   try {
     const data = JSON.parse(json) as RawSave;
-    if (data.version !== 1 && data.version !== SAVE_VERSION) return null;
-    if (typeof data.seed !== "number" || !Number.isFinite(data.seed)) return null;
-    if (typeof data.tilesB64 !== "string") return null;
-    const tiles = decodeTiles(data.tilesB64);
-    if (!tiles) return null;
+    if (data.version !== 1 && data.version !== 2 && data.version !== SAVE_VERSION) return null;
     if (!data.player || typeof data.player.x !== "number" || typeof data.player.y !== "number") return null;
     if (!Number.isFinite(data.player.x) || !Number.isFinite(data.player.y)) return null;
     const player = { x: data.player.x, y: data.player.y };
     if (data.version === 1) {
-      return {
-        seed: data.seed,
-        tiles,
-        inventory: migrateV1Inventory(data.inventory),
-        player,
-        hp: PLAYER_MAX_HP,
-        dayPhase: START_PHASE,
-      };
+      return { inventory: migrateV1Inventory(data.inventory), player, hp: PLAYER_MAX_HP };
     }
-    const hp = typeof data.hp === "number" && Number.isFinite(data.hp)
-      ? Math.max(1, Math.min(PLAYER_MAX_HP, Math.floor(data.hp)))
-      : PLAYER_MAX_HP;
-    const dayPhase = typeof data.dayPhase === "number" && Number.isFinite(data.dayPhase)
-      ? ((data.dayPhase % 1) + 1) % 1
-      : START_PHASE;
+    // v2 / v3: スロット・HP・位置だけを引き継ぐ（v2 のタイル・位相・シードは破棄）
     return {
-      seed: data.seed,
-      tiles,
       inventory: { slots: sanitizeSlots(data.slots) },
       player,
-      hp,
-      dayPhase,
+      hp: sanitizeHp(data.hp),
     };
   } catch {
     return null;
