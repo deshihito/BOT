@@ -1136,7 +1136,7 @@ export default function WorldBoxClient() {
       if (!prof) return false;
       const slot = prof.hotbar[selSlotRef.current] ?? null;
       const selItem = slot ? itemById(slot.id) : null;
-      const wantsPlace = !!selItem && (selItem.category === "block" || selItem.facility === true);
+      const wantsPlace = !!selItem && (selItem.category === "block" || selItem.facility === true || !!selItem.placesBlock);
       const px = Math.floor(player.x);
       const py = Math.floor(player.y);
       if (Math.max(Math.abs(t.x - px), Math.abs(t.y - py)) > 1) {
@@ -1156,7 +1156,7 @@ export default function WorldBoxClient() {
       const act = actionForTile(view, {
         tool: selItem?.tool,
         seedId: selItem && selItem.category === "seed" ? selItem.id : undefined,
-        blockId: selItem && (selItem.category === "block" || selItem.facility) ? selItem.id : undefined,
+        blockId: selItem && (selItem.category === "block" || selItem.facility || selItem.placesBlock) ? selItem.id : undefined,
       });
       if (!act) {
         // 隣接タップで何も起きない場合は理由を出す（素材は置けない・その地形には置けない等）。
@@ -1875,7 +1875,7 @@ export default function WorldBoxClient() {
         const prof = invRef.current;
         const slot = prof?.hotbar[selSlotRef.current] ?? null;
         const selDef = slot ? itemById(slot.id) : null;
-        if (prof && selDef && (selDef.category === "block" || selDef.facility === true)) {
+        if (prof && selDef && (selDef.category === "block" || selDef.facility === true || !!selDef.placesBlock)) {
           const px = Math.floor(player.x);
           const py = Math.floor(player.y);
           for (let dy = -1; dy <= 1; dy++) {

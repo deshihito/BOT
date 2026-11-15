@@ -34,6 +34,11 @@ export type ItemDef = {
    * プレイヤーは通過できる。固体ブロックとの区別はこのデータで持つ。
    */
   facility?: boolean;
+  /**
+   * この素材はそのままこのブロックとして置ける（基本素材の直接設置）。
+   * 消費は素材側、設置されるブロックは placesBlock の定義で描画・耐久・回収される。
+   */
+  placesBlock?: string;
   /** 硬いブロック（耐久50以上）を掘るのに要る道具（block のみ）。 */
   mineTool?: "axe" | "pickaxe";
   /** ドット絵アイコンのパス（public 配下）。無いアイテムは文字で出す。 */
@@ -51,8 +56,8 @@ export const ITEMS: readonly ItemDef[] = [
   { id: "bento", name: "幕の内弁当", desc: "品数たっぷり", category: "food", price: 45, hunger: 80 },
   { id: "feast", name: "フルコース", desc: "満腹まで食べる", category: "food", price: 50, hunger: 100 },
   // ---- 素材（合成の材料） ---------------------------------------------
-  { id: "wood", name: "木材", desc: "基本の素材", category: "material", price: 8 },
-  { id: "stone", name: "石材", desc: "基本の素材", category: "material", price: 8 },
+  { id: "wood", name: "木材", desc: "基本の素材", category: "material", price: 8, placesBlock: "oak_log" },
+  { id: "stone", name: "石材", desc: "基本の素材", category: "material", price: 8, placesBlock: "stone_block" },
   { id: "herb", name: "薬草", desc: "薬の素材になる草", category: "material", price: 12 },
   { id: "cloth", name: "布", desc: "織物の素材", category: "material", price: 16 },
   { id: "glass", name: "ガラス", desc: "透明な素材", category: "material", price: 18 },
