@@ -17,7 +17,7 @@ import { DASH_SPEED, SWIM_DASH_SPEED, SWIM_SPEED, WALK_SPEED, findFreeNear, isWa
 import { isNightPhase, nightAmount, phaseAtTime } from "@/lib/worldbox/daynight";
 import { mobById, mobOccupiesTile, type PlacedMob } from "@/lib/worldbox/mobs";
 import {
-  MOB_ATTACK_RANGE, MOB_RESPAWN_MS, knockbackTarget, mobBlockedTiles, mobDistance, mobFootprintTiles,
+  MOB_ATTACK_RANGE, MOB_RESPAWN_MS, attackTarget, knockbackTarget, mobBlockedTiles, mobDistance, mobFootprintTiles,
   mobHpNow, mobKeyOf, visibleMobs, type MobState,
 } from "@/lib/worldbox/combat";
 import { advanceWalkPhase, attackSwingAngle, damp, moveLean, stepBeatIndex, walkBob, walkSquashY } from "@/lib/worldbox/anim";
@@ -1039,6 +1039,38 @@ export default function WorldBoxClient() {
       const nowMs = Date.now();
       const px = Math.floor(player.x);
       const py = Math.floor(player.y);
+      const selSlotItem = invRef.current.hotbar[selSlotRef.current] ?? null;
+      const selDef = selSlotItem ? itemById(selSlotItem.id) : null;
+      // 剣は照準方式でなく範囲方式: 振ること自体は常に応答し、範囲内のモブに当たる。
+      // 狙いはタップ方向へ向け、対象は attackTarget が「タップを含む個体→近い個体」で選ぶ。
+      if (selDef?.tool === "sword") {
+        if (t.x !== px || t.y !== py) player.face = t.x + 0.5 >= player.x ? 1 : -1;
+        swing = { startedAt: performance.now(), itemId: selDef.id, face: player.face, whiff: false };
+        const candidates: { mobId: string; x: number; y: number; size: number; placed: PlacedMob }[] = [];
+        for (const placed of mobCache) {
+          const def = mobById(placed.mobId);
+          if (!def) continue;
+          const key = mobKeyOf(placed);
+          if (!mobHpNow(def, mobStatesRef.current[key] ?? null, nowMs).alive) continue;
+          const r = mobRenders.get(key);
+          candidates.push({
+            mobId: placed.mobId,
+            x: r ? Math.floor(r.wx) : placed.x,
+            y: r ? Math.floor(r.wy) : placed.y,
+            size: placed.size,
+            placed,
+          });
+        }
+        const target = attackTarget(px, py, t.x, t.y, candidates);
+        if (target) {
+          if (nowMs - lastAttackAt >= 350) {
+            lastAttackAt = nowMs;
+            void attackMobRef.current(target.placed);
+          }
+          return true;
+        }
+        return false; // 空振り（スイングは出した。タイル行為は通常どおり続く）
+      }
       for (const placed of mobCache) {
         const def = mobById(placed.mobId);
         if (!def) continue;
@@ -1092,8 +1124,9 @@ export default function WorldBoxClient() {
         blockId: selItem && (selItem.category === "block" || selItem.facility) ? selItem.id : undefined,
       });
       if (!act) {
-        // 隣接タップで何も起きない場合は理由を出す（素材は置けない・その地形には置けない等）
-        if (selItem) setTileMsg(TILE_ERROR_LABEL.tile_blocked);
+        // 隣接タップで何も起きない場合は理由を出す（素材は置けない・その地形には置けない等）。
+        // 剣の空振りは通常の応答なので理由は出さない
+        if (selItem && selItem.tool !== "sword") setTileMsg(TILE_ERROR_LABEL.tile_blocked);
         return false;
       }
       if (act.action === "plant-picker") {

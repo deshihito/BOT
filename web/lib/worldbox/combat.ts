@@ -105,6 +105,35 @@ export function mobDistance(px: number, py: number, placed: Pick<PlacedMob, "x" 
   return Math.max(dx, dy);
 }
 
+/**
+ * 剣を振ったときの攻撃対象を決める（照準方式でなく範囲方式）。
+ * プレイヤーから攻撃範囲内（占有範囲まで MOB_ATTACK_RANGE）にいる候補のうち、
+ * タップしたマスを含むものを最優先し、次にタップ位置に近いもの、
+ * 最後にプレイヤーに近いものを選ぶ。範囲内にいなければ null（空振り）。
+ * 候補の現在位置は呼び出し側が渡す（アンカーでも現在タイルでもよい）。
+ */
+export function attackTarget<T extends Pick<PlacedMob, "mobId" | "x" | "y" | "size">>(
+  px: number, py: number, tx: number, ty: number,
+  candidates: readonly T[],
+): T | null {
+  let best: T | null = null;
+  let bestRank: [number, number, number] | null = null;
+  for (const m of candidates) {
+    const distP = mobDistance(px, py, m);
+    if (distP > MOB_ATTACK_RANGE) continue;
+    const onTap = mobOccupiesTile(m.size, m.x, m.y, tx, ty) ? 0 : 1;
+    const rank: [number, number, number] = [onTap, mobDistance(tx, ty, m), distP];
+    if (
+      !bestRank || rank[0] < bestRank[0] ||
+      (rank[0] === bestRank[0] && (rank[1] < bestRank[1] || (rank[1] === bestRank[1] && rank[2] < bestRank[2])))
+    ) {
+      best = m;
+      bestRank = rank;
+    }
+  }
+  return best;
+}
+
 export type MobAttackResult = {
   state: MobState;
   hp: number;
