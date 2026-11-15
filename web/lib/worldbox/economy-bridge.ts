@@ -7,6 +7,8 @@
 // steal は一旦廃止（2026-11-16）: buildEconomyOp は steal を作らず、
 // Bot 側ワーカーも steal オプを failed(steal_disabled) で終端化する。
 // 型と解釈（parseEconomyOp）は既存レコードの表示のために残す。
+// 労働も廃止（2026-11-16）: earn の許可リストから "work" を外し、
+// 新規の work オプは作れない（過去オプの parse は壊さない）。
 // なお lib/worldbox/economy.ts はプロフィール側の状態遷移（かばん・
 // 空腹度などコイン以外の検証）で、コインの移動はすべてこのブリッジの
 // オプとして表現される。
@@ -57,7 +59,6 @@ export const EARN_REASONS: ReadonlySet<string> = new Set([
   "guild_shop_sale",
   "arena_prize",
   "shop_sale",
-  "work",
   "guild_request_reward",
   "guild_request_refund",
 ]);

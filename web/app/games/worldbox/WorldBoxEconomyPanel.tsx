@@ -1,10 +1,11 @@
 "use client";
-// AGO WORLD BOX の経済パネル（かばん・ショップ・合成・労働・銀行）。
+// AGO WORLD BOX の経済パネル（かばん・ショップ・合成・銀行）。
 // 売買・合成・送金は場所制約つき: それぞれの施設の前にいる間だけタブが出る。
 // Discord ボット側の経済機能（items / workshop craft）の規則をそのまま使い、
 // かばん・空腹度は /api/worldbox/profile が正とする。
 // steal は一旦廃止（2026-11-16）: タブ・ルート・オプ生成・ワーカー適用の
 // すべてで止めてある（履歴表示のラベルだけ残る）。
+// 労働も廃止（2026-11-16）: ボタン・ルート・earn 許可リストから外してある。
 // コインの正は AGO コイン本体: 残高と移動履歴は経済ブリッジ
 // （/api/worldbox/economy）が返し、移動は Bot 本体が数十秒で適用する。
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -22,7 +23,6 @@ const ACTION_SE: Record<string, WbSeName> = {
   sell: "sell",
   craft: "craft",
   eat: "harvest",
-  work: "coin",
 };
 
 type Tab = "bag" | "shop" | "craft" | "bank";
@@ -32,7 +32,7 @@ const ERROR_LABEL: Record<string, string> = {
   not_enough_coins: "コインが足りません",
   not_enough_items: "アイテムが足りません",
   hunger_full: "もう満腹です",
-  too_tired: "空腹度が足りません。食べてから働きましょう",
+  work_disabled: "労働は廃止されました",
   steal_disabled: "steal は廃止されました",
   unauthorized: "ログインが必要です",
   discord_required: "コインの移動には Discord ログインが必要です",
@@ -275,14 +275,6 @@ export default function WorldBoxEconomyPanel({ space, station, genre, onClose }:
         </span>
         {profile.status.some((e) => e.kind === "poison") && <span style={{ color: "#b6f26d" }}>毒</span>}
         <span style={{ flex: 1 }} />
-        <button
-          type="button"
-          style={btn}
-          disabled={busy}
-          onClick={() => void act({ action: "work" }, () => "働いた（報酬 20 コインは処理中）")}
-        >
-          労働する
-        </button>
         {closeBtn}
       </div>
 
