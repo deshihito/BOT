@@ -1,3 +1,5 @@
+import Breadcrumbs from "../Breadcrumbs";
+
 export const metadata = {
   title: "プライバシーポリシー",
   description: "AGOBOTのプライバシーポリシー。取得する情報とその利用目的について説明します。",
@@ -7,6 +9,7 @@ export const metadata = {
 export default function PrivacyPage() {
   return (
     <article className="legal-page">
+      <Breadcrumbs items={[{ label: "プライバシーポリシー" }]} />
       <h1>プライバシーポリシー</h1>
       <p className="draft-note"><strong>プライバシーポリシー</strong><br />運営者の正式名称、問い合わせ先、保存期間、外部サービスについて。</p>
       <p><strong>Luna</strong>（以下「運営者」）は、Discord Bot「AGOBOT」と関連ウェブサイト（以下「本サービス」）における利用者に関する情報を、以下のとおり取り扱います。</p>

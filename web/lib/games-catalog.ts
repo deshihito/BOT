@@ -30,6 +30,12 @@ export type WebGame = {
    * 指定したタイトルは通常の一覧から外れ、ハブ先頭のジャンルセクションに分離表示される。
    */
   genre?: string;
+  /**
+   * 詳細ヘッダーに出す関連ガイドへの導線（任意）。
+   * 図鑑・ルール解説など、そのゲームを遊ぶ前に読む1本だけを置く。
+   * サイト内に行き先がないページ（/jinrou/roles など）の唯一の入口にもなる。
+   */
+  guide?: { href: string; label: string };
 };
 
 /**
@@ -144,6 +150,7 @@ export const WEB_GAMES: WebGame[] = [
     status: "playable",
     activity: true,
     players: "4〜8人（オンライン）",
+    guide: { href: "/jinrou/roles", label: "人狼 役職図鑑を見る" },
   },
   {
     slug: "lll",

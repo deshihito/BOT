@@ -105,6 +105,20 @@ test("vitals: 精算は30分で頭打ち（長期離脱で飢え死にしない�
   assert.equal(safe.died, false);
 });
 
+test("vitals: 毒の tick は毒の有効窓で数える（vitalAt が古くても過剰に引かない）", () => {
+  // 罠は精算なしで毒を付けるため、vitalAt が古いまま毒が付くことがある。
+  // 旧実装は vitalAt 起点で tick を数え、15分ぶりの罠毒で即死した（S5）。
+  let p = { ...fresh(), vitalAt: T0 - 15 * 60_000, hp: 100, hunger: 100 };
+  p = v.applyPoison(p, T0);
+  const after = v.stepVitals(p, T0 + 15_000);
+  assert.equal(after.profile.hp, v.HP_MAX - 10); // 15秒で 5 tick
+  assert.equal(after.died, false);
+  // 毒の全窓（30秒）でも最大 10 tick まで
+  const full = v.stepVitals(p, T0 + v.POISON_DURATION_MS);
+  assert.equal(full.profile.hp, v.HP_MAX - 20);
+  assert.deepEqual(full.profile.status, []);
+});
+
 test("vitals: 毒は3秒ごとに2減り、期限で消える", () => {
   let p = { ...fresh(), vitalAt: T0 };
   p = v.applyPoison(p, T0);
@@ -235,4 +249,13 @@ test("vitals: クライアントが HP バー・接触ダメージ・定期精�
   assert.match(client, /action: "set_bed"/);
   assert.match(client, /HP_MAX/);
   assert.doesNotMatch(client, /プレイヤー HP は未実装/);
+});
+
+test("vitals: 蘇生のテレポートは死亡した空間へ戻す（S5）", () => {
+  // 従来は respawnActionRef が space を "world" に固定していたため、
+  // 洞窟・遺跡・ダンジョンで蘇生されるとワールドの同座標へ飛ばされた。
+  const client = fs.readFileSync(path.join(rootDir, "app/games/worldbox/WorldBoxClient.tsx"), "utf8");
+  assert.match(client, /parseInstanceSpace\(t\.space\)/);
+  assert.match(client, /instanceWarpRef\.current\(t\.space/);
+  assert.match(client, /instanceWarpRef\.current = warpToInstance/);
 });

@@ -17,7 +17,7 @@ import FactsStrip from "../FactsStrip";
 import { InviteCtaBlock } from "../InviteCta";
 
 export const metadata = {
-  title: "リーダーボード",
+  title: "ランキング",
   description: "AGOBOTのランキング。経験値・コイン保有と、bump系RTA（DISBOARD bump・Dis速 up・鯖ちゃんねる・TakasumiBOT・Dicoall・Discord Cafe・SharkBot・DiscordServers.io・DISCOM）の全サーバー記録を、サービス種類別のエントリで1つのボードにまとめて表示します。サーバー同士の活動量で競うサーバー対抗ランキングもあります。",
   alternates: { canonical: "/ranking" },
 };
@@ -120,7 +120,7 @@ export default async function RankingPage({ searchParams }: PageProps) {
   return (
     <section className="ranking-page">
       <Breadcrumbs items={[{ label: "ランキング" }]} />
-      <h1>リーダーボード</h1>
+      <h1>ランキング</h1>
       <FactsStrip
         facts={[
           { label: "集計範囲", value: "全サーバー横断" },
