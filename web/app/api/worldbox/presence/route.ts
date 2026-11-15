@@ -3,7 +3,7 @@ import { getRequestSession, publicOrigin, sessionOwnerKey } from "@/lib/auth";
 import { rectBounds, worldBounds } from "@/lib/worldbox/mapgen";
 import { LOBBY_H, LOBBY_W } from "@/lib/worldbox/lobby";
 import { LOBBY2_H, LOBBY2_W, LOBBY3_H, LOBBY3_W } from "@/lib/worldbox/lobby-floors";
-import { TENT_H, TENT_W } from "@/lib/worldbox/tent";
+import { TENT_MAX_H, TENT_MAX_W } from "@/lib/worldbox/tent";
 import { isPresenceEnabled, listPresence, putPresence, removePresence } from "@/lib/worldbox/presence-online";
 import { presenceIdFor, sanitizeHeartbeat, sanitizePresenceSpace, selectVisiblePlayers, thinPresenceNear } from "@/lib/worldbox/presence";
 
@@ -77,7 +77,7 @@ export async function PUT(request: Request) {
   const isCave = /^cave:-?\d+,-?\d+:\d+$/.test(space);
   const isRuins = /^ruins:-?\d+,-?\d+:\d+$/.test(space);
   const isDungeon = /^dungeon:-?\d+,-?\d+:\d+$/.test(space);
-  const bounds = space === "lobby" ? rectBounds(LOBBY_W, LOBBY_H) : space === "lobby2" ? rectBounds(LOBBY2_W, LOBBY2_H) : space === "lobby3" ? rectBounds(LOBBY3_W, LOBBY3_H) : space === "tent" ? rectBounds(TENT_W, TENT_H) : isCave ? rectBounds(64, 64) : isRuins ? rectBounds(48, 48) : isDungeon ? rectBounds(52, 52) : worldBounds();
+  const bounds = space === "lobby" ? rectBounds(LOBBY_W, LOBBY_H) : space === "lobby2" ? rectBounds(LOBBY2_W, LOBBY2_H) : space === "lobby3" ? rectBounds(LOBBY3_W, LOBBY3_H) : space === "tent" ? rectBounds(TENT_MAX_W, TENT_MAX_H) : isCave ? rectBounds(64, 64) : isRuins ? rectBounds(48, 48) : isDungeon ? rectBounds(52, 52) : worldBounds();
   const heartbeat = sanitizeHeartbeat(body, bounds);
   if (!heartbeat) {
     return NextResponse.json({ error: "invalid_heartbeat" }, { status: 400, headers: NO_STORE });

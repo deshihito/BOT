@@ -10,6 +10,7 @@ import { buildLobby, stationGenreNear, stationNear, type LobbyObject, type Lobby
 import { buildLobby2, buildLobby3 } from "./lobby-floors";
 import type { ShopGenreId } from "./shops";
 import { buildTent } from "./tent";
+import { loadProfile } from "./profile-online";
 import { isPresenceEnabled, loadMyPresence } from "./presence-online";
 import { parseSave } from "./save";
 import { loadWorldBoxSave } from "./save-online";
@@ -31,7 +32,8 @@ async function loadMyIndoorPosition(
       return { objects: buildLobby3().objects, tx: Math.floor(presence.x), ty: Math.floor(presence.y) };
     }
     if (presence.space === "tent") {
-      return { objects: buildTent().objects, tx: Math.floor(presence.x), ty: Math.floor(presence.y) };
+      const profile = await loadProfile(ownerKey);
+      return { objects: buildTent(profile.tentTier).objects, tx: Math.floor(presence.x), ty: Math.floor(presence.y) };
     }
     return null;
   }
@@ -47,7 +49,8 @@ async function loadMyIndoorPosition(
     return { objects: buildLobby3().objects, tx: Math.floor(saved.x), ty: Math.floor(saved.y) };
   }
   if (saved.space === "tent") {
-    return { objects: buildTent().objects, tx: Math.floor(saved.x), ty: Math.floor(saved.y) };
+    const profile = await loadProfile(ownerKey);
+    return { objects: buildTent(profile.tentTier).objects, tx: Math.floor(saved.x), ty: Math.floor(saved.y) };
   }
   return null;
 }
