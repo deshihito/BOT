@@ -45,12 +45,14 @@ export function buyItem(
   itemId: unknown,
   countRaw: unknown,
   balance: number,
+  unitPrice?: number,
 ): Transition {
   const item = itemById(itemId);
   if (!item) return { ok: false, error: "unknown_item" };
   const count = clampCount(countRaw);
   if (count === null) return { ok: false, error: "invalid_count" };
-  const cost = item.price * count;
+  const price = typeof unitPrice === "number" && Number.isFinite(unitPrice) && unitPrice > 0 ? Math.floor(unitPrice) : item.price;
+  const cost = price * count;
   if (balance < cost) return { ok: false, error: "not_enough_coins" };
   return {
     ok: true,
