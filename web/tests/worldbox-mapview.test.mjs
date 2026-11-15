@@ -27,8 +27,8 @@ test("大きなマップにもマーカーを描く（首都・建物・他プ�
   assert.match(client, /others\.values\(\)/);
 });
 
-test("ボタンとメニューの両方から開ける", () => {
-  assert.match(client, /マップ\{mapView \? "を閉じる" : "を見る"\}/);
+test("左上の ≡ メニューから開ける（ボタン行には統合済み）", () => {
   assert.match(client, /id: "mapview"/);
+  assert.match(client, /label: mapView \? "マップを閉じる" : "マップを見る"/);
   assert.match(client, /黄色い丸 = あなた/);
 });
