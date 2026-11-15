@@ -101,19 +101,9 @@ test("economy: buildEconomyOp は種類ごとの制約を守る", () => {
     "12345678-abcd-4abc-8abc-1234567890ab", 1,
   );
   assert.equal(spend?.kind, "spend");
-  // steal は奪い元が必須で、自分自身は不可
-  const steal = eco.buildEconomyOp(
+  // steal は一旦廃止（2026-11-16）: 形が正しくても作れない
+  assert.equal(eco.buildEconomyOp(
     { kind: "steal", userKey: MY_KEY, discordId: ME, amount: 20, reason: "steal", fromDiscordId: OTHER },
-    "12345678-abcd-4abc-8abc-1234567890ab", 1,
-  );
-  assert.equal(steal?.kind, "steal");
-  assert.equal(steal?.fromDiscordId, OTHER);
-  assert.equal(eco.buildEconomyOp(
-    { kind: "steal", userKey: MY_KEY, discordId: ME, amount: 20, reason: "steal" },
-    "12345678-abcd-4abc-8abc-1234567890ab", 1,
-  ), null);
-  assert.equal(eco.buildEconomyOp(
-    { kind: "steal", userKey: MY_KEY, discordId: ME, amount: 20, reason: "steal", fromDiscordId: ME },
     "12345678-abcd-4abc-8abc-1234567890ab", 1,
   ), null);
 });
@@ -360,6 +350,7 @@ const map = (globalThis.__wbPresence = new Map());
 export function isPresenceEnabled() { return true; }
 export async function findPresenceOwnerKey(id) { return map.has(id) ? map.get(id) : null; }
 `);
+await import(presenceStubUrl); // ルートはもう presence-online を読まないため、状態だけ先に作る
 const profileSwapUrl = bundleModule(["worldbox/items.ts", "worldbox/profile.ts"], ["swapSlots", "moveSlot"]);
 const shopsUrl = bundleModule(["worldbox/items.ts", "worldbox/shops.ts"], ["checkBuyGenre"]);
 const profileRoute = await import(
@@ -442,53 +433,17 @@ test("API(profile): eat はオプを積まない", async () => {
   assert.equal(globalThis.__wbBridge.ops.length, 0);
 });
 
-test("API(profile): steal 成功は steal オプ、失敗は罰金の spend オプ", async () => {
-  const cookie = sessionCookie(ME, "eco-user");
-  const origRandom = Math.random;
-  try {
-    resetBridgeState();
-    globalThis.__wbPresence.set("pres-1", `discord:${OTHER}`);
-    globalThis.__wbBridge.balances.set(ME, 100);
-    globalThis.__wbBridge.balances.set(OTHER, 400);
-    Math.random = () => 0;
-    const won = await profileRoute.POST(apiRequest(URL_P, "POST", cookie, { action: "steal", targetId: "pres-1" }));
-    assert.equal(won.status, 200);
-    const wonData = await won.json();
-    assert.equal(wonData.success, true);
-    assert.equal(wonData.amount, 20);
-    let ops = globalThis.__wbBridge.ops;
-    assert.equal(ops.length, 1);
-    assert.equal(ops[0].kind, "steal");
-    assert.equal(ops[0].fromDiscordId, OTHER);
-    assert.equal(ops[0].discordId, ME);
-    assert.ok(globalThis.__wbProfiles.get(MY_KEY).stealActorAt > 0);
-    assert.ok(globalThis.__wbProfiles.get(`discord:${OTHER}`).stealTargetAt > 0);
-
-    resetBridgeState();
-    globalThis.__wbPresence.set("pres-1", `discord:${OTHER}`);
-    globalThis.__wbBridge.balances.set(ME, 100);
-    globalThis.__wbBridge.balances.set(OTHER, 400);
-    Math.random = () => 0.99;
-    const lost = await profileRoute.POST(apiRequest(URL_P, "POST", cookie, { action: "steal", targetId: "pres-1" }));
-    assert.equal(lost.status, 200);
-    assert.equal((await lost.json()).success, false);
-    ops = globalThis.__wbBridge.ops;
-    assert.deepEqual(ops.map((op) => [op.kind, op.reason, op.amount]), [["spend", "steal_fine", 20]]);
-  } finally {
-    Math.random = origRandom;
-  }
-});
-
-test("API(profile): steal は相手の実残高が下限未満なら保護され、Google セッションは 403", async () => {
+test("API(profile): steal は廃止され、オプもプロフィールも動かない", async () => {
   resetBridgeState();
   globalThis.__wbPresence.set("pres-1", `discord:${OTHER}`);
   globalThis.__wbBridge.balances.set(ME, 100);
-  globalThis.__wbBridge.balances.set(OTHER, 10);
+  globalThis.__wbBridge.balances.set(OTHER, 400);
   const cookie = sessionCookie(ME, "eco-user");
   const res = await profileRoute.POST(apiRequest(URL_P, "POST", cookie, { action: "steal", targetId: "pres-1" }));
   assert.equal(res.status, 409);
-  assert.equal((await res.json()).error, "target_protected");
+  assert.equal((await res.json()).error, "steal_disabled");
   assert.equal(globalThis.__wbBridge.ops.length, 0);
+  assert.equal(globalThis.__wbProfiles.get(MY_KEY)?.stealActorAt ?? 0, 0);
   const google = sessionCookie("633333333333333333", "g-user", "google");
   const denied = await profileRoute.POST(apiRequest(URL_P, "POST", google, { action: "buy", itemId: "wood" }));
   assert.equal(denied.status, 403);
