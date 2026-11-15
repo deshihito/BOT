@@ -68,7 +68,8 @@ import { HP_MAX, HUNGER_MAX, countItem, maxHpFor, type AdventureRoleId, type Ite
 import {
   containerCapacity, isContainerItem, type ContainerSlotRef,
 } from "@/lib/worldbox/containers";
-import { loadDungeonTiles, loadFarmSprites, loadLobbySprites, loadMobSprites, loadTextures } from "@/lib/worldbox/textures";
+import { DUNGEON_TILE_SRC, FARM_SPRITE_SRC, LOBBY_SPRITE_SRC, loadDungeonTiles, loadFarmSprites, loadLobbySprites, loadMobSprites, loadTextures } from "@/lib/worldbox/textures";
+import { preloadImages, transitionAlpha, transitionDone, transitionSwapDue, SPRITE_PRELOAD_TIMEOUT_MS, TRANSITION_OVERLAY_RGB, type TransitionKind } from "@/lib/worldbox/transition";
 import { isStickTouch, stickBase, stickVector } from "@/lib/worldbox/stick";
 import {
   bgmSceneFor, loadWbSoundSettings, playWbSe, saveWbSoundSettings, seForFxBurst, setWbBgmScene,
@@ -378,7 +379,9 @@ export default function WorldBoxClient() {
   // 入場ゲート（Discord ログイン必須。許可されるまでワールドは描画しない）
   const [gate, setGate] = useState<"checking" | "ok" | "denied">("checking");
   const [gateTry, setGateTry] = useState(0);
-  const gateOk = gate === "ok";
+  // 先読み完了までワールドを出さない（初フレームで平色フォールバックがチラつかないように）。
+  const [booted, setBooted] = useState(false);
+  const gateOk = gate === "ok" && booted;
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -394,6 +397,27 @@ export default function WorldBoxClient() {
       cancelled = true;
     };
   }, [gateTry]);
+  // 入場前スプライト先読み: ロビー/農場/モブ/洞窟のファイル素材を温め、
+  // 初フレームで平色フォールバックがチラつかないようにする。タイムアウトで
+  // 必ず進む（止まらない）。ゲート画面の「読み込み中…」の間に済ませる。
+  useEffect(() => {
+    if (gate !== "ok" || booted) return;
+    let cancelled = false;
+    void preloadImages(
+      [
+        ...Object.values(LOBBY_SPRITE_SRC),
+        ...Object.values(FARM_SPRITE_SRC),
+        ...Object.values(MOB_SPRITE),
+        ...Object.values(DUNGEON_TILE_SRC),
+      ],
+      { timeoutMs: SPRITE_PRELOAD_TIMEOUT_MS },
+    ).then(() => {
+      if (!cancelled) setBooted(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [gate, booted]);
   // Activity 内では GamesShell の SDK 認証が完了するとセッションが張られる。
   // 本人情報が届いた時点でゲートを引き直す（初回チェックが認証より先に
   // 走って denied になっても、押せないログインリンクで詰まらないように）。
@@ -1462,6 +1486,28 @@ export default function WorldBoxClient() {
     // 空間（ワールド / ロビー）。ロビーでは国家・ミニマップは扱わない。
     let space: SaveSpace = "world";
     let worldReturn: { x: number; y: number } | null = null;
+    // シームレスローディング（B1）: 空間遷移はフェードでつなぐ。切替は
+    // フェードアウトの頂点で1回だけ走る。performance.now() ベース。
+    let transitionStart = -1; // -1 = 非遷移中
+    let transitionKind: TransitionKind = "warp";
+    let transitionSwapped = true;
+    let transitionPending: (() => void) | null = null;
+    const beginTransition = (apply: () => void) => {
+      if (transitionStart >= 0 && transitionKind === "warp" && !transitionDone(performance.now() - transitionStart, "warp")) {
+        if (!transitionSwapped) {
+          // フェードアウト中は最新の切替で上書き（連打で二重ワープしない）。
+          transitionPending = apply;
+          return;
+        }
+        // フェードイン中の切替は暗幕の下でそのまま通す。
+        apply();
+        return;
+      }
+      transitionKind = "warp";
+      transitionSwapped = false;
+      transitionPending = apply;
+      transitionStart = performance.now();
+    };
     const activeMap = (): TopDownMap => (space === "world" ? worldMap : indoorData().moveMap);
     const activeBounds = () => {
       const inst = parseInstanceSpace(space);
@@ -1659,6 +1705,8 @@ export default function WorldBoxClient() {
     let rtRetryAt = 0;
     let rtBackoffMs = 1000;
     let rtReconnectTimer: number | undefined;
+    // 初回接続と再接続の区別（再接続だけ薄い復帰パルスを出す）。
+    let rtEverConnected = false;
     /** WS 経由のハートビート送信（中継は REST と同じ整形規則で受ける）。 */
     const sendWsHeartbeat = () => {
       if (!rtSocket || rtSocket.readyState !== WebSocket.OPEN) return;
@@ -1684,6 +1732,15 @@ export default function WorldBoxClient() {
         rtSocket = ws;
         ws.onopen = () => {
           rtBackoffMs = 1000;
+          // 再接続の復帰演出: 薄いパルスだけ（暗転しない・入力は止めない）。
+          // ワープ遷移中はそちらを優先して上書きしない。
+          if (rtEverConnected && transitionStart < 0) {
+            transitionKind = "reconnect";
+            transitionSwapped = true;
+            transitionPending = null;
+            transitionStart = performance.now();
+          }
+          rtEverConnected = true;
           sendWsHeartbeat();
         };
         ws.onmessage = (ev) => {
@@ -2373,69 +2430,74 @@ export default function WorldBoxClient() {
       // 移動先エリアの設置ブロックを即時に取り直す（15秒ポーリング待ちにしない）
       void refreshTilesRef.current();
     };
-    instanceTeleportRef.current = (x: number, y: number) => placePlayer(x, y);
+    instanceTeleportRef.current = (x: number, y: number) => beginTransition(() => placePlayer(x, y));
     const doWarp = (target: SaveSpace) => {
       if (target === space) return;
-      if (target === "lobby") {
-        worldReturn = { x: player.x, y: player.y };
-        space = "lobby";
-        setSpaceUi("lobby");
-        setStatusText("ロビー");
-        setBoardOpen(false);
-        setGuildBoardOpen(false);
-        placePlayer(LOBBY_ENTRY.x, LOBBY_ENTRY.y);
-      } else if (target === "tent") {
-        worldReturn = { x: player.x, y: player.y };
-        space = "tent";
-        setSpaceUi("tent");
-        setStatusText("テント");
-        setBoardOpen(false);
-        setGuildBoardOpen(false);
-        placePlayer(TENT_ENTRY.x, TENT_ENTRY.y);
-      } else {
-        space = "world";
-        setSpaceUi("world");
-        setStatusText("共有ワールド");
-        lastStation = null;
-        setStationUi(null);
-        lastStationGenre = null;
-        setStationGenre(null);
-        const dest = worldReturn ?? spawn;
-        placePlayer(dest.x, dest.y);
-      }
-      spawnBurst(fxSys, "warp", player.x, player.y - 0.3);
-      playWbSe("warp");
-      void pollOthers();
+      // ハードカットしない: 暗転の頂点で空間を切り替える。
+      beginTransition(() => {
+        if (target === "lobby") {
+          worldReturn = { x: player.x, y: player.y };
+          space = "lobby";
+          setSpaceUi("lobby");
+          setStatusText("ロビー");
+          setBoardOpen(false);
+          setGuildBoardOpen(false);
+          placePlayer(LOBBY_ENTRY.x, LOBBY_ENTRY.y);
+        } else if (target === "tent") {
+          worldReturn = { x: player.x, y: player.y };
+          space = "tent";
+          setSpaceUi("tent");
+          setStatusText("テント");
+          setBoardOpen(false);
+          setGuildBoardOpen(false);
+          placePlayer(TENT_ENTRY.x, TENT_ENTRY.y);
+        } else {
+          space = "world";
+          setSpaceUi("world");
+          setStatusText("共有ワールド");
+          lastStation = null;
+          setStationUi(null);
+          lastStationGenre = null;
+          setStationGenre(null);
+          const dest = worldReturn ?? spawn;
+          placePlayer(dest.x, dest.y);
+        }
+        spawnBurst(fxSys, "warp", player.x, player.y - 0.3);
+        playWbSe("warp");
+        void pollOthers();
+      });
     };
     warpActionRef.current = doWarp;
     /** インスタンス空間（洞窟など）への遷移。入口の踏破で発火する。 */
     const warpToInstance = (target: string, entry: { x: number; y: number }) => {
       if (target === space) return;
-      if (space === "world") worldReturn = { x: player.x, y: player.y };
-      space = target;
-      setSpaceUi(target);
-      const inst = parseInstanceSpace(target);
-      setStatusText(inst?.kind === "cave" ? `洞窟 B${(inst.layer ?? 0) + 1}` : inst?.kind === "ruins" ? "遺跡" : inst?.kind === "dungeon" ? `ダンジョン ${(inst.layer ?? 0) + 1}F` : "インスタンス");
-      lastStation = null;
-      setStationUi(null);
-      setBoardOpen(false);
-      setGuildBoardOpen(false);
-      placePlayer(entry.x, entry.y);
-      spawnBurst(fxSys, "warp", player.x, player.y - 0.3);
-      playWbSe("warp");
-      void pollOthers();
-      if (inst?.kind === "cave") {
-        void refreshCaveStateRef.current(target);
-        void refreshMobsRef.current();
-      }
-      if (inst?.kind === "ruins") {
-        void refreshRuinsStateRef.current(target);
-        void refreshMobsRef.current();
-      }
-      if (inst?.kind === "dungeon") {
-        void refreshDungeonStateRef.current(target);
-        void refreshMobsRef.current();
-      }
+      beginTransition(() => {
+        if (space === "world") worldReturn = { x: player.x, y: player.y };
+        space = target;
+        setSpaceUi(target);
+        const inst = parseInstanceSpace(target);
+        setStatusText(inst?.kind === "cave" ? `洞窟 B${(inst.layer ?? 0) + 1}` : inst?.kind === "ruins" ? "遺跡" : inst?.kind === "dungeon" ? `ダンジョン ${(inst.layer ?? 0) + 1}F` : "インスタンス");
+        lastStation = null;
+        setStationUi(null);
+        setBoardOpen(false);
+        setGuildBoardOpen(false);
+        placePlayer(entry.x, entry.y);
+        spawnBurst(fxSys, "warp", player.x, player.y - 0.3);
+        playWbSe("warp");
+        void pollOthers();
+        if (inst?.kind === "cave") {
+          void refreshCaveStateRef.current(target);
+          void refreshMobsRef.current();
+        }
+        if (inst?.kind === "ruins") {
+          void refreshRuinsStateRef.current(target);
+          void refreshMobsRef.current();
+        }
+        if (inst?.kind === "dungeon") {
+          void refreshDungeonStateRef.current(target);
+          void refreshMobsRef.current();
+        }
+      });
     };
     /** ダンジョン入場フロー: セッション作成（サーバー検証）を待ってから遷移する。 */
     enterDungeonRef.current = (ex: number, ey: number) => {
@@ -2464,29 +2526,33 @@ export default function WorldBoxClient() {
     };
     /** 所属国への移動: サーバーが決めた移動先へそのままテレポートする。 */
     teleportActionRef.current = (x: number, y: number) => {
-      if (space !== "world") {
+      beginTransition(() => {
+        if (space !== "world") {
+          space = "world";
+          setSpaceUi("world");
+          setStatusText("共有ワールド");
+          lastStation = null;
+          setStationUi(null);
+          lastStationGenre = null;
+          setStationGenre(null);
+          setBoardOpen(false);
+        }
+        placePlayer(x, y);
+        void pollOthers();
+      });
+    };
+    respawnActionRef.current = (point: { x: number; y: number }) => {
+      beginTransition(() => {
         space = "world";
         setSpaceUi("world");
         setStatusText("共有ワールド");
         lastStation = null;
         setStationUi(null);
-        lastStationGenre = null;
-        setStationGenre(null);
-        setBoardOpen(false);
-      }
-      placePlayer(x, y);
-      void pollOthers();
-    };
-    respawnActionRef.current = (point: { x: number; y: number }) => {
-      space = "world";
-      setSpaceUi("world");
-      setStatusText("共有ワールド");
-      lastStation = null;
-      setStationUi(null);
-      placePlayer(point.x, point.y);
-      spawnBurst(fxSys, "warp", player.x, player.y - 0.3);
-      playWbSe("warp");
-      void pollOthers();
+        placePlayer(point.x, point.y);
+        spawnBurst(fxSys, "warp", player.x, player.y - 0.3);
+        playWbSe("warp");
+        void pollOthers();
+      });
     };
     /** タイルへ「踏み込んだ」ときだけ発火する（着地したタイルでは再発火しない）。 */
     const checkTileTriggers = () => {
@@ -2617,6 +2683,14 @@ export default function WorldBoxClient() {
       const dt = Math.min(0.05, Math.max(0.001, (now - lastT) / 1000));
       lastT = now;
 
+      // 遷移の切替: フェードアウトの頂点で1回だけ走る。
+      if (transitionStart >= 0 && transitionKind === "warp" && !transitionSwapped && transitionSwapDue(now - transitionStart)) {
+        transitionSwapped = true;
+        const apply = transitionPending;
+        transitionPending = null;
+        apply?.();
+      }
+
       // 入力ベクトル
       let ix = 0;
       let iy = 0;
@@ -2627,6 +2701,11 @@ export default function WorldBoxClient() {
       if (joy.active) {
         ix += joy.dx;
         iy += joy.dy;
+      }
+      // ワープ遷移中は入力を止める（暗転の間に歩き出さない）。
+      if (transitionStart >= 0 && transitionKind === "warp" && !transitionDone(now - transitionStart, "warp")) {
+        ix = 0;
+        iy = 0;
       }
       const ilen = Math.hypot(ix, iy);
       if (ilen > 1) {
@@ -3859,6 +3938,21 @@ export default function WorldBoxClient() {
         ctx.stroke();
       }
 
+      // 遷移の暗幕（シェル背景と同色。ワープ/入場/再接続の継ぎ目を消す）。
+      if (transitionStart >= 0) {
+        const overlayAlpha = transitionAlpha(now - transitionStart, transitionKind);
+        if (overlayAlpha > 0) {
+          ctx.fillStyle = `rgba(${TRANSITION_OVERLAY_RGB},${overlayAlpha.toFixed(3)})`;
+          ctx.fillRect(0, 0, cw, ch);
+        }
+        if (transitionDone(now - transitionStart, transitionKind)) {
+          transitionStart = -1;
+          transitionKind = "warp";
+          transitionSwapped = true;
+          transitionPending = null;
+        }
+      }
+
       // ミニマップ（プレイヤー中心の周辺図、約5Hz。ロビーでは出さない）
       if (space === "world" && showMapRef.current && now - lastMinimapAt > 200) {
         lastMinimapAt = now;
@@ -3937,6 +4031,11 @@ export default function WorldBoxClient() {
         }
       }
     };
+    // 初回入場は暗転から明ける（初フレームのチラつきを消す）。
+    transitionKind = "enter";
+    transitionSwapped = true;
+    transitionPending = null;
+    transitionStart = performance.now();
     raf = requestAnimationFrame(loop);
 
     return () => {
@@ -4097,7 +4196,7 @@ export default function WorldBoxClient() {
         }}
       >
         <h1 style={{ fontSize: 28, margin: 0 }}>AGO WORLD BOX</h1>
-        {gate === "checking" ? (
+        {gate === "checking" || (gate === "ok" && !booted) ? (
           <p role="status" style={{ margin: 0 }}>
             読み込み中…
           </p>
