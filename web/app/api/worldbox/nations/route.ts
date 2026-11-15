@@ -6,6 +6,7 @@ import {
   type MyGuildView, type NationActionResult, type NationsState,
 } from "@/lib/worldbox/nations";
 import { isNationsEnabled, loadNationsState, storeNationsState } from "@/lib/worldbox/nations-online";
+import { loadMyLobbyStation } from "@/lib/worldbox/station-online";
 import { loadBuildings } from "@/lib/worldbox/buildings-online";
 import { annotateMyGuilds, getUserGuilds, roleInGuild, type UserGuildsResult } from "@/lib/worldbox/guilds";
 
@@ -19,6 +20,8 @@ export const runtime = "nodejs";
 // POST { action: "join", guildId } : 参加（そのサーバーのメンバーのみ。役職は権限由来）
 // POST { action: "leave" } : 離脱。王は国民がいる間は離脱できず、一人なら解散。
 //   解散しても建物は個人所有なので残る。
+//   役職まわりの操作は全部ギルドボードの前でのみ（依頼と同じ場所検証:
+//   プレゼンス＋stationNear。共有ノート「ギルドボード」「行動の場所制約」）。
 // 保存先は bot_kv（名前空間 worldbox_nations の "nations" / "members"）。
 // 繁栄度の算出にだけ建物（同名前空間の "buildings"）を読み込む。
 // Bot API 未設定なら 503（クライアントは国家なしで遊び続ける）。
@@ -108,6 +111,10 @@ export async function POST(request: Request) {
   const action = (body as { action?: unknown } | null)?.action;
   const ownerKey = sessionOwnerKey(session);
   const fields = body as { guildId?: unknown };
+  // 場所制約: 役職の操作（建国・参加・離脱）はギルドボードの前でのみ
+  if ((await loadMyLobbyStation(ownerKey)) !== "guild") {
+    return errorResponse("not_at_guild_board");
+  }
   const state = await loadNationsState();
 
   let result: NationActionResult;

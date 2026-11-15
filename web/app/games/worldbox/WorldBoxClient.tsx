@@ -135,6 +135,7 @@ const NATION_ERROR_LABEL: Record<string, string> = {
   nation_not_found: "国が見つかりません",
   not_in_nation: "国に所属していません",
   king_must_transfer_or_disband: "国民がいる間、王は離脱できません",
+  not_at_guild_board: "ギルドボードの前で操作してください",
   unauthorized: "ログインが必要です",
   tile_blocked: "そこには建てられません",
   cap_reached: "建築上限に達しています",
@@ -402,6 +403,7 @@ export default function WorldBoxClient() {
   useEffect(() => {
     if (stationUi !== "board") setBoardOpen(false);
     if (stationUi !== "casino") setCasinoOpen(false);
+    if (stationUi !== "guild") setGuildBoardOpen(false);
   }, [stationUi]);
 
   const applyNationsData = (data: NationsResponse) => {
