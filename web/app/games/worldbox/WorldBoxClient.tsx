@@ -42,7 +42,6 @@ import { countItem, type ItemSlot, type PlayerProfile, type SlotRef } from "@/li
 import { loadDungeonTiles, loadFarmSprites, loadLobbySprites, loadTextures } from "@/lib/worldbox/textures";
 import { useGamesNav } from "../GamesShell";
 import WorldBoxEconomyPanel from "./WorldBoxEconomyPanel";
-import WorldBoxCasinoPanel from "./WorldBoxCasinoPanel";
 
 const SAVE_KEY = "ago-worldbox-save-v6";
 /** 1タイルの表示サイズ（CSS px）。 */
@@ -257,6 +256,25 @@ export default function WorldBoxClient() {
   const mapViewRef = useRef(false);
   mapViewRef.current = mapView;
   const bigMapRef = useRef<HTMLCanvasElement | null>(null);
+  // フルスクリーン（ステージ全体を画面いっぱいにする。対応環境でのみボタンを出す）
+  const stageRef = useRef<HTMLDivElement | null>(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [canFullscreen, setCanFullscreen] = useState(false);
+  useEffect(() => {
+    setCanFullscreen(
+      typeof HTMLElement !== "undefined" && "requestFullscreen" in HTMLElement.prototype,
+    );
+    const onFsChange = () => setIsFullscreen(Boolean(document.fullscreenElement));
+    document.addEventListener("fullscreenchange", onFsChange);
+    return () => document.removeEventListener("fullscreenchange", onFsChange);
+  }, []);
+  const toggleFullscreen = () => {
+    if (document.fullscreenElement) {
+      void document.exitFullscreen().catch(() => {});
+    } else {
+      void stageRef.current?.requestFullscreen().catch(() => {});
+    }
+  };
   // 座標表示（タイル単位の整数。ループが毎フレーム書く playerPosRef から拾う）
   const [coords, setCoords] = useState({ x: Math.floor(MAP_W / 2), y: Math.floor(MAP_H / 2) });
   const [nationMsg, setNationMsg] = useState("");
@@ -328,7 +346,6 @@ export default function WorldBoxClient() {
   const [spaceUi, setSpaceUi] = useState<SaveSpace>("world");
   const [menuOpen, setMenuOpen] = useState(false);
   const [stationUi, setStationUi] = useState<LobbyStation | null>(null);
-  const [casinoOpen, setCasinoOpen] = useState(false);
   const warpActionRef = useRef<(target: SaveSpace) => void>(() => {});
   const [boardOpen, setBoardOpen] = useState(false);
   const [boardPosts, setBoardPosts] = useState<BoardPost[]>([]);
@@ -1654,9 +1671,11 @@ export default function WorldBoxClient() {
     border: "1px solid rgba(255,255,255,0.22)", background: "rgba(10,12,18,0.93)", color: "#f2f2f2",
     boxShadow: "0 12px 36px rgba(0,0,0,0.5)",
   };
-  /** スロット枠（中身はスプライトのみ。SlotContent と対で使う）。 */
+  /** スロット枠（中身はスプライトのみ。SlotContent と対で使う）。
+   *  サイズは --slot（ホットバー側で画面幅に合わせて決める）に従い、狭い画面では縮む。 */
   const slotBox: React.CSSProperties = {
-    ...btn, position: "relative", width: 42, height: 42, minHeight: 42, padding: 2,
+    ...btn, position: "relative", boxSizing: "border-box",
+    width: "var(--slot, 42px)", height: "var(--slot, 42px)", minHeight: "var(--slot, 42px)", padding: 2,
     display: "flex", alignItems: "center", justifyContent: "center",
     color: "#fff", background: "rgba(255,255,255,0.08)",
   };
@@ -1783,14 +1802,21 @@ export default function WorldBoxClient() {
         {` ・ 座標 X ${coords.x} / Y ${coords.y}`}
       </p>
 
-      <div style={{ position: "relative", maxWidth: 960, margin: "0 auto", touchAction: "none" }}>
+      <div
+        ref={stageRef}
+        style={{
+          position: "relative", margin: "0 auto", touchAction: "none",
+          maxWidth: isFullscreen ? undefined : 960,
+          ...(isFullscreen ? { width: "100%", height: "100%", background: "#0b0e14" } : {}),
+        }}
+      >
         <canvas
           ref={canvasRef}
           onContextMenu={(e) => e.preventDefault()}
           aria-label="AGO WORLD BOX の見下ろしマップ。スティックか WASD で歩けます"
           style={{
-            width: "100%", height: "min(62vh, 560px)", minHeight: 340, display: "block",
-            borderRadius: 16, border: "2px solid rgba(255,255,255,0.15)",
+            width: "100%", height: isFullscreen ? "100%" : "min(62vh, 560px)", minHeight: isFullscreen ? 0 : 340, display: "block",
+            borderRadius: isFullscreen ? 0 : 16, border: "2px solid rgba(255,255,255,0.15)",
             touchAction: "none", userSelect: "none", WebkitUserSelect: "none", WebkitTouchCallout: "none", WebkitTapHighlightColor: "transparent",
           }}
         />
@@ -1806,6 +1832,20 @@ export default function WorldBoxClient() {
         >
           ≡
         </button>
+        {canFullscreen && (
+          <button
+            type="button"
+            aria-label={isFullscreen ? "全画面を終わる" : "全画面にする"}
+            aria-pressed={isFullscreen}
+            onClick={toggleFullscreen}
+            style={{
+              ...btn, position: "absolute", right: 10, top: 10, minHeight: 40, zIndex: 5,
+              padding: "4px 12px", fontSize: 12, lineHeight: 1, background: "rgba(0,0,0,0.55)", color: "#fff",
+            }}
+          >
+            {isFullscreen ? "戻す" : "全画面"}
+          </button>
+        )}
         {menuOpen && (
           <div
             style={{
@@ -1848,19 +1888,7 @@ export default function WorldBoxClient() {
                 {boardOpen ? "閉じる" : "開く"}
               </button>
             )}
-            {stationUi === "casino" && (
-              <button
-                type="button"
-                style={{ ...btn, minHeight: 32, padding: "2px 10px" }}
-                onClick={() => setCasinoOpen((v) => !v)}
-              >
-                {casinoOpen ? "閉じる" : "遊ぶ"}
-              </button>
-            )}
           </div>
-        )}
-        {casinoOpen && spaceUi === "lobby" && (
-          <WorldBoxCasinoPanel onClose={() => setCasinoOpen(false)} />
         )}
         {showMap && spaceUi === "world" && (
           <canvas
@@ -1880,7 +1908,7 @@ export default function WorldBoxClient() {
             style={{
               position: "absolute", left: 10, bottom: 10, display: "flex", gap: 8, alignItems: "center",
               padding: "6px 8px 6px 12px", borderRadius: 10, background: "rgba(0,0,0,0.6)",
-              color: "#fff", fontSize: 13,
+              color: "#fff", fontSize: 13, maxWidth: "calc(100% - 20px)", boxSizing: "border-box",
             }}
           >
             <span>
@@ -1897,6 +1925,9 @@ export default function WorldBoxClient() {
               position: "absolute", left: "50%", bottom: 10, transform: "translateX(-50%)",
               display: "flex", gap: 4, alignItems: "stretch", padding: 4, borderRadius: 10,
               background: "rgba(0,0,0,0.6)", zIndex: 4, maxWidth: "calc(100% - 16px)",
+              boxSizing: "border-box",
+              // スロットは画面幅でスケーリングする（縦画面ではみ出さない）
+              ...({ "--slot": "clamp(30px, 10.5vw, 42px)" } as React.CSSProperties),
             }}
           >
             {invProfile.hotbar.map((slot, i) => (
@@ -1918,7 +1949,11 @@ export default function WorldBoxClient() {
             ))}
             <button
               type="button"
-              style={{ ...btn, height: 42, minHeight: 42, padding: "2px 8px", fontSize: 11, color: "#fff", background: "rgba(255,255,255,0.08)" }}
+              style={{
+                ...btn, boxSizing: "border-box", flexShrink: 0, whiteSpace: "nowrap",
+                height: "var(--slot, 42px)", minHeight: "var(--slot, 42px)",
+                padding: "2px 8px", fontSize: 11, color: "#fff", background: "rgba(255,255,255,0.08)",
+              }}
               onClick={() => setStorageOpen((v) => !v)}
               aria-expanded={storageOpen}
             >
@@ -1933,6 +1968,7 @@ export default function WorldBoxClient() {
               position: "absolute", left: "50%", bottom: 58, transform: "translateX(-50%)",
               padding: "4px 12px", borderRadius: 10, background: "rgba(0,0,0,0.6)",
               color: "#fff", fontSize: 13, whiteSpace: "nowrap", zIndex: 4,
+              maxWidth: "calc(100% - 16px)", boxSizing: "border-box", overflow: "hidden", textOverflow: "ellipsis",
             }}
           >
             {tileMsg}
