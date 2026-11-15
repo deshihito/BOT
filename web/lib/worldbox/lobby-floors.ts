@@ -5,7 +5,8 @@
 // F4 が触るため、今夜は移設しない。2F はラウンジ＋休憩、3F は展望＋休憩。
 // 3F 北の本棚 2 つは L5 の隠し部屋の入口アンカー候補（今はただの家具）。
 // 階段の遷移（クライアント配線）は L2b で WorldBoxClient.tsx に載せる。
-// 既存スプライトのみ使う（新規素材は作らない）。
+// アーケード筐体（L3）は新規スプライト arcade_<id>.png を使う（textures.ts に登録）。
+// 筐体パネル・ルーム起動の配線は L4（station はまだ付けない）。
 import { T_GRASS, T_ROCK, tilesSource, type TopDownMap } from "./mapgen";
 import {
   L_CARPET,
@@ -100,6 +101,17 @@ put2("lamp", 18, 6);
 put2("lamp", 22, 6);
 put2("lamp", 18, 22);
 put2("lamp", 22, 22);
+
+// --- 中央ラウンジ北弧: アーケード筐体（L3 第1弾・1タイル1ゲーム） ---
+// 対面3＋パーティ3を ARCADE_FIRST_WAVE の順に左から並べる（カジノの
+// 機器列と同じく1マス空け）。前に立つのは南側の y=10（円の中心側）。
+// station は付けない（筐体パネル・ルーム起動の配線は L4 で行う）。
+put2("arcade_reversi", 15, 9);
+put2("arcade_connect4", 17, 9);
+put2("arcade_battleship", 19, 9);
+put2("arcade_werewolf", 21, 9);
+put2("arcade_wordwolf", 23, 9);
+put2("arcade_majority", 25, 9);
 
 // --- 西翼: ギルド談話 ---
 put2("bench", 4, 11);
