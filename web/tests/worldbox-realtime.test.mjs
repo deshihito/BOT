@@ -17,15 +17,56 @@ const hb = (x, y, extra = {}) => ({ x, y, vx: 0, vy: 0, face: 1, space: "world",
 
 test("relay: ハートビートは整形され、範囲と速度が丸められる", () => {
   const room = core.createRoom();
-  const e = core.acceptHeartbeat(room, "p1", "名前", hb(2000, -5, { vx: 99, face: -1 }), NOW);
-  assert.equal(e.x, 1024);
-  assert.equal(e.y, 0);
+  // ワールドは実質無制限（±1,000,000）。1024 を超える座標もそのまま通る。
+  const e = core.acceptHeartbeat(room, "p1", "名前", hb(2000, -1500, { vx: 99, face: -1 }), NOW);
+  assert.equal(e.x, 2000);
+  assert.equal(e.y, -1500);
   assert.equal(e.vx, 16);
   assert.equal(e.face, -1);
   assert.equal(e.id, "p1");
   assert.equal(e.ts, NOW);
+  // 上限を超えたら丸める
+  const far = core.acceptHeartbeat(room, "p1", "n", hb(2_000_000, -2_000_000), NOW);
+  assert.equal(far.x, core.WORLD_COORD_LIMIT);
+  assert.equal(far.y, -core.WORLD_COORD_LIMIT);
   assert.equal(core.acceptHeartbeat(room, "p1", "n", { x: "a", y: 1 }, NOW), null);
   assert.equal(core.acceptHeartbeat(room, "p1", "n", null, NOW), null);
+});
+
+test("relay: インスタンス空間は潰さず、空間ごとに分離する", () => {
+  const room = core.createRoom();
+  core.acceptHeartbeat(room, "c1", "洞窟", hb(10, 10, { space: "cave:100,200:0" }), NOW);
+  core.acceptHeartbeat(room, "w1", "地上", hb(10, 10, { space: "world" }), NOW);
+  core.acceptHeartbeat(room, "d1", "迷宮", hb(5, 5, { space: "dungeon:0,0:1" }), NOW);
+  assert.deepEqual(core.snapshot(room, "cave:100,200:0", "x", NOW).map((p) => p.id), ["c1"]);
+  assert.deepEqual(core.snapshot(room, "world", "x", NOW).map((p) => p.id), ["w1"]);
+  assert.deepEqual(core.snapshot(room, "dungeon:0,0:1", "x", NOW).map((p) => p.id), ["d1"]);
+  // 別インスタンス同士は混ざらない（層違いも別空間）
+  assert.equal(core.snapshot(room, "cave:100,200:1", "x", NOW).length, 0);
+  // 旧空間からの移動もインスタンス間で効く
+  core.acceptHeartbeat(room, "c1", "洞窟", hb(1, 1, { space: "cave:100,200:1" }), NOW);
+  assert.equal(core.snapshot(room, "cave:100,200:0", "x", NOW).length, 0);
+  assert.deepEqual(core.snapshot(room, "cave:100,200:1", "x", NOW).map((p) => p.id), ["c1"]);
+});
+
+test("relay: 役職・ランク・パーティを通し、インスタンスの境界で丸める", () => {
+  const room = core.createRoom();
+  const e = core.acceptHeartbeat(room, "p1", "P", hb(999, 999, { space: "cave:0,0:0", role: "guard", rank: 7, party: "pk-1" }), NOW);
+  assert.equal(e.space, "cave:0,0:0");
+  assert.equal(e.x, 64);
+  assert.equal(e.y, 64);
+  assert.equal(e.role, "guard");
+  assert.equal(e.rank, 5);
+  assert.equal(e.party, "pk-1");
+  const bad = core.acceptHeartbeat(room, "p2", "P", hb(1, 1, { role: "nope", rank: "x" }), NOW);
+  assert.equal(bad.role, "free");
+  assert.equal(bad.rank, 1);
+  assert.equal(bad.party, "");
+  // 遺跡・ダンジョンの境界も種類ごとに違う
+  const r = core.acceptHeartbeat(room, "p3", "P", hb(100, 100, { space: "ruins:0,0:0" }), NOW);
+  assert.equal(r.x, 48);
+  const d = core.acceptHeartbeat(room, "p4", "P", hb(100, 100, { space: "dungeon:0,0:0" }), NOW);
+  assert.equal(d.x, 52);
 });
 
 test("relay: スナップショットは他者だけ・新鮮なものだけ・上限まで", () => {
@@ -86,4 +127,8 @@ test("配線: ラッパー・デプロイ・トークンルート・クライア
   assert.ok(client.includes("pollOthers"), "ポーリングが消えている");
   // bot_kv プレゼンス（サーバー検証の正）の鮮度維持: WS 接続中も REST を併送する
   assert.ok(client.includes("lastRestHeartbeatAt"), "REST 併送の間隔管理が無い");
+  // WS/REST の乖離を無くす: WS 送信にも役職・ランクを載せ、受信側は
+  // ダンジョンのパーティ分離と WS 経由の鮮度を欠落グレースに反映する
+  assert.ok(client.includes("wsSeenAt"), "WS 経由の鮮度が欠落グレースに無い");
+  assert.ok(client.includes("isOtherPartyInDungeon"), "WS 側のダンジョンパーティ分離が無い");
 });

@@ -17,14 +17,41 @@ const NAME_MAX = 24;
 const TOKEN_TTL_MS = 10 * 60 * 1000;
 
 /** 空間ごとの境界（lib/worldbox/mapgen.ts の MAP_W/MAP_H、lobby.ts の LOBBY_W/LOBBY_H）。 */
+/** ワールドは実質無制限のため、ここには有限空間の矩形だけを置く。 */
 const SPACE_BOUNDS = {
-  world: { width: 1024, height: 1024 },
   lobby: { width: 56, height: 64 },
   tent: { width: 13, height: 10 },
 };
+/** ワールド座標の上限（presence.ts の PRESENCE_COORD_LIMIT / mapgen.ts の WORLD_COORD_LIMIT と一致）。 */
+const WORLD_COORD_LIMIT = 1_000_000;
+/** インスタンス空間 ID（presence.ts の PRESENCE_INSTANCE_SPACE_RE と同じ形式）。 */
+const INSTANCE_SPACE_RE = /^(cave|ruins|dungeon):(-?\d+),(-?\d+):(\d+)$/;
+/** インスタンス空間の辺（app/api/worldbox/presence/route.ts の境界と同じ値）。 */
+const INSTANCE_BOUNDS = { cave: 64, ruins: 48, dungeon: 52 };
+/** 冒険役職（presence.ts の sanitizeHeartbeat と同じ許可リスト）。 */
+const ROLE_IDS = ["blade", "guard", "scout", "miner", "medic"];
+
+/** 空間の座標範囲（min/max 形式）。ワールドは実質無制限。 */
+function boundsForSpace(space) {
+  if (space === "lobby" || space === "tent") {
+    const b = SPACE_BOUNDS[space];
+    return { minX: 0, maxX: b.width, minY: 0, maxY: b.height };
+  }
+  const m = INSTANCE_SPACE_RE.exec(space || "");
+  if (m) {
+    const size = INSTANCE_BOUNDS[m[1]];
+    return { minX: 0, maxX: size, minY: 0, maxY: size };
+  }
+  return {
+    minX: -WORLD_COORD_LIMIT, maxX: WORLD_COORD_LIMIT,
+    minY: -WORLD_COORD_LIMIT, maxY: WORLD_COORD_LIMIT,
+  };
+}
 
 function sanitizeSpace(raw) {
-  return raw === "lobby" ? "lobby" : raw === "tent" ? "tent" : "world";
+  if (raw === "lobby" || raw === "tent") return raw;
+  if (typeof raw === "string" && INSTANCE_SPACE_RE.test(raw)) return raw;
+  return "world";
 }
 
 function clampNum(v, min, max) {
@@ -37,15 +64,20 @@ function sanitizeHeartbeat(raw) {
   if (typeof raw.x !== "number" || !Number.isFinite(raw.x)) return null;
   if (typeof raw.y !== "number" || !Number.isFinite(raw.y)) return null;
   const space = sanitizeSpace(raw.space);
-  const b = SPACE_BOUNDS[space];
+  const b = boundsForSpace(space);
   const vel = (n) => (typeof n === "number" && Number.isFinite(n) ? clampNum(n, -MAX_VELOCITY, MAX_VELOCITY) : 0);
   return {
-    x: clampNum(raw.x, 0, b.width),
-    y: clampNum(raw.y, 0, b.height),
+    x: clampNum(raw.x, b.minX, b.maxX),
+    y: clampNum(raw.y, b.minY, b.maxY),
     vx: vel(raw.vx),
     vy: vel(raw.vy),
     face: raw.face === -1 ? -1 : 1,
     space,
+    // B6 の役職・ランク・パーティも REST と同じ規則で通す（ネームプレートと
+    // ダンジョンのパーティ分離が WS 経由でも効くようにする）。
+    role: typeof raw.role === "string" && ROLE_IDS.includes(raw.role) ? raw.role : "free",
+    rank: typeof raw.rank === "number" && Number.isFinite(raw.rank) ? Math.max(1, Math.min(5, Math.floor(raw.rank))) : 1,
+    party: typeof raw.party === "string" ? raw.party.slice(0, 48) : "",
   };
 }
 
@@ -146,7 +178,9 @@ module.exports = {
   FRESH_MS,
   MAX_PLAYERS,
   SPACE_BOUNDS,
+  WORLD_COORD_LIMIT,
   TOKEN_TTL_MS,
+  boundsForSpace,
   sanitizeSpace,
   sanitizeHeartbeat,
   createRoom,
