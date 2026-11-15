@@ -23,7 +23,7 @@ from core.vc.voice_media import add_audio_source, remove_audio_source
 from core.support.panel_v2 import as_panel_v2, edit_panel_v2, as_embed_v2
 
 from core.vc.common import *  # noqa: F401,F403 - shared constants
-from core.vc.common import COGS, GVC_ROOM_ACTIONS, GVC_ROOM_FORMS, LAZY_EXTENSIONS, VOICE_ACTIONS_BY_GENRE, VOICE_GENRES, format_elapsed  # noqa: F401
+from core.vc.common import COGS, GVC_ROOM_ACTIONS, GVC_ROOM_FORMS, LAZY_EXTENSIONS, VC_GENRE_ALIASES, VOICE_ACTIONS_BY_GENRE, VOICE_GENRES, format_elapsed, vc_genre_for_action  # noqa: F401
 from core.vc.trigger import VoiceTriggerManageView, VoiceTriggerRegisterView, _scan_recent_audios  # noqa: F401
 from core.vc.tts import TTSSayModal, TTSSettingsModal  # noqa: F401
 
@@ -468,8 +468,19 @@ class VoicePanelView(discord.ui.View):
         self.owner_id = owner_id
         self.history_specs = list(history_specs or [])
         saved = (shortcut_item or {}).get("action", {})
-        self.genre = genre or saved.get("genre")
+        saved_genre = saved.get("genre")
+        self.genre = VC_GENRE_ALIASES.get(genre or saved_genre, genre or saved_genre)
         self.action = saved.get("value")
+        # ジャンル再編でアクションが別ジャンルへ移った旧ショートカットは、保存ジャンルを
+        # 開いても目的の機能が一覧に出ないため、アクション値から現行ジャンルを再導出する
+        # （導線最適化 U3: community 吸収・echo_status 追加）。
+        if self.action:
+            current = vc_genre_for_action(self.action)
+            if current is not None and (
+                self.genre not in VOICE_ACTIONS_BY_GENRE
+                or self.action not in [v for _l, v in VOICE_ACTIONS_BY_GENRE[self.genre]]
+            ):
+                self.genre = current
         self.shortcut_mode = shortcut_mode
         self.shortcut_item = shortcut_item
         self.refresh()

@@ -96,8 +96,7 @@ VOICE_GENRES = {
     "studio": ("録音・音声制作", ""),
     "effects": ("音声加工", "ボイスチェンジャー"),
     "trigger": ("音声トリガー", ""),
-    "community": ("ランダム通話", ""),
-    "gvc_rooms": ("グローバルVCルーム", ""),
+    "gvc_rooms": ("グローバルVC", ""),
 }
 VOICE_ACTIONS_BY_GENRE = {
     "connection": [("参加", "join"), ("退出", "leave"), ("状態", "status")],
@@ -112,12 +111,11 @@ VOICE_ACTIONS_BY_GENRE = {
     "studio": [(f"録音: {label}", f"record_{value}") for label, value in
                 (("開始", "start"), ("停止", "stop"), ("状態", "status"), ("音程解析", "pitch"))] +
                [(f"やまびこ: {label}", f"echo_{value}") for label, value in
-                (("開始", "start"), ("停止", "stop"), ("遅延変更", "delay"))] +
+                (("開始", "start"), ("停止", "stop"), ("状態", "status"), ("遅延変更", "delay"))] +
                [("文字起こし: 開始", "transcribe_start"), ("文字起こし: 停止", "transcribe_stop"),
                 ("カラオケ: 開始", "karaoke_start"), ("カラオケ: 停止", "karaoke_stop"),
                 ("カラオケ: 採点", "karaoke_score")],
     "effects": [("開始", "changer_start"), ("停止", "changer_stop"), ("状態/設定", "changer_status")],
-    "community": [("ランダム通話: 開始/参加", "match_start"), ("ランダム通話: 終了/退出", "match_stop")],
     "gvc_rooms": [("グローバルVC: 開始/参加", "global_start"), ("グローバルVC: 終了/退出", "global_stop"),
                   ("ルーム一覧（参加ボタン付き）", "gvc_room_list"), ("メンバー確認", "gvc_members"),
                   ("ルーム作成", "gvc_room_create"),
@@ -126,7 +124,11 @@ VOICE_ACTIONS_BY_GENRE = {
                   ("言語設定", "gvc_lang_setting"),
                   ("グロチャ: 接続（このチャンネル）", "gvc_chat_connect"),
                   ("グロチャ: 接続解除（このチャンネル）", "gvc_chat_disconnect"),
-                  ("グロチャ自動接続設定", "gvc_auto_connect")],
+                  ("グロチャ自動接続設定", "gvc_auto_connect"),
+                  # 導線最適化 U3: ランダム通話もグローバルVCの入口に一本化
+                  # （旧 community ジャンル 2件を吸収。開始/終了はルーム管理と同じ
+                  # ジャンルに置く、というラウンド2の判断の延長）。
+                  ("ランダム通話: 開始/参加", "match_start"), ("ランダム通話: 終了/退出", "match_stop")],
     "tts": [("読み上げ: 開始（このチャンネルを読む）", "tts_start"), ("読み上げ: 停止", "tts_stop"),
             ("読み上げ: 話者・ピッチ・話速の設定", "tts_config"), ("読み上げ: 1回だけ読む", "tts_say")],
     "trigger": [
@@ -134,6 +136,20 @@ VOICE_ACTIONS_BY_GENRE = {
         ("トリガー一覧・削除", "trigger_panel"),
     ],
 }
+
+# 旧バージョンで保存されたショートカットを新しいジャンルへ移行する。
+# 導線最適化 U3: "community" は 2件ジャンルだったため gvc_rooms へ吸収し、
+# ジャンル自体が無くなった（ランダム通話もグローバルVCの入口に一本化）。
+VC_GENRE_ALIASES = {"community": "gvc_rooms"}
+
+
+def vc_genre_for_action(value: str) -> str | None:
+    """アクション値が属する現行ジャンルを返す（旧ジャンルで保存された
+    ショートカットを開くときの再導出用）。"""
+    for genre, items in VOICE_ACTIONS_BY_GENRE.items():
+        if any(item_value == value for _label, item_value in items):
+            return genre
+    return None
 
 # グローバルVCルームの操作（/vc パネルから使う）
 # 値: (入力フォームのタイトル, [(キー, ラベル, 最大文字数, 必須, 初期値)])

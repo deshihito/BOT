@@ -324,8 +324,8 @@ const containersOnlineStubUrl = dataUrl(`
 import { parseContainerState, serializeContainerState } from ${JSON.stringify(containersBundleUrl)};
 const store = (globalThis.__wbBlockContainers ??= new Map());
 export function isContainersEnabled() { return true; }
-export async function loadContainer(x, y, itemId) { const v = store.get(x + "," + y); return v === undefined ? null : parseContainerState(v, itemId); }
-export async function storeContainer(x, y, state) { if (state === null) store.delete(x + "," + y); else store.set(x + "," + y, serializeContainerState(state)); return true; }
+export async function loadContainer(space, x, y, itemId) { const v = store.get(space + "|" + x + "," + y); return v === undefined ? null : parseContainerState(v, itemId); }
+export async function storeContainer(space, x, y, state) { if (state === null) store.delete(space + "|" + x + "," + y); else store.set(space + "|" + x + "," + y, serializeContainerState(state)); return true; }
 `);
 const nationsOnlineStubUrl = dataUrl(`
 export function isNationsEnabled() { return true; }
@@ -345,6 +345,7 @@ export class NextResponse {
   }
 }
 `);
+const userLockUrl = dataUrl(transpile("worldbox/user-lock.ts"));
 const tilesRoute = await import(
   dataUrl(
     transpile("api/worldbox/tiles/route.ts", rootDir + "/app")
@@ -360,6 +361,7 @@ const tilesRoute = await import(
       .replaceAll('"@/lib/worldbox/tiles-online"', JSON.stringify(tilesOnlineStubUrl))
       .replaceAll('"@/lib/worldbox/containers"', JSON.stringify(containersBundleUrl))
       .replaceAll('"@/lib/worldbox/containers-online"', JSON.stringify(containersOnlineStubUrl))
+      .replaceAll('"@/lib/worldbox/user-lock"', JSON.stringify(userLockUrl))
       .replaceAll('"@/lib/worldbox/nations-online"', JSON.stringify(nationsOnlineStubUrl))
       .replaceAll('"@/lib/worldbox/war"', JSON.stringify(warUrl))
       .replaceAll('"@/lib/worldbox/war-online"', JSON.stringify(warsOnlineStubUrl)),

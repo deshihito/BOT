@@ -97,9 +97,12 @@ class CustomIdTest(unittest.TestCase):
         view.genre = "party"
         view.refresh()
         self.assertIn("panel:game:select", child_ids(view))
-        # ラウンド5で party が25件を超えたため、ジャンル絞り込み時も
-        # ページめくりが出る（ページングの一般化）。
-        self.assertIn("panel:game:page_next", child_ids(view))
+        # 導線最適化 U3: party は word への分割で14件となり1ページに収まるため、
+        # ジャンル絞り込み時のページめくりは出ない（word 16件も同じ）。
+        self.assertNotIn("panel:game:page_next", child_ids(view))
+        view.genre = "word"
+        view.refresh()
+        self.assertNotIn("panel:game:page_next", child_ids(view))
         view = GameHubView(None)
         view.genre = "solo"
         view.refresh()

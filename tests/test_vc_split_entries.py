@@ -3,6 +3,9 @@
 
 - VOICE_ACTIONS_BY_GENRE に音楽6件＋グロチャ自動接続1件が追加され総数44、
   さらにメンバー確認 (gvc_members) が加わり 45 になること
+- 導線最適化 U3: やまびこ状態 (echo_status) を studio に載せ 47 になること
+  （ガイド上の47件とパネルの46件の差を解消）。community 2件は
+  gvc_rooms へ吸収され総数は変わらないこと
 - dispatch_voice_action が新 value を音楽cog / GVCcog の既存 impl へ配線すること
 - 音楽パネル本体（build_music_panel_layout）に立体音響の入口ボタンが増え、
   既存の自動再生トグル行が保たれること
@@ -40,8 +43,27 @@ class GenreListTest(unittest.TestCase):
     def test_total_is_45(self):
         # 44 に gvc メンバー確認 (gvc_members) が加わり 45。
         # ラジオ (radio_panel) の追加で 46。
+        # 導線最適化 U3: やまびこ状態 (echo_status) の追加で 47。
+        # community 吸収はジャンル間の移動だけで総数は変わらない。
         total = sum(len(items) for items in VOICE_ACTIONS_BY_GENRE.values())
-        self.assertEqual(total, 46)
+        self.assertEqual(total, 47)
+
+    def test_echo_status_in_studio(self):
+        # 導線最適化 U3: ガイド・レジストリにはあった echo_status が
+        # パネル側のジャンル表にだけ無かったため studio に載せる。
+        studio = VOICE_ACTIONS_BY_GENRE["studio"]
+        self.assertIn(("やまびこ: 状態", "echo_status"), studio)
+        self.assertEqual(len(studio), 13)
+
+    def test_old_community_shortcut_rederives_genre(self):
+        # 導線最適化 U3: 旧 community ジャンルで保存されたショートカットを開いても
+        # gvc_rooms へ再導出され、目的の機能が一覧に出ること。
+        from core.vc.hub import VoicePanelView
+
+        view = VoicePanelView(
+            None, shortcut_item={"action": {"genre": "community", "value": "match_start"}})
+        self.assertEqual(view.genre, "gvc_rooms")
+        self.assertEqual(view.action, "match_start")
 
     def test_music_genre_entries(self):
         self.assertEqual(
