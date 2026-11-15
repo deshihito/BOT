@@ -40,8 +40,9 @@ import {
   L_PLAZA, L_SAND, L_VOID,
   LOBBY_ENTRY, LOBBY_FLOOR_FALLBACK, LOBBY_FLOOR_SPRITE, LOBBY_H, LOBBY_STAIRS_DOWN, LOBBY_STAIRS_UP,
   LOBBY_DOWN_LANDING, LOBBY_UP_LANDING, LOBBY_W, LOBBY_WARP_PAD,
-  buildLobby, lobbyTileAt, stationNear, type LobbyData, type LobbyObject, type LobbyStation,
+  buildLobby, lobbyTileAt, stationGenreNear, stationNear, type LobbyData, type LobbyObject, type LobbyStation,
 } from "@/lib/worldbox/lobby";
+import { genreById, type ShopGenreId } from "@/lib/worldbox/shops";
 import { TENT_ENTRY, TENT_EXIT, TENT_H, TENT_W, buildTent, tentTileAt } from "@/lib/worldbox/tent";
 import type { BoardPost } from "@/lib/worldbox/board";
 import { parseSave, serializeSave, type SaveSpace } from "@/lib/worldbox/save";
@@ -402,6 +403,8 @@ export default function WorldBoxClient() {
   const [spaceUi, setSpaceUi] = useState<SaveSpace>("world");
   const [menuOpen, setMenuOpen] = useState(false);
   const [stationUi, setStationUi] = useState<LobbyStation | null>(null);
+  /** いま接している店の品目ジャンル（鍛冶屋は "smith"）。経済パネルの品目選別に使う。 */
+  const [stationGenre, setStationGenre] = useState<ShopGenreId | null>(null);
   const warpActionRef = useRef<(target: SaveSpace) => void>(() => {});
   /** 所属国への移動（ゲームループ側のテレポート実体）。 */
   const teleportActionRef = useRef<(x: number, y: number) => void>(() => {});
@@ -1649,6 +1652,7 @@ export default function WorldBoxClient() {
     // ---- 空間移動（ワープパッド・階段・ハンバーガーメニュー） ----
     let lastTileKey = "";
     let lastStation: LobbyStation | null = null;
+    let lastStationGenre: ShopGenreId | null = null;
     const placePlayer = (x: number, y: number) => {
       const free = findFreeNear(activeMap(), x, y, activeBlocked(), { swim: space === "world" });
       player.x = free.x;
@@ -1691,6 +1695,8 @@ export default function WorldBoxClient() {
         setStatusText("共有ワールド");
         lastStation = null;
         setStationUi(null);
+        lastStationGenre = null;
+        setStationGenre(null);
         const dest = worldReturn ?? spawn;
         placePlayer(dest.x, dest.y);
       }
@@ -1707,6 +1713,8 @@ export default function WorldBoxClient() {
         setStatusText("共有ワールド");
         lastStation = null;
         setStationUi(null);
+        lastStationGenre = null;
+        setStationGenre(null);
         setBoardOpen(false);
         if (buildRef.current.active) {
           buildRef.current.active = false;
@@ -1899,10 +1907,19 @@ export default function WorldBoxClient() {
       }
       checkTileTriggers();
       if (space !== "world") {
-        const st = stationNear(indoorData().objects, Math.floor(player.x), Math.floor(player.y));
+        const tx = Math.floor(player.x);
+        const ty = Math.floor(player.y);
+        const st = stationNear(indoorData().objects, tx, ty);
         if (st !== lastStation) {
           lastStation = st;
           setStationUi(st);
+        }
+        const genre = st === "shop"
+          ? stationGenreNear(indoorData().objects, tx, ty)
+          : st === "smith" ? "smith" : null;
+        if (genre !== lastStationGenre) {
+          lastStationGenre = genre;
+          setStationGenre(genre);
         }
       }
       player.vx = (player.x - prevX) / dt;
@@ -2947,7 +2964,7 @@ export default function WorldBoxClient() {
               borderRadius: 10, background: "rgba(0,0,0,0.6)", color: "#fff", fontSize: 13, whiteSpace: "nowrap",
             }}
           >
-            <span>{STATION_LABEL[stationUi]}</span>
+            <span>{stationUi === "shop" && stationGenre ? (genreById(stationGenre)?.name ?? STATION_LABEL[stationUi]) : STATION_LABEL[stationUi]}</span>
             {stationUi === "board" && (
               <button
                 type="button"
@@ -3279,7 +3296,7 @@ export default function WorldBoxClient() {
         </div>
       )}
 
-      {showEconomy && <WorldBoxEconomyPanel space={spaceUi} station={stationUi} onClose={() => setShowEconomy(false)} />}
+      {showEconomy && <WorldBoxEconomyPanel space={spaceUi} station={stationUi} genre={stationGenre} onClose={() => setShowEconomy(false)} />}
       {casinoOpen && spaceUi === "lobby" && (
         <WorldBoxCasinoPanel onClose={() => setCasinoOpen(false)} />
       )}

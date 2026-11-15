@@ -8,6 +8,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { EconomyOp } from "@/lib/worldbox/economy-bridge";
 import { ITEMS, RECIPES, itemById, sellPrice } from "@/lib/worldbox/items";
+import { genreById, itemsForGenre, type ShopGenreId } from "@/lib/worldbox/shops";
 import type { LobbyStation } from "@/lib/worldbox/lobby";
 import type { PlayerProfile } from "@/lib/worldbox/profile";
 import type { SaveSpace } from "@/lib/worldbox/save";
@@ -44,6 +45,7 @@ const ERROR_LABEL: Record<string, string> = {
   self_transfer: "自分には送れません",
   invalid_amount: "金額が不正です",
   not_at_shop: "ショップの前にいません",
+  wrong_shop: "この店では買えません",
   not_at_workbench: "作業台の前にいません",
   not_at_bank: "銀行の前にいません",
 };
@@ -96,12 +98,15 @@ function ItemIcon({ id, size = 24 }: { id: string; size?: number }) {
   );
 }
 
-export default function WorldBoxEconomyPanel({ space, station, onClose }: { space: SaveSpace; station: LobbyStation | null; onClose: () => void }) {
+export default function WorldBoxEconomyPanel({ space, station, genre, onClose }: { space: SaveSpace; station: LobbyStation | null; genre: ShopGenreId | null; onClose: () => void }) {
   // 行動の場所制約: 売買はショップの前、合成は作業台（鍛冶屋）の前、
   // 送金は銀行の前でのみ。いる場所に対応するタブだけを出す（サーバー側
   // でもプレゼンスで検証されるため、ここは表示の一致が役割）。
   const inLobby = space === "lobby";
-  const atShop = inLobby && station === "shop";
+  // 売買は店と鍛冶屋の両方で可。品目は店ごとのジャンルで選別される
+  // （鍛冶屋はジャンル "smith"）。ジャンルが無い店は全品目。
+  const shopGenre: ShopGenreId | null = station === "smith" ? "smith" : genre;
+  const atShop = inLobby && (station === "shop" || station === "smith");
   const atWorkbench = space !== "world" && station === "smith";
   const atBank = inLobby && station === "bank";
   const [profile, setProfile] = useState<PlayerProfile | null>(null);
@@ -247,6 +252,8 @@ export default function WorldBoxEconomyPanel({ space, station, onClose }: { spac
   }
 
   const owned = ITEMS.filter((item) => (profile.items[item.id] ?? 0) > 0);
+  // この店で売られている品目（ジャンル選別。ジャンルが無ければ全品目）
+  const shopItems = shopGenre ? itemsForGenre(shopGenre) : ITEMS;
   // 施設の前にいないタブを開いたままにしない（その施設へ行くと使える）
   const tabAllowed = (t: Tab): boolean =>
     t === "shop" ? atShop : t === "craft" ? atWorkbench : t === "bank" ? atBank : true;
@@ -288,7 +295,7 @@ export default function WorldBoxEconomyPanel({ space, station, onClose }: { spac
 
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12 }}>
         {tabBtn("bag", "かばん")}
-        {atShop && tabBtn("shop", "ショップ")}
+        {atShop && tabBtn("shop", shopGenre ? (genreById(shopGenre)?.name ?? "ショップ") : "ショップ")}
         {atWorkbench && tabBtn("craft", "合成")}
         {tabBtn("steal", "steal")}
         {atBank && tabBtn("bank", "銀行")}
@@ -322,7 +329,7 @@ export default function WorldBoxEconomyPanel({ space, station, onClose }: { spac
 
       {activeTab === "shop" && atShop && (
         <div style={{ marginTop: 6 }}>
-          {ITEMS.map((item) => (
+          {shopItems.map((item) => (
             <div key={item.id} style={row}>
               <ItemIcon id={item.id} />
               <strong>{item.name}</strong>
