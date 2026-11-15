@@ -10,7 +10,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { EconomyOp } from "@/lib/worldbox/economy-bridge";
 import { ITEMS, RECIPES, itemById, sellPrice } from "@/lib/worldbox/items";
-import { genreById, itemsForGenre, type ShopGenreId } from "@/lib/worldbox/shops";
+import { genreById, isShopExcluded, itemsForGenre, type ShopGenreId } from "@/lib/worldbox/shops";
 import type { LobbyStation } from "@/lib/worldbox/lobby";
 import type { PlayerProfile } from "@/lib/worldbox/profile";
 import type { SaveSpace } from "@/lib/worldbox/save";
@@ -43,6 +43,7 @@ const ERROR_LABEL: Record<string, string> = {
   invalid_amount: "金額が不正です",
   not_at_shop: "ショップの前にいません",
   wrong_shop: "この店では買えません",
+  not_sold: "販売していません",
   not_at_workbench: "作業台の前にいません",
   not_at_bank: "銀行の前にいません",
 };
@@ -236,8 +237,8 @@ export default function WorldBoxEconomyPanel({ space, station, genre, onClose }:
   }
 
   const owned = ITEMS.filter((item) => (profile.items[item.id] ?? 0) > 0);
-  // この店で売られている品目（ジャンル選別。ジャンルが無ければ全品目）
-  const shopItems = shopGenre ? itemsForGenre(shopGenre) : ITEMS;
+  // この店で売られている品目（ジャンル選別。レア品はどの店でも売らない）
+  const shopItems = shopGenre ? itemsForGenre(shopGenre) : ITEMS.filter((item) => !isShopExcluded(item));
   // 施設の前にいないタブを開いたままにしない（その施設へ行くと使える）
   const tabAllowed = (t: Tab): boolean =>
     t === "shop" ? atShop : t === "craft" ? atWorkbench : t === "bank" ? atBank : true;

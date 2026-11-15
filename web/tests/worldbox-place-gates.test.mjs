@@ -288,6 +288,36 @@ test("API(place): buy は店のジャンルと合う品目だけ買える（wron
   assert.equal(sold.status, 200);
 });
 
+test("API(place): レア品はジャンルが合っても買えない（not_sold）が、売却はできる", async () => {
+  globalThis.__wbGateUsers.set(ME, 5000);
+  seedProfile({});
+  // 鍛冶屋で特殊（ジャンルは合う）を買おうとしても not_sold
+  setPresence(AT_SMITH.x, AT_SMITH.y);
+  const special = await profileRoute.POST(apiRequest(URL_P, "POST", { action: "buy", itemId: "star_shard" }));
+  assert.equal(special.status, 409);
+  assert.equal((await special.json()).error, "not_sold");
+  // 道具屋でミスリル tier4（ジャンルは合う）も not_sold
+  setPresence(AT_SHOP.x, AT_SHOP.y);
+  const mithril = await profileRoute.POST(apiRequest(URL_P, "POST", { action: "buy", itemId: "mithril_axe" }));
+  assert.equal(mithril.status, 409);
+  assert.equal((await mithril.json()).error, "not_sold");
+  // 建築屋カウンター前で宝石ブロックも not_sold
+  setPresence(9.5, 21.5);
+  const gem = await profileRoute.POST(apiRequest(URL_P, "POST", { action: "buy", itemId: "diamond_block" }));
+  assert.equal(gem.status, 409);
+  assert.equal((await gem.json()).error, "not_sold");
+  // ジャンルも合わないレア品は wrong_shop が優先される
+  setPresence(AT_SHOP.x, AT_SHOP.y);
+  const both = await profileRoute.POST(apiRequest(URL_P, "POST", { action: "buy", itemId: "star_shard" }));
+  assert.equal(both.status, 409);
+  assert.equal((await both.json()).error, "wrong_shop");
+  // レア品の売却はジャンル不問で通る
+  seedProfile({ star_shard: 1 });
+  setPresence(AT_SMITH.x, AT_SMITH.y);
+  const sold = await profileRoute.POST(apiRequest(URL_P, "POST", { action: "sell", itemId: "star_shard" }));
+  assert.equal(sold.status, 200);
+});
+
 test("API(place): craft は作業台（鍛冶屋）の前でのみ通る", async () => {
   seedProfile({ wood: 3 });
   setPresence(AT_SHOP.x, AT_SHOP.y);

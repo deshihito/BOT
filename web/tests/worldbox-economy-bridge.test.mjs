@@ -352,7 +352,7 @@ export async function findPresenceOwnerKey(id) { return map.has(id) ? map.get(id
 `);
 await import(presenceStubUrl); // ルートはもう presence-online を読まないため、状態だけ先に作る
 const profileSwapUrl = bundleModule(["worldbox/items.ts", "worldbox/profile.ts"], ["swapSlots", "moveSlot"]);
-const shopsUrl = bundleModule(["worldbox/items.ts", "worldbox/shops.ts"], ["checkBuyGenre"]);
+const shopsUrl = bundleModule(["worldbox/items.ts", "worldbox/shops.ts"], ["checkBuyGenre", "checkBuySold"]);
 const profileRoute = await import(
   dataUrl(
     transpile("api/worldbox/profile/route.ts", rootDir + "/app")
