@@ -108,3 +108,13 @@ export function loadFarmSprites(): Record<string, HTMLImageElement> {
   for (const [k, v] of Object.entries(FARM_SPRITE_SRC)) { const img = new Image(); img.src = v; out[k] = img; }
   return out;
 }
+
+// モブの素材スプライト（16×16、確定素材セット由来）。マップは combat.ts の
+// MOB_SPRITE（モブID → パス）が正で、ここはロビー等と同じ読み込みだけを担う。
+import { MOB_SPRITE } from "./combat";
+
+export function loadMobSprites(): Record<string, HTMLImageElement> {
+  const out: Record<string, HTMLImageElement> = {};
+  for (const [k, v] of Object.entries(MOB_SPRITE)) { const img = new Image(); img.src = v; out[k] = img; }
+  return out;
+}

@@ -147,7 +147,7 @@ export async function POST(request: Request) {
   const key = mobKeyOf(placed);
   const state = await loadMobState(key);
   const profile = await loadProfile(ownerKey);
-  const result = applyMobAttack(def, state, playerAttack(profile.items), now, Math.random);
+  const result = applyMobAttack(def, state, playerAttack(profile.items), now, Math.random, key);
   if ("error" in result) {
     return NextResponse.json({ error: result.error }, { status: 409, headers: NO_STORE });
   }

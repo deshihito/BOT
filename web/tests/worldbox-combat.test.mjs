@@ -54,6 +54,9 @@ const combatUrl = bundleModule(
     "mobKeyOf", "parseMobKey", "parseMobState", "parseMobStates", "mobHpNow",
     "visibleMobs", "mobExistsAt", "mobDistance", "applyMobAttack", "MOB_RESPAWN_MS",
     "attackTarget", "playerAttack",
+    "MOB_SPRITE", "MOB_SPRITE_FALLBACK", "validateMobSprites", "mobHasVisual",
+    "mobRespawnDelayMs", "MOB_RESPAWN_JITTER_MS",
+    "MOB_CHUNK_CAP", "MOB_MIN_ANCHOR_DISTANCE", "MOB_SPAWN_EXCLUSION_RADIUS", "isNearWorldSpawn", "WORLD_SPAWN_TILE", "mobsForChunk",
   ],
 );
 const bundled = await import(combatUrl);
@@ -208,6 +211,77 @@ test("クライアント: モブ描画・タップ攻撃・モーションが配
   assert.ok(client.includes("popScale(popProgress(r.seenAt"), "出現ポップが無い");
   assert.ok(client.includes("HP バー"), "HP バーが無い");
   assert.ok(client.includes('kind: "spawn"'), "出現エフェクトを発火していない");
+  // 素材描画: スプライト読み込みと drawImage が主で、図形の特徴描き分けは残っていない
+  assert.ok(client.includes("loadMobSprites"), "モブ素材の読み込みが無い");
+  assert.ok(client.includes("MOB_SPRITE[def.id]"), "MOB_SPRITE で描画していない");
+  assert.ok(client.includes("imageSmoothingEnabled = false"), "ピクセル固定で描いていない");
+  assert.ok(!client.includes('feature === "ears"'), "図形の特徴描画が残っている");
   // UI に絵文字を使わない（モブ名のテキストも出さない: HP バーだけ）
   assert.ok(!client.includes("def.name"), "モブ名テキストを描画している");
+});
+
+test("モブ素材: 全モブがスプライトか明示フォールバックを持ち、ファイルが実在する", () => {
+  assert.deepEqual(combat.validateMobSprites(), []);
+  assert.equal(Object.keys(combat.MOB_SPRITE).length, 26);
+  assert.deepEqual([...combat.MOB_SPRITE_FALLBACK].sort(), ["giant", "mouse", "ogre"]);
+  for (const def of mobs.MOBS) {
+    assert.ok(combat.mobHasVisual(def.id), `${def.id} に描画手段が無い`);
+  }
+  const files = new Set();
+  for (const [id, src] of Object.entries(combat.MOB_SPRITE)) {
+    assert.ok(src.startsWith("/img/worldbox/mobs/"), `${id}: ${src}`);
+    files.add(src);
+    assert.ok(fs.existsSync(path.join(rootDir, "public", src)), `missing sprite file ${src}`);
+  }
+  assert.equal(files.size, 23, "実ファイルは23点（流用含む）");
+});
+
+test("再出現: 基本15分＋個体キー決定的な追加遅延0〜10分で分散する", () => {
+  assert.equal(combat.MOB_RESPAWN_MS, 15 * 60 * 1000);
+  assert.equal(combat.MOB_RESPAWN_JITTER_MS, 10 * 60 * 1000);
+  const k1 = "slime@512,300";
+  const d1 = combat.mobRespawnDelayMs(k1);
+  assert.equal(d1, combat.mobRespawnDelayMs(k1), "決定的でない");
+  assert.ok(d1 >= 0 && d1 <= combat.MOB_RESPAWN_JITTER_MS);
+  const delays = new Set();
+  for (let i = 0; i < 40; i++) delays.add(combat.mobRespawnDelayMs(`slime@${500 + i},300`));
+  assert.ok(delays.size > 20, `分散していない: ${delays.size}`);
+  // キーを渡すと deadUntil に基本+遅延が入る。渡さなければ基本のみ（従来互換）。
+  const slime = mobs.mobById("slime");
+  const withKey = combat.applyMobAttack(slime, null, 99, 5000, always, k1);
+  assert.equal(withKey.state.deadUntil, 5000 + combat.MOB_RESPAWN_MS + d1);
+  // mobHpNow は deadUntil だけで判定するので、遅延込みの復活時刻と一貫する
+  assert.deepEqual(combat.mobHpNow(slime, withKey.state, withKey.state.deadUntil - 1), { hp: 0, alive: false });
+  assert.deepEqual(combat.mobHpNow(slime, withKey.state, withKey.state.deadUntil), { hp: slime.hp, alive: true });
+});
+
+test("沸き抑制: チャンク上限4・最短距離5・スポーン半径6にモブなし", () => {
+  assert.equal(combat.MOB_CHUNK_CAP, 4);
+  assert.equal(combat.MOB_MIN_ANCHOR_DISTANCE, 5);
+  assert.equal(combat.MOB_SPAWN_EXCLUSION_RADIUS, 6);
+  // 無制限マップ化（#937）後の除外中心は原点（初期スポーン抽選の中心）
+  assert.deepEqual(combat.WORLD_SPAWN_TILE, { x: 0, y: 0 });
+  assert.ok(combat.isNearWorldSpawn(0, 0));
+  assert.ok(combat.isNearWorldSpawn(6, -6));
+  assert.ok(!combat.isNearWorldSpawn(7, 0));
+  let total = 0;
+  for (let cy = 0; cy < 32; cy++) {
+    for (let cx = 0; cx < 32; cx++) {
+      for (const night of [false, true]) {
+        const list = combat.mobsForChunk(SEED, cx, cy, night);
+        assert.ok(list.length <= combat.MOB_CHUNK_CAP, `chunk ${cx},${cy} night=${night}: ${list.length}体`);
+        for (const m of list) {
+          total++;
+          assert.ok(!combat.isNearWorldSpawn(m.x, m.y), `スポーン直上に ${m.mobId}@${m.x},${m.y}`);
+        }
+        for (let i = 0; i < list.length; i++) {
+          for (let j = i + 1; j < list.length; j++) {
+            const d = Math.max(Math.abs(list[i].x - list[j].x), Math.abs(list[i].y - list[j].y));
+            assert.ok(d >= combat.MOB_MIN_ANCHOR_DISTANCE, `近すぎる: ${list[i].mobId}@${list[i].x},${list[i].y} と ${list[j].mobId}@${list[j].x},${list[j].y} (距離${d})`);
+          }
+        }
+      }
+    }
+  }
+  assert.ok(total > 100, `間引いてもモブは残るはず: ${total}`);
 });
