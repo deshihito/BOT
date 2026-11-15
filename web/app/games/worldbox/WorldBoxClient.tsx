@@ -44,6 +44,11 @@ import {
 } from "@/lib/worldbox/lobby";
 import { genreById, type ShopGenreId } from "@/lib/worldbox/shops";
 import { TENT_ENTRY, TENT_EXIT, TENT_H, TENT_W, buildTent, tentTileAt } from "@/lib/worldbox/tent";
+import {
+  buildCaveLayer, lightRadiusTiles, makeInstanceSpace, parseInstanceSpace, type CaveLayer,
+} from "@/lib/worldbox/instances";
+import { structureById, structuresForChunk, type PlacedStructure } from "@/lib/worldbox/maplogic";
+import { specialObjectById } from "@/lib/worldbox/objects";
 import type { BoardPost } from "@/lib/worldbox/board";
 import { parseSave, serializeSave, type SaveSpace } from "@/lib/worldbox/save";
 import { chooseInitialSave } from "@/lib/worldbox/save-source";
@@ -210,6 +215,10 @@ const TILE_ERROR_LABEL: Record<string, string> = {
   on_capital: "首都には置けない",
   not_enough_items: "足りない",
   too_far: "遠すぎる",
+  depleted: "もう無い",
+  needs_pickaxe: "ツルハシが必要",
+  pickaxe_tier: "ツルハシが弱い",
+  not_at_onsen: "温泉が遠い",
   unauthorized: "ログインが必要",
   tiles_unavailable: "いま使えない",
   not_empty: "中身が入っている",
@@ -723,8 +732,53 @@ export default function WorldBoxClient() {
     void postVitals({
       action: "damage", mobId, x, y,
       px: playerPosRef.current.x, py: playerPosRef.current.y,
+      ...(parseInstanceSpace(spaceUi)?.kind === "cave" ? { space: spaceUi } : {}),
     });
   };
+  /** 洞窟の枯渇状態（鉱脈・宝箱）。サーバーが正、ここは表示用キャッシュ。 */
+  const caveStateRef = useRef<{ veins: Record<string, number>; chest: number }>({ veins: {}, chest: 0 });
+  const refreshCaveState = async (space: string) => {
+    try {
+      const res = await fetch(`/api/worldbox/instances?space=${encodeURIComponent(space)}`, {
+        headers: { Accept: "application/json" },
+      });
+      if (!res.ok) return;
+      const data = (await res.json()) as { veins?: Record<string, number>; chest?: number };
+      caveStateRef.current = { veins: data.veins ?? {}, chest: data.chest ?? 0 };
+    } catch { /* 読めなくても歩き続けられる */ }
+  };
+  const refreshCaveStateRef = useRef(refreshCaveState);
+  refreshCaveStateRef.current = refreshCaveState;
+  /** 洞窟内アクション（採掘・宝箱・温泉）。検証と付与はサーバーが担う。 */
+  const postInstance = async (action: "mine" | "open_chest" | "onsen", extra?: { veinKey?: string }) => {
+    const space = spaceUi;
+    if (parseInstanceSpace(space)?.kind !== "cave") return;
+    try {
+      const res = await fetch("/api/worldbox/instances", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, space, ...extra }),
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        error?: string; gained?: Record<string, number>; trapped?: boolean; profile?: PlayerProfile;
+      };
+      if (!res.ok) {
+        if (data.error && TILE_ERROR_LABEL[data.error]) setTileMsg(TILE_ERROR_LABEL[data.error]);
+        return;
+      }
+      if (data.profile) setInvProfile(data.profile);
+      if (data.trapped) {
+        fxEventsRef.current.push({ kind: "hit", x: playerPosRef.current.x, y: playerPosRef.current.y });
+        playWbSe("hit");
+      } else {
+        fxEventsRef.current.push({ kind: "poof", x: playerPosRef.current.x, y: playerPosRef.current.y });
+        playWbSe("success");
+      }
+      void refreshCaveState(space);
+    } catch { /* 失敗しても歩き続けられる */ }
+  };
+  const postInstanceRef = useRef(postInstance);
+  postInstanceRef.current = postInstance;
   /** ベッドを踏んだらリスポーン点にする（同じベッドでは1回だけ送る）。 */
   const postBedRespawn = (x: number, y: number) => {
     const key = `${x},${y}`;
@@ -809,6 +863,22 @@ export default function WorldBoxClient() {
   const mobStatesRef = useRef<Record<string, MobState>>({});
   const refreshMobs = async () => {
     try {
+      const caveSpace = parseInstanceSpace(spaceUi)?.kind === "cave" ? spaceUi : null;
+      if (caveSpace) {
+        const res = await fetch(
+          `/api/worldbox/mobs?space=${encodeURIComponent(caveSpace)}`,
+          { headers: { Accept: "application/json" } },
+        );
+        if (!res.ok) return;
+        const data = (await res.json()) as { states?: Record<string, MobState> };
+        const next: Record<string, MobState> = { ...mobStatesRef.current };
+        for (const key of Object.keys(next)) {
+          if (key.startsWith(`${caveSpace}|`)) delete next[key];
+        }
+        Object.assign(next, data.states ?? {});
+        mobStatesRef.current = next;
+        return;
+      }
       const px = Math.floor(playerPosRef.current.x);
       const py = Math.floor(playerPosRef.current.y);
       const x0 = px - 64;
@@ -821,6 +891,7 @@ export default function WorldBoxClient() {
       const data = (await res.json()) as { states?: Record<string, MobState> };
       const next: Record<string, MobState> = { ...mobStatesRef.current };
       for (const key of Object.keys(next)) {
+        if (key.includes("|")) continue;
         const m = /@(-?\d+),(-?\d+)$/.exec(key);
         if (!m) continue;
         const x = Number(m[1]);
@@ -833,7 +904,7 @@ export default function WorldBoxClient() {
   };
   /** モブへの攻撃（サーバーが配置・距離・HP の正）。結果は演出で返す。 */
   const attackMob = async (placed: PlacedMob) => {
-    const key = mobKeyOf(placed);
+    let key = mobKeyOf(placed);
     const def = mobById(placed.mobId);
     try {
       const res = await fetch("/api/worldbox/mobs", {
@@ -841,14 +912,16 @@ export default function WorldBoxClient() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action: "attack", mobId: placed.mobId, x: placed.x, y: placed.y,
+          ...(parseInstanceSpace(spaceUi)?.kind === "cave" ? { space: spaceUi } : {}),
           // サーバー側の位置の正（プレゼンス）が WS 中継中は bot_kv に届かないため、
           // 距離検証のフォールバックとして現在位置を添える（プレゼンスが新鮮ならそちらが優先される）
           px: playerPosRef.current.x, py: playerPosRef.current.y,
         }),
       });
       const data = (await res.json().catch(() => ({}))) as {
-        error?: string; hp?: number; dead?: boolean; profile?: PlayerProfile;
+        error?: string; hp?: number; dead?: boolean; profile?: PlayerProfile; key?: string;
       };
+      if (data.key) key = data.key;
       if (!res.ok) {
         if (data.error === "too_far") setTileMsg(TILE_ERROR_LABEL.too_far);
         fxEventsRef.current.push({ kind: "whiff", x: placed.x, y: placed.y });
@@ -871,6 +944,8 @@ export default function WorldBoxClient() {
   };
   const attackMobRef = useRef(attackMob);
   attackMobRef.current = attackMob;
+  const refreshMobsRef = useRef(refreshMobs);
+  refreshMobsRef.current = refreshMobs;
   /** インベントリ整理: 任意スロット間の移動（サーバー側 moveSlot が正）。 */
   const moveItem = async (from: SlotRef, to: SlotRef) => {
     try {
@@ -995,7 +1070,21 @@ export default function WorldBoxClient() {
     const lobby = buildLobby();
     const tent = buildTent();
     /** 現在の室内空間（ロビー/テント）のデータ。ワールドでは lobby を返す（使われない）。 */
-    const indoorData = (): LobbyData => (space === "tent" ? tent : lobby);
+    let caveCacheKey = "";
+    let caveCache: CaveLayer | null = null;
+    const caveLayerNow = (): CaveLayer | null => {
+      const inst = parseInstanceSpace(space);
+      if (inst?.kind !== "cave") return null;
+      if (caveCacheKey !== space) {
+        caveCacheKey = space;
+        caveCache = buildCaveLayer(MAP_SEED, inst.entranceX, inst.entranceY, inst.layer);
+      }
+      return caveCache;
+    };
+    /** モブ状態のキー（洞窟は空間 ID で前置し、地表の同座標個体と分ける）。 */
+    const mobKeyFor = (placed: PlacedMob): string =>
+      parseInstanceSpace(space)?.kind === "cave" ? `${space}|${mobKeyOf(placed)}` : mobKeyOf(placed);
+    const indoorData = (): LobbyData => caveLayerNow()?.data ?? (space === "tent" ? tent : lobby);
     const textures = loadTextures();
     const dungeon = loadDungeonTiles();
     const lobbySprites = loadLobbySprites();
@@ -1396,7 +1485,7 @@ export default function WorldBoxClient() {
         for (const placed of mobCache) {
           const def = mobById(placed.mobId);
           if (!def) continue;
-          const key = mobKeyOf(placed);
+          const key = mobKeyFor(placed);
           if (!mobHpNow(def, mobStatesRef.current[key] ?? null, nowMs).alive) continue;
           const r = mobRenders.get(key);
           candidates.push({
@@ -1420,7 +1509,7 @@ export default function WorldBoxClient() {
       for (const placed of mobCache) {
         const def = mobById(placed.mobId);
         if (!def) continue;
-        const key = mobKeyOf(placed);
+        const key = mobKeyFor(placed);
         if (!mobHpNow(def, mobStatesRef.current[key] ?? null, nowMs).alive) continue;
         const r = mobRenders.get(key);
         const cx = r ? Math.floor(r.wx) : placed.x;
@@ -1439,6 +1528,37 @@ export default function WorldBoxClient() {
           lastAttackAt = nowMs;
           void attackMobRef.current(placed);
         }
+        return true;
+      }
+      return false;
+    };
+    /** 洞窟内タップ: 鉱脈と宝箱だけが対象（検証と付与はサーバー）。 */
+    const handleCaveTap = (t: { x: number; y: number }): boolean => {
+      const cave = caveLayerNow();
+      if (!cave) return false;
+      const px = Math.floor(player.x);
+      const py = Math.floor(player.y);
+      const vein = cave.veins.find((v) => v.x === t.x && v.y === t.y);
+      if (vein) {
+        const def = specialObjectById(vein.objectId);
+        const takenAt = caveStateRef.current.veins[vein.key] ?? 0;
+        if (def && takenAt > 0 && Date.now() - takenAt < def.respawnMs) {
+          setTileMsg(TILE_ERROR_LABEL.depleted);
+          return true;
+        }
+        if (Math.hypot(px - t.x, py - t.y) > 2) {
+          setTileMsg(TILE_ERROR_LABEL.too_far);
+          return true;
+        }
+        void postInstanceRef.current("mine", { veinKey: vein.key });
+        return true;
+      }
+      if (cave.chest && cave.chest.x === t.x && cave.chest.y === t.y) {
+        if (Math.hypot(px - t.x, py - t.y) > 2) {
+          setTileMsg(TILE_ERROR_LABEL.too_far);
+          return true;
+        }
+        void postInstanceRef.current("open_chest");
         return true;
       }
       return false;
@@ -1514,9 +1634,12 @@ export default function WorldBoxClient() {
         canvas.setPointerCapture(e.pointerId);
         return;
       }
-      if (space === "world") {
+      if (space === "world" || parseInstanceSpace(space)?.kind === "cave") {
         const t = toTile(e);
-        if (!handleMobTap(t)) handleTileTap(t);
+        if (!handleMobTap(t)) {
+          if (space === "world") handleTileTap(t);
+          else handleCaveTap(t);
+        }
       }
     };
     const onPointerMove = (e: PointerEvent) => {
@@ -1843,6 +1966,40 @@ export default function WorldBoxClient() {
       void pollOthers();
     };
     warpActionRef.current = doWarp;
+    /** インスタンス空間（洞窟など）への遷移。入口の踏破で発火する。 */
+    const warpToInstance = (target: string, entry: { x: number; y: number }) => {
+      if (target === space) return;
+      if (space === "world") worldReturn = { x: player.x, y: player.y };
+      space = target;
+      setSpaceUi(target);
+      const inst = parseInstanceSpace(target);
+      setStatusText(inst?.kind === "cave" ? `洞窟 B${(inst.layer ?? 0) + 1}` : "インスタンス");
+      lastStation = null;
+      setStationUi(null);
+      setBoardOpen(false);
+      setGuildBoardOpen(false);
+      placePlayer(entry.x, entry.y);
+      spawnBurst(fxSys, "warp", player.x, player.y - 0.3);
+      playWbSe("warp");
+      void pollOthers();
+      if (inst?.kind === "cave") {
+        void refreshCaveStateRef.current(target);
+        void refreshMobsRef.current();
+      }
+    };
+    /** 構造物（入口など）をタイル座標で探す（自チャンク+隣接）。 */
+    const structureAt = (tx: number, ty: number): PlacedStructure | null => {
+      const ccx = Math.floor(tx / CHUNK_SIZE);
+      const ccy = Math.floor(ty / CHUNK_SIZE);
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          for (const st of structuresForChunk(MAP_SEED, ccx + dx, ccy + dy)) {
+            if (st.x === tx && st.y === ty) return st;
+          }
+        }
+      }
+      return null;
+    };
     /** 所属国への移動: サーバーが決めた移動先へそのままテレポートする。 */
     teleportActionRef.current = (x: number, y: number) => {
       if (space !== "world") {
@@ -1888,7 +2045,42 @@ export default function WorldBoxClient() {
         // ロビー行きは ≡ メニュー。ワールド側の踏むトリガーはテント入場とベッドのリスポーン設定。
         if (tilesRef.current[tileKey(tx, ty)]?.block?.itemId === "tent") doWarp("tent");
         else if (tilesRef.current[tileKey(tx, ty)]?.block?.itemId === "bed") postBedRespawn(tx, ty);
+        else {
+          const st = structureAt(tx, ty);
+          const stDef = st ? structureById(st.structureId) : null;
+          if (stDef?.kind === "entrance" && stDef.targetSpace === "cave") {
+            const c = buildCaveLayer(MAP_SEED, tx, ty, 0);
+            warpToInstance(makeInstanceSpace("cave", tx, ty, 0), { x: c.portal.x + 0.5, y: c.portal.y + 0.5 });
+          }
+        }
         return;
+      }
+      {
+        const inst = parseInstanceSpace(space);
+        if (inst?.kind === "cave") {
+          const cave = caveLayerNow();
+          if (!cave) return;
+          if (tx === cave.portal.x && ty === cave.portal.y) {
+            doWarp("world");
+            return;
+          }
+          if (cave.stairsDown && tx === cave.stairsDown.x && ty === cave.stairsDown.y) {
+            const next = buildCaveLayer(MAP_SEED, inst.entranceX, inst.entranceY, inst.layer + 1);
+            const up = next.stairsUp ?? next.portal;
+            warpToInstance(makeInstanceSpace("cave", inst.entranceX, inst.entranceY, inst.layer + 1), { x: up.x + 0.5, y: up.y + 0.5 });
+            return;
+          }
+          if (cave.stairsUp && tx === cave.stairsUp.x && ty === cave.stairsUp.y) {
+            const prev = buildCaveLayer(MAP_SEED, inst.entranceX, inst.entranceY, inst.layer - 1);
+            const down = prev.stairsDown ?? prev.portal;
+            warpToInstance(makeInstanceSpace("cave", inst.entranceX, inst.entranceY, inst.layer - 1), { x: down.x + 0.5, y: down.y + 0.5 });
+            return;
+          }
+          if (cave.onsen.some((t) => t.x === tx && t.y === ty)) {
+            void postInstanceRef.current("onsen");
+          }
+          return;
+        }
       }
       if (space === "tent") {
         if (tx === TENT_EXIT.x && ty === TENT_EXIT.y) doWarp("world");
@@ -1935,13 +2127,13 @@ export default function WorldBoxClient() {
       // モブ占有: 現在位置の footprint を移動の当たり判定へ合成する。
       // 占有の真上に立っている間は、そのモブの占有だけ通す（閉じ込め防止）。
       mobFrameBlocked = undefined;
-      if (space === "world" && mobRenders.size > 0) {
+      if ((space === "world" || parseInstanceSpace(space)?.kind === "cave") && mobRenders.size > 0) {
         const frameMobs: { key: string; size: number; x: number; y: number }[] = [];
         let standingKey: string | null = null;
         const ptx = Math.floor(player.x);
         const pty = Math.floor(player.y);
         for (const placed of mobCache) {
-          const key = mobKeyOf(placed);
+          const key = mobKeyFor(placed);
           const r = mobRenders.get(key);
           if (!r) continue;
           const cur = { key, size: placed.size, x: Math.floor(r.wx), y: Math.floor(r.wy) };
@@ -2021,12 +2213,12 @@ export default function WorldBoxClient() {
       // モブ接触: 占有範囲までチェビシェフ距離1以内を接触とする。
       // 敵対は接触開始時（継続中は1秒間隔）だけ軽いノックバック＋hit バーストを出し、
       // ダメージはサーバー（/api/worldbox/vitals）が検証して profile の HP に適用する。
-      if (space === "world") {
+      if (space === "world" || parseInstanceSpace(space)?.kind === "cave") {
         let contact: { placed: PlacedMob; key: string; dist: number; cx: number; cy: number } | null = null;
         const ptx = Math.floor(player.x);
         const pty = Math.floor(player.y);
         for (const placed of mobCache) {
-          const key = mobKeyOf(placed);
+          const key = mobKeyFor(placed);
           const r = mobRenders.get(key);
           if (!r) continue;
           const cx = Math.floor(r.wx);
@@ -2200,6 +2392,47 @@ export default function WorldBoxClient() {
         }
       }
 
+      // 構造物（入口・遺構）: 決定的配置をそのまま描く。入口は踏むと遷移する。
+      {
+        const ccx0 = Math.floor(tx0 / CHUNK_SIZE);
+        const ccx1 = Math.floor(tx1 / CHUNK_SIZE);
+        const ccy0 = Math.floor(ty0 / CHUNK_SIZE);
+        const ccy1 = Math.floor(ty1 / CHUNK_SIZE);
+        for (let ccy = ccy0; ccy <= ccy1; ccy++) {
+          for (let ccx = ccx0; ccx <= ccx1; ccx++) {
+            for (const st of structuresForChunk(MAP_SEED, ccx, ccy)) {
+              const stDef = structureById(st.structureId);
+              const sx = Math.round(toScreenX(st.x));
+              const sy = Math.round(toScreenY(st.y));
+              if (stDef?.kind === "entrance") {
+                ctx.fillStyle = "#4a4a55";
+                ctx.fillRect(sx + 2, sy + 4, TILE - 4, TILE - 4);
+                ctx.fillStyle = "#0a0a10";
+                ctx.beginPath();
+                ctx.arc(sx + TILE / 2, sy + TILE - 6, TILE * 0.26, Math.PI, 0);
+                ctx.rect(sx + TILE / 2 - TILE * 0.26, sy + TILE - 6, TILE * 0.52, 4);
+                ctx.fill();
+              } else {
+                ctx.fillStyle = "rgba(120,116,100,0.9)";
+                ctx.fillRect(sx + 6, sy + 8, TILE - 12, TILE - 10);
+                ctx.fillStyle = "rgba(90,86,70,0.9)";
+                ctx.fillRect(sx + 4, sy + 5, TILE - 8, 4);
+              }
+              if (Math.hypot(player.x - (st.x + 0.5), player.y - (st.y + 0.5)) <= 5) {
+                ctx.font = "11px sans-serif";
+                ctx.textAlign = "center";
+                ctx.fillStyle = "rgba(10,10,14,0.65)";
+                const label = stDef?.name ?? "";
+                const w = ctx.measureText(label).width + 10;
+                ctx.fillRect(sx + TILE / 2 - w / 2, sy - 16, w, 14);
+                ctx.fillStyle = "#fff";
+                ctx.fillText(label, sx + TILE / 2, sy - 5);
+              }
+            }
+          }
+        }
+      }
+
       // タイル上書きの重ね描き（畑・切り株・作物の成長段階）
       for (let ty = ty0; ty <= ty1; ty++) {
         for (let tx = tx0; tx <= tx1; tx++) {
@@ -2317,7 +2550,9 @@ export default function WorldBoxClient() {
         ctx.imageSmoothingEnabled = false;
         for (let ty = ly0; ty <= ly1; ty++) {
           for (let tx = lx0; tx <= lx1; tx++) {
-            const id = space === "tent" ? tentTileAt(indoor.tiles, tx, ty) : lobbyTileAt(indoor.tiles, tx, ty);
+            const id = parseInstanceSpace(space)
+              ? indoor.tiles[ty * indoor.width + tx] ?? 0
+              : space === "tent" ? tentTileAt(indoor.tiles, tx, ty) : lobbyTileAt(indoor.tiles, tx, ty);
             if (id === L_VOID) continue; // 図形の外は背景のまま
             const sx = lobbyOx + tx * TILE;
             const sy = lobbyOy + ty * TILE;
@@ -2417,24 +2652,25 @@ export default function WorldBoxClient() {
           ctx.fillRect(bxHp, byHp, bw * Math.max(0, hpFrac), bh2);
         }
       };
-      if (space === "world") {
+      if (space === "world" || parseInstanceSpace(space)?.kind === "cave") {
         const nowMs = Date.now();
         const isNight = isNightPhase(phaseAtTime(nowMs / 1000));
         const vx0 = Math.floor(cam.x - cw / TILE / 2) - 3;
         const vy0 = Math.floor(cam.y - ch / TILE / 2) - 3;
         const vx1 = Math.ceil(cam.x + cw / TILE / 2) + 3;
         const vy1 = Math.ceil(cam.y + ch / TILE / 2) + 3;
-        const cacheKey = `${vx0 >> 5},${vy0 >> 5},${vx1 >> 5},${vy1 >> 5},${isNight ? 1 : 0}`;
+        const caveNow = caveLayerNow();
+        const cacheKey = caveNow ? `cave:${space}` : `${vx0 >> 5},${vy0 >> 5},${vx1 >> 5},${vy1 >> 5},${isNight ? 1 : 0}`;
         if (cacheKey !== mobCacheKey) {
           mobCacheKey = cacheKey;
-          mobCache = visibleMobs(MAP_SEED, vx0, vy0, vx1, vy1, isNight);
-          const keys = new Set(mobCache.map((m) => mobKeyOf(m)));
+          mobCache = caveNow ? [...caveNow.mobs] : visibleMobs(MAP_SEED, vx0, vy0, vx1, vy1, isNight);
+          const keys = new Set(mobCache.map((m) => mobKeyFor(m)));
           for (const k of [...mobRenders.keys()]) if (!keys.has(k)) mobRenders.delete(k);
         }
         for (const placed of mobCache) {
           const def = mobById(placed.mobId);
           if (!def) continue;
-          const key = mobKeyOf(placed);
+          const key = mobKeyFor(placed);
           const hpNow = mobHpNow(def, mobStatesRef.current[key] ?? null, nowMs);
           if (!hpNow.alive) {
             // 死んでいる間は見た目状態を捨てる（復活時はアンカーでポップして出る）
@@ -2538,11 +2774,51 @@ export default function WorldBoxClient() {
         }
       }
       if (space !== "world") {
+        const caveDraw = caveLayerNow();
         for (const o of indoorData().objects) {
           if (FLAT_LOBBY_SPRITES.has(o.sprite)) continue;
           const sx = lobbyOx + o.x * TILE;
           const sy = lobbyOy + o.y * TILE;
           if (sx < -TILE * 4 || sy < -TILE * 4 || sx > cw + TILE * 4 || sy > ch + TILE * 4) continue;
+          if (caveDraw && (o.sprite === "cave_chest" || caveDraw.veins.some((v) => v.objectId === o.sprite && v.x === o.x && v.y === o.y))) {
+            // 洞窟の鉱脈・宝箱は色つき図形で描く（枯渇中は鉱脈を出さない）
+            const vein = caveDraw.veins.find((v) => v.x === o.x && v.y === o.y);
+            const takenAt = vein ? caveStateRef.current.veins[vein.key] ?? 0 : caveStateRef.current.chest;
+            const def = specialObjectById(o.sprite);
+            const respawnMs = o.sprite === "cave_chest" ? 6 * 60 * 60 * 1000 : def?.respawnMs ?? 0;
+            if (vein && takenAt > 0 && Date.now() - takenAt < respawnMs) continue;
+            const colors: Record<string, string> = {
+              coal_vein: "#3a3a42", copper_vein: "#c47b4a", rare_vein: "#e8c85a",
+              crystal_cluster: "#9fe8ff", mithril_vein: "#b9f2d8", cave_chest: "#8a5a2b",
+            };
+            const color = colors[o.sprite] ?? "#999";
+            const opened = o.sprite === "cave_chest" && takenAt > 0 && Date.now() - takenAt < respawnMs;
+            drawList.push({
+              y: o.y + o.h,
+              draw: () => {
+                const bx = Math.round(lobbyOx + o.x * TILE);
+                const by = Math.round(lobbyOy + o.y * TILE);
+                if (o.sprite === "cave_chest") {
+                  ctx.fillStyle = opened ? "#5d4020" : color;
+                  ctx.fillRect(bx + 4, by + 10, TILE - 8, TILE - 14);
+                  ctx.fillStyle = "#e8c85a";
+                  ctx.fillRect(bx + 4, by + 16, TILE - 8, 3);
+                } else {
+                  ctx.fillStyle = "#55565f";
+                  ctx.fillRect(bx + 2, by + 2, TILE - 4, TILE - 4);
+                  ctx.fillStyle = color;
+                  ctx.beginPath();
+                  ctx.moveTo(bx + TILE * 0.5, by + 5);
+                  ctx.lineTo(bx + TILE - 7, by + TILE * 0.55);
+                  ctx.lineTo(bx + TILE * 0.62, by + TILE - 6);
+                  ctx.lineTo(bx + 7, by + TILE * 0.6);
+                  ctx.closePath();
+                  ctx.fill();
+                }
+              },
+            });
+            continue;
+          }
           drawList.push({ y: o.y + o.h, draw: () => drawLobbySprite(o) });
         }
         // 店員NPC（あごむに。静止・当たり判定なし）
@@ -2569,6 +2845,18 @@ export default function WorldBoxClient() {
       });
       drawList.sort((a, b) => a.y - b.y);
       for (const d of drawList) d.draw();
+
+      // 洞窟の闇: 明かりの半径の外を暗くする（松明 6 / ランプ 9 タイル）。
+      if (parseInstanceSpace(space)?.kind === "cave") {
+        const radius = lightRadiusTiles(invRef.current?.items) * TILE;
+        const cxp = Math.round(lobbyOx + player.x * TILE);
+        const cyp = Math.round(lobbyOy + player.y * TILE);
+        const grad = ctx.createRadialGradient(cxp, cyp, radius * 0.55, cxp, cyp, radius);
+        grad.addColorStop(0, "rgba(5,6,14,0)");
+        grad.addColorStop(1, "rgba(5,6,14,0.93)");
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, cw, ch);
+      }
 
       // 入水/出水の波紋（広がって消える輪）
       if (space === "world" && splashes.length > 0) {
@@ -2673,12 +2961,13 @@ export default function WorldBoxClient() {
       }
       drawParticles(false);
 
-      // 道具スイングと風切り（自分のタップへの応答。ワールドのみ）
-      if (space === "world") {
+      // 道具スイングと風切り（自分のタップへの応答）
+      if (space === "world" || parseInstanceSpace(space)?.kind === "cave") {
         const sk = swingProgress(swing.startedAt, now);
         if (sk < 1) {
-          const cxp = toScreenX(player.x);
-          const cyp = toScreenY(player.y) - TILE * 0.45;
+          const inCave = space !== "world";
+          const cxp = inCave ? Math.round(lobbyOx + player.x * TILE) : toScreenX(player.x);
+          const cyp = (inCave ? Math.round(lobbyOy + player.y * TILE) : toScreenY(player.y)) - TILE * 0.45;
           const ang = attackSwingAngle(sk);
           ctx.save();
           ctx.translate(cxp, cyp);

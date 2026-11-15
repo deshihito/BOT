@@ -14,7 +14,8 @@ import { WORLD_COORD_LIMIT } from "./mapgen";
 export const SAVE_VERSION = 6;
 
 /** プレイヤーがいる空間。 */
-export type SaveSpace = "world" | "lobby" | "tent";
+/** 既存3空間 + インスタンス空間 ID（"cave:x,y:層" 等）。 */
+export type SaveSpace = string;
 
 /** プレイヤー状態（位置と空間）。座標はタイル単位の浮動小数。 */
 export type WorldBoxState = {
@@ -29,8 +30,18 @@ function clampPos(v: number, max: number): number {
   return Math.max(0.5, Math.min(max - 0.5, v));
 }
 
+// インスタンス空間 ID の判定（instances.ts の正規表現を複製。このファイルは
+// 単体でトランスパイルされるため import しない）。
+const SAVE_INSTANCE_SPACE_RE = /^(cave|ruins|dungeon):(-?\d+),(-?\d+):(\d+)$/;
+function instanceKindOf(space: string): string | null {
+  const m = SAVE_INSTANCE_SPACE_RE.exec(space);
+  return m ? m[1] : null;
+}
+
 function sanitizeSpace(raw: unknown): SaveSpace {
-  return raw === "lobby" ? "lobby" : raw === "tent" ? "tent" : "world";
+  if (raw === "lobby" || raw === "tent") return raw;
+  if (typeof raw === "string" && instanceKindOf(raw)) return raw;
+  return "world";
 }
 
 /**
@@ -40,6 +51,7 @@ function sanitizeSpace(raw: unknown): SaveSpace {
 function clampToSpace(space: SaveSpace, x: number, y: number): { x: number; y: number } {
   if (space === "lobby") return { x: clampPos(x, LOBBY_W), y: clampPos(y, LOBBY_H) };
   if (space === "tent") return { x: clampPos(x, TENT_W), y: clampPos(y, TENT_H) };
+  if (instanceKindOf(space) === "cave") return { x: clampPos(x, 64), y: clampPos(y, 64) }; // CAVE_W/H = 64
   const lim = (v: number) => Math.max(-WORLD_COORD_LIMIT, Math.min(WORLD_COORD_LIMIT, v));
   return { x: lim(x), y: lim(y) };
 }

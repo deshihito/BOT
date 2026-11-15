@@ -30,11 +30,16 @@ const MAX_VELOCITY = 16;
 export const PRESENCE_NAME_MAX = 24;
 
 /** プレイヤーがいる空間。ワールドとロビーでプレゼンスは混ざらない。 */
-export type PresenceSpace = "world" | "lobby" | "tent";
+/** 既存3空間 + インスタンス空間 ID（"cave:x,y:層" 等）。 */
+export type PresenceSpace = string;
 
 /** 空間の指定として解釈する。不正な値はワールドに寄せる。 */
+const PRESENCE_INSTANCE_SPACE_RE = /^(cave|ruins|dungeon):(-?\d+),(-?\d+):(\d+)$/;
+
 export function sanitizePresenceSpace(raw: unknown): PresenceSpace {
-  return raw === "lobby" ? "lobby" : raw === "tent" ? "tent" : "world";
+  if (raw === "lobby" || raw === "tent") return raw;
+  if (typeof raw === "string" && PRESENCE_INSTANCE_SPACE_RE.test(raw)) return raw;
+  return "world";
 }
 
 export type Heartbeat = {

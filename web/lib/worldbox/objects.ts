@@ -104,6 +104,10 @@ export const SPECIAL_OBJECTS: readonly SpecialObjectDef[] = [
     { itemId: "diamond", min: 1, max: 1, chance: 0.18 },
     { itemId: "star_shard", min: 1, max: 1, chance: 0.08 },
   ] },
+  { id: "mithril_vein", name: "ミスリルの鉱脈", interaction: "mine", biomes: [], density: 0, respawnMs: 6 * HOUR, solid: true, tool: "pickaxe", minTier: 3, loot: [
+    { itemId: "mithril", min: 1, max: 2, chance: 1 },
+    { itemId: "diamond", min: 1, max: 1, chance: 0.12 },
+  ] },
   { id: "sulfur_vent", name: "硫黄の噴気", interaction: "harvest", biomes: ["highland", "dryland"], density: 0.3, respawnMs: 2 * HOUR, solid: false, loot: [
     { itemId: "sulfur", min: 1, max: 3, chance: 1 },
   ] },

@@ -15,6 +15,7 @@ import {
   MOB_ATTACK_MAX_DISTANCE, type MobState,
 } from "@/lib/worldbox/combat";
 import { isMobsEnabled, loadMobState, loadMobStates, storeMobState } from "@/lib/worldbox/mobs-online";
+import { buildCaveLayer, parseInstanceSpace } from "@/lib/worldbox/instances";
 
 export const runtime = "nodejs";
 
@@ -78,6 +79,24 @@ export async function GET(request: Request) {
   const x1 = clampIntParam(url.searchParams.get("x1"), x0, Math.min(WORLD_COORD_LIMIT, x0 + MAX_RECT_SPAN - 1), x0);
   const y1 = clampIntParam(url.searchParams.get("y1"), y0, Math.min(WORLD_COORD_LIMIT, y0 + MAX_RECT_SPAN - 1), y0);
   const now = Date.now();
+  const spaceParam = url.searchParams.get("space");
+  const instGet = spaceParam ? parseInstanceSpace(spaceParam) : null;
+  if (instGet?.kind === "cave") {
+    const cave = buildCaveLayer(MAP_SEED, instGet.entranceX, instGet.entranceY, instGet.layer);
+    const allC = await loadMobStates();
+    const statesC: Record<string, MobState> = {};
+    for (const placed of cave.mobs) {
+      const key = `${spaceParam}|${mobKeyOf(placed)}`;
+      const st = allC[key];
+      if (!st) continue;
+      if (st.deadUntil !== undefined && now >= st.deadUntil) continue;
+      statesC[key] = st;
+    }
+    return NextResponse.json(
+      { states: statesC, selfId: presenceIdFor(sessionOwnerKey(session)) },
+      { headers: NO_STORE },
+    );
+  }
   const isNight = isNightPhase(phaseAtTime(now / 1000));
   const all = await loadMobStates();
   const states: Record<string, MobState> = {};
@@ -111,7 +130,7 @@ export async function POST(request: Request) {
   } catch {
     return NextResponse.json({ error: "invalid_request" }, { status: 400, headers: NO_STORE });
   }
-  const fields = (body ?? {}) as { action?: unknown; mobId?: unknown; x?: unknown; y?: unknown; px?: unknown; py?: unknown };
+  const fields = (body ?? {}) as { action?: unknown; mobId?: unknown; x?: unknown; y?: unknown; px?: unknown; py?: unknown; space?: unknown };
   if (fields.action !== "attack" || typeof fields.x !== "number" || typeof fields.y !== "number") {
     return NextResponse.json({ error: "invalid_request" }, { status: 400, headers: NO_STORE });
   }
@@ -124,19 +143,45 @@ export async function POST(request: Request) {
   const def = mobById(fields.mobId);
   const x = Math.floor(fields.x);
   const y = Math.floor(fields.y);
-  if (!def || def.instanceOnly || x < -WORLD_COORD_LIMIT || y < -WORLD_COORD_LIMIT || x > WORLD_COORD_LIMIT || y > WORLD_COORD_LIMIT) {
+  const instPost = typeof fields.space === "string" ? parseInstanceSpace(fields.space) : null;
+  const caveSpace = instPost?.kind === "cave" ? (fields.space as string) : null;
+  if (!def || x < -WORLD_COORD_LIMIT || y < -WORLD_COORD_LIMIT || x > WORLD_COORD_LIMIT || y > WORLD_COORD_LIMIT) {
     return NextResponse.json({ error: "unknown_mob" }, { status: 400, headers: NO_STORE });
   }
   const now = Date.now();
-  const isNight = isNightPhase(phaseAtTime(now / 1000));
-  if (!mobExistsAt(MAP_SEED, def.id, x, y, isNight)) {
-    return NextResponse.json({ error: "unknown_mob" }, { status: 400, headers: NO_STORE });
-  }
   const ownerKey = sessionOwnerKey(session);
   const placed = { mobId: def.id, x, y, size: def.size, biome: "plains" as const };
+  let keyPrefix = "";
+  if (caveSpace && instPost) {
+    // 洞窟内モブ: 配置は instances の決定的生成が正。地表配置の検証は使わない。
+    if (def.instanceOnly && def.instanceOnly !== "cave") {
+      return NextResponse.json({ error: "unknown_mob" }, { status: 400, headers: NO_STORE });
+    }
+    const cave = buildCaveLayer(MAP_SEED, instPost.entranceX, instPost.entranceY, instPost.layer);
+    if (!cave.mobs.some((m) => m.mobId === def.id && m.x === x && m.y === y)) {
+      return NextResponse.json({ error: "unknown_mob" }, { status: 400, headers: NO_STORE });
+    }
+    keyPrefix = `${caveSpace}|`;
+  } else {
+    if (def.instanceOnly) {
+      return NextResponse.json({ error: "unknown_mob" }, { status: 400, headers: NO_STORE });
+    }
+    const isNight = isNightPhase(phaseAtTime(now / 1000));
+    if (!mobExistsAt(MAP_SEED, def.id, x, y, isNight)) {
+      return NextResponse.json({ error: "unknown_mob" }, { status: 400, headers: NO_STORE });
+    }
+  }
 
   // 隣接検証（本人の位置が分かる場合だけ、占有範囲までの距離）
-  const pos = await actorWorldPosition(ownerKey, reported);
+  const pos = caveSpace
+    ? await (async () => {
+        const selfId = presenceIdFor(ownerKey);
+        const entries = await listPresence();
+        const entry = entries.find((e) => e.id === selfId && e.space === caveSpace && now - e.ts <= 15_000);
+        if (entry) return { x: entry.x, y: entry.y };
+        return reported;
+      })()
+    : await actorWorldPosition(ownerKey, reported);
   if (pos) {
     const dist = mobDistance(Math.floor(pos.x), Math.floor(pos.y), placed);
     if (dist > MOB_ATTACK_MAX_DISTANCE) {
@@ -144,7 +189,7 @@ export async function POST(request: Request) {
     }
   }
 
-  const key = mobKeyOf(placed);
+  const key = keyPrefix + mobKeyOf(placed);
   const state = await loadMobState(key);
   const profile = await loadProfile(ownerKey);
   const result = applyMobAttack(def, state, playerAttack(profile.items), now, Math.random, key);
