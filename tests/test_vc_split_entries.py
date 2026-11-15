@@ -32,15 +32,14 @@ NEW_MUSIC = [
     ("キュー表示", "music_queue"),
     ("楽曲検索・追加", "music_search"),
     ("音声ファイルID一覧", "music_files"),
-      ("ラジオ", "radio_panel"),
-  
+    ("ラジオ", "radio_panel"),
 ]
 
 
 class GenreListTest(unittest.TestCase):
     def test_total_is_45(self):
         # 44 に gvc メンバー確認 (gvc_members) が加わり 45。
-              # ラジオ (radio_panel) の追加で 46。
+        # ラジオ (radio_panel) の追加で 46。
         total = sum(len(items) for items in VOICE_ACTIONS_BY_GENRE.values())
         self.assertEqual(total, 46)
 
