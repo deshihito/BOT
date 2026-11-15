@@ -13,7 +13,7 @@ import type { EconomyOp } from "@/lib/worldbox/economy-bridge";
 import { ITEMS, RECIPES, itemById, sellPrice } from "@/lib/worldbox/items";
 import { dailyPriceFor, dailyStockForGenre, genreById, isShopExcluded, itemsForGenre, shopDayKeyOf, type ShopGenreId } from "@/lib/worldbox/shops";
 import type { LobbyStation } from "@/lib/worldbox/lobby";
-import type { PlayerProfile } from "@/lib/worldbox/profile";
+import { ENHANCE_BASE_COST, ENHANCE_MATERIALS, ENHANCE_MAX_LEVEL, type PlayerProfile } from "@/lib/worldbox/profile";
 import type { SaveSpace } from "@/lib/worldbox/save";
 import { playWbSe, type WbSeName } from "@/lib/worldbox/sound";
 
@@ -362,6 +362,40 @@ export default function WorldBoxEconomyPanel({ space, station, genre, onClose }:
               </div>
             );
           })}
+        </div>
+      )}
+
+      {activeTab === "craft" && (
+        <div style={{ marginTop: 10, borderTop: "1px solid rgba(255,255,255,0.14)", paddingTop: 8 }}>
+          <strong style={{ fontSize: 13 }}>道具の強化</strong>
+          {Object.entries(profile.items)
+            .filter(([itemId, n]) => n > 0 && itemById(itemId)?.tool)
+            .map(([itemId]) => {
+              const def = itemById(itemId);
+              const level = profile.enhance[itemId] ?? 0;
+              const material = def?.tier ? ENHANCE_MATERIALS[def.tier] : undefined;
+              return (
+                <div key={itemId} style={row}>
+                  <ItemIcon id={itemId} />
+                  <strong>{def?.name ?? itemId}</strong>
+                  <span className="muted">{"+".repeat(level) || "未強化"}</span>
+                  {material && level < ENHANCE_MAX_LEVEL && (
+                    <span className="muted">
+                      {itemById(material.itemId)?.name}×{material.count}（所持 {profile.items[material.itemId] ?? 0}）+ {ENHANCE_BASE_COST * (level + 1)}
+                    </span>
+                  )}
+                  <span style={{ flex: 1 }} />
+                  {level < ENHANCE_MAX_LEVEL ? (
+                    <button type="button" style={btn} disabled={busy}
+                      onClick={() => void act({ action: "enhance", itemId }, () => `${def?.name ?? "道具"}を強化した`)}>
+                      強化する
+                    </button>
+                  ) : (
+                    <span className="muted">最大</span>
+                  )}
+                </div>
+              );
+            })}
         </div>
       )}
 

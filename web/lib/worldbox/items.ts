@@ -26,6 +26,8 @@ export type ItemDef = {
   heal?: number;
   /** 使うと毒を治す（薬・一部の飲み物）。 */
   curePoison?: boolean;
+  /** 食べると付く持続効果（warm=空腹が減りにくい / alert=満腹時に少しずつ回復）。 */
+  buff?: { kind: "warm" | "alert"; minutes: number };
   /** 道具の種類（tool のみ）。 */
   tool?: ToolKind;
   /** 道具の素材段位 1=木 2=石 3=鉄（tool のみ）。 */
@@ -236,7 +238,7 @@ export const ITEMS: readonly ItemDef[] = [
   { id: "grilled_fish", name: "焼き魚", desc: "焼いた魚", category: "food", price: 30, hunger: 30 },
   { id: "omelette", name: "オムレツ", desc: "たまご料理", category: "food", price: 32, hunger: 35 },
   { id: "baked_potato", name: "ベイクドポテト", desc: "焼いたジャガイモ", category: "food", price: 20, hunger: 25 },
-  { id: "stew", name: "シチュー", desc: "具だくさんの煮込み", category: "food", price: 70, hunger: 65, heal: 10 },
+  { id: "stew", name: "シチュー", desc: "具だくさんの煮込み", category: "food", price: 70, hunger: 65, heal: 10, buff: { kind: "warm", minutes: 10 } },
   // ---- 種（追加分） -------------------------------------------------------
   { id: "onion_seed", name: "タマネギの種", desc: "畑に植える種", category: "seed", price: 8 },
   { id: "soybean_seed", name: "大豆の種", desc: "畑に植える種", category: "seed", price: 8 },
@@ -317,7 +319,7 @@ export const ITEMS: readonly ItemDef[] = [
   { id: "pickles", name: "漬物", desc: "塩漬けの野菜", category: "food", price: 35, hunger: 18 },
   { id: "fruit_punch", name: "フルーツポンチ", desc: "果物の盛り合わせ", category: "food", price: 88, hunger: 38 },
   { id: "veggie_soup", name: "野菜スープ", desc: "温かいスープ", category: "food", price: 64, hunger: 36 },
-  { id: "honey_tea", name: "はちみつティー", desc: "甘い温かい飲み物。毒も流す", category: "food", price: 75, hunger: 16, heal: 5, curePoison: true },
+  { id: "honey_tea", name: "はちみつティー", desc: "甘い温かい飲み物。毒も流す", category: "food", price: 75, hunger: 16, heal: 5, curePoison: true, buff: { kind: "alert", minutes: 5 } },
   { id: "cheese", name: "チーズ", desc: "発酵した乳製品", category: "food", price: 46, hunger: 20 },
   // ---- 合成品（追加分2） -------------------------------------------------------
   { id: "ceramic_vase", name: "陶器の壺", desc: "焼き物の壺", category: "crafted", price: 125 },

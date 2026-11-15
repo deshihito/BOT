@@ -280,7 +280,7 @@ export async function POST(request: Request) {
     let cx = pos.x;
     let cy = pos.y;
     let targets: PlacedMob[] = [];
-    const baseAttack = playerAttack(profile.items) * (profile.role === "blade" ? 1.25 : 1);
+    const baseAttack = playerAttack(profile.items, profile.enhance) * (profile.role === "blade" ? 1.25 : 1);
     if (skillId === "sweep" || skillId === "whirlwind") {
       targets = await mobsInSpace(ownerKey, space, pos.x, pos.y, skill.radius + 2);
       targets = targets.filter((m) => Math.hypot(m.x + 0.5 - pos.x, m.y + 0.5 - pos.y) <= skill.radius + m.size * 0.5);

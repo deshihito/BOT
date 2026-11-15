@@ -10,7 +10,10 @@ import {
   enqueueEconomyOp, enqueueEconomyOpOnce, isEconomyEnabled, readUserBalance,
 } from "@/lib/worldbox/economy-bridge-online";
 import { TENT_MAX_TIER, TENT_TIERS } from "@/lib/worldbox/tent";
-import { moveSlot, swapSlots, type PlayerProfile } from "@/lib/worldbox/profile";
+import {
+  countItem, ENHANCE_BASE_COST, ENHANCE_MATERIALS, ENHANCE_MAX_LEVEL, moveSlot, removeItem,
+  swapSlots, type PlayerProfile,
+} from "@/lib/worldbox/profile";
 import { itemById } from "@/lib/worldbox/items";
 import { findPresenceOwnerKey, isPresenceEnabled } from "@/lib/worldbox/presence-online";
 import { checkBuyGenre, checkBuySold, checkDailyStock, dailyPriceFor, shopDayKeyOf } from "@/lib/worldbox/shops";
@@ -244,6 +247,34 @@ async function handlePost(request: Request, session: AuthedSession) {
         return saveAndReturn(withXp, { itemName: result.item.name });
       }
       return saveAndReturn(result, result.ok ? { itemName: result.item.name } : {});
+    }
+    case "enhance": {
+      // 道具強化: 鍛冶の前で、素材とコインを払って道具のレベルを上げる（最大3）。
+      const gate = coinGate();
+      if ("response" in gate) return gate.response;
+      const place = await stationGate("smith", "not_at_workbench");
+      if (place) return place;
+      const def = itemById(data.itemId as string);
+      if (!def || !def.tool) return errorResponse("unknown_item");
+      if ((current.items[def.id] ?? 0) <= 0) return errorResponse("not_enough_items");
+      const level = current.enhance[def.id] ?? 0;
+      if (level >= ENHANCE_MAX_LEVEL) return statusError("max_level", 409);
+      const material = ENHANCE_MATERIALS[def.tier ?? 1] ?? ENHANCE_MATERIALS[1];
+      if (countItem(current, material.itemId) < material.count) return errorResponse("not_enough_items");
+      const cost = ENHANCE_BASE_COST * (level + 1);
+      const balance = await readUserBalance(gate.discordId);
+      if (balance === null) return statusError("economy_unavailable", 503);
+      if (balance < cost) return statusError("insufficient_balance", 409);
+      const removedMat = removeItem(current, material.itemId, material.count);
+      if (!removedMat) return errorResponse("not_enough_items");
+      return saveWithCoin(
+        {
+          ok: true,
+          profile: { ...removedMat, enhance: { ...removedMat.enhance, [def.id]: level + 1 } },
+          coin: { kind: "spend", amount: cost, reason: "tool_enhance" },
+        },
+        gate.discordId,
+      );
     }
     case "craft": {
       const place = await stationGate("smith", "not_at_workbench");

@@ -33,7 +33,7 @@ export const HUNGER_MAX = 100;
 export const HP_MAX = 100;
 
 /** 状態異常の種類。poison は時間で HP が減り、解毒で消える。 */
-export type StatusKind = "poison";
+export type StatusKind = "poison" | "warm" | "alert";
 /** 状態異常1件（終了時刻つき）。 */
 export type StatusEffect = { kind: StatusKind; until: number };
 /** ワールド座標のリスポーン候補（タイル単位の浮動小数）。 */
@@ -91,6 +91,8 @@ export type PlayerProfile = {
   reviveMark: { space: string; at: number } | null;
   /** テント（個人空間）の拡張段階 0..2。 */
   tentTier: number;
+  /** 道具の強化レベル（アイテム ID → 0..3）。 */
+  enhance: Record<string, number>;
   /** 蘇生で戻される先（次回 sync でクライアントが適用し、サーバーが消す）。 */
   pendingTeleport: { space: string; x: number; y: number } | null;
 };
@@ -107,6 +109,7 @@ export const DEFAULT_PROFILE: PlayerProfile = {
   reviveMark: null,
   pendingTeleport: null,
   tentTier: 0,
+  enhance: {},
   coins: STARTING_COINS,
   hunger: HUNGER_MAX,
   hp: HP_MAX,
@@ -232,7 +235,7 @@ export function parseProfile(raw: unknown): PlayerProfile {
   }
   const inv = invOf({
     coins: 0, hunger: 0, hp: HP_MAX, status: [], vitalAt: 0, respawn: null, restPoint: null, lastDamageAt: 0, deaths: 0, stealActorAt: 0, stealTargetAt: 0,
-    role: "free", mastery: {}, skillAt: {}, tauntUntil: 0, reviveMark: null, pendingTeleport: null, tentTier: 0,
+    role: "free", mastery: {}, skillAt: {}, tauntUntil: 0, reviveMark: null, pendingTeleport: null, tentTier: 0, enhance: {},
     items: data.items as Record<string, number>,
     hotbar: data.hotbar as ItemSlot[],
     storage: data.storage as ItemSlot[],
@@ -259,6 +262,7 @@ export function parseProfile(raw: unknown): PlayerProfile {
     reviveMark: parseReviveMark(data.reviveMark),
     pendingTeleport: parsePendingTeleport(data.pendingTeleport),
     tentTier: clampInt(data.tentTier, 0, 2, 0),
+    enhance: parseEnhance(data.enhance),
   };
 }
 
@@ -297,15 +301,40 @@ function parsePendingTeleport(raw: unknown): { space: string; x: number; y: numb
   return { space: v.space.slice(0, 64), x: v.x, y: v.y };
 }
 
+/** 強化レベルの復元（道具以外・範囲外は落とす）。 */
+export function parseEnhance(raw: unknown): Record<string, number> {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const out: Record<string, number> = {};
+  for (const [itemId, level] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof level !== "number" || !Number.isFinite(level)) continue;
+    const lv = Math.floor(level);
+    if (lv <= 0) continue;
+    out[itemId] = Math.min(ENHANCE_MAX_LEVEL, lv);
+  }
+  return out;
+}
+
+/** 道具強化の最大レベル。 */
+export const ENHANCE_MAX_LEVEL = 3;
+/** 強化1回のコイン価格（レベル+1 ごとにこの額 × (現在レベル+1)）。暫定。 */
+export const ENHANCE_BASE_COST = 150;
+/** 強化に要る素材（道具の tier ごと）。 */
+export const ENHANCE_MATERIALS: Record<number, { itemId: string; count: number }> = {
+  1: { itemId: "wood", count: 2 },
+  2: { itemId: "stone", count: 2 },
+  3: { itemId: "iron_ingot", count: 1 },
+  4: { itemId: "mithril", count: 1 },
+};
+
 function parseStatus(raw: unknown): StatusEffect[] {
   if (!Array.isArray(raw)) return [];
   const out: StatusEffect[] = [];
   for (const v of raw) {
     if (!v || typeof v !== "object" || Array.isArray(v)) continue;
     const e = v as { kind?: unknown; until?: unknown };
-    if (e.kind !== "poison") continue;
+    if (e.kind !== "poison" && e.kind !== "warm" && e.kind !== "alert") continue;
     if (typeof e.until !== "number" || !Number.isFinite(e.until) || e.until <= 0) continue;
-    out.push({ kind: "poison", until: Math.floor(e.until) });
+    out.push({ kind: e.kind, until: Math.floor(e.until) });
   }
   return out.slice(0, 4);
 }
@@ -345,6 +374,7 @@ export function serializeProfile(profile: PlayerProfile): string {
     reviveMark: parseReviveMark(profile.reviveMark),
     pendingTeleport: parsePendingTeleport(profile.pendingTeleport),
     tentTier: clampInt(profile.tentTier, 0, 2, 0),
+    enhance: parseEnhance(profile.enhance),
   });
 }
 

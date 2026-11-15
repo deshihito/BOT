@@ -358,7 +358,7 @@ export function isPresenceEnabled() { return true; }
 export async function findPresenceOwnerKey(id) { return map.has(id) ? map.get(id) : null; }
 `);
 await import(presenceStubUrl); // ルートはもう presence-online を読まないため、状態だけ先に作る
-const profileSwapUrl = bundleModule(["worldbox/items.ts", "worldbox/profile.ts"], ["swapSlots", "moveSlot"]);
+const profileSwapUrl = bundleModule(["worldbox/items.ts", "worldbox/profile.ts"], ["swapSlots", "moveSlot", "countItem", "removeItem", "ENHANCE_BASE_COST", "ENHANCE_MATERIALS", "ENHANCE_MAX_LEVEL"]);
 const rolesUrl = bundleModule(["worldbox/items.ts", "worldbox/profile.ts", "worldbox/roles.ts"], ["addMasteryXp"]);
 const shopsRealUrl = bundleModule(["worldbox/items.ts", "worldbox/shops.ts"], ["checkBuyGenre", "checkBuySold", "checkDailyStock", "dailyPriceFor", "shopDayKeyOf"]);
 // 日次ローテーションは日付依存なので、このブリッジテストでは中立化する

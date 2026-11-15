@@ -290,7 +290,7 @@ export async function POST(request: Request) {
   return withUserLock(`mob:${key}`, async () => {
         const state = await loadMobState(key);
         const profile = await loadProfile(ownerKey);
-        const attackPower = playerAttack(profile.items) * (profile.role === "blade" ? 1.25 : 1);
+        const attackPower = playerAttack(profile.items, profile.enhance) * (profile.role === "blade" ? 1.25 : 1);
         const result = applyMobAttack(effDef, state, attackPower, now, Math.random, key);
         if ("error" in result) {
           return NextResponse.json({ error: result.error }, { status: 409, headers: NO_STORE });
