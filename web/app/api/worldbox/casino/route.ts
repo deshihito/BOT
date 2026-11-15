@@ -18,6 +18,7 @@ import {
   clearCasinoSession, loadCasinoSession, loadCasinoUserState, saveCasinoSession,
   saveCasinoUserState,
 } from "@/lib/worldbox/casino-session-online";
+import { recordCasinoTournamentScore } from "@/lib/worldbox/casino-tournament-online";
 import { buildEconomyOp, ECONOMY_AMOUNT_MAX, GAMBLE_PAYOUT_MAX, type EconomyOp } from "@/lib/worldbox/economy-bridge";
 import {
   enqueueEconomyOp, findEconomyOp, isEconomyEnabled, loadMyEconomyOps, readUserBalance,
@@ -139,7 +140,14 @@ async function enqueue(userKey: string, discordId: string, input: {
     Date.now(),
   );
   if (!op) return null;
-  return (await enqueueEconomyOp(op)) ? op : null;
+  const stored = await enqueueEconomyOp(op);
+  if (stored && input.kind === "gamble") {
+    // カジノ大会のスコア（純益 = 配当 - ベット）を加える。大会が
+    // 対局時間中で、遊んだ人が参加者のときだけ記録される。
+    // スコア記録の失敗はこのプレイの決済を変えない。
+    await recordCasinoTournamentScore(discordId, input.amount, input.payout ?? 0);
+  }
+  return stored ? op : null;
 }
 
 /**
