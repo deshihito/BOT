@@ -917,7 +917,7 @@ test("クライアント: 建築モード・建物描画・繁栄度が配線さ
   assert.ok(client.includes("繁栄度"), "繁栄度の表示が無い");
   assert.ok(client.includes("prosperity - a.prosperity") || client.includes("b.prosperity - a.prosperity"), "国リストが繁栄度順でない");
   // 建物は移動の当たり判定に入る（空間でマップと固体集合を切り替える）
-  assert.ok(client.includes("stepMove(activeMap(), player, vel, dt, activeBlocked())"), "建物が当たり判定に入っていない");
+  assert.ok(client.includes("stepMove(activeMap(), player, vel, dt, activeBlocked(), { swim: space === \"world\" })"), "建物が当たり判定に入っていない");
   assert.ok(client.includes("blockedRef.current"), "ワールドの固体集合に建物が入っていない");
   assert.ok(client.includes("blockedRef"), "建物の固体集合が無い");
 });

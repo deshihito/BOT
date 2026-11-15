@@ -13,10 +13,15 @@ import {
   MAP_H, MAP_SEED, MAP_W, MINIMAP_SIZE, T_DIRT, T_GRASS, T_ROCK, T_SAND, T_SNOW, T_SNOW_TREE, T_TREE, T_WATER,
   generateMap, mapSpawn, mapTileAt, sampleMinimapTiles, type TopDownMap,
 } from "@/lib/worldbox/mapgen";
-import { WALK_SPEED, findFreeNear, stepMove } from "@/lib/worldbox/move";
+import { DASH_SPEED, SWIM_DASH_SPEED, SWIM_SPEED, WALK_SPEED, findFreeNear, isWaterAt, stepMove } from "@/lib/worldbox/move";
 import { nightAmount, phaseAtTime } from "@/lib/worldbox/daynight";
 import { advanceWalkPhase, damp, moveLean, walkBob, walkSquashY } from "@/lib/worldbox/anim";
-import { SNAP_DISTANCE, predictPosition, type PresenceEntry } from "@/lib/worldbox/presence";
+import type { PresenceEntry } from "@/lib/worldbox/presence";
+import {
+  STAMINA_MAX, canDash, createStamina, createTapTracker, isStickDash, registerKeyTap, rescueStamina,
+  staminaGaugeVisible, stepStamina, type StaminaState, type StaminaUse, type TapTracker,
+} from "@/lib/worldbox/stamina";
+import { createRemoteTrack, stepRemoteTrack, updateRemoteTrack, type RemoteTrack } from "@/lib/worldbox/remote";
 import type { NationRole, NationView, NationsResponse } from "@/lib/worldbox/nations";
 import { USER_BUILDING_CAP, isSpawnPlazaTile, type BuildingType, type BuildingView } from "@/lib/worldbox/buildings";
 import {
@@ -94,12 +99,13 @@ type PlayerState = {
 };
 
 type OtherRender = {
-  entry: PresenceEntry;
-  /** 描画位置（デッドレコニング予測へ ease で寄せる）。 */
-  rx: number;
-  ry: number;
+  /** 描画位置のトラック（スナップショット予測へバネで寄せる）。 */
+  track: RemoteTrack;
   phase: number;
 };
+
+/** 移動キー（ダッシュの2度押し判定の対象）。 */
+const MOVE_KEYS = new Set(["w", "a", "s", "d", "arrowup", "arrowdown", "arrowleft", "arrowright"]);
 
 function texReady(img: HTMLImageElement | undefined): img is HTMLImageElement {
   return !!img && img.complete && img.naturalWidth > 0;
@@ -512,6 +518,17 @@ export default function WorldBoxClient() {
     const keys = new Set<string>();
     const joy = { active: false, pointerId: -1, baseX: 0, baseY: 0, dx: 0, dy: 0 };
     const others = new Map<string, OtherRender>();
+    // スタミナとダッシュ（キーの2度押し / スティックの強い倒し）
+    let stamina: StaminaState = createStamina();
+    let tapTracker: TapTracker = createTapTracker();
+    let dashKey: string | null = null;
+    /** 最後に立っていた陸の位置（水中で力尽きた際の帰還先）。 */
+    let lastLand = { x: spawn.x, y: spawn.y };
+    let wasSwimming = false;
+    /** 今フレームの泳ぎ状態（描画の沈み・波紋用）。 */
+    let playerSwimming = false;
+    /** 入水/出水時の波紋（中心・発生時刻ミリ秒）。 */
+    const splashes: { x: number; y: number; at: number }[] = [];
     let loggedIn = false;
     let disposed = false;
     let lastSaved = { x: player.x, y: player.y, at: 0 };
@@ -560,7 +577,7 @@ export default function WorldBoxClient() {
       if (choice.state) {
         space = choice.state.space;
         worldReturn = choice.state.worldReturn;
-        const free = findFreeNear(activeMap(), choice.state.x, choice.state.y, activeBlocked());
+        const free = findFreeNear(activeMap(), choice.state.x, choice.state.y, activeBlocked(), { swim: space === "world" });
         player.x = free.x;
         player.y = free.y;
         cam.x = free.x;
@@ -592,10 +609,9 @@ export default function WorldBoxClient() {
           seen.add(entry.id);
           const cur = others.get(entry.id);
           if (!cur) {
-            const p = predictPosition(entry, Date.now(), activeMap());
-            others.set(entry.id, { entry, rx: p.x, ry: p.y, phase: 0 });
+            others.set(entry.id, { track: createRemoteTrack(entry, Date.now(), activeMap()), phase: 0 });
           } else {
-            cur.entry = entry;
+            cur.track = updateRemoteTrack(cur.track, entry, Date.now(), activeMap());
           }
         }
         for (const id of [...others.keys()]) {
@@ -619,8 +635,18 @@ export default function WorldBoxClient() {
       const k = e.key.toLowerCase();
       if (["arrowup", "arrowdown", "arrowleft", "arrowright", " "].includes(k)) e.preventDefault();
       keys.add(k);
+      // 同じ移動キーの2度押しでダッシュ（長押しのオートリピートは数えない）
+      if (!e.repeat && MOVE_KEYS.has(k)) {
+        const r = registerKeyTap(tapTracker, k, performance.now());
+        tapTracker = r.tracker;
+        if (r.doubleTapped) dashKey = k;
+      }
     };
-    const onKeyUp = (e: KeyboardEvent) => keys.delete(e.key.toLowerCase());
+    const onKeyUp = (e: KeyboardEvent) => {
+      const k = e.key.toLowerCase();
+      keys.delete(k);
+      if (k === dashKey) dashKey = null;
+    };
     window.addEventListener("keydown", onKeyDown);
     window.addEventListener("keyup", onKeyUp);
 
@@ -770,33 +796,61 @@ export default function WorldBoxClient() {
       speedRatio: number,
       name: string | null,
       nationColor: string | null = null,
+      swim = false,
     ) => {
       const size = TILE * AVATAR_TILES;
-      const bob = walkBob(phase) * TILE * 0.07 * speedRatio;
-      const squash = 1 - (1 - walkSquashY(phase)) * speedRatio;
+      // 泳ぎ中は体を沈め、歩行の上下動をゆるい浮き沈みに替える
+      const sink = swim ? size * 0.34 : 0;
+      const bob = swim ? Math.sin(performance.now() / 280 + phase) * TILE * 0.02 : walkBob(phase) * TILE * 0.07 * speedRatio;
+      const squash = swim ? 1 : 1 - (1 - walkSquashY(phase)) * speedRatio;
+      const waterline = sy - size * 0.28;
       c.fillStyle = "rgba(20,30,16,0.30)";
       c.beginPath();
       c.ellipse(sx, sy, size * 0.30, size * 0.10, 0, 0, Math.PI * 2);
       c.fill();
       if (texReady(avatar)) {
-        c.save();
-        c.translate(sx, sy - bob);
-        c.rotate(moveLean(speedRatio) * face);
-        c.scale(face * (1 + (1 - squash) * 0.7), squash);
-        c.drawImage(avatar, -size / 2, -size, size, size);
-        c.restore();
+        const paintSprite = (alpha: number, y0: number, y1: number) => {
+          c.save();
+          c.beginPath();
+          c.rect(sx - size, y0, size * 2, y1 - y0);
+          c.clip();
+          c.globalAlpha = alpha;
+          c.translate(sx, sy - bob + sink);
+          c.rotate(moveLean(speedRatio) * face);
+          c.scale(face * (1 + (1 - squash) * 0.7), squash);
+          c.drawImage(avatar, -size / 2, -size, size, size);
+          c.restore();
+        };
+        if (swim) {
+          paintSprite(0.55, waterline, sy + size); // 水中側は水を通して薄く
+          paintSprite(1, sy - size * 2, waterline);
+        } else {
+          paintSprite(1, sy - size * 2, sy + size);
+        }
       } else {
         c.fillStyle = "#f4f6f8";
         c.beginPath();
-        c.arc(sx, sy - size / 2 - bob, size * 0.36, 0, Math.PI * 2);
+        c.arc(sx, sy - size / 2 - bob + sink, size * 0.36, 0, Math.PI * 2);
         c.fill();
+      }
+      if (swim) {
+        // 水面の波紋（広がって消える輪を2重に）
+        const t = performance.now() / 1000;
+        for (let i = 0; i < 2; i++) {
+          const k = (t * 0.9 + i * 0.5 + phase * 0.13) % 1;
+          c.strokeStyle = `rgba(255,255,255,${(0.5 * (1 - k)).toFixed(3)})`;
+          c.lineWidth = 1.5;
+          c.beginPath();
+          c.ellipse(sx, sy + 1, size * (0.30 + 0.22 * k), size * (0.10 + 0.07 * k), 0, 0, Math.PI * 2);
+          c.stroke();
+        }
       }
       if (name) {
         c.font = "600 11px sans-serif";
         c.textAlign = "center";
         c.lineWidth = 3;
         c.strokeStyle = "rgba(10,16,10,0.65)";
-        const ly = sy - size - 6 - bob;
+        const ly = sy - size + sink - 6 - bob;
         c.strokeText(name, sx, ly);
         c.fillStyle = "#ffffff";
         c.fillText(name, sx, ly);
@@ -948,7 +1002,7 @@ export default function WorldBoxClient() {
     let lastStation: LobbyStation | null = null;
     const placePlayer = (x: number, y: number) => {
       syncEffMap();
-      const free = findFreeNear(activeMap(), x, y, activeBlocked());
+      const free = findFreeNear(activeMap(), x, y, activeBlocked(), { swim: space === "world" });
       player.x = free.x;
       player.y = free.y;
       player.vx = 0;
@@ -1038,13 +1092,49 @@ export default function WorldBoxClient() {
         ix /= ilen;
         iy /= ilen;
       }
-      const vel = { x: ix * WALK_SPEED, y: iy * WALK_SPEED };
-      const prevX = player.x;
-      const prevY = player.y;
       syncEffMap();
-      const moved = stepMove(activeMap(), player, vel, dt, activeBlocked());
+      // ダッシュ（キーの2度押しを持ち続け / スティックの強い倒し）と泳ぎで速さと消費が変わる
+      const swimming = space === "world" && isWaterAt(effMap, player.x, player.y);
+      const wantDash =
+        ilen > 0.01 && ((dashKey !== null && keys.has(dashKey)) || (joy.active && isStickDash(joy.dx, joy.dy)));
+      const dashing = wantDash && canDash(stamina);
+      let moveSpeed = WALK_SPEED;
+      let staminaUse: StaminaUse = "none";
+      if (swimming) {
+        moveSpeed = dashing ? SWIM_DASH_SPEED : SWIM_SPEED;
+        staminaUse = dashing ? "swimDash" : "swim";
+      } else if (dashing) {
+        moveSpeed = DASH_SPEED;
+        staminaUse = "dash";
+      }
+      const vel = { x: ix * moveSpeed, y: iy * moveSpeed };
+      let prevX = player.x;
+      let prevY = player.y;
+      const moved = stepMove(activeMap(), player, vel, dt, activeBlocked(), { swim: space === "world" });
       player.x = moved.x;
       player.y = moved.y;
+      // スタミナ増減・陸の記録・入出水の波紋・水中で力尽きたら陸へ帰還
+      const inWaterNow = space === "world" && isWaterAt(effMap, player.x, player.y);
+      if (space === "world" && !inWaterNow) lastLand = { x: player.x, y: player.y };
+      if (inWaterNow !== wasSwimming) {
+        splashes.push({ x: player.x, y: player.y, at: now });
+        wasSwimming = inWaterNow;
+      }
+      stamina = stepStamina(stamina, staminaUse, dt).state;
+      playerSwimming = inWaterNow;
+      if (inWaterNow && stamina.value <= 0) {
+        stamina = rescueStamina(stamina);
+        player.x = lastLand.x;
+        player.y = lastLand.y;
+        prevX = player.x;
+        prevY = player.y;
+        cam.x = player.x;
+        cam.y = player.y;
+        wasSwimming = false;
+        playerSwimming = false;
+        splashes.push({ x: player.x, y: player.y, at: now });
+        saveNow();
+      }
       checkTileTriggers();
       if (space === "lobby") {
         const st = stationNear(lobby.objects, Math.floor(player.x), Math.floor(player.y));
@@ -1069,19 +1159,11 @@ export default function WorldBoxClient() {
       cam.x = damp(cam.x, lookX, 6, dt);
       cam.y = damp(cam.y, lookY, 6, dt);
 
-      // 他プレイヤーの描画位置（デッドレコニング予測へ寄せる）
+      // 他プレイヤーの描画位置（スナップショット予測へバネでなめらかに寄せる）
       const nowMs = Date.now();
       for (const o of others.values()) {
-        const target = predictPosition(o.entry, nowMs, activeMap());
-        const dist = Math.hypot(target.x - o.rx, target.y - o.ry);
-        if (dist > SNAP_DISTANCE) {
-          o.rx = target.x;
-          o.ry = target.y;
-        } else {
-          o.rx = damp(o.rx, target.x, 8, dt);
-          o.ry = damp(o.ry, target.y, 8, dt);
-        }
-        const ospeed = Math.hypot(o.entry.vx, o.entry.vy);
+        o.track = stepRemoteTrack(o.track, nowMs, dt, activeMap());
+        const ospeed = Math.hypot(o.track.entry.vx, o.track.entry.vy);
         o.phase = advanceWalkPhase(o.phase, ospeed, dt);
       }
 
@@ -1227,15 +1309,16 @@ export default function WorldBoxClient() {
       // プレイヤー群（y 順で奥行き感）
       const drawList: { y: number; draw: () => void }[] = [];
       for (const o of others.values()) {
-        const nationColor = nationsRef.current.playerNations[o.entry.id]?.color ?? null;
+        const nationColor = nationsRef.current.playerNations[o.track.entry.id]?.color ?? null;
+        const oSwim = space === "world" && isWaterAt(effMap, o.track.rx, o.track.ry);
         drawList.push({
-          y: o.ry,
+          y: o.track.ry,
           draw: () =>
             drawAvatar(
               ctx,
-              space === "lobby" ? Math.round(lobbyOx + o.rx * TILE) : toScreenX(o.rx),
-              space === "lobby" ? Math.round(lobbyOy + o.ry * TILE) : toScreenY(o.ry),
-              o.entry.face, o.phase, Math.min(1, Math.hypot(o.entry.vx, o.entry.vy) / WALK_SPEED), o.entry.name || null, nationColor,
+              space === "lobby" ? Math.round(lobbyOx + o.track.rx * TILE) : toScreenX(o.track.rx),
+              space === "lobby" ? Math.round(lobbyOy + o.track.ry * TILE) : toScreenY(o.track.ry),
+              o.track.entry.face, o.phase, Math.min(1, Math.hypot(o.track.entry.vx, o.track.entry.vy) / WALK_SPEED), o.track.entry.name || null, nationColor, oSwim,
             ),
         });
       }
@@ -1271,11 +1354,28 @@ export default function WorldBoxClient() {
             ctx,
             space === "lobby" ? Math.round(lobbyOx + player.x * TILE) : toScreenX(player.x),
             space === "lobby" ? Math.round(lobbyOy + player.y * TILE) : toScreenY(player.y),
-            player.face, player.phase, speedRatio, null,
+            player.face, player.phase, speedRatio, null, null, playerSwimming,
           ),
       });
       drawList.sort((a, b) => a.y - b.y);
       for (const d of drawList) d.draw();
+
+      // 入水/出水の波紋（広がって消える輪）
+      if (space === "world" && splashes.length > 0) {
+        for (let i = splashes.length - 1; i >= 0; i--) {
+          const s = splashes[i];
+          const age = (now - s.at) / 450;
+          if (age >= 1) {
+            splashes.splice(i, 1);
+            continue;
+          }
+          ctx.strokeStyle = `rgba(255,255,255,${(0.65 * (1 - age)).toFixed(3)})`;
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.ellipse(toScreenX(s.x), toScreenY(s.y), TILE * (0.25 + 0.45 * age), TILE * (0.09 + 0.16 * age), 0, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+      }
 
       // 昼夜の薄い色づけ（共有時計。ロビーは屋内なので付けない）
       const night = nightAmount(phaseAtTime(nowMs / 1000));
@@ -1294,6 +1394,26 @@ export default function WorldBoxClient() {
         ctx.beginPath();
         ctx.arc(joy.baseX + joy.dx * 34, joy.baseY + joy.dy * 34, 22, 0, Math.PI * 2);
         ctx.fill();
+      }
+
+      // スタミナ（ゼルダ式の円形ゲージをキャラの左上に。満タンで放置すると消える）
+      if (staminaGaugeVisible(stamina)) {
+        const px = space === "lobby" ? Math.round(lobbyOx + player.x * TILE) : toScreenX(player.x);
+        const py = space === "lobby" ? Math.round(lobbyOy + player.y * TILE) : toScreenY(player.y);
+        const size = TILE * AVATAR_TILES;
+        const gx = px - size * 0.72;
+        const gy = py - size * 0.80;
+        const gr = 11;
+        const frac = stamina.value / STAMINA_MAX;
+        ctx.beginPath();
+        ctx.arc(gx, gy, gr, 0, Math.PI * 2);
+        ctx.fillStyle = "rgba(10,16,10,0.45)";
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(gx, gy, gr - 2.5, -Math.PI / 2, -Math.PI / 2 + frac * Math.PI * 2);
+        ctx.strokeStyle = stamina.exhausted ? "#e5484d" : frac < 0.35 ? "#f5c542" : "#58d158";
+        ctx.lineWidth = 3;
+        ctx.stroke();
       }
 
       // ミニマップ（約5Hz。ロビーでは出さない）
@@ -1316,7 +1436,7 @@ export default function WorldBoxClient() {
           }
           mctx.fillStyle = "#ffffff";
           for (const o of others.values()) {
-            mctx.fillRect(Math.floor(o.rx * MINIMAP_SCALE) - 1, Math.floor(o.ry * MINIMAP_SCALE) - 1, 2, 2);
+            mctx.fillRect(Math.floor(o.track.rx * MINIMAP_SCALE) - 1, Math.floor(o.track.ry * MINIMAP_SCALE) - 1, 2, 2);
           }
           mctx.fillStyle = "#ffd23e";
           mctx.strokeStyle = "rgba(0,0,0,0.6)";
@@ -1351,7 +1471,7 @@ export default function WorldBoxClient() {
           bctx.fillStyle = "#ffffff";
           for (const o of others.values()) {
             bctx.beginPath();
-            bctx.arc(o.rx * BIGMAP_SCALE, o.ry * BIGMAP_SCALE, 2.6, 0, Math.PI * 2);
+            bctx.arc(o.track.rx * BIGMAP_SCALE, o.track.ry * BIGMAP_SCALE, 2.6, 0, Math.PI * 2);
             bctx.fill();
           }
           // 自分
