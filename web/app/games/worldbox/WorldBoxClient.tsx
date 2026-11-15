@@ -6,12 +6,12 @@
 // 純粋ロジックは lib/worldbox/ に分離（生成・物理・在庫・敵・体力・工作・崩落・保存）。
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
-import { AIR, BLOCKS, COAL_ORE, COPPER_ORE, canDigBlock, dropOf } from "@/lib/worldbox/blocks";
+import { AIR, BEDROCK, BLOCKS, COAL_ORE, COPPER_ORE, DIRT, GRASS, LEAVES, SAND, STONE, WOOD, canDigBlock, dropOf } from "@/lib/worldbox/blocks";
 import { generateWorld, getTile, findSpawn, WORLD_H, WORLD_W, type World } from "@/lib/worldbox/worldgen";
 import { createBody, stepPlayer, PLAYER_H, PLAYER_W, type PlayerBody } from "@/lib/worldbox/physics";
 import { digTile, placeTile, withinReach } from "@/lib/worldbox/rules";
 import { SLOT_COUNT, addItem, canAdd, cloneInventory, countOf, createInventory, isInventoryFull, type InventoryV2, type InvSlot } from "@/lib/worldbox/inventory";
-import { attackDamageOf, canDigWith, digSecondsFor, isTool, itemDef, requiredTier, tierOfTool, COPPER_INGOT, COPPER_PICKAXE, STONE_PICKAXE, SWORD, WOODEN_PICKAXE } from "@/lib/worldbox/items";
+import { attackDamageOf, canDigWith, digSecondsFor, isTool, itemDef, requiredTier, tierOfTool, COPPER_INGOT, COPPER_PICKAXE, DEEP_STONE_Y, STONE_PICKAXE, SWORD, WOODEN_PICKAXE } from "@/lib/worldbox/items";
 import { advancePhase, isNightPhase, nightAmount } from "@/lib/worldbox/daynight";
 import { CONTACT_DAMAGE, ENEMY_H, ENEMY_MAX_HP, ENEMY_W, SPAWN_INTERVAL_SEC, attackEnemy, burnEnemiesAtDawn, enemyTouches, rollsHeartDrop, stepEnemy, trySpawnEnemy, type Enemy } from "@/lib/worldbox/enemies";
 import { HEART_HEAL, createPickup, pickupTouches, stepPickup, type Pickup } from "@/lib/worldbox/pickups";
@@ -20,11 +20,30 @@ import { RECIPES, SMELT_SECONDS, applyCraft, canStartSmelt, checkCraft, collectS
 import { FALL_BLOCK_DAMAGE, settleAfterChange, stepFalling, type FallingBlock } from "@/lib/worldbox/collapse";
 import { parseSave, serializeSave, type WorldBoxState } from "@/lib/worldbox/save";
 import { chooseInitialSave } from "@/lib/worldbox/save-source";
+import { TEXTURE_DATA, loadTextures } from "@/lib/worldbox/textures";
 import { sfxPlace, sfxTap } from "@/lib/sfx";
 import { useGamesNav } from "../GamesShell";
 
 const SAVE_KEY = "ago-worldbox-save-v1";
 const JOY_RADIUS = 52;
+
+/** ブロックID → テクスチャキー（lib/worldbox/textures.ts の用意済み素材）。 */
+const TEXTURE_KEY_BY_BLOCK: Record<number, string> = {
+  [GRASS]: "grass",
+  [DIRT]: "dirt",
+  [STONE]: "stone",
+  [WOOD]: "wood",
+  [LEAVES]: "leaves",
+  [SAND]: "sand",
+  [COAL_ORE]: "coal",
+  [COPPER_ORE]: "copper",
+  [BEDROCK]: "bedrock",
+};
+
+/** 画像が描画可能（読み込み完了）かどうか。 */
+function texReady(img: HTMLImageElement | undefined): img is HTMLImageElement {
+  return !!img && img.complete && img.naturalWidth > 0;
+}
 const TIER_TOOL_NAME: Record<number, string> = { 1: "木のツルハシ", 2: "石のツルハシ", 3: "銅のツルハシ" };
 
 type Hud = {
@@ -133,6 +152,17 @@ function ItemIcon({ id, size = 26 }: { id: number; size?: number }) {
       </svg>
     );
   }
+  const texKey = TEXTURE_KEY_BY_BLOCK[id];
+  if (texKey && TEXTURE_DATA[texKey]) {
+    return (
+      <img
+        src={TEXTURE_DATA[texKey]}
+        alt=""
+        aria-hidden
+        style={{ display: "block", width: size, height: size, margin: "0 auto", borderRadius: 5, border: "1px solid rgba(0,0,0,0.35)" }}
+      />
+    );
+  }
   const def = BLOCKS[id];
   return (
     <span
@@ -140,7 +170,7 @@ function ItemIcon({ id, size = 26 }: { id: number; size?: number }) {
       style={{
         display: "block", width: size, height: size, margin: "0 auto", borderRadius: 5,
         border: "1px solid rgba(0,0,0,0.35)",
-        background: id === 1 ? "linear-gradient(#57a639 0 40%, #8a5a2b 40% 100%)" : def?.color ?? "#888",
+        background: def?.color ?? "#888",
       }}
     />
   );
@@ -162,6 +192,9 @@ export default function WorldBoxClient() {
   const fallingRef = useRef<FallingBlock[]>([]);
   const furnaceRef = useRef<Furnace>(createFurnace());
   const poofsRef = useRef<{ x: number; y: number; at: number }[]>([]);
+  const texturesRef = useRef<Record<string, HTMLImageElement> | null>(null);
+  const charImgRef = useRef<{ ago: HTMLImageElement; jinrou: HTMLImageElement } | null>(null);
+  const enemyHitRef = useRef(new Map<number, number>());
   const selectedRef = useRef(0);
   const keysRef = useRef({ left: false, right: false, jump: false, fastFall: false });
   const touchRef = useRef({ jump: false, dig: false });
@@ -438,6 +471,7 @@ export default function WorldBoxClient() {
         if (attackCdRef.current > 0) return true; // 攻撃扱いで掘りに行かない
         attackCdRef.current = 0.35;
         const dead = attackEnemy(e, attackDamageOf(toolId), centerX);
+        enemyHitRef.current.set(e.id, now);
         sfxTap();
         if (dead) killEnemy(e, now);
         return true;
@@ -731,10 +765,23 @@ export default function WorldBoxClient() {
     camY = viewH >= WORLD_H ? (WORLD_H - viewH) / 2 : Math.max(0, Math.min(WORLD_H - viewH, camY));
     camRef.current = { x: camX, y: camY };
 
+    // 素材は初回描画で一度だけ読み込む（タイルテクスチャ＋公式キャラ画像）
+    if (!texturesRef.current) texturesRef.current = loadTextures();
+    if (!charImgRef.current) {
+      const ago = new Image();
+      ago.src = "/img/nomal.png";
+      const jinrou = new Image();
+      jinrou.src = "/img/jinrou.png";
+      charImgRef.current = { ago, jinrou };
+    }
+
     // 空
     const [sr, sg, sb] = skyColor(dayRef.current);
     ctx.fillStyle = `rgb(${sr},${sg},${sb})`;
     ctx.fillRect(0, 0, vw, vh);
+
+    // 遠景の丘（パララックス）
+    drawHills(ctx, camX, camY, vw, vh, tilePx);
 
     const x0 = Math.max(0, Math.floor(camX));
     const x1 = Math.min(WORLD_W - 1, Math.ceil(camX + viewW));
@@ -772,6 +819,9 @@ export default function WorldBoxClient() {
         ctx.bezierCurveTo(22, 12.28, 13.45, 20.03, 12, 21.35);
         ctx.fillStyle = "#e5484d";
         ctx.fill();
+        ctx.strokeStyle = "rgba(24,10,14,0.85)";
+        ctx.lineWidth = 1.6;
+        ctx.stroke();
         ctx.restore();
       } else {
         drawBlock(ctx, p.blockId, Math.floor(p.x), Math.floor(p.y), px, py, s);
@@ -837,7 +887,7 @@ export default function WorldBoxClient() {
     // プレイヤー（標準AGOキャラ）。無敵時間中は点滅させる
     const invuln = gameTimeRef.current < healthRef.current.invulnUntil;
     if (!invuln || Math.floor(now / 90) % 2 === 0) {
-      drawAgo(ctx, (body.x - camX) * tilePx, (body.y - camY) * tilePx, PLAYER_W * tilePx, PLAYER_H * tilePx, body.face, walkPhaseRef.current, body.onGround, now);
+      drawPlayer(ctx, (body.x - camX) * tilePx, (body.y - camY) * tilePx, tilePx, body.face, walkPhaseRef.current, body.onGround, now);
     }
 
     // 夜の暗さ
@@ -868,42 +918,38 @@ export default function WorldBoxClient() {
 
   const drawEnemy = (ctx: CanvasRenderingContext2D, e: Enemy, px: number, py: number, tilePx: number, now: number) => {
     const w = 0.9 * tilePx;
-    const h = 0.9 * tilePx;
-    const bob = Math.sin(now / 160 + e.id * 2) * h * 0.04;
-    ctx.save();
-    ctx.translate(px + w / 2, py + bob);
-    ctx.scale(e.face, 1);
-    // 体（夜の歩行者: 濃い紫の丸体）
-    ctx.beginPath();
-    ctx.roundRect(-w * 0.46, h * 0.08, w * 0.92, h * 0.8, w * 0.3);
-    ctx.fillStyle = "#46335e";
-    ctx.fill();
-    ctx.strokeStyle = "#241a33";
-    ctx.lineWidth = Math.max(1.4, w * 0.05);
-    ctx.stroke();
-    // 角
-    ctx.beginPath();
-    ctx.moveTo(-w * 0.3, h * 0.12);
-    ctx.lineTo(-w * 0.38, -h * 0.08);
-    ctx.lineTo(-w * 0.14, h * 0.04);
-    ctx.moveTo(w * 0.3, h * 0.12);
-    ctx.lineTo(w * 0.38, -h * 0.08);
-    ctx.lineTo(w * 0.14, h * 0.04);
-    ctx.fillStyle = "#6b5583";
-    ctx.fill();
-    // 目（赤く光る2つ）
-    ctx.fillStyle = "#ff5a5a";
-    for (const ex of [0.08, 0.3]) {
+    const img = charImgRef.current?.jinrou;
+    const bob = Math.sin(now / 160 + e.id * 2) * tilePx * 0.03;
+    const feetX = px + (ENEMY_W * tilePx) / 2;
+    const feetY = py + ENEMY_H * tilePx;
+    if (texReady(img)) {
+      // 公式の人狼あごむに（/img/jinrou.png）。プレイヤーと同程度の大きさ、足元アンカー、向き反転
+      const size = tilePx * 1.5;
+      const burning = !isNightPhase(dayRef.current); // 夜明けは燃焼中: 明滅させる
+      const hitAgo = now - (enemyHitRef.current.get(e.id) ?? -10000);
+      ctx.save();
+      ctx.translate(feetX, feetY + bob);
+      ctx.scale(e.face, 1);
+      if (burning) ctx.globalAlpha = 0.6 + 0.3 * Math.sin(now / 45);
+      ctx.drawImage(img, -size / 2, -size, size, size);
+      if (hitAgo < 150) {
+        // 被弾フラッシュ（白く重ねる）
+        ctx.globalAlpha = 0.55;
+        ctx.filter = "brightness(3) saturate(0.2)";
+        ctx.drawImage(img, -size / 2, -size, size, size);
+        ctx.filter = "none";
+      }
+      ctx.restore();
+    } else {
+      // 読み込み中だけの無地シルエット（造形は描かない）
+      ctx.save();
+      ctx.translate(feetX, feetY + bob);
       ctx.beginPath();
-      ctx.arc(w * ex, h * 0.42, w * 0.055, 0, Math.PI * 2);
+      ctx.arc(0, -w * 0.45, w * 0.45, 0, Math.PI * 2);
+      ctx.fillStyle = "#3c414d";
       ctx.fill();
+      ctx.restore();
     }
-    // 足
-    ctx.fillStyle = "#241a33";
-    const step = Math.sin(now / 130 + e.id) * w * 0.08;
-    ctx.fillRect(-w * 0.34 + step, h * 0.86, w * 0.2, h * 0.12);
-    ctx.fillRect(w * 0.14 - step, h * 0.86, w * 0.2, h * 0.12);
-    ctx.restore();
     // HP バー（減っているときだけ）
     if (e.hp < ENEMY_MAX_HP) {
       ctx.fillStyle = "rgba(10,10,14,0.65)";
@@ -916,6 +962,27 @@ export default function WorldBoxClient() {
   const drawBlock = (ctx: CanvasRenderingContext2D, id: number, tx: number, ty: number, px: number, py: number, s: number) => {
     const def = BLOCKS[id];
     if (!def) return;
+    // 用意済みテクスチャ素材で描く（読み込み前/失敗時は下のフラット描画にフォールバック）
+    const texKey = TEXTURE_KEY_BY_BLOCK[id];
+    const tex = texKey ? texturesRef.current?.[texKey] : undefined;
+    if (texReady(tex)) {
+      // 既存のシードハッシュで一部のタイルだけ左右反転し、単調さを崩す
+      if (hash2(tx, ty) >= 0.5) {
+        ctx.save();
+        ctx.translate(px + s, py);
+        ctx.scale(-1, 1);
+        ctx.drawImage(tex, 0, 0, s, s);
+        ctx.restore();
+      } else {
+        ctx.drawImage(tex, px, py, s, s);
+      }
+      // 深層の石は石テクスチャ＋暗がり
+      if (id === STONE && ty >= DEEP_STONE_Y) {
+        ctx.fillStyle = "rgba(8,8,20,0.38)";
+        ctx.fillRect(px, py, s, s);
+      }
+      return;
+    }
     const h = hash2(tx, ty);
     ctx.fillStyle = def.color;
     ctx.fillRect(px, py, s, s);
@@ -970,58 +1037,69 @@ export default function WorldBoxClient() {
     }
   };
 
-  /** 標準AGOキャラ（nomal.png の白い丸体＋黒目＋水色の影）を平たく描く。 */
-  const drawAgo = (
+  /** プレイヤー: 公式あごむに画像（/img/nomal.png）を足元アンカーで描く。歩行は足元の上下＋潰れで表す。 */
+  const drawPlayer = (
     ctx: CanvasRenderingContext2D,
     px: number,
     py: number,
-    w: number,
-    h: number,
+    tilePx: number,
     face: 1 | -1,
     walkPhase: number,
     onGround: boolean,
     now: number,
   ) => {
-    const moving = Math.abs(Math.sin(walkPhase)) > 0.15 && onGround;
-    const bob = onGround && moving ? Math.abs(Math.sin(walkPhase)) * h * 0.03 : Math.sin(now / 380) * h * 0.012;
-    const y = py - bob;
-    const cxp = px + w / 2;
+    const size = tilePx * 1.5;
+    const feetX = px + (PLAYER_W * tilePx) / 2;
+    const feetY = py + PLAYER_H * tilePx;
+    const moving = onGround && Math.abs(Math.sin(walkPhase)) > 0.15;
+    const bob = moving ? Math.abs(Math.sin(walkPhase)) * size * 0.03 : Math.sin(now / 380) * size * 0.012;
+    // 歩行位相の半周期ごとに足元基準で少し潰す（scaleY 0.94）
+    const squash = moving && Math.sin(walkPhase) < 0 ? 0.94 : 1;
+    const img = charImgRef.current?.ago;
     ctx.save();
-    ctx.translate(cxp, y);
+    ctx.translate(feetX, feetY - bob);
     ctx.scale(face, 1);
-    ctx.beginPath();
-    ctx.fillStyle = "#ffffff";
-    ctx.strokeStyle = "#14161c";
-    ctx.lineWidth = Math.max(1.6, w * 0.09);
-    const footSwing = moving ? Math.sin(walkPhase) * w * 0.14 : 0;
-    ctx.arc(-w * 0.28 + footSwing, h * 0.94, w * 0.2, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.stroke();
-    ctx.beginPath();
-    const bx = -w * 0.52;
-    const by = h * 0.04;
-    const bw = w * 1.04;
-    const bh = h * 0.86;
-    ctx.roundRect(bx, by, bw, bh, [bw * 0.48, bw * 0.48, bw * 0.42, bw * 0.3]);
-    ctx.fillStyle = "#ffffff";
-    ctx.fill();
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.fillStyle = "#aebfc6";
-    ctx.ellipse(-bw * 0.08, by + bh * 0.88, bw * 0.3, bh * 0.13, -0.25, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.beginPath();
-    ctx.roundRect(bw * 0.32, by + bh * 0.34, bw * 0.3, bh * 0.13, bh * 0.06);
-    ctx.fillStyle = "#ffffff";
-    ctx.fill();
-    ctx.stroke();
-    ctx.fillStyle = "#14161c";
-    for (const ex of [0.02, 0.3]) {
+    ctx.scale(1, squash);
+    if (texReady(img)) {
+      ctx.drawImage(img, -size / 2, -size, size, size);
+    } else {
+      // 読み込み中だけの無地プレースホルダ（顔などの造形は描かない）
       ctx.beginPath();
-      ctx.ellipse(bw * ex, by + bh * 0.34, bw * 0.055, bh * 0.085, 0, 0, Math.PI * 2);
+      ctx.arc(0, -size / 2, size * 0.42, 0, Math.PI * 2);
+      ctx.fillStyle = "#f4f4f6";
       ctx.fill();
+      ctx.strokeStyle = "rgba(20,22,28,0.7)";
+      ctx.lineWidth = Math.max(1.4, size * 0.05);
+      ctx.stroke();
     }
     ctx.restore();
+  };
+
+  /** 遠景の丘シルエット（2層パララックス）。地表ラインに追随し、深い地下では画面外に出る。 */
+  const drawHills = (ctx: CanvasRenderingContext2D, camX: number, camY: number, vw: number, vh: number, tilePx: number) => {
+    const world = worldRef.current;
+    if (!world) return;
+    const centerCol = Math.max(0, Math.min(WORLD_W - 1, Math.floor(camX + vw / tilePx / 2)));
+    const surfY = (world.surfaces[centerCol] - camY) * tilePx;
+    if (surfY < -tilePx * 3) return;
+    const night = nightAmount(dayRef.current);
+    const layers = [
+      { par: 0.25, amp: 2.4, color: `rgba(116,166,96,${0.5 - night * 0.22})` },
+      { par: 0.5, amp: 1.5, color: `rgba(79,128,62,${0.75 - night * 0.3})` },
+    ];
+    for (const L of layers) {
+      ctx.fillStyle = L.color;
+      ctx.beginPath();
+      ctx.moveTo(0, vh);
+      for (let sx = 0; sx <= vw; sx += Math.max(8, tilePx / 2)) {
+        const wx = camX * L.par + sx / tilePx;
+        const n = 0.5 + 0.32 * Math.sin(wx * 0.55 + L.par * 9) + 0.18 * Math.sin(wx * 1.37 + 1.7);
+        ctx.lineTo(sx, surfY + tilePx * 0.4 - n * L.amp * tilePx);
+      }
+      ctx.lineTo(vw, vh);
+      ctx.closePath();
+      ctx.fill();
+    }
   };
 
   // ---- ポインタ ----
@@ -1122,7 +1200,7 @@ export default function WorldBoxClient() {
   const selectedSlot = hud.slots[selected] ?? null;
   const selectedName = selectedSlot ? itemName(selectedSlot.id) : "空き枠";
   const statusText =
-    `深さ ${hud.depth} m ・ ${hud.night ? "夜（敵が出ます）" : "昼"} ・ 選択中: ${selectedName}` +
+    `深さ ${hud.depth} m ・ ${hud.night ? "夜（人狼あごむにが出ます）" : "昼"} ・ 選択中: ${selectedName}` +
     (selectedSlot && !isTool(selectedSlot.id) ? `（所持 ${selectedSlot.count}）` : "") +
     (hud.gate ? ` ・ ${hud.gate}` : "") +
     (onlineMode ? " ・ オンライン保存" : "");
@@ -1147,7 +1225,7 @@ export default function WorldBoxClient() {
       </nav>
       <div className="page-heading compact-heading">
         <h1>AGO WORLD BOX</h1>
-        <p className="muted">横スクロールの2Dサンドボックス。掘って集めて道具を作り、夜の敵から生き延びます。</p>
+        <p className="muted">横スクロールの2Dサンドボックス。掘って集めて道具を作り、夜の人狼あごむにから生き延びます。</p>
       </div>
 
       <p className="classic-status" role="status">{statusText}</p>
@@ -1378,7 +1456,7 @@ export default function WorldBoxClient() {
         数字キー1〜5で枠を切り替え、Cで「つくる」を開きます。
         スマホ・タブレットでは、画面左側を触るとスティックが出て（傾けた量で歩き/走り、下に倒すと急降下）、
         右下のボタンで掘る・置く・跳ぶができます。
-        夜は敵が出ます。石は木のツルハシ、石炭・銅の鉱石は石のツルハシ、深い石は銅のツルハシがないと掘れません。
+        夜は人狼あごむにが出ます。石は木のツルハシ、石炭・銅の鉱石は石のツルハシ、深い石は銅のツルハシがないと掘れません。
         草・土・砂・葉は支えを失うと崩れ落ち、当たると痛いです。持ち物は5枠まで。
         ログイン中はサーバーにも自動保存され、別の端末でも続きが遊べます。
       </p>
