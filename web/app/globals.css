@@ -441,6 +441,16 @@ body:has(.vs-shell) > main { max-width:none; min-height:0; margin:0; padding:0; 
 .vs-shell { min-height:100svh; background:#0e0f11; color:#f2f3f5; font-family:system-ui,-apple-system,"Hiragino Sans","Noto Sans JP",sans-serif; }
 .vs-shell .vs-header { background:transparent; position:static; border-bottom:1px solid #23252a; }
 .vs-shell .vs-footer { background:transparent; border-top:none; padding:0; }
+/* --- WORLD BOX 独立シェル（.wb-shell） ---
+   /games/worldbox はサイト共通ヘッダー/フッターを出さず（lib/site-chrome.ts）、
+   ステージが画面いっぱい（100svh）になる独立シェルで完結させる。共通CSSの
+   main（中央カラム＋余白＋min-height）と、Activity 埋め込み時の .games-shell
+   （中央カラム＋余白）・埋め込みバーを、.wb-shell がある場合だけ打ち消す。 */
+body:has(.wb-shell) { background:#0b0e14; overscroll-behavior:none; }
+body:has(.wb-shell) > main { max-width:none; min-height:0; margin:0; padding:0; }
+.games-shell[data-activity-root]:has(.wb-shell) { max-width:none; margin:0; padding:0; }
+.games-shell[data-activity-root]:has(.wb-shell) > .games-embedded-bar { display:none; }
+.wb-shell { height:100svh; background:#0b0e14; color:#f2f2f2; }
 /* --- WEB ゲーム（/games） --- */
 .games-shell[data-activity-root] { max-width:880px; margin:0 auto; padding:18px 16px 48px; }
 .games-embedded-bar { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:14px; padding-bottom:10px; border-bottom:1px solid var(--line); font-size:14px; }

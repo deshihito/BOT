@@ -1954,35 +1954,38 @@ export default function WorldBoxClient() {
   ];
 
   // 入場ゲート: Discord ログインが確認できるまではワールドを描画しない。
+  // ゲートも独立シェル（100svh・中央寄せ）で完結させる。
   if (!gateOk) {
     return (
-      <div>
-        <nav className="breadcrumbs" aria-label="パンくず">
-          <Link href={`${prefix}/games`}>ゲーム</Link>
-          <span> / </span>
-          <span>AGO WORLD BOX</span>
-        </nav>
-        <div className="page-heading compact-heading">
-          <h1>AGO WORLD BOX</h1>
-        </div>
+      <div
+        className="wb-shell"
+        style={{
+          display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+          gap: 14, padding: 20, boxSizing: "border-box", textAlign: "center",
+        }}
+      >
+        <h1 style={{ fontSize: 28, margin: 0 }}>AGO WORLD BOX</h1>
         {gate === "checking" ? (
-          <p className="classic-status" role="status">
+          <p role="status" style={{ margin: 0 }}>
             読み込み中…
           </p>
         ) : (
-          <div style={{ textAlign: "center", marginTop: 24 }}>
-            <p className="classic-status" role="status">
+          <>
+            <p role="status" style={{ margin: 0 }}>
               ログインが必要
             </p>
             <a
               href="/api/auth/discord/authorize?next=/games/worldbox"
               style={{
-                ...btn, textDecoration: "none", display: "inline-flex", alignItems: "center", marginTop: 12,
+                ...btn, textDecoration: "none", display: "inline-flex", alignItems: "center",
               }}
             >
               Discordでログイン
             </a>
-          </div>
+            <Link href={`${prefix}/games`} style={{ color: "#9fd8e8", fontSize: 13 }}>
+              ゲーム一覧へ
+            </Link>
+          </>
         )}
       </div>
     );
@@ -1990,8 +1993,10 @@ export default function WorldBoxClient() {
 
   return (
     <div
+      className="wb-shell"
       onContextMenu={(e) => e.preventDefault()}
       style={{
+        display: "flex", flexDirection: "column",
         WebkitTouchCallout: "none",
         WebkitUserSelect: "none",
         MozUserSelect: "none",
@@ -1999,27 +2004,12 @@ export default function WorldBoxClient() {
         userSelect: "none",
       }}
     >
-      <nav className="breadcrumbs" aria-label="パンくず">
-        <Link href={`${prefix}/games`}>ゲーム</Link>
-        <span> / </span>
-        <span>AGO WORLD BOX</span>
-      </nav>
-      <div className="page-heading compact-heading">
-        <h1>AGO WORLD BOX</h1>
-      </div>
-
-      <p className="classic-status" role="status">
-        {statusText}
-        {othersCount > 0 ? ` ・ いま ${othersCount} 人が歩いている` : ""}
-        {` ・ 座標 X ${coords.x} / Y ${coords.y}`}
-      </p>
-
       <div
         ref={stageRef}
         style={{
-          position: "relative", margin: "0 auto", touchAction: "none",
-          maxWidth: isFullscreen ? undefined : 960,
-          ...(isFullscreen ? { width: "100%", height: "100%", background: "#0b0e14" } : {}),
+          position: "relative", touchAction: "none",
+          width: "100%", flex: "1 1 auto", minHeight: 0,
+          ...(isFullscreen ? { height: "100%", background: "#0b0e14" } : {}),
         }}
       >
         <canvas
@@ -2027,11 +2017,24 @@ export default function WorldBoxClient() {
           onContextMenu={(e) => e.preventDefault()}
           aria-label="AGO WORLD BOX の見下ろしマップ。スティックか WASD で歩けます"
           style={{
-            width: "100%", height: isFullscreen ? "100%" : "min(62vh, 560px)", minHeight: isFullscreen ? 0 : 340, display: "block",
-            borderRadius: isFullscreen ? 0 : 16, border: "2px solid rgba(255,255,255,0.15)",
+            width: "100%", height: "100%", display: "block",
             touchAction: "none", userSelect: "none", WebkitUserSelect: "none", WebkitTouchCallout: "none", WebkitTapHighlightColor: "transparent",
           }}
         />
+        <div
+          role="status"
+          style={{
+            position: "absolute", top: 10, left: "50%", transform: "translateX(-50%)",
+            padding: "4px 12px", borderRadius: 10, background: "rgba(0,0,0,0.55)", color: "#fff",
+            fontSize: 12, lineHeight: 1.5, whiteSpace: "nowrap", pointerEvents: "none", zIndex: 4,
+            maxWidth: "calc(100% - 176px)", boxSizing: "border-box",
+            overflow: "hidden", textOverflow: "ellipsis",
+          }}
+        >
+          {statusText}
+          {othersCount > 0 ? ` ・ いま ${othersCount} 人が歩いている` : ""}
+          {` ・ 座標 X ${coords.x} / Y ${coords.y}`}
+        </div>
         <button
           type="button"
           aria-label="メニュー"
@@ -2080,6 +2083,15 @@ export default function WorldBoxClient() {
                   {a.label}
                 </button>
               ))}
+            <Link
+              href={`${prefix}/games`}
+              style={{
+                ...btn, background: "rgba(255,255,255,0.10)", color: "#fff",
+                textDecoration: "none", textAlign: "center",
+              }}
+            >
+              ゲーム一覧へ
+            </Link>
           </div>
         )}
         {spaceUi === "lobby" && stationUi && (
