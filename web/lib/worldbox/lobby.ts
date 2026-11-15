@@ -5,7 +5,7 @@
 // 図形の和集合で、和集合の境界セルが壁になる。ショップ翼の2階（ギルド
 // ショップ）は同じグリッド内の別領域（サブエリア）として持ち、階段タイルで
 // 往復する。全てマス目管理: 配置・占有・判定はタイル単位。
-import { T_GRASS, T_ROCK, type TopDownMap } from "./mapgen";
+import { T_GRASS, T_ROCK, tilesSource, type TopDownMap } from "./mapgen";
 
 export const LOBBY_W = 56;
 export const LOBBY_H = 64;
@@ -257,10 +257,8 @@ export const LOBBY_NPCS: readonly { x: number; y: number }[] = [
 
 /** ロビー入場地点（ワープパッドの北、広場側）。 */
 export const LOBBY_ENTRY = { x: 28.5, y: 32.5 };
-/** ロビーのワープパッド（タイル座標）。 */
+/** ロビーのワープパッド（タイル座標）。ワールド→ロビーは ≡ メニューから。 */
 export const LOBBY_WARP_PAD = { x: 28, y: 34 };
-/** ワールド側スポーン広場のワープパッド（タイル座標）。 */
-export const WORLD_WARP_PAD = { x: 514, y: 512 };
 /** 1階の階段タイル（踏むと2階へ）。 */
 export const LOBBY_STAIRS_UP: readonly { x: number; y: number }[] = [{ x: 17, y: 29 }, { x: 18, y: 29 }];
 /** 2階の階段タイル（踏むと1階へ）。 */
@@ -320,7 +318,7 @@ export function buildLobby(): LobbyData {
     objects: LOBBY_OBJECTS,
     npcs: LOBBY_NPCS,
     blocked,
-    moveMap: { seed: 0, width: LOBBY_W, height: LOBBY_H, tiles: moveTiles },
+    moveMap: tilesSource(0, LOBBY_W, LOBBY_H, moveTiles),
   };
   return cached;
 }

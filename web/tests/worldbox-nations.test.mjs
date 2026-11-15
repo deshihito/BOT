@@ -55,10 +55,10 @@ async function loadBundle(files, exportNames) {
 }
 
 const wb = await loadBundle(
-  ["worldbox/rng.ts", "worldbox/mapgen.ts", "worldbox/presence.ts", "worldbox/buildings.ts", "worldbox/nations.ts", "worldbox/guilds.ts"],
+  ["worldbox/rng.ts", "worldbox/mapgen.ts", "worldbox/move.ts", "worldbox/presence.ts", "worldbox/buildings.ts", "worldbox/nations.ts", "worldbox/guilds.ts"],
   [
-    "MAP_W", "MAP_H", "T_GRASS", "T_WATER", "T_DIRT", "T_SAND", "T_TREE", "T_ROCK", "generateMap", "mapTileAt",
-    "isSpawnPlazaTile", "presenceIdFor",
+    "T_GRASS", "T_WATER", "T_DIRT", "T_SAND", "T_TREE", "T_ROCK", "worldTileSource", "tilesSource", "mapTileAt",
+    "presenceIdFor", "fastTravelDestination", "FAST_TRAVEL_COST", "FAST_TRAVEL_COOLDOWN_MS",
     "TERRITORY_RADIUS", "NATION_PALETTE", "NATIONS_STATE_VERSION", "emptyNationsState",
     "pickNationColor", "capitalFits", "findCapitalTile", "memberCounts",
     "applyFound", "applyJoin", "applyLeave", "parseNationsState", "nationViews", "playerNationMap",
@@ -71,9 +71,8 @@ const wb = await loadBundle(
 
 function fakeMap(fill, paint) {
   const tiles = new Uint8Array(128 * 128).fill(fill);
-  const map = { seed: 0, width: 128, height: 128, tiles };
   paint?.(tiles);
-  return map;
+  return wb.tilesSource(0, 128, 128, tiles);
 }
 
 const KING_A = "discord:100000000000000001";
@@ -86,19 +85,19 @@ const GUILD_2 = "900000000000000002";
 // ---------- 渦巻き首都探索 ----------
 
 test("nations: 空きマップでは中央が最初の首都になる", () => {
-  const map = wb.generateMap();
+  const map = wb.worldTileSource();
   assert.deepEqual(wb.findCapitalTile(map, []), { x: 512, y: 512 });
 });
 
 test("nations: 2つ目の首都は領地が重ならない距離に置かれる", () => {
   const map = fakeMap(wb.T_GRASS);
-  const first = wb.findCapitalTile(map, []);
+  const first = wb.findCapitalTile(map, [], { x: 64, y: 64 });
   assert.deepEqual(first, { x: 64, y: 64 });
   const nations = [{ guildId: GUILD_1, name: "一国", color: wb.NATION_PALETTE[0], kingKey: KING_A, capital: first, createdAt: 1 }];
   // 距離 2R までは重なり、2R+1 から置ける
   assert.equal(wb.capitalFits(map, 64 + wb.TERRITORY_RADIUS * 2, 64, nations), false);
   assert.equal(wb.capitalFits(map, 64 + wb.TERRITORY_RADIUS * 2 + 1, 64, nations), true);
-  const second = wb.findCapitalTile(map, nations);
+  const second = wb.findCapitalTile(map, nations, { x: 64, y: 64 });
   assert.ok(second);
   const d = Math.max(Math.abs(second.x - 64), Math.abs(second.y - 64));
   assert.ok(d > wb.TERRITORY_RADIUS * 2, `領地が重なっている d=${d}`);
@@ -109,9 +108,9 @@ test("nations: 水のタイルは飛ばし、陸にだけ首都を置く", () =>
   const map = fakeMap(wb.T_WATER, (t) => {
     t[64 * 128 + 70] = wb.T_GRASS;
   });
-  assert.deepEqual(wb.findCapitalTile(map, []), { x: 70, y: 64 });
+  assert.deepEqual(wb.findCapitalTile(map, [], { x: 64, y: 64 }), { x: 70, y: 64 });
   const allWater = fakeMap(wb.T_WATER);
-  assert.equal(wb.findCapitalTile(allWater, []), null);
+  assert.equal(wb.findCapitalTile(allWater, [], { x: 64, y: 64 }), null);
 });
 
 // ---------- パレット ----------
@@ -142,7 +141,7 @@ test("guilds: 役職は Discord 権限から（オーナー=王、ADMINISTRATOR=
 });
 
 test("guilds: 自分のギルド一覧に国の有無と役職が付く", () => {
-  const map = wb.generateMap();
+  const map = wb.worldTileSource();
   const founded = wb.applyFound(wb.emptyNationsState(), KING_A, { id: GUILD_1, name: "あご鯖" }, map, 1000);
   const annotated = wb.annotateMyGuilds([
     { id: GUILD_1, name: "あご鯖", owner: true, permissions: "0" },
@@ -177,7 +176,7 @@ test("guilds: ギルドキャッシュは TTL 内だけ有効で、壊れた値�
 // ---------- 状態遷移 ----------
 
 test("nations: 建国→王、参加→渡された役職、二重所属と重複建国は却下", () => {
-  const map = wb.generateMap();
+  const map = wb.worldTileSource();
   const founded = wb.applyFound(wb.emptyNationsState(), KING_A, { id: GUILD_1, name: "あご鯖" }, map, 1000);
   assert.equal(founded.ok, true);
   assert.equal(founded.nation.guildId, GUILD_1);
@@ -205,7 +204,7 @@ test("nations: 建国→王、参加→渡された役職、二重所属と重�
 });
 
 test("nations: 王の離脱規則と、解散で首都が空く", () => {
-  const map = wb.generateMap();
+  const map = wb.worldTileSource();
   const founded = wb.applyFound(wb.emptyNationsState(), KING_A, { id: GUILD_1, name: "あご鯖" }, map, 1000);
   const joined = wb.applyJoin(founded.state, USER_B, GUILD_1, "citizen");
 
@@ -225,7 +224,7 @@ test("nations: 王の離脱規則と、解散で首都が空く", () => {
 });
 
 test("nations: 保存形式の往復（v2）と、旧形式の破棄・壊れた要素の除去", () => {
-  const map = wb.generateMap();
+  const map = wb.worldTileSource();
   const founded = wb.applyFound(wb.emptyNationsState(), KING_A, { id: GUILD_1, name: "あご鯖" }, map, 1000);
   const restored = wb.parseNationsState(
     JSON.stringify({ v: wb.NATIONS_STATE_VERSION, nations: founded.state.nations }),
@@ -254,7 +253,7 @@ test("nations: 保存形式の往復（v2）と、旧形式の破棄・壊れた
       v: wb.NATIONS_STATE_VERSION,
       nations: {
         bad1: { guildId: GUILD_1, name: "色が不正", color: "#000000", kingKey: KING_A, capital: { x: 1, y: 1 }, createdAt: 1 },
-        bad2: { guildId: GUILD_2, name: "首都が範囲外", color: wb.NATION_PALETTE[0], kingKey: KING_A, capital: { x: 9999, y: 1 }, createdAt: 1 },
+        bad2: { guildId: GUILD_2, name: "首都が範囲外", color: wb.NATION_PALETTE[0], kingKey: KING_A, capital: { x: 2000000, y: 1 }, createdAt: 1 },
       },
     }),
     JSON.stringify({
@@ -267,7 +266,7 @@ test("nations: 保存形式の往復（v2）と、旧形式の破棄・壊れた
 });
 
 test("nations: 表示用ビューの人数とプレイヤー色マップ、ギルド情報の素通し", () => {
-  const map = wb.generateMap();
+  const map = wb.worldTileSource();
   const founded = wb.applyFound(wb.emptyNationsState(), KING_A, { id: GUILD_1, name: "あご鯖" }, map, 1000);
   const joined = wb.applyJoin(founded.state, USER_B, GUILD_1, "citizen");
   const views = wb.nationViews(joined.state);
@@ -295,7 +294,7 @@ test("nations: 表示用ビューの人数とプレイヤー色マップ、ギ�
 
 // ---------- 建物（個人所有）と繁栄度 ----------
 
-test("buildings: 建築の検証マトリクス（所属不問・種類・首都・広場・地形・占有）", () => {
+test("buildings: 建築の検証マトリクス（所属不問・種類・首都・地形・占有）", () => {
   const map = fakeMap(wb.T_GRASS, (t) => {
     t[40 * 128 + 66] = wb.T_WATER;
     t[40 * 128 + 67] = wb.T_TREE;
@@ -309,11 +308,11 @@ test("buildings: 建築の検証マトリクス（所属不問・種類・首都
   // 不正な種類（所属の有無より先に弾く）
   assert.equal(wb.applyBuild(none, USER_C, capitals, map, "castle", 59, 64, 1).error, "invalid_type");
   assert.equal(wb.applyBuild(none, USER_C, capitals, map, null, 59, 64, 1).error, "invalid_type");
-  // 首都タイルは誰のものでも保護、スポーン広場も保護
+  // 首都タイルは誰のものでも保護される
   assert.equal(wb.applyBuild(none, USER_C, capitals, map, "house", 64, 64, 1).error, "on_capital");
-  assert.equal(wb.applyBuild(none, USER_C, [], map, "house", 64, 64, 1).error, "on_spawn");
-  assert.equal(wb.applyBuild(none, USER_C, [], map, "house", 61, 62, 1).error, "on_spawn");
-  assert.equal(wb.isSpawnPlazaTile(map, 59, 64), false);
+  // 固定のスポーン広場という保護は無い（中心付近でも建てられる）
+  assert.equal(wb.applyBuild(none, USER_C, [], map, "house", 64, 64, 1).ok, true);
+  assert.equal(wb.applyBuild(none, USER_C, [], map, "house", 61, 62, 1).ok, true);
   // 水・木・岩には建てられない
   assert.equal(wb.applyBuild(none, USER_C, capitals, map, "house", 66, 40, 1).error, "tile_blocked");
   assert.equal(wb.applyBuild(none, USER_C, capitals, map, "house", 67, 40, 1).error, "tile_blocked");
@@ -395,7 +394,7 @@ test("buildings: 保存形式の移行（旧 {nationId, by} → ownerId）と往
 });
 
 test("buildings: 繁栄度 = 国民5 + 国民の建物（家3・畑2・塔2）、ビューに載る", () => {
-  const map = wb.generateMap();
+  const map = wb.worldTileSource();
   const founded = wb.applyFound(wb.emptyNationsState(), KING_A, { id: GUILD_1, name: "あご鯖" }, map, 1000);
   const joined = wb.applyJoin(founded.state, USER_B, GUILD_1, "citizen");
   const state = joined.state;
@@ -455,17 +454,37 @@ const authUrl = dataUrl(
 const auth = await import(authUrl);
 const rngUrl = dataUrl(transpile("worldbox/rng.ts"));
 const mapgenUrl = dataUrl(transpile("worldbox/mapgen.ts").replaceAll('"./rng"', JSON.stringify(rngUrl)));
-const presenceUrl = dataUrl(transpile("worldbox/presence.ts"));
+const presenceUrl = dataUrl(transpile("worldbox/presence.ts").replaceAll('"./mapgen"', JSON.stringify(mapgenUrl)));
 const buildingsUrl = dataUrl(
   transpile("worldbox/buildings.ts")
     .replaceAll('"./mapgen"', JSON.stringify(mapgenUrl))
     .replaceAll('"./presence"', JSON.stringify(presenceUrl)),
 );
+const moveUrl = dataUrl(
+  transpile("worldbox/move.ts").replaceAll('"./mapgen"', JSON.stringify(mapgenUrl)),
+);
 const nationsUrl = dataUrl(
   transpile("worldbox/nations.ts")
     .replaceAll('"./mapgen"', JSON.stringify(mapgenUrl))
+    .replaceAll('"./move"', JSON.stringify(moveUrl))
     .replaceAll('"./presence"', JSON.stringify(presenceUrl))
     .replaceAll('"./buildings"', JSON.stringify(buildingsUrl)),
+);
+const lobbyUrl = dataUrl(
+  transpile("worldbox/lobby.ts").replaceAll('"./mapgen"', JSON.stringify(mapgenUrl)),
+);
+const saveUrl = dataUrl(
+  transpile("worldbox/save.ts")
+    .replaceAll('"./lobby"', JSON.stringify(lobbyUrl))
+    .replaceAll('"./mapgen"', JSON.stringify(mapgenUrl)),
+);
+const saveOnlineUrl = dataUrl(
+  transpile("worldbox/save-online.ts").replaceAll('"../bot-api"', JSON.stringify(botApiStubUrl)),
+);
+const presenceOnlineUrl = dataUrl(
+  transpile("worldbox/presence-online.ts")
+    .replaceAll('"../bot-api"', JSON.stringify(botApiStubUrl))
+    .replaceAll('"./presence"', JSON.stringify(presenceUrl)),
 );
 const guildsUrl = dataUrl(
   transpile("worldbox/guilds.ts")
@@ -505,9 +524,27 @@ const nationsRoute = await import(
       .replaceAll('"@/lib/worldbox/mapgen"', JSON.stringify(mapgenUrl))
       .replaceAll('"@/lib/worldbox/nations"', JSON.stringify(nationsUrl))
       .replaceAll('"@/lib/worldbox/nations-online"', JSON.stringify(nationsOnlineUrl))
+      .replaceAll('"@/lib/worldbox/save"', JSON.stringify(saveUrl))
+      .replaceAll('"@/lib/worldbox/save-online"', JSON.stringify(saveOnlineUrl))
+      .replaceAll('"@/lib/worldbox/presence-online"', JSON.stringify(presenceOnlineUrl))
       .replaceAll('"@/lib/worldbox/station-online"', JSON.stringify(stationStubUrl))
       .replaceAll('"@/lib/worldbox/buildings-online"', JSON.stringify(buildingsOnlineUrl))
       .replaceAll('"@/lib/worldbox/guilds"', JSON.stringify(guildsUrl)),
+  ),
+);
+const spawnUrl = dataUrl(
+  transpile("worldbox/spawn.ts")
+    .replaceAll('"./mapgen"', JSON.stringify(mapgenUrl))
+    .replaceAll('"./move"', JSON.stringify(moveUrl)),
+);
+const saveRoute = await import(
+  dataUrl(
+    transpile("api/worldbox/save/route.ts", rootDir + "/app")
+      .replaceAll('"next/server"', JSON.stringify(nextServerStubUrl))
+      .replaceAll('"@/lib/auth"', JSON.stringify(authUrl))
+      .replaceAll('"@/lib/worldbox/save"', JSON.stringify(saveUrl))
+      .replaceAll('"@/lib/worldbox/save-online"', JSON.stringify(saveOnlineUrl))
+      .replaceAll('"@/lib/worldbox/spawn"', JSON.stringify(spawnUrl)),
   ),
 );
 const buildingsRoute = await import(
@@ -796,13 +833,12 @@ test("API(buildings): 個人所有の建築・繁栄度・所有者だけが取�
   assert.equal((await buildingsRoute.POST(buildingsRequest("POST", null, { action: "build", type: "house", x: 1, y: 1 }))).status, 401);
   assert.equal((await buildingsRoute.POST(buildingsRequest("POST", null, { action: "demolish", x: 1, y: 1 }))).status, 401);
 
-  // 建てられるタイルを探す（実マップ準拠: 草・土・砂、広場と首都を除く。
+  // 建てられるタイルを探す（実マップ準拠: 草・土・砂。
   // 温帯の中心付近を探す。北の雪原帯は建築対象タイルが無い）
-  const map = wb.generateMap();
+  const map = wb.worldTileSource();
   const buildable = [];
   for (let y = 480; y < 544 && buildable.length < 4; y++) {
     for (let x = 480; x < 544 && buildable.length < 4; x++) {
-      if (wb.isSpawnPlazaTile(map, x, y)) continue;
       const t = wb.mapTileAt(map, x, y);
       if (t === wb.T_GRASS || t === wb.T_DIRT || t === wb.T_SAND) buildable.push({ x, y });
     }
@@ -831,13 +867,10 @@ test("API(buildings): 個人所有の建築・繁栄度・所有者だけが取�
   const capital = foundBody.nation.capital;
   assert.equal(foundBody.nation.prosperity, 5, "建国直後の繁栄度は国民1人ぶん");
 
-  // エラーコード: 首都・広場・不正な種類
+  // エラーコード: 首都・不正な種類
   const onCapital = await buildingsRoute.POST(buildingsRequest("POST", cookieD, { action: "build", type: "house", x: capital.x, y: capital.y }));
   assert.equal(onCapital.status, 409);
   assert.equal((await onCapital.json()).error, "on_capital");
-  const onSpawn = await buildingsRoute.POST(buildingsRequest("POST", cookieD, { action: "build", type: "house", x: 510, y: 512 }));
-  assert.equal(onSpawn.status, 409);
-  assert.equal((await onSpawn.json()).error, "on_spawn");
   const badType = await buildingsRoute.POST(buildingsRequest("POST", cookieD, { action: "build", type: "castle", x: t2.x, y: t2.y }));
   assert.equal(badType.status, 400);
   assert.equal((await badType.json()).error, "invalid_type");
@@ -932,6 +965,93 @@ test("クライアント: 建築モード・建物描画・繁栄度が配線さ
   assert.ok(client.includes("stepMove(activeMap(), player, vel, dt, activeBlocked(), { swim: space === \"world\" })"), "建物が当たり判定に入っていない");
   assert.ok(client.includes("blockedRef.current"), "ワールドの固体集合に建物が入っていない");
   assert.ok(client.includes("blockedRef"), "建物の固体集合が無い");
+});
+
+// ---------- ファストトラベル ----------
+
+test("nations: ファストトラベル先は所属国の首都のみ（料金・クールダウンは当面ゼロ）", () => {
+  assert.equal(wb.FAST_TRAVEL_COST, 0);
+  assert.equal(wb.FAST_TRAVEL_COOLDOWN_MS, 0);
+  const map = wb.worldTileSource();
+  const founded = wb.applyFound(wb.emptyNationsState(), KING_A, { id: GUILD_1, name: "あご鯖" }, map, 1000);
+  const joined = wb.applyJoin(founded.state, USER_B, GUILD_1, "citizen");
+  const cap = founded.nation.capital;
+  for (const key of [KING_A, USER_B]) {
+    const dest = wb.fastTravelDestination(joined.state, key, map);
+    assert.equal(dest.ok, true);
+    assert.equal(dest.nationId, GUILD_1);
+    assert.ok(Math.abs(dest.x - (cap.x + 0.5)) <= 1.5 && Math.abs(dest.y - (cap.y + 0.5)) <= 1.5, `(${dest.x}, ${dest.y})`);
+  }
+  assert.equal(wb.fastTravelDestination(joined.state, USER_C, map).error, "not_in_nation");
+});
+
+test("API(nations): トラベルは所属者だけができ、セーブがユニオンマーク位置になる", async () => {
+  const GAMMA = "900000000000000013";
+  const cookieG = guildUser("200000000000000101", "king-g", "67", [
+    discordGuild(GAMMA, "がま鯖", true, "0"),
+  ]);
+  const cookieH = guildUser("200000000000000102", "user-h", "88", [
+    discordGuild(GAMMA, "がま鯖", false, "0"),
+  ]);
+  const cookieI = guildUser("200000000000000103", "user-i", "99", []);
+  // 未所属は却下（状態競合系の 409）
+  const denied = await nationsRoute.POST(nationsRequest("POST", cookieI, { action: "travel" }));
+  assert.equal(denied.status, 409);
+  assert.equal((await denied.json()).error, "not_in_nation");
+  // 建国して首都を得る
+  const found = await nationsRoute.POST(nationsRequest("POST", cookieG, { action: "found", guildId: GAMMA }));
+  assert.equal(found.status, 200);
+  const cap = (await found.json()).nation.capital;
+  // 王のトラベル: 座標は首都タイル中心付近
+  const tv = await nationsRoute.POST(nationsRequest("POST", cookieG, { action: "travel" }));
+  assert.equal(tv.status, 200);
+  const tvBody = await tv.json();
+  assert.equal(tvBody.nationId, GAMMA);
+  assert.ok(Math.abs(tvBody.x - (cap.x + 0.5)) <= 1.5 && Math.abs(tvBody.y - (cap.y + 0.5)) <= 1.5, `(${tvBody.x}, ${tvBody.y})`);
+  // セーブに反映されている
+  const saveMod = await import(saveUrl);
+  const savedRaw = globalThis.__wbNationsStore.get("worldbox_save discord:200000000000000101");
+  assert.ok(savedRaw, "トラベル先がセーブに保存されていない");
+  const saved = saveMod.parseSave(savedRaw);
+  assert.equal(saved.space, "world");
+  assert.equal(saved.x, tvBody.x);
+  assert.equal(saved.y, tvBody.y);
+  // 国民もトラベルできる
+  assert.equal((await nationsRoute.POST(nationsRequest("POST", cookieH, { action: "join", guildId: GAMMA }))).status, 200);
+  const tvH = await nationsRoute.POST(nationsRequest("POST", cookieH, { action: "travel" }));
+  assert.equal(tvH.status, 200);
+  assert.equal((await tvH.json()).nationId, GAMMA);
+  // 後片付け
+  await nationsRoute.POST(nationsRequest("POST", cookieH, { action: "leave" }));
+  await nationsRoute.POST(nationsRequest("POST", cookieG, { action: "leave" }));
+});
+
+// ---------- 初期スポーン（セーブ初回作成） ----------
+
+test("API(save): 初回 GET はランダムな陸スポーンでセーブを作り、以後は同じ位置を返す", async () => {
+  const cookie = sessionCookie("200000000000000201", "newbie");
+  const req = () => new Request("http://localhost/api/worldbox/save", { headers: { cookie } });
+  const res = await saveRoute.GET(req());
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  const saveMod = await import(saveUrl);
+  const parsed = saveMod.parseSave(body.save);
+  assert.ok(parsed, "初回セーブが解釈できない");
+  assert.equal(parsed.space, "world");
+  const tx = Math.floor(parsed.x);
+  const ty = Math.floor(parsed.y);
+  assert.ok(Math.abs(tx) <= 2000 && Math.abs(ty) <= 2000, `スポーン範囲外 (${tx}, ${ty})`);
+  // 陸の歩行可能タイル（草・砂・土・雪）の中心に落ちる
+  const t = wb.mapTileAt(wb.worldTileSource(), tx, ty);
+  assert.ok([wb.T_GRASS, wb.T_SAND, wb.T_DIRT, 6].includes(t), `スポーン不可タイル ${t} at (${tx}, ${ty})`);
+  assert.equal(parsed.x, tx + 0.5);
+  assert.equal(parsed.y, ty + 0.5);
+  // 2回目は作り直さず、保存済みの位置をそのまま返す
+  const res2 = await saveRoute.GET(req());
+  assert.equal(res2.status, 200);
+  assert.equal((await res2.json()).save, body.save);
+  // 未ログインは 401
+  assert.equal((await saveRoute.GET(new Request("http://localhost/api/worldbox/save"))).status, 401);
 });
 
 test("API(nations): 役職の操作はギルドボードの前でのみ（場所ゲート）", async () => {

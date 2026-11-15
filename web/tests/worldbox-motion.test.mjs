@@ -66,7 +66,7 @@ const st = await loadBundle(
 const mv = await loadBundle(
   ["worldbox/rng.ts", "worldbox/mapgen.ts", "worldbox/move.ts"],
   [
-    "T_GRASS", "T_WATER", "T_TREE", "WALK_SPEED", "SWIM_SPEED", "DASH_SPEED",
+    "T_GRASS", "T_WATER", "T_TREE", "WALK_SPEED", "SWIM_SPEED", "DASH_SPEED", "tilesSource",
     "stepMove", "canStandAt", "findFreeNear", "isWaterAt",
   ],
 );
@@ -184,7 +184,7 @@ function tinyMap() {
   const tiles = new Uint8Array(36).fill(mv.T_GRASS);
   for (const [x, y] of [[2, 2], [3, 2], [2, 3], [3, 3]]) tiles[y * 6 + x] = mv.T_WATER;
   tiles[2 * 6 + 4] = mv.T_TREE;
-  return { seed: 0, width: 6, height: 6, tiles };
+  return mv.tilesSource(0, 6, 6, tiles);
 }
 
 test("swim: オプションなしでは水に入れない", () => {
@@ -222,7 +222,7 @@ test("swim: findFreeNear は泳ぎ可なら水上をそのまま認める", () =
 
 // ---------- 他プレイヤーの描画補間 ----------
 
-const BOUNDS = { width: 1024, height: 1024 };
+const BOUNDS = { minX: 0, maxX: 1024, minY: 0, maxY: 1024 };
 const entry = (x, y, vx, vy, ts, face = 1) => ({ id: "a", name: "n", x, y, vx, vy, face, space: "world", ts });
 
 test("remote: 初見は予測位置から始まる", () => {

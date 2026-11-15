@@ -62,7 +62,7 @@ const wb = await loadBundle(
     "T_GRASS", "T_ROCK",
     "LOBBY_W", "LOBBY_H", "L_VOID", "L_WALL", "L_MARBLE", "L_PLAZA", "L_RING", "L_CARPET", "L_WOOD",
     "L_SAND", "L_DARK", "L_CHECK", "LOBBY_FLOOR_SPRITE", "LOBBY_FLOOR_FALLBACK", "isSolidLobbyTile",
-    "inLobbyShape", "LOBBY_OBJECTS", "LOBBY_NPCS", "LOBBY_ENTRY", "LOBBY_WARP_PAD", "WORLD_WARP_PAD",
+    "inLobbyShape", "LOBBY_OBJECTS", "LOBBY_NPCS", "LOBBY_ENTRY", "LOBBY_WARP_PAD",
     "LOBBY_STAIRS_UP", "LOBBY_STAIRS_DOWN", "LOBBY_UP_LANDING", "LOBBY_DOWN_LANDING",
     "buildLobby", "lobbyTileAt", "stationNear",
     "sanitizeHeartbeat", "sanitizePresenceSpace", "parsePresenceEntry", "selectVisiblePlayers",
@@ -80,14 +80,15 @@ test("lobby: 寸法は 56×64 で、タイル配列が一致する", () => {
   assert.equal(wb.LOBBY_W, 56);
   assert.equal(wb.LOBBY_H, 64);
   assert.equal(lobby.tiles.length, 56 * 64);
-  assert.equal(lobby.moveMap.width, 56);
-  assert.equal(lobby.moveMap.height, 64);
+  // moveMap はタイル源（範囲外は岩＝固体）
+  assert.equal(lobby.moveMap.tileAt(-1, 0), wb.T_ROCK);
+  assert.equal(lobby.moveMap.tileAt(56, 0), wb.T_ROCK);
 });
 
 test("lobby: 中央は大円の広場（内側は歩行可、リングが縁取る）", () => {
   assert.equal(tile(28, 20), wb.L_PLAZA);
   assert.equal(tile(28, 13), wb.L_RING); // 円の北端はリング
-  assert.equal(lobby.moveMap.tiles[20 * wb.LOBBY_W + 28], wb.T_GRASS); // 歩行可
+  assert.equal(lobby.moveMap.tileAt(28, 20), wb.T_GRASS); // 歩行可
   // 噴水の場所は固体オブジェクトで塞がれている
   assert.ok(lobby.blocked.has("28,24"));
 });
@@ -102,8 +103,8 @@ test("lobby: 図形の外は無効（VOID）、境界セルは壁", () => {
   assert.equal(tile(28, 0), wb.L_WALL); // アプスの頂点
   assert.equal(tile(53, 24), wb.L_WALL); // カジノ翼の東端
   // 壁と無効は moveMap でも固体
-  assert.equal(lobby.moveMap.tiles[24 * wb.LOBBY_W + 2], wb.T_ROCK);
-  assert.equal(lobby.moveMap.tiles[0], wb.T_ROCK);
+  assert.equal(lobby.moveMap.tileAt(2, 24), wb.T_ROCK);
+  assert.equal(lobby.moveMap.tileAt(0, 0), wb.T_ROCK);
 });
 
 test("lobby: ゾーンごとの床（カジノ=カーペット、ショップ=木、鍛冶屋=ダーク、2階=チェック、闘技場=砂）", () => {
@@ -187,9 +188,8 @@ test("lobby: ワープパッドと階段は歩行可タイルで、着地点も�
   assert.ok(walkable(Math.floor(wb.LOBBY_ENTRY.x), Math.floor(wb.LOBBY_ENTRY.y)));
   assert.ok(walkable(Math.floor(wb.LOBBY_UP_LANDING.x), Math.floor(wb.LOBBY_UP_LANDING.y)));
   assert.ok(walkable(Math.floor(wb.LOBBY_DOWN_LANDING.x), Math.floor(wb.LOBBY_DOWN_LANDING.y)));
-  // ワールド側パッドはスポーン広場（中心 512,512 の保護範囲）の中
-  const d2 = (wb.WORLD_WARP_PAD.x - 512) ** 2 + (wb.WORLD_WARP_PAD.y - 512) ** 2;
-  assert.ok(d2 <= 20, "ワールド側パッドがスポーン広場の外");
+  // ワールド側に固定パッドは無い（ロビー行きは ≡ メニューから）
+  assert.ok(!("WORLD_WARP_PAD" in wb), "ワールド側の固定ワープパッドが残っている");
 });
 
 // ---------- 到達可能性 ----------
@@ -199,7 +199,7 @@ function reachableFrom(sx, sy) {
   const H = wb.LOBBY_H;
   const walk = (x, y) =>
     x >= 0 && y >= 0 && x < W && y < H &&
-    lobby.moveMap.tiles[y * W + x] !== wb.T_ROCK && !lobby.blocked.has(`${x},${y}`);
+    lobby.moveMap.tileAt(x, y) !== wb.T_ROCK && !lobby.blocked.has(`${x},${y}`);
   const seen = new Set([`${sx},${sy}`]);
   const queue = [[sx, sy]];
   while (queue.length > 0) {
@@ -339,7 +339,7 @@ const auth = await import(authUrl);
 const rngUrl = dataUrl(transpile("worldbox/rng.ts"));
 const mapgenUrl = dataUrl(transpile("worldbox/mapgen.ts").replaceAll('"./rng"', JSON.stringify(rngUrl)));
 const lobbyModUrl = dataUrl(transpile("worldbox/lobby.ts").replaceAll('"./mapgen"', JSON.stringify(mapgenUrl)));
-const presenceUrl = dataUrl(transpile("worldbox/presence.ts"));
+const presenceUrl = dataUrl(transpile("worldbox/presence.ts").replaceAll('"./mapgen"', JSON.stringify(mapgenUrl)));
 const presenceOnlineUrl = dataUrl(
   transpile("worldbox/presence-online.ts")
     .replaceAll('"../bot-api"', JSON.stringify(botApiStubUrl))
@@ -495,7 +495,8 @@ test("クライアント: ハンバーガーメニューと空間ワープがあ
   assert.ok(client.includes("ロビーへ行く"), "ロビーへの導線が無い");
   assert.ok(client.includes("ワールドへ戻る"), "ワールドへの導線が無い");
   assert.ok(client.includes("ago-worldbox-save-v6"), "セーブキーが v6 でない");
-  assert.ok(client.includes("WORLD_WARP_PAD") && client.includes("LOBBY_WARP_PAD"), "ワープパッド判定が無い");
+  assert.ok(client.includes("LOBBY_WARP_PAD"), "ロビー側ワープパッド判定が無い");
+  assert.ok(!client.includes("WORLD_WARP_PAD"), "ワールド側の固定ワープパッドが残っている");
   assert.ok(client.includes("LOBBY_STAIRS_UP") && client.includes("LOBBY_STAIRS_DOWN"), "階段判定が無い");
 });
 

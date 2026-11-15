@@ -1,6 +1,20 @@
 // AGO WORLD BOX の同時接続プレゼンス（純粋ロジック）。
 // ハートビートの検証・整形、鮮度判定、デッドレコニング（速度による先読み）を
 // ここに集約し、API ルートとクライアント描画はこの結果だけを使う。
+// 座標境界は mapgen.ts の worldBounds と同じ値（このファイルは単体で
+// トランスパイルされるため import せず複製して明示する。値の正は mapgen）。
+export type CoordBounds = { minX: number; maxX: number; minY: number; maxY: number };
+
+const PRESENCE_COORD_LIMIT = 1_000_000;
+
+function fallbackBounds(): CoordBounds {
+  return {
+    minX: -PRESENCE_COORD_LIMIT,
+    maxX: PRESENCE_COORD_LIMIT,
+    minY: -PRESENCE_COORD_LIMIT,
+    maxY: PRESENCE_COORD_LIMIT,
+  };
+}
 
 /** ハートビートが「在席」とみなせる上限（ミリ秒）。送信間隔 約1秒 +  poll 約2秒 の余裕。 */
 export const PRESENCE_FRESH_MS = 10_000;
@@ -64,9 +78,9 @@ function sanitizeName(raw: unknown): string {
 
 /**
  * ハートビート body を検証・整形する。位置が数値でなければ null。
- * 範囲外の値はマップ境界へ丸める（却下ではなく補正）。
+ * 範囲外の値は空間の範囲へ丸める（却下ではなく補正）。
  */
-export function sanitizeHeartbeat(raw: unknown, bounds: { width: number; height: number }): Heartbeat | null {
+export function sanitizeHeartbeat(raw: unknown, bounds: CoordBounds): Heartbeat | null {
   if (!raw || typeof raw !== "object") return null;
   const v = raw as Record<string, unknown>;
   if (typeof v.x !== "number" || !Number.isFinite(v.x)) return null;
@@ -74,8 +88,8 @@ export function sanitizeHeartbeat(raw: unknown, bounds: { width: number; height:
   const vel = (n: unknown) => (typeof n === "number" && Number.isFinite(n) ? clampNum(n, -MAX_VELOCITY, MAX_VELOCITY) : 0);
   return {
     name: sanitizeName(v.name),
-    x: clampNum(v.x, 0, bounds.width),
-    y: clampNum(v.y, 0, bounds.height),
+    x: clampNum(v.x, bounds.minX, bounds.maxX),
+    y: clampNum(v.y, bounds.minY, bounds.maxY),
     vx: vel(v.vx),
     vy: vel(v.vy),
     face: v.face === -1 ? -1 : 1,
@@ -96,7 +110,7 @@ export function parsePresenceEntry(id: string, raw: unknown): PresenceEntry | nu
   if (!data || typeof data !== "object") return null;
   const v = data as Record<string, unknown>;
   if (typeof v.ts !== "number" || !Number.isFinite(v.ts)) return null;
-  const hb = sanitizeHeartbeat(v, { width: 1e9, height: 1e9 });
+  const hb = sanitizeHeartbeat(v, fallbackBounds());
   if (!hb) return null;
   return { ...hb, id, ts: v.ts };
 }
@@ -132,12 +146,12 @@ export function selectVisiblePlayers(
 
 /**
  * デッドレコニング: 最終ハートビート位置を速度で外挿する。
- * 外挿は EXTRAPOLATE_CAP_SEC で頭打ちにし、マップ内に丸める。
+ * 外挿は EXTRAPOLATE_CAP_SEC で頭打ちにし、空間の範囲内に丸める。
  */
-export function predictPosition(entry: PresenceEntry, now: number, bounds: { width: number; height: number }): { x: number; y: number } {
+export function predictPosition(entry: PresenceEntry, now: number, bounds: CoordBounds): { x: number; y: number } {
   const dt = clampNum((now - entry.ts) / 1000, 0, EXTRAPOLATE_CAP_SEC);
   return {
-    x: clampNum(entry.x + entry.vx * dt, 0, bounds.width),
-    y: clampNum(entry.y + entry.vy * dt, 0, bounds.height),
+    x: clampNum(entry.x + entry.vx * dt, bounds.minX, bounds.maxX),
+    y: clampNum(entry.y + entry.vy * dt, bounds.minY, bounds.maxY),
   };
 }

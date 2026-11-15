@@ -9,8 +9,9 @@
 // 状態遷移（建国・参加・離脱・解散）はここに集約し、API ルートは保存・認証・
 // Discord 検証だけを担う。地形は lib/worldbox/mapgen の決定的マップを参照する。
 import {
-  MAP_H, MAP_W, isSolidMapTile, mapTileAt, type TopDownMap,
+  WORLD_COORD_LIMIT, isSolidMapTile, mapTileAt, type TopDownMap,
 } from "./mapgen";
+import { findFreeNear } from "./move";
 import { presenceIdFor } from "./presence";
 import { BUILDING_PROSPERITY, emptyBuildings, type BuildingsMap } from "./buildings";
 
@@ -80,12 +81,13 @@ function chebyshev(ax: number, ay: number, bx: number, by: number): number {
 }
 
 /**
- * (x, y) に首都を置けるか: 周囲のフットプリント全体がマップ内、首都タイルが
- * 固体（水・木・岩）でない、どの国の首都とも近すぎない。
+ * (x, y) に首都を置けるか: 首都タイルが固体（水・木・岩）でなく、
+ * どの国の首都とも近すぎない。ワールドに境界は無いため範囲は問わない
+ * （座標の健全上限だけは守る）。
  */
 export function capitalFits(map: TopDownMap, x: number, y: number, nations: Nation[]): boolean {
   const r = TERRITORY_RADIUS;
-  if (x - r < 0 || y - r < 0 || x + r >= map.width || y + r >= map.height) return false;
+  if (Math.abs(x) > WORLD_COORD_LIMIT - r || Math.abs(y) > WORLD_COORD_LIMIT - r) return false;
   if (isSolidMapTile(mapTileAt(map, x, y))) return false;
   for (const n of nations) {
     if (chebyshev(x, y, n.capital.x, n.capital.y) <= r * 2) return false;
@@ -93,21 +95,26 @@ export function capitalFits(map: TopDownMap, x: number, y: number, nations: Nati
   return true;
 }
 
+/** 首都探索の中心（既存の首都が集まる原点近傍の基準点）。 */
+export const CAPITAL_SEARCH_CENTER = { x: 512, y: 512 };
+/** 首都探索の最大リング。これ以上は「空き地なし」とする。 */
+const CAPITAL_SEARCH_MAX_RING = 1024;
+
 /**
- * 首都候補をマップ中央からチェビシェフリング状に外側へ探す（渦巻き配置）。
+ * 首都候補を探索中心からチェビシェフリング状に外側へ探す（渦巻き配置）。
  * 置ける最初のタイルを返し、無ければ null。
  */
-export function findCapitalTile(map: TopDownMap, nations: Nation[]): { x: number; y: number } | null {
-  const cx = Math.floor(map.width / 2);
-  const cy = Math.floor(map.height / 2);
-  const maxRing = Math.max(map.width, map.height);
-  for (let r = 0; r <= maxRing; r++) {
+export function findCapitalTile(
+  map: TopDownMap,
+  nations: Nation[],
+  center: { x: number; y: number } = CAPITAL_SEARCH_CENTER,
+): { x: number; y: number } | null {
+  for (let r = 0; r <= CAPITAL_SEARCH_MAX_RING; r++) {
     for (let dy = -r; dy <= r; dy++) {
       for (let dx = -r; dx <= r; dx++) {
         if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
-        const x = cx + dx;
-        const y = cy + dy;
-        if (x < 0 || y < 0 || x >= map.width || y >= map.height) continue;
+        const x = center.x + dx;
+        const y = center.y + dy;
         if (capitalFits(map, x, y, nations)) return { x, y };
       }
     }
@@ -204,6 +211,37 @@ export function applyLeave(state: NationsState, ownerKey: string): NationActionR
   return { ok: true, state: { nations: state.nations, members }, disbanded: false };
 }
 
+// ---------- ファストトラベル ----------
+
+/** 所属国への移動料金（アゴコイン）。当面は無料。 */
+export const FAST_TRAVEL_COST = 0;
+/** 所属国への移動のクールダウン（ミリ秒）。当面はなし。 */
+export const FAST_TRAVEL_COOLDOWN_MS = 0;
+
+export type FastTravelResult =
+  | { ok: true; nationId: string; x: number; y: number }
+  | { ok: false; error: string };
+
+/**
+ * 所属国へのファストトラベル先: 自分の国のユニオンマーク（首都）タイルの
+ * 中心。所属の検証はこの関数が正（状態に所属が無ければ not_in_nation）。
+ * 首都タイルは建国時点で固体でないことが保証されるが、周囲の変化に備えて
+ * 立てる場所へ寄せる。料金・クールダウンは定数（現状どちらも 0）で、
+ * 課金・制限を入れる場合はここを起点にする。
+ */
+export function fastTravelDestination(
+  state: NationsState,
+  ownerKey: string,
+  map: TopDownMap,
+): FastTravelResult {
+  const mine = state.members[ownerKey];
+  if (!mine) return { ok: false, error: "not_in_nation" };
+  const nation = state.nations[mine.nationId];
+  if (!nation) return { ok: false, error: "not_in_nation" };
+  const free = findFreeNear(map, nation.capital.x + 0.5, nation.capital.y + 0.5, undefined, { swim: true });
+  return { ok: true, nationId: nation.guildId, x: free.x, y: free.y };
+}
+
 // ---------- 繁栄度 ----------
 
 /** 国民1人あたりの繁栄度。 */
@@ -256,7 +294,7 @@ function parseNation(raw: unknown): Nation | null {
   if (!Number.isFinite(cap.x) || !Number.isFinite(cap.y)) return null;
   const x = Math.floor(cap.x);
   const y = Math.floor(cap.y);
-  if (x < 0 || y < 0 || x >= MAP_W || y >= MAP_H) return null;
+  if (Math.abs(x) > WORLD_COORD_LIMIT || Math.abs(y) > WORLD_COORD_LIMIT) return null;
   if (typeof v.createdAt !== "number" || !Number.isFinite(v.createdAt)) return null;
   return { guildId: v.guildId, name: v.name, color: v.color, kingKey: v.kingKey, capital: { x, y }, createdAt: v.createdAt };
 }

@@ -57,7 +57,8 @@ export function circleHitsSolid(map: TopDownMap, cx: number, cy: number, r: numb
 
 /**
  * 速度 vel（タイル/秒）で dt 秒進める。軸分離で壁に沿って滑る。
- * マップ外には出ない（端で止まる）。
+ * ワールドに境界は無い（座標は実質無制限）。有限空間（ロビー）は
+ * タイル源の範囲外が岩になることで端が壁になる。
  */
 export function stepMove(
   map: TopDownMap,
@@ -80,8 +81,6 @@ export function stepMove(
   if (circleHitsSolid(map, x, ny, r, blocked, opts)) hitY = true;
   else y = ny;
 
-  x = Math.max(r, Math.min(map.width - r, x));
-  y = Math.max(r, Math.min(map.height - r, y));
   return { x, y, hitX, hitY };
 }
 
@@ -99,12 +98,11 @@ export function findFreeNear(map: TopDownMap, x: number, y: number, blocked?: Bl
         if (Math.max(Math.abs(dx), Math.abs(dy)) !== ring) continue;
         const cx = x + dx;
         const cy = y + dy;
-        if (cx < 1 || cy < 1 || cx > map.width - 1 || cy > map.height - 1) continue;
         if (canStandAt(map, cx, cy, blocked, opts)) return { x: cx, y: cy };
       }
     }
   }
-  return { x: Math.floor(map.width / 2) + 0.5, y: Math.floor(map.height / 2) + 0.5 };
+  return { x, y };
 }
 
 /** その地点の足元が水か（中心タイルで判定）。 */

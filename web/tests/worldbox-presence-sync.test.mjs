@@ -50,7 +50,8 @@ const url = bundleModule(
   ["clockOffsetEstimate", "predictPosition", "EXTRAPOLATE_CAP_SEC"],
 );
 const wb = await import(url);
-const bounds = { width: 1024, height: 1024 };
+// 境界は CoordBounds 形式（{minX, maxX, minY, maxY}）が現行仕様
+const bounds = { minX: 0, maxX: 1024, minY: 0, maxY: 1024 };
 
 test("clockOffsetEstimate: 往復中点との差でずれを推定する", () => {
   // クライアントがサーバーより 3000ms 進んでいる（往復 100ms）
