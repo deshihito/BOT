@@ -155,14 +155,15 @@ test("床: ゾーンの最低高で形を守り、席と中央帯は潰れて消
   assert.ok(/\.balku-seat \.balku-stackface \{[^}]*width:104px/.test(css), "席内の小型の顔がない");
   assert.ok(client.includes("balku-seat-meta") && client.includes("balku-seat-statsline"), "席の情報列がない");
   assert.ok(client.includes("balku-seat-noface"), "提出なし席のプレースホルダがない");
-  // 手札ファンは固定高コンテナに完全収納し、重なりはカード幅の45%まで。
+  // 手札ファンは固定高コンテナに完全収納し、重なりはカード幅の30%まで
+  // （掴める帯＝露出7割を確保する。2026-11-15 第3弾で 45%→30% に浅くした）。
   // 名前とPTは左列に縦積みし、重なりの下に隠れない
   assert.ok(css.includes(".balku-fan-projects { height:140px; }"), "企画ファンの固定高がない");
   assert.ok(css.includes(".balku-fan-mats { height:100px; }"), "素材ファンの固定高がない");
   assert.ok(/\.balku-fan-projects \.balku-card \{[^}]*height:118px/.test(css), "手札カードの固定高がない");
   assert.ok(css.includes("--balku-fan-card-w:clamp(104px, 13.5cqw, 140px)"), "横向きのカード幅変数がない");
   assert.ok(css.includes("--balku-fan-card-w:clamp(104px, 30cqw, 126px)"), "縦持ちのカード幅変数がない");
-  assert.ok(css.includes("* -0.45"), "重なりの上限（45%）がない");
+  assert.ok(css.includes("* -0.3)"), "重なりの上限（30%）がない");
   assert.ok(!css.includes("-17cqw") && !css.includes("-7.4cqw"), "旧の強い重なりが残っている");
   assert.ok(/\.balku-fan-projects \.balku-card-head \{[^}]*flex-direction:column/.test(css), "名前とPTの縦積みがない");
   // 情報バーの副次表示（同期状態）はハンバーガーへ。低丈の横向きでは
@@ -309,6 +310,18 @@ test("演出と認知負荷: パーティクル/シェイクと、チップ化�
   assert.ok(client.includes("balku-legal-badge"), "合法バッジがない");
   // 情報バーはターンと山札を1チップに統合（常時表示の要素を減らす）
   assert.ok(/第\{st\.turn\}ターン ・ 山札/.test(client), "情報バーのチップ統合がない");
+});
+
+test("取る側と落とす側のバランス: 掴みは大きく、提出先は場の下部だけ", () => {
+  // ファンの重なりは浅く（露出7割で掴める帯を広く保つ）
+  assert.ok(css.includes("* -0.3)"), "ファンの重なりが深いまま（掴める帯が狭い）");
+  // ドラッグ中のゴーストは手札カードより大きく浮く
+  assert.ok(/\.balku-drag-clone \.balku-card-small \{ width:156px/.test(css), "ドラッグゴーストが小さいまま");
+  // 施工の大カード（束の掴み元）も一回り大きく
+  assert.ok(css.includes("width:min(264px, 76cqw)"), "施工カードが小さいまま");
+  // 提出先の半分は場いっぱい（inset:0）ではなく下部56%に収める
+  assert.ok(/\.balku-fieldhalves \{[^}]*height:56%/.test(css), "提出先が場の下部に収まっていない");
+  assert.ok(!/\.balku-fieldhalves \{[^}]*inset:0/.test(css), "提出先が場いっぱいに広がっている");
 });
 
 test("対戦画面とカタログに絵文字が残っていない", () => {
