@@ -15,7 +15,8 @@ import {
   MOB_ATTACK_MAX_DISTANCE, type MobState,
 } from "@/lib/worldbox/combat";
 import { isMobsEnabled, loadMobState, loadMobStates, storeMobState } from "@/lib/worldbox/mobs-online";
-import { buildCaveLayer, parseInstanceSpace } from "@/lib/worldbox/instances";
+import { buildCaveLayer, parseInstanceSpace, weekKeyOf } from "@/lib/worldbox/instances";
+import { loadRuinsPersonal, storeRuinsPersonal } from "@/lib/worldbox/instances-online";
 
 export const runtime = "nodejs";
 
@@ -81,6 +82,25 @@ export async function GET(request: Request) {
   const now = Date.now();
   const spaceParam = url.searchParams.get("space");
   const instGet = spaceParam ? parseInstanceSpace(spaceParam) : null;
+  if (instGet?.kind === "ruins" && spaceParam) {
+    // 警報罠の召喚モブはプレイヤー専用。配置は個人状態が正。
+    const personal = await loadRuinsPersonal(spaceParam, sessionOwnerKey(session), weekKeyOf(now));
+    const allR = await loadMobStates();
+    const statesR: Record<string, MobState> = {};
+    const summons = personal.summons.map((sm) => {
+      const def = mobById(sm.mobId);
+      return { mobId: sm.mobId, x: sm.x, y: sm.y, biome: "plains" as const, size: def?.size ?? 1 };
+    });
+    for (const placed of summons) {
+      const key = `${spaceParam}|${mobKeyOf(placed)}`;
+      const st = allR[key];
+      if (st && !(st.deadUntil !== undefined && now >= st.deadUntil)) statesR[key] = st;
+    }
+    return NextResponse.json(
+      { states: statesR, summons, selfId: presenceIdFor(sessionOwnerKey(session)) },
+      { headers: NO_STORE },
+    );
+  }
   if (instGet?.kind === "cave") {
     const cave = buildCaveLayer(MAP_SEED, instGet.entranceX, instGet.entranceY, instGet.layer);
     const allC = await loadMobStates();
@@ -144,7 +164,7 @@ export async function POST(request: Request) {
   const x = Math.floor(fields.x);
   const y = Math.floor(fields.y);
   const instPost = typeof fields.space === "string" ? parseInstanceSpace(fields.space) : null;
-  const caveSpace = instPost?.kind === "cave" ? (fields.space as string) : null;
+  const caveSpace = instPost?.kind === "cave" || instPost?.kind === "ruins" ? (fields.space as string) : null;
   if (!def || x < -WORLD_COORD_LIMIT || y < -WORLD_COORD_LIMIT || x > WORLD_COORD_LIMIT || y > WORLD_COORD_LIMIT) {
     return NextResponse.json({ error: "unknown_mob" }, { status: 400, headers: NO_STORE });
   }
@@ -153,13 +173,20 @@ export async function POST(request: Request) {
   const placed = { mobId: def.id, x, y, size: def.size, biome: "plains" as const };
   let keyPrefix = "";
   if (caveSpace && instPost) {
-    // 洞窟内モブ: 配置は instances の決定的生成が正。地表配置の検証は使わない。
-    if (def.instanceOnly && def.instanceOnly !== "cave") {
-      return NextResponse.json({ error: "unknown_mob" }, { status: 400, headers: NO_STORE });
-    }
-    const cave = buildCaveLayer(MAP_SEED, instPost.entranceX, instPost.entranceY, instPost.layer);
-    if (!cave.mobs.some((m) => m.mobId === def.id && m.x === x && m.y === y)) {
-      return NextResponse.json({ error: "unknown_mob" }, { status: 400, headers: NO_STORE });
+    // インスタンス内モブ: 配置は生成/個人状態が正。地表配置の検証は使わない。
+    if (instPost.kind === "ruins") {
+      const personal = await loadRuinsPersonal(caveSpace, ownerKey, weekKeyOf(now));
+      if (!personal.summons.some((m) => m.mobId === def.id && m.x === x && m.y === y)) {
+        return NextResponse.json({ error: "unknown_mob" }, { status: 400, headers: NO_STORE });
+      }
+    } else {
+      if (def.instanceOnly && def.instanceOnly !== "cave") {
+        return NextResponse.json({ error: "unknown_mob" }, { status: 400, headers: NO_STORE });
+      }
+      const cave = buildCaveLayer(MAP_SEED, instPost.entranceX, instPost.entranceY, instPost.layer);
+      if (!cave.mobs.some((m) => m.mobId === def.id && m.x === x && m.y === y)) {
+        return NextResponse.json({ error: "unknown_mob" }, { status: 400, headers: NO_STORE });
+      }
     }
     keyPrefix = `${caveSpace}|`;
   } else {
@@ -198,6 +225,12 @@ export async function POST(request: Request) {
   }
   if (!(await storeMobState(key, result.state))) {
     return NextResponse.json({ error: "mobs_failed" }, { status: 500, headers: NO_STORE });
+  }
+  if (result.dead && caveSpace && instPost?.kind === "ruins") {
+    // 倒した召喚モブは個人状態から消す（再出現しない）
+    const personal = await loadRuinsPersonal(caveSpace, ownerKey, weekKeyOf(now));
+    personal.summons = personal.summons.filter((m) => !(m.mobId === def.id && m.x === x && m.y === y));
+    await storeRuinsPersonal(caveSpace, ownerKey, personal);
   }
   let updatedProfile = null;
   if (result.dead && Object.keys(result.gained).length > 0) {

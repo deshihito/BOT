@@ -45,7 +45,8 @@ import {
 import { genreById, type ShopGenreId } from "@/lib/worldbox/shops";
 import { TENT_ENTRY, TENT_EXIT, TENT_H, TENT_W, buildTent, tentTileAt } from "@/lib/worldbox/tent";
 import {
-  buildCaveLayer, lightRadiusTiles, makeInstanceSpace, parseInstanceSpace, type CaveLayer,
+  buildCaveLayer, buildRuins, lightRadiusTiles, makeInstanceSpace, parseInstanceSpace,
+  type CaveLayer, type RuinsMap,
 } from "@/lib/worldbox/instances";
 import { structureById, structuresForChunk, type PlacedStructure } from "@/lib/worldbox/maplogic";
 import { specialObjectById } from "@/lib/worldbox/objects";
@@ -217,6 +218,7 @@ const TILE_ERROR_LABEL: Record<string, string> = {
   too_far: "遠すぎる",
   depleted: "もう無い",
   needs_pickaxe: "ツルハシが必要",
+  needs_golden_key: "金の鍵が必要",
   pickaxe_tier: "ツルハシが弱い",
   not_at_onsen: "温泉が遠い",
   unauthorized: "ログインが必要",
@@ -732,9 +734,34 @@ export default function WorldBoxClient() {
     void postVitals({
       action: "damage", mobId, x, y,
       px: playerPosRef.current.x, py: playerPosRef.current.y,
-      ...(parseInstanceSpace(spaceUi)?.kind === "cave" ? { space: spaceUi } : {}),
+      ...(parseInstanceSpace(spaceUi) ? { space: spaceUi } : {}),
     });
   };
+  /** 遺跡の個人状態（宝箱・罠・扉・召喚）。サーバーが正、ここは表示用キャッシュ。 */
+  const ruinsStateRef = useRef<{
+    chests: Record<string, boolean>; traps: Record<string, boolean>;
+    doors: Record<string, boolean>; summons: { mobId: string; x: number; y: number }[];
+  }>({ chests: {}, traps: {}, doors: {}, summons: [] });
+  const refreshRuinsState = async (space: string) => {
+    try {
+      const res = await fetch(`/api/worldbox/instances?space=${encodeURIComponent(space)}`, {
+        headers: { Accept: "application/json" },
+      });
+      if (!res.ok) return;
+      const data = (await res.json()) as {
+        chests?: Record<string, boolean>; traps?: Record<string, boolean>;
+        doors?: Record<string, boolean>; summons?: { mobId: string; x: number; y: number }[];
+      };
+      ruinsStateRef.current = {
+        chests: data.chests ?? {}, traps: data.traps ?? {},
+        doors: data.doors ?? {}, summons: data.summons ?? [],
+      };
+    } catch { /* 読めなくても歩き続けられる */ }
+  };
+  const refreshRuinsStateRef = useRef(refreshRuinsState);
+  refreshRuinsStateRef.current = refreshRuinsState;
+  /** インスタンス内のテレポート（転移罠など）。エフェクト側が placePlayer を差す。 */
+  const instanceTeleportRef = useRef<((x: number, y: number) => void) | null>(null);
   /** 洞窟の枯渇状態（鉱脈・宝箱）。サーバーが正、ここは表示用キャッシュ。 */
   const caveStateRef = useRef<{ veins: Record<string, number>; chest: number }>({ veins: {}, chest: 0 });
   const refreshCaveState = async (space: string) => {
@@ -749,10 +776,14 @@ export default function WorldBoxClient() {
   };
   const refreshCaveStateRef = useRef(refreshCaveState);
   refreshCaveStateRef.current = refreshCaveState;
-  /** 洞窟内アクション（採掘・宝箱・温泉）。検証と付与はサーバーが担う。 */
-  const postInstance = async (action: "mine" | "open_chest" | "onsen", extra?: { veinKey?: string }) => {
+  /** インスタンス内アクション（洞窟の採掘/宝箱/温泉、遺跡の宝箱/扉/罠）。検証と付与はサーバーが担う。 */
+  const postInstance = async (
+    action: "mine" | "open_chest" | "onsen" | "open_door" | "trap",
+    extra?: { veinKey?: string; chestIdx?: number; doorIdx?: number; trapIdx?: number },
+  ) => {
     const space = spaceUi;
-    if (parseInstanceSpace(space)?.kind !== "cave") return;
+    const kindNow = parseInstanceSpace(space)?.kind;
+    if (kindNow !== "cave" && kindNow !== "ruins") return;
     try {
       const res = await fetch("/api/worldbox/instances", {
         method: "POST",
@@ -761,20 +792,29 @@ export default function WorldBoxClient() {
       });
       const data = (await res.json().catch(() => ({}))) as {
         error?: string; gained?: Record<string, number>; trapped?: boolean; profile?: PlayerProfile;
+        teleport?: { x: number; y: number } | null; kind?: string;
       };
       if (!res.ok) {
         if (data.error && TILE_ERROR_LABEL[data.error]) setTileMsg(TILE_ERROR_LABEL[data.error]);
         return;
       }
       if (data.profile) setInvProfile(data.profile);
-      if (data.trapped) {
+      if (data.teleport) {
+        instanceTeleportRef.current?.(data.teleport.x, data.teleport.y);
+        playWbSe("warp");
+      } else if (data.trapped || data.kind === "damage" || data.kind === "poison") {
         fxEventsRef.current.push({ kind: "hit", x: playerPosRef.current.x, y: playerPosRef.current.y });
         playWbSe("hit");
+      } else if (data.kind === "alarm") {
+        fxEventsRef.current.push({ kind: "hit", x: playerPosRef.current.x, y: playerPosRef.current.y });
+        playWbSe("error");
+        void refreshMobsRef.current();
       } else {
         fxEventsRef.current.push({ kind: "poof", x: playerPosRef.current.x, y: playerPosRef.current.y });
         playWbSe("success");
       }
-      void refreshCaveState(space);
+      if (kindNow === "cave") void refreshCaveState(space);
+      else void refreshRuinsState(space);
     } catch { /* 失敗しても歩き続けられる */ }
   };
   const postInstanceRef = useRef(postInstance);
@@ -884,6 +924,29 @@ export default function WorldBoxClient() {
   const mobStatesRef = useRef<Record<string, MobState>>({});
   const refreshMobs = async () => {
     try {
+      const ruinsSpace = parseInstanceSpace(spaceUi)?.kind === "ruins" ? spaceUi : null;
+      if (ruinsSpace) {
+        const res = await fetch(
+          `/api/worldbox/mobs?space=${encodeURIComponent(ruinsSpace)}`,
+          { headers: { Accept: "application/json" } },
+        );
+        if (!res.ok) return;
+        const data = (await res.json()) as {
+          states?: Record<string, MobState>;
+          summons?: { mobId: string; x: number; y: number; size: number }[];
+        };
+        ruinsStateRef.current = {
+          ...ruinsStateRef.current,
+          summons: (data.summons ?? []).map((sm) => ({ mobId: sm.mobId, x: sm.x, y: sm.y })),
+        };
+        const next: Record<string, MobState> = { ...mobStatesRef.current };
+        for (const key of Object.keys(next)) {
+          if (key.startsWith(`${ruinsSpace}|`)) delete next[key];
+        }
+        Object.assign(next, data.states ?? {});
+        mobStatesRef.current = next;
+        return;
+      }
       const caveSpace = parseInstanceSpace(spaceUi)?.kind === "cave" ? spaceUi : null;
       if (caveSpace) {
         const res = await fetch(
@@ -933,7 +996,7 @@ export default function WorldBoxClient() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action: "attack", mobId: placed.mobId, x: placed.x, y: placed.y,
-          ...(parseInstanceSpace(spaceUi)?.kind === "cave" ? { space: spaceUi } : {}),
+          ...(parseInstanceSpace(spaceUi) ? { space: spaceUi } : {}),
           // サーバー側の位置の正（プレゼンス）が WS 中継中は bot_kv に届かないため、
           // 距離検証のフォールバックとして現在位置を添える（プレゼンスが新鮮ならそちらが優先される）
           px: playerPosRef.current.x, py: playerPosRef.current.y,
@@ -1114,10 +1177,21 @@ export default function WorldBoxClient() {
       }
       return caveCache;
     };
-    /** モブ状態のキー（洞窟は空間 ID で前置し、地表の同座標個体と分ける）。 */
+    let ruinsCacheKey = "";
+    let ruinsCache: RuinsMap | null = null;
+    const ruinsNow = (): RuinsMap | null => {
+      const inst = parseInstanceSpace(space);
+      if (inst?.kind !== "ruins") return null;
+      if (ruinsCacheKey !== space) {
+        ruinsCacheKey = space;
+        ruinsCache = buildRuins(MAP_SEED, inst.entranceX, inst.entranceY);
+      }
+      return ruinsCache;
+    };
+    /** モブ状態のキー（インスタンス内は空間 ID で前置し、地表の同座標個体と分ける）。 */
     const mobKeyFor = (placed: PlacedMob): string =>
-      parseInstanceSpace(space)?.kind === "cave" ? `${space}|${mobKeyOf(placed)}` : mobKeyOf(placed);
-    const indoorData = (): LobbyData => caveLayerNow()?.data ?? (space === "tent" ? tent : lobby);
+      parseInstanceSpace(space) ? `${space}|${mobKeyOf(placed)}` : mobKeyOf(placed);
+    const indoorData = (): LobbyData => caveLayerNow()?.data ?? ruinsNow()?.data ?? (space === "tent" ? tent : lobby);
     const textures = loadTextures();
     const dungeon = loadDungeonTiles();
     const lobbySprites = loadLobbySprites();
@@ -1175,11 +1249,29 @@ export default function WorldBoxClient() {
     let space: SaveSpace = "world";
     let worldReturn: { x: number; y: number } | null = null;
     const activeMap = (): TopDownMap => (space === "world" ? worldMap : indoorData().moveMap);
-    const activeBounds = () => (space === "lobby" ? rectBounds(LOBBY_W, LOBBY_H) : space === "tent" ? rectBounds(TENT_W, TENT_H) : worldBounds());
+    const activeBounds = () => {
+      const inst = parseInstanceSpace(space);
+      if (inst?.kind === "cave") return rectBounds(64, 64);
+      if (inst?.kind === "ruins") return rectBounds(48, 48);
+      return space === "lobby" ? rectBounds(LOBBY_W, LOBBY_H) : space === "tent" ? rectBounds(TENT_W, TENT_H) : worldBounds();
+    };
     // モブ占有を差し引いた今フレームの固体集合（モブの真上に立つ間の救済用）
     let mobFrameBlocked: ReadonlySet<string> | undefined;
-    const activeBlocked = (): ReadonlySet<string> | undefined =>
-      mobFrameBlocked ?? (space === "world" ? blockedRef.current : indoorData().blocked);
+    const activeBlocked = (): ReadonlySet<string> | undefined => {
+      if (mobFrameBlocked) return mobFrameBlocked;
+      if (space === "world") return blockedRef.current;
+      const ruins = ruinsNow();
+      if (ruins) {
+        // 開けた金の鍵の扉は通れる（個人状態が正、ここは表示・移動用）
+        const opened = ruinsStateRef.current.doors;
+        if (ruins.doors.some((d) => opened[String(d.idx)])) {
+          const set = new Set(indoorData().blocked);
+          for (const d of ruins.doors) if (opened[String(d.idx)]) set.delete(`${d.x},${d.y}`);
+          return set;
+        }
+      }
+      return indoorData().blocked;
+    };
     const keys = new Set<string>();
     // 固定式スティック: 基点は左下の固定位置（lib/worldbox/stick）。
     // 基点を持ち歩くのは「スティックが起動したか」と倒し量だけ。
@@ -1568,6 +1660,37 @@ export default function WorldBoxClient() {
       }
       return false;
     };
+    /** 遺跡内タップ: 宝箱と金の鍵の扉が対象（検証と付与はサーバー）。 */
+    const handleRuinsTap = (t: { x: number; y: number }): boolean => {
+      const ruins = ruinsNow();
+      if (!ruins) return false;
+      const px = Math.floor(player.x);
+      const py = Math.floor(player.y);
+      const chest = ruins.chests.find((c) => c.x === t.x && c.y === t.y);
+      if (chest) {
+        if (ruinsStateRef.current.chests[String(chest.idx)]) {
+          setTileMsg(TILE_ERROR_LABEL.depleted);
+          return true;
+        }
+        if (Math.hypot(px - t.x, py - t.y) > 2) {
+          setTileMsg(TILE_ERROR_LABEL.too_far);
+          return true;
+        }
+        void postInstanceRef.current("open_chest", { chestIdx: chest.idx });
+        return true;
+      }
+      const door = ruins.doors.find((d) => d.x === t.x && d.y === t.y);
+      if (door) {
+        if (ruinsStateRef.current.doors[String(door.idx)]) return false;
+        if (Math.hypot(px - t.x, py - t.y) > 2) {
+          setTileMsg(TILE_ERROR_LABEL.too_far);
+          return true;
+        }
+        void postInstanceRef.current("open_door", { doorIdx: door.idx });
+        return true;
+      }
+      return false;
+    };
     /** 洞窟内タップ: 鉱脈と宝箱だけが対象（検証と付与はサーバー）。 */
     const handleCaveTap = (t: { x: number; y: number }): boolean => {
       const cave = caveLayerNow();
@@ -1670,10 +1793,11 @@ export default function WorldBoxClient() {
         canvas.setPointerCapture(e.pointerId);
         return;
       }
-      if (space === "world" || parseInstanceSpace(space)?.kind === "cave") {
+      if (space === "world" || parseInstanceSpace(space)) {
         const t = toTile(e);
         if (!handleMobTap(t)) {
           if (space === "world") handleTileTap(t);
+          else if (parseInstanceSpace(space)?.kind === "ruins") handleRuinsTap(t);
           else handleCaveTap(t);
         }
       }
@@ -1966,6 +2090,7 @@ export default function WorldBoxClient() {
       // 移動先エリアの設置ブロックを即時に取り直す（15秒ポーリング待ちにしない）
       void refreshTilesRef.current();
     };
+    instanceTeleportRef.current = (x: number, y: number) => placePlayer(x, y);
     const doWarp = (target: SaveSpace) => {
       if (target === space) return;
       if (target === "lobby") {
@@ -2011,7 +2136,7 @@ export default function WorldBoxClient() {
       space = target;
       setSpaceUi(target);
       const inst = parseInstanceSpace(target);
-      setStatusText(inst?.kind === "cave" ? `洞窟 B${(inst.layer ?? 0) + 1}` : "インスタンス");
+      setStatusText(inst?.kind === "cave" ? `洞窟 B${(inst.layer ?? 0) + 1}` : inst?.kind === "ruins" ? "遺跡" : "インスタンス");
       lastStation = null;
       setStationUi(null);
       setBoardOpen(false);
@@ -2022,6 +2147,10 @@ export default function WorldBoxClient() {
       void pollOthers();
       if (inst?.kind === "cave") {
         void refreshCaveStateRef.current(target);
+        void refreshMobsRef.current();
+      }
+      if (inst?.kind === "ruins") {
+        void refreshRuinsStateRef.current(target);
         void refreshMobsRef.current();
       }
     };
@@ -2089,6 +2218,9 @@ export default function WorldBoxClient() {
           if (stDef?.kind === "entrance" && stDef.targetSpace === "cave") {
             const c = buildCaveLayer(MAP_SEED, tx, ty, 0);
             warpToInstance(makeInstanceSpace("cave", tx, ty, 0), { x: c.portal.x + 0.5, y: c.portal.y + 0.5 });
+          } else if (stDef?.kind === "entrance" && stDef.targetSpace === "ruins") {
+            const r = buildRuins(MAP_SEED, tx, ty);
+            warpToInstance(makeInstanceSpace("ruins", tx, ty, 0), { x: r.portal.x + 0.5, y: r.portal.y + 0.5 });
           }
         }
         return;
@@ -2116,6 +2248,19 @@ export default function WorldBoxClient() {
           }
           if (cave.onsen.some((t) => t.x === tx && t.y === ty)) {
             void postInstanceRef.current("onsen");
+          }
+          return;
+        }
+        if (inst?.kind === "ruins") {
+          const ruins = ruinsNow();
+          if (!ruins) return;
+          if (tx === ruins.portal.x && ty === ruins.portal.y) {
+            doWarp("world");
+            return;
+          }
+          const trap = ruins.traps.find((t) => t.x === tx && t.y === ty);
+          if (trap && !ruinsStateRef.current.traps[String(trap.idx)]) {
+            void postInstanceRef.current("trap", { trapIdx: trap.idx });
           }
           return;
         }
@@ -2165,7 +2310,7 @@ export default function WorldBoxClient() {
       // モブ占有: 現在位置の footprint を移動の当たり判定へ合成する。
       // 占有の真上に立っている間は、そのモブの占有だけ通す（閉じ込め防止）。
       mobFrameBlocked = undefined;
-      if ((space === "world" || parseInstanceSpace(space)?.kind === "cave") && mobRenders.size > 0) {
+      if ((space === "world" || parseInstanceSpace(space)) && mobRenders.size > 0) {
         const frameMobs: { key: string; size: number; x: number; y: number }[] = [];
         let standingKey: string | null = null;
         const ptx = Math.floor(player.x);
@@ -2263,7 +2408,7 @@ export default function WorldBoxClient() {
       // モブ接触: 占有範囲までチェビシェフ距離1以内を接触とする。
       // 敵対は接触開始時（継続中は1秒間隔）だけ軽いノックバック＋hit バーストを出し、
       // ダメージはサーバー（/api/worldbox/vitals）が検証して profile の HP に適用する。
-      if (space === "world" || parseInstanceSpace(space)?.kind === "cave") {
+      if (space === "world" || parseInstanceSpace(space)) {
         let contact: { placed: PlacedMob; key: string; dist: number; cx: number; cy: number } | null = null;
         const ptx = Math.floor(player.x);
         const pty = Math.floor(player.y);
@@ -2620,6 +2765,25 @@ export default function WorldBoxClient() {
             }
           }
         }
+        // 遺跡の床罠は薄いヒビとしてだけ見える（発動済みは消える）
+        {
+          const ruinsDraw = ruinsNow();
+          if (ruinsDraw) {
+            ctx.strokeStyle = "rgba(30,26,20,0.35)";
+            ctx.lineWidth = 1;
+            for (const trap of ruinsDraw.traps) {
+              if (ruinsStateRef.current.traps[String(trap.idx)]) continue;
+              if (trap.x < lx0 || trap.x > lx1 || trap.y < ly0 || trap.y > ly1) continue;
+              const sx = lobbyOx + trap.x * TILE;
+              const sy = lobbyOy + trap.y * TILE;
+              ctx.beginPath();
+              ctx.moveTo(sx + 6, sy + TILE - 7);
+              ctx.lineTo(sx + TILE / 2, sy + TILE / 2 + 3);
+              ctx.lineTo(sx + TILE - 8, sy + 9);
+              ctx.stroke();
+            }
+          }
+        }
         // 平置きオブジェクト（ワープパッド・階段・タペストリー）は足元レイヤー
         for (const o of indoor.objects) {
           if (!FLAT_LOBBY_SPRITES.has(o.sprite)) continue;
@@ -2702,7 +2866,7 @@ export default function WorldBoxClient() {
           ctx.fillRect(bxHp, byHp, bw * Math.max(0, hpFrac), bh2);
         }
       };
-      if (space === "world" || parseInstanceSpace(space)?.kind === "cave") {
+      if (space === "world" || parseInstanceSpace(space)) {
         const nowMs = Date.now();
         const isNight = isNightPhase(phaseAtTime(nowMs / 1000));
         const vx0 = Math.floor(cam.x - cw / TILE / 2) - 3;
@@ -2710,10 +2874,17 @@ export default function WorldBoxClient() {
         const vx1 = Math.ceil(cam.x + cw / TILE / 2) + 3;
         const vy1 = Math.ceil(cam.y + ch / TILE / 2) + 3;
         const caveNow = caveLayerNow();
-        const cacheKey = caveNow ? `cave:${space}` : `${vx0 >> 5},${vy0 >> 5},${vx1 >> 5},${vy1 >> 5},${isNight ? 1 : 0}`;
+        const ruinsMobNow = ruinsNow();
+        const cacheKey = caveNow ? `cave:${space}` : ruinsMobNow ? `ruins:${space}:${ruinsStateRef.current.summons.length}` : `${vx0 >> 5},${vy0 >> 5},${vx1 >> 5},${vy1 >> 5},${isNight ? 1 : 0}`;
         if (cacheKey !== mobCacheKey) {
           mobCacheKey = cacheKey;
-          mobCache = caveNow ? [...caveNow.mobs] : visibleMobs(MAP_SEED, vx0, vy0, vx1, vy1, isNight);
+          mobCache = caveNow
+            ? [...caveNow.mobs]
+            : ruinsMobNow
+              ? ruinsStateRef.current.summons.map((sm) => ({
+                  mobId: sm.mobId, x: sm.x, y: sm.y, biome: "plains" as const, size: mobById(sm.mobId)?.size ?? 1,
+                }))
+              : visibleMobs(MAP_SEED, vx0, vy0, vx1, vy1, isNight);
           const keys = new Set(mobCache.map((m) => mobKeyFor(m)));
           for (const k of [...mobRenders.keys()]) if (!keys.has(k)) mobRenders.delete(k);
         }
@@ -2825,11 +2996,39 @@ export default function WorldBoxClient() {
       }
       if (space !== "world") {
         const caveDraw = caveLayerNow();
+        const ruinsObjDraw = ruinsNow();
         for (const o of indoorData().objects) {
           if (FLAT_LOBBY_SPRITES.has(o.sprite)) continue;
           const sx = lobbyOx + o.x * TILE;
           const sy = lobbyOy + o.y * TILE;
           if (sx < -TILE * 4 || sy < -TILE * 4 || sx > cw + TILE * 4 || sy > ch + TILE * 4) continue;
+          if (ruinsObjDraw && (o.sprite === "ruins_chest" || o.sprite === "gold_door")) {
+            const isDoor = o.sprite === "gold_door";
+            const door = ruinsObjDraw.doors.find((d) => d.x === o.x && d.y === o.y);
+            const chest = ruinsObjDraw.chests.find((c) => c.x === o.x && c.y === o.y);
+            if (isDoor && door && ruinsStateRef.current.doors[String(door.idx)]) continue;
+            const openedChest = !!chest && ruinsStateRef.current.chests[String(chest.idx)];
+            drawList.push({
+              y: o.y + o.h,
+              draw: () => {
+                const bx = Math.round(lobbyOx + o.x * TILE);
+                const by = Math.round(lobbyOy + o.y * TILE);
+                if (isDoor) {
+                  ctx.fillStyle = "#7a6420";
+                  ctx.fillRect(bx + 3, by + 2, TILE - 6, TILE - 2);
+                  ctx.fillStyle = "#e8c85a";
+                  ctx.fillRect(bx + 3, by + 2, TILE - 6, 4);
+                  ctx.fillRect(bx + TILE / 2 - 2, by + TILE / 2 - 2, 4, 4);
+                } else {
+                  ctx.fillStyle = openedChest ? "#5d5040" : "#6e5a43";
+                  ctx.fillRect(bx + 4, by + 10, TILE - 8, TILE - 14);
+                  ctx.fillStyle = chest?.main ? "#e8c85a" : "#b9a888";
+                  ctx.fillRect(bx + 4, by + 16, TILE - 8, 3);
+                }
+              },
+            });
+            continue;
+          }
           if (caveDraw && (o.sprite === "cave_chest" || caveDraw.veins.some((v) => v.objectId === o.sprite && v.x === o.x && v.y === o.y))) {
             // 洞窟の鉱脈・宝箱は色つき図形で描く（枯渇中は鉱脈を出さない）
             const vein = caveDraw.veins.find((v) => v.x === o.x && v.y === o.y);
@@ -3012,7 +3211,7 @@ export default function WorldBoxClient() {
       drawParticles(false);
 
       // 道具スイングと風切り（自分のタップへの応答）
-      if (space === "world" || parseInstanceSpace(space)?.kind === "cave") {
+      if (space === "world" || parseInstanceSpace(space)) {
         const sk = swingProgress(swing.startedAt, now);
         if (sk < 1) {
           const inCave = space !== "world";
@@ -3472,6 +3671,24 @@ export default function WorldBoxClient() {
             >
               {soundSettings.se ? "効果音を切る" : "効果音を入れる"}
             </button>
+            {invProfile && (
+              <div style={{ borderTop: "1px solid rgba(255,255,255,0.18)", paddingTop: 6 }}>
+                <div style={{ fontSize: 11, opacity: 0.75, marginBottom: 4 }}>コレクション</div>
+                <div style={{ display: "grid", gap: 3 }}>
+                  {["ancient_relic", "star_map", "ancient_coin", "dragon_scale", "ghost_tear", "golden_key"].map((id) => {
+                    const def = itemById(id);
+                    const count = invProfile.items[id] ?? 0;
+                    return (
+                      <div key={id} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, opacity: count > 0 ? 1 : 0.38 }}>
+                        <ItemIcon id={id} size={18} />
+                        <span style={{ flex: 1 }}>{def?.name ?? id}</span>
+                        <span>{count}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
             <Link
               href={`${prefix}/games`}
               style={{
