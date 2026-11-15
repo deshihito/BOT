@@ -11,12 +11,17 @@ import { parseSave } from "@/lib/worldbox/save";
 import { loadWorldBoxSave } from "@/lib/worldbox/save-online";
 import { loadNationsState } from "@/lib/worldbox/nations-online";
 import { loadTileOverride } from "@/lib/worldbox/tiles-online";
-import { buildCaveLayer, parseInstanceSpace, weekKeyOf } from "@/lib/worldbox/instances";
+import { buildCaveLayer, buildDungeonFloor, makeInstanceSpace, parseInstanceSpace, weekKeyOf } from "@/lib/worldbox/instances";
 import { loadRuinsPersonal } from "@/lib/worldbox/instances-online";
 import { listPresenceWithOwners } from "@/lib/worldbox/presence-online";
 import { addMasteryXp, GUARD_AURA_REDUCTION } from "@/lib/worldbox/roles";
 import { recordDeath } from "@/lib/worldbox/roles-online";
 import { loadMobState } from "@/lib/worldbox/mobs-online";
+import {
+  deleteDungeonSession, dungeonSessionClosed, loadDungeonSession, storeDungeonSession,
+} from "@/lib/worldbox/instances-online";
+import { partyKeyOf } from "@/lib/worldbox/party";
+import { loadPartyOf } from "@/lib/worldbox/party-online";
 import type { PlayerProfile, RespawnPoint } from "@/lib/worldbox/profile";
 import {
   applyDeath, applyMobDamage, resolveRespawnPoint, setBedRespawn, stepVitals,
@@ -86,6 +91,26 @@ async function settleDeath(
     });
   }
   const { profile: revived, dropped } = applyDeath(profile, now);
+  // ダンジョン内死亡: セッションに死亡を記録し、全滅なら閉じる。
+  // リスポーンは入口前（企画書 §1.4: 復活は帰還座標＝入口前）。
+  const dungeonInst = savedAtDeath ? parseInstanceSpace(savedAtDeath.space) : null;
+  if (dungeonInst?.kind === "dungeon") {
+    const party = await loadPartyOf(ownerKey);
+    const partyKey = partyKeyOf(party, ownerKey);
+    const floor1 = makeInstanceSpace("dungeon", dungeonInst.entranceX, dungeonInst.entranceY, 0);
+    const ds = await loadDungeonSession(floor1, partyKey);
+    if (ds && ds.members.includes(ownerKey)) {
+      const next = { ...ds, dead: ds.dead.includes(ownerKey) ? ds.dead : [...ds.dead, ownerKey] };
+      if (dungeonSessionClosed(next)) await deleteDungeonSession(floor1, partyKey);
+      else await storeDungeonSession(floor1, next);
+    }
+    const front = savedAtDeath?.worldReturn ?? { x: dungeonInst.entranceX + 0.5, y: dungeonInst.entranceY + 0.5 };
+    if (!(await storeProfile(ownerKey, revived))) return errorResponse("store_failed", 503);
+    return NextResponse.json(
+      { profile: revived, died: true, dropped, respawn: { x: front.x, y: front.y, source: "entrance" } },
+      { headers: NO_STORE },
+    );
+  }
   const mark = await unionMarkOf(ownerKey);
   const { point, source } = resolveRespawnPoint(
     revived, mark, { x: 0.5, y: 0.5 },
@@ -135,7 +160,8 @@ export async function POST(request: Request) {
     const instDmg = typeof data.space === "string" ? parseInstanceSpace(data.space) : null;
     const inCave = instDmg?.kind === "cave";
     const inRuins = instDmg?.kind === "ruins";
-    if (!def || def.temperament === "passive" || def.attack <= 0 || (def.instanceOnly && !inCave) || (inCave && def.instanceOnly && def.instanceOnly !== "cave")) {
+    const inDungeon = instDmg?.kind === "dungeon";
+    if (!def || def.temperament === "passive" || def.attack <= 0 || (def.instanceOnly && !inCave && !inDungeon) || (inCave && def.instanceOnly && def.instanceOnly !== "cave")) {
       return errorResponse("unknown_mob", 400);
     }
     if (typeof data.x !== "number" || typeof data.y !== "number") {
@@ -147,6 +173,11 @@ export async function POST(request: Request) {
     if (inCave && instDmg) {
       const cave = buildCaveLayer(MAP_SEED, instDmg.entranceX, instDmg.entranceY, instDmg.layer);
       if (!cave.mobs.some((m) => m.mobId === def.id && m.x === x && m.y === y)) {
+        return errorResponse("unknown_mob", 400);
+      }
+    } else if (inDungeon && instDmg) {
+      const dfloor = buildDungeonFloor(MAP_SEED, instDmg.entranceX, instDmg.entranceY, instDmg.layer);
+      if (!dfloor.mobs.some((m) => m.mobId === def.id && m.x === x && m.y === y)) {
         return errorResponse("unknown_mob", 400);
       }
     } else if (inRuins && instDmg && typeof data.space === "string") {
@@ -166,14 +197,18 @@ export async function POST(request: Request) {
       Math.abs(data.px) <= WORLD_COORD_LIMIT && Math.abs(data.py) <= WORLD_COORD_LIMIT
         ? { x: data.px, y: data.py }
         : null;
-    const pos = await actorWorldPosition(ownerKey, reported, (inCave || inRuins) && typeof data.space === "string" ? data.space : "world");
+    const pos = await actorWorldPosition(ownerKey, reported, (inCave || inRuins || inDungeon) && typeof data.space === "string" ? data.space : "world");
     if (pos) {
       const dist = mobDistance(Math.floor(pos.x), Math.floor(pos.y), { x, y, size: def.size });
       if (dist > MOB_ATTACK_MAX_DISTANCE) return errorResponse("too_far", 409);
     }
     // 凍結中のモブは接触ダメージを与えない
     {
-      const keyPrefix = (inCave || inRuins) && typeof data.space === "string" ? `${data.space}|` : "";
+      let keyPrefix = (inCave || inRuins) && typeof data.space === "string" ? `${data.space}|` : "";
+      if (inDungeon && typeof data.space === "string") {
+        const party = await loadPartyOf(ownerKey);
+        keyPrefix = `${data.space}#${partyKeyOf(party, ownerKey)}|`;
+      }
       const mstate = await loadMobState(`${keyPrefix}${def.id}@${x},${y}`);
       if (mstate?.frozenUntil && mstate.frozenUntil > now) {
         return NextResponse.json(
@@ -185,7 +220,7 @@ export async function POST(request: Request) {
     // 守護の挑発・オーラ（同じ空間の新鮮なプレゼンスから解決する）
     let attack = def.attack;
     {
-      const spaceHere = (inCave || inRuins) && typeof data.space === "string" ? data.space : "world";
+      const spaceHere = (inCave || inRuins || inDungeon) && typeof data.space === "string" ? data.space : "world";
       const owners = await listPresenceWithOwners();
       const victimPos = pos ?? reported;
       const guards = owners.filter((o) =>

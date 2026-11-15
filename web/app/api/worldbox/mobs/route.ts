@@ -15,9 +15,19 @@ import {
   MOB_ATTACK_MAX_DISTANCE, type MobState,
 } from "@/lib/worldbox/combat";
 import { isMobsEnabled, loadMobState, loadMobStates, storeMobState } from "@/lib/worldbox/mobs-online";
-import { buildCaveLayer, parseInstanceSpace, weekKeyOf } from "@/lib/worldbox/instances";
+import {
+  buildCaveLayer, buildDungeonFloor, dungeonHpScale, makeInstanceSpace, parseInstanceSpace, weekKeyOf,
+} from "@/lib/worldbox/instances";
 import { addMasteryXp } from "@/lib/worldbox/roles";
-import { loadRuinsPersonal, storeRuinsPersonal } from "@/lib/worldbox/instances-online";
+import {
+  dungeonGateSatisfied, loadDungeonClearWeek, loadDungeonSession, loadRuinsPersonal, storeDungeonClearWeek,
+  storeDungeonSession, storeRuinsPersonal,
+} from "@/lib/worldbox/instances-online";
+import { partyKeyOf } from "@/lib/worldbox/party";
+import { loadPartyOf } from "@/lib/worldbox/party-online";
+import { DUNGEON_CLEAR_EARN } from "@/lib/worldbox/instances";
+import { buildEconomyOp } from "@/lib/worldbox/economy-bridge";
+import { enqueueEconomyOpOnce, isEconomyEnabled } from "@/lib/worldbox/economy-bridge-online";
 
 export const runtime = "nodejs";
 
@@ -102,6 +112,27 @@ export async function GET(request: Request) {
       { headers: NO_STORE },
     );
   }
+  if (instGet?.kind === "dungeon") {
+    const ownerKey = sessionOwnerKey(session);
+    const party = await loadPartyOf(ownerKey);
+    const partyKey = partyKeyOf(party, ownerKey);
+    const floor1 = makeInstanceSpace("dungeon", instGet.entranceX, instGet.entranceY, 0);
+    const ds = await loadDungeonSession(floor1, partyKey);
+    const floor = buildDungeonFloor(MAP_SEED, instGet.entranceX, instGet.entranceY, instGet.layer);
+    const allD = await loadMobStates();
+    const statesD: Record<string, MobState> = {};
+    for (const placed of floor.mobs) {
+      const key = `${spaceParam}#${partyKey}|${mobKeyOf(placed)}`;
+      const st = allD[key];
+      if (!st) continue;
+      if (st.deadUntil !== undefined && now >= st.deadUntil) continue;
+      statesD[key] = st;
+    }
+    return NextResponse.json(
+      { states: statesD, hpScale: dungeonHpScale(ds?.size ?? 1), selfId: presenceIdFor(ownerKey) },
+      { headers: NO_STORE },
+    );
+  }
   if (instGet?.kind === "cave") {
     const cave = buildCaveLayer(MAP_SEED, instGet.entranceX, instGet.entranceY, instGet.layer);
     const allC = await loadMobStates();
@@ -166,6 +197,7 @@ export async function POST(request: Request) {
   const y = Math.floor(fields.y);
   const instPost = typeof fields.space === "string" ? parseInstanceSpace(fields.space) : null;
   const caveSpace = instPost?.kind === "cave" || instPost?.kind === "ruins" ? (fields.space as string) : null;
+  const dungeonSpace = instPost?.kind === "dungeon" ? (fields.space as string) : null;
   if (!def || x < -WORLD_COORD_LIMIT || y < -WORLD_COORD_LIMIT || x > WORLD_COORD_LIMIT || y > WORLD_COORD_LIMIT) {
     return NextResponse.json({ error: "unknown_mob" }, { status: 400, headers: NO_STORE });
   }
@@ -173,6 +205,40 @@ export async function POST(request: Request) {
   const ownerKey = sessionOwnerKey(session);
   const placed = { mobId: def.id, x, y, size: def.size, biome: "plains" as const };
   let keyPrefix = "";
+  let effDef = def;
+  let dungeonCtx: {
+    floor1: string; partyKey: string;
+    session: NonNullable<Awaited<ReturnType<typeof loadDungeonSession>>>;
+    floor: ReturnType<typeof buildDungeonFloor>;
+  } | null = null;
+  if (dungeonSpace && instPost) {
+    const party = await loadPartyOf(ownerKey);
+    const partyKey = partyKeyOf(party, ownerKey);
+    const floor1 = makeInstanceSpace("dungeon", instPost.entranceX, instPost.entranceY, 0);
+    const ds = await loadDungeonSession(floor1, partyKey);
+    if (!ds || !ds.members.includes(ownerKey) || ds.departed.includes(ownerKey) || ds.dead.includes(ownerKey)) {
+      return NextResponse.json({ error: "no_session" }, { status: 409, headers: NO_STORE });
+    }
+    if (!(await dungeonGateSatisfied(ds.members, instPost.layer + 1))) {
+      return NextResponse.json({ error: "gate_locked" }, { status: 409, headers: NO_STORE });
+    }
+    const floor = buildDungeonFloor(MAP_SEED, instPost.entranceX, instPost.entranceY, instPost.layer);
+    if (!floor.mobs.some((m) => m.mobId === def.id && m.x === x && m.y === y)) {
+      return NextResponse.json({ error: "unknown_mob" }, { status: 400, headers: NO_STORE });
+    }
+    const isBossAnchor = floor.boss.mobId === def.id && floor.boss.x === x && floor.boss.y === y;
+    if (isBossAnchor) {
+      if (instPost.layer >= 1 && !ds.floorBossDead[String(instPost.layer)]) {
+        return NextResponse.json({ error: "gate_locked" }, { status: 409, headers: NO_STORE });
+      }
+      if (floor.doors.length > 0 && !ds.doors[`${instPost.layer}:0`]) {
+        return NextResponse.json({ error: "door_locked" }, { status: 409, headers: NO_STORE });
+      }
+    }
+    effDef = { ...def, hp: Math.max(1, Math.round(def.hp * dungeonHpScale(ds.size))) };
+    keyPrefix = `${dungeonSpace}#${partyKey}|`;
+    dungeonCtx = { floor1, partyKey, session: ds, floor };
+  }
   if (caveSpace && instPost) {
     // インスタンス内モブ: 配置は生成/個人状態が正。地表配置の検証は使わない。
     if (instPost.kind === "ruins") {
@@ -201,11 +267,11 @@ export async function POST(request: Request) {
   }
 
   // 隣接検証（本人の位置が分かる場合だけ、占有範囲までの距離）
-  const pos = caveSpace
+  const pos = caveSpace || dungeonSpace
     ? await (async () => {
         const selfId = presenceIdFor(ownerKey);
         const entries = await listPresence();
-        const entry = entries.find((e) => e.id === selfId && e.space === caveSpace && now - e.ts <= 15_000);
+        const entry = entries.find((e) => e.id === selfId && e.space === (caveSpace ?? dungeonSpace) && now - e.ts <= 15_000);
         if (entry) return { x: entry.x, y: entry.y };
         return reported;
       })()
@@ -221,12 +287,46 @@ export async function POST(request: Request) {
   const state = await loadMobState(key);
   const profile = await loadProfile(ownerKey);
   const attackPower = playerAttack(profile.items) * (profile.role === "blade" ? 1.25 : 1);
-  const result = applyMobAttack(def, state, attackPower, now, Math.random, key);
+  const result = applyMobAttack(effDef, state, attackPower, now, Math.random, key);
   if ("error" in result) {
     return NextResponse.json({ error: result.error }, { status: 409, headers: NO_STORE });
   }
   if (!(await storeMobState(key, result.state))) {
     return NextResponse.json({ error: "mobs_failed" }, { status: 500, headers: NO_STORE });
+  }
+  if (result.dead && dungeonCtx && instPost) {
+    // 番人はダンジョンの鍵を落とす
+    if (dungeonCtx.floor.keyHolder.mobId === def.id && dungeonCtx.floor.keyHolder.x === x && dungeonCtx.floor.keyHolder.y === y) {
+      result.gained.dungeon_key = (result.gained.dungeon_key ?? 0) + 1;
+    }
+    // フロアボス撃破で階段が開く。最終ボスはクリア処理（週1 earn を全員へ）
+    const isBossAnchor = dungeonCtx.floor.boss.mobId === def.id && dungeonCtx.floor.boss.x === x && dungeonCtx.floor.boss.y === y;
+    if (isBossAnchor) {
+      const floorNo = instPost.layer + 1;
+      const nextSession = {
+        ...dungeonCtx.session,
+        floorBossDead: { ...dungeonCtx.session.floorBossDead, [String(floorNo)]: true },
+        bossDead: dungeonCtx.session.bossDead || floorNo >= 4,
+      };
+      await storeDungeonSession(dungeonCtx.floor1, nextSession);
+      if (floorNo >= 4 && isEconomyEnabled()) {
+        const week = weekKeyOf(now);
+        for (const memberKey of nextSession.members) {
+          if (nextSession.departed.includes(memberKey) || nextSession.dead.includes(memberKey)) continue;
+          if (!memberKey.startsWith("discord:")) continue;
+          if ((await loadDungeonClearWeek(memberKey)) === week) continue;
+          // 週1回の報酬は決定的 ID で冪等化する（#953 の規則: 同時撃破でも二重に払わない）
+          const op = buildEconomyOp(
+            { kind: "earn", userKey: memberKey, discordId: memberKey.slice("discord:".length), amount: DUNGEON_CLEAR_EARN, reason: "dungeon_clear" },
+            `dungeon-clear-${week}-${memberKey.slice("discord:".length)}`,
+            now,
+          );
+          if (op && (await enqueueEconomyOpOnce(op))) {
+            await storeDungeonClearWeek(memberKey, week);
+          }
+        }
+      }
+    }
   }
   if (result.dead && caveSpace && instPost?.kind === "ruins") {
     // 倒した召喚モブは個人状態から消す（再出現しない）

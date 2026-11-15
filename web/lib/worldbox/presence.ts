@@ -56,6 +56,8 @@ export type Heartbeat = {
   role?: string;
   /** 冒険役職の熟練ランク（1〜5）。 */
   rank?: number;
+  /** パーティ ID（バッチ5、ダンジョン内の他者フィルタ用）。未所属は ""。 */
+  party?: string;
 };
 
 export type PresenceEntry = Heartbeat & {
@@ -105,6 +107,7 @@ export function sanitizeHeartbeat(raw: unknown, bounds: CoordBounds): Heartbeat 
     space: sanitizePresenceSpace(v.space),
     role: typeof v.role === "string" && ["blade", "guard", "scout", "miner", "medic"].includes(v.role) ? v.role : "free",
     rank: typeof v.rank === "number" && Number.isFinite(v.rank) ? Math.max(1, Math.min(5, Math.floor(v.rank))) : 1,
+    party: typeof v.party === "string" ? v.party.slice(0, 48) : "",
   };
 }
 

@@ -269,6 +269,7 @@ export const ITEMS: readonly ItemDef[] = [
   { id: "dragon_scale", name: "竜のうろこ", desc: "強敵が落とす希少なうろこ", category: "special", price: 380 },
   { id: "ghost_tear", name: "幽霊の涙", desc: "ダンジョンで見つかる雫", category: "special", price: 300 },
   { id: "golden_key", name: "金の鍵", desc: "宝箱を開ける鍵", category: "special", price: 350 },
+  { id: "dungeon_key", name: "ダンジョンの鍵", desc: "ダンジョンの扉を開ける鍵", category: "special", price: 150 },
   { id: "star_map", name: "星の地図", desc: "星の位置を記した古地図", category: "special", price: 280 },
   // ---- 施設（追加分: 作業台・鍛冶台・かまど等の特殊オブジェクト） --------
   { id: "workbench", name: "作業台", desc: "合成をする台", category: "furniture", price: 80, facility: true },
@@ -460,7 +461,7 @@ export const ITEM_ICON_IDS: readonly string[] = [
   // 拡張分（合成品・特殊・施設）
   "rope", "stone_statue", "flower_wreath", "embroidered_cloth", "gem_ring",
   "pearl_necklace", "honey_candy",
-  "ancient_coin", "ancient_relic", "dragon_scale", "ghost_tear", "golden_key", "star_map",
+  "ancient_coin", "ancient_relic", "dragon_scale", "ghost_tear", "golden_key", "dungeon_key", "star_map",
   "workbench", "smithing_table", "furnace", "anvil", "storage_chest", "bed",
   "torch", "campfire", "well", "loom", "cooking_pot", "flower_pot",
   // 拡張分2
@@ -582,6 +583,8 @@ export const RECIPES: readonly Recipe[] = [
   { id: "mithril_axe", inputs: { mithril: 3, stick: 2 }, output: "mithril_axe", outputCount: 1 },
   { id: "mithril_pickaxe", inputs: { mithril: 3, stick: 2 }, output: "mithril_pickaxe", outputCount: 1 },
   { id: "mithril_sword", inputs: { mithril: 2, stick: 1 }, output: "mithril_sword", outputCount: 1 },
+  { id: "mithril_sword_dragon", inputs: { dragon_scale: 1, stick: 1 }, output: "mithril_sword", outputCount: 1 },
+  { id: "ghost_lantern_mithril", inputs: { ghost_tear: 1, mithril: 1 }, output: "ghost_lantern", outputCount: 2 },
   { id: "mithril_hoe", inputs: { mithril: 2, stick: 2 }, output: "mithril_hoe", outputCount: 1 },
   // ブロック（金属・宝石・自然素材）
   { id: "copper_block", inputs: { copper_ingot: 4 }, output: "copper_block", outputCount: 1 },

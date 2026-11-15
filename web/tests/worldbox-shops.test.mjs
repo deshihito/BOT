@@ -100,7 +100,7 @@ const EXCLUDED_IDS = [
   // 特殊カテゴリ全品
   "guard_charm", "thief_mask", "star_shard", "crown",
   "ancient_coin", "ancient_relic", "dragon_scale", "ghost_tear",
-  "golden_key", "star_map", "slime_core", "wolf_fang",
+  "golden_key", "dungeon_key", "star_map", "slime_core", "wolf_fang",
   "scepter", "tiara", "dragon_egg", "star_crown", "world_seed", "ago_emblem",
   // 道具 tier 4（ミスリル）
   "mithril_axe", "mithril_pickaxe", "mithril_sword", "mithril_hoe",
@@ -108,9 +108,9 @@ const EXCLUDED_IDS = [
   "diamond_block", "emerald_block", "ruby_block", "sapphire_block",
 ];
 
-test("shops: レア品の除外集合はちょうど26品", () => {
+test("shops: レア品の除外集合はちょうど27品", () => {
   const excluded = shops.ITEMS.filter((item) => shops.isShopExcluded(item)).map((item) => item.id);
-  assert.equal(EXCLUDED_IDS.length, 26);
+  assert.equal(EXCLUDED_IDS.length, 27);
   assert.deepEqual([...excluded].sort(), [...EXCLUDED_IDS].sort());
   // 除外しないもの: 宝石の素材・鉱石ブロック・合成品の高額品・ミスリルブロック
   for (const id of ["ruby", "sapphire", "emerald", "diamond", "pearl", "diamond_ore_block", "gem_ring", "mithril_block", "wooden_axe"]) {

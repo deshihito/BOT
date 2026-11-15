@@ -19,8 +19,14 @@ import {
   roleById, skillCooldownLeft, SKILLS, type SkillId,
 } from "@/lib/worldbox/roles";
 import { maxHpFor } from "@/lib/worldbox/profile";
-import { buildCaveLayer, parseInstanceSpace } from "@/lib/worldbox/instances";
-import { loadRuinsPersonal, storeRuinsPersonal } from "@/lib/worldbox/instances-online";
+import {
+  buildCaveLayer, buildDungeonFloor, dungeonHpScale, makeInstanceSpace, parseInstanceSpace,
+} from "@/lib/worldbox/instances";
+import {
+  loadDungeonSession, loadRuinsPersonal, storeRuinsPersonal,
+} from "@/lib/worldbox/instances-online";
+import { partyKeyOf } from "@/lib/worldbox/party";
+import { loadPartyOf } from "@/lib/worldbox/party-online";
 import { weekKeyOf } from "@/lib/worldbox/instances";
 import { clearDeath, listDeaths } from "@/lib/worldbox/roles-online";
 
@@ -56,9 +62,13 @@ async function actorPos(ownerKey: string, space: string, reported: { x: number; 
   return null;
 }
 
-/** その空間のモブ配置（地表/洞窟/遺跡召喚）を返す。 */
+/** その空間のモブ配置（地表/洞窟/遺跡召喚/ダンジョン）を返す。 */
 async function mobsInSpace(ownerKey: string, space: string, cx: number, cy: number, radius: number): Promise<PlacedMob[]> {
   const inst = parseInstanceSpace(space);
+  if (inst?.kind === "dungeon") {
+    const floor = buildDungeonFloor(MAP_SEED, inst.entranceX, inst.entranceY, inst.layer);
+    return floor.mobs.filter((m) => Math.hypot(m.x + 0.5 - cx, m.y + 0.5 - cy) <= radius + m.size);
+  }
   if (inst?.kind === "cave") {
     const cave = buildCaveLayer(MAP_SEED, inst.entranceX, inst.entranceY, inst.layer);
     return cave.mobs.filter((m) => Math.hypot(m.x + 0.5 - cx, m.y + 0.5 - cy) <= radius + m.size);
@@ -79,8 +89,23 @@ async function mobsInSpace(ownerKey: string, space: string, cx: number, cy: numb
     .filter((m) => Math.hypot(m.x + 0.5 - cx, m.y + 0.5 - cy) <= radius + m.size);
 }
 
-function keyFor(space: string, placed: PlacedMob): string {
-  return parseInstanceSpace(space) ? `${space}|${mobKeyOf(placed)}` : mobKeyOf(placed);
+async function keyFor(ownerKey: string, space: string, placed: PlacedMob): Promise<string> {
+  const inst = parseInstanceSpace(space);
+  if (inst?.kind === "dungeon") {
+    const party = await loadPartyOf(ownerKey);
+    return `${space}#${partyKeyOf(party, ownerKey)}|${mobKeyOf(placed)}`;
+  }
+  return inst ? `${space}|${mobKeyOf(placed)}` : mobKeyOf(placed);
+}
+
+/** ダンジョンではモブ HP がパーティ人数で倍率される（mobs ルートと同じ式）。 */
+async function effectiveDef(ownerKey: string, space: string, def: NonNullable<ReturnType<typeof mobById>>) {
+  const inst = parseInstanceSpace(space);
+  if (inst?.kind !== "dungeon") return def;
+  const party = await loadPartyOf(ownerKey);
+  const floor1 = makeInstanceSpace("dungeon", inst.entranceX, inst.entranceY, 0);
+  const ds = await loadDungeonSession(floor1, partyKeyOf(party, ownerKey));
+  return { ...def, hp: Math.max(1, Math.round(def.hp * dungeonHpScale(ds?.size ?? 1))) };
 }
 
 export async function GET(request: Request) {
@@ -270,16 +295,27 @@ export async function POST(request: Request) {
       if (targets.length === 0) return err("no_target", 409);
     }
 
+    // ダンジョンのフロアボスは技の対象にしない（進行登録は通常攻撃の経路に一本化）
+    {
+      const instD = parseInstanceSpace(space);
+      if (instD?.kind === "dungeon") {
+        const floorD = buildDungeonFloor(MAP_SEED, instD.entranceX, instD.entranceY, instD.layer);
+        targets = targets.filter((m) => !(m.mobId === floorD.boss.mobId && m.x === floorD.boss.x && m.y === floorD.boss.y));
+        if (targets.length === 0) return err("no_target", 409);
+      }
+    }
+
     const results: { key: string; hp: number; dead: boolean }[] = [];
     let gainedAll: Record<string, number> = {};
     let anyDead = false;
     for (const placed of targets) {
       const def = mobById(placed.mobId);
       if (!def) continue;
-      const key = keyFor(space, placed);
+      const key = await keyFor(ownerKey, space, placed);
       const state = await loadMobState(key);
       // 凍結中は追加ダメージを受けない（氷の上書き防止ではなく、状態の保護）
-      const result = applyMobAttack(def, state, baseAttack * skill.power, now, Math.random, key);
+      const effDef = await effectiveDef(ownerKey, space, def);
+      const result = applyMobAttack(effDef, state, baseAttack * skill.power, now, Math.random, key);
       if ("error" in result) continue;
       let st: MobState = result.state;
       if (skillId === "ice_lance" && !result.dead) st = { ...st, frozenUntil: now + 3000 };
