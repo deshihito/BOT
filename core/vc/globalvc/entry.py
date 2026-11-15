@@ -69,8 +69,16 @@ class GlobalVCCog(ConnectMixin, RestoreMixin, ManageMixin, ChatMixin, commands.C
 
     @tasks.loop(hours=1)
     async def _theme_rotation_loop(self):
-        """常設ルームの自動テーマを日替わりで回す（JST の日付が変われば進む）。"""
-        changed = rotate_room_themes()
+        """常設ルームの自動テーマを日替わりで回す（JST の日付が変われば進む）。
+
+        tasks.loop は本体で例外が漏れるとループごと止まる。テーマ計算で
+        予期しない例外が出ても次周期に再試行できるよう、ここで吸収する。
+        """
+        try:
+            changed = rotate_room_themes()
+        except Exception:
+            logger.exception("グローバルVC: 常設ルームのテーマ更新に失敗しました（次周期に再試行）")
+            return
         if changed:
             logger.info("グローバルVC: 常設ルームのテーマを更新しました: %s", ", ".join(changed))
 
@@ -91,12 +99,20 @@ class GlobalVCCog(ConnectMixin, RestoreMixin, ManageMixin, ChatMixin, commands.C
 
     @tasks.loop(seconds=PLAYBACK_WATCHDOG_SECONDS)
     async def _playback_watchdog(self):
-        """再接続や外部からの stop などで再生が止まったサーバーを、定期的に見回って再開させる。"""
-        _prune_dead_clients()
-        for clients in list(GLOBAL_ROOMS.values()):
-            for vc in list(clients):
-                _ensure_playing(vc)
-        self._sync_watchdog_interval()
+        """再接続や外部からの stop などで再生が止まったサーバーを、定期的に見回って再開させる。
+
+        tasks.loop は本体で例外が漏れるとループごと止まる。個々の接続の
+        生死判定・再生再開は中で吸収される作りだが、間隔の切り替えも含め
+        全体をここで吸収し、次周期に再試行できるようにする。
+        """
+        try:
+            _prune_dead_clients()
+            for clients in list(GLOBAL_ROOMS.values()):
+                for vc in list(clients):
+                    _ensure_playing(vc)
+            self._sync_watchdog_interval()
+        except Exception:
+            logger.exception("グローバルVC: 再生ウォッチドッグに失敗しました（次周期に再試行）")
 
 
 async def setup(bot: commands.Bot):

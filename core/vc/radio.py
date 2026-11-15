@@ -238,34 +238,50 @@ class RadioCog(commands.Cog):
     # ------------------------------------------------------------ 24/7 スーパーバイザー
     @tasks.loop(seconds=60)
     async def _supervisor(self) -> None:
-        """24/7 ON のサーバーで、ラジオが止まっていたら復帰させる。"""
+        """24/7 ON のサーバーで、ラジオが止まっていたら復帰させる。
+
+        tasks.loop は本体で例外が漏れるとループごと止まる。設定の読み込み
+        失敗は次周期に再試行し、サーバー単位の失敗（再生の開始など）は
+        そのサーバーだけ飛ばして次へ進む。
+        """
         store = get_store()
-        await store.ensure_loaded()
+        try:
+            await store.ensure_loaded()
+        except Exception:
+            logger.exception("ラジオの監視に失敗しました（設定の読み込み）")
+            return
         for guild_key, raw in store.all_sections(SECTION).items():
-            cfg = clean_radio_settings(raw)
-            if not (cfg["always_on"] and cfg["playing"]):
-                continue
             try:
-                guild_id = int(guild_key)
-            except (TypeError, ValueError):
-                continue
-            guild = self.bot.get_guild(guild_id)
-            if guild is None or cfg["channel_id"] is None:
-                continue
-            vc = getattr(guild, "voice_client", None)
-            if self.session_has_radio(guild_id) and vc is not None and vc.is_connected():
-                if not has_audio_source(vc, SOURCE_KEY):
-                    self._play(guild_id, vc, STATION_BY_ID[cfg["station"]])
-                continue
-            channel = guild.get_channel(cfg["channel_id"])
-            if channel is None:
-                continue
-            try:
-                await self.start_radio(guild, channel, self.bot.user, cfg["station"])
-            except VoiceBusy:
-                logger.debug("guild %s: 他の機能が VC 使用中のためラジオ復帰を次周期に回します", guild_id)
+                await self._supervise_guild(guild_key, raw)
             except Exception:
-                logger.exception("guild %s: ラジオの自動復帰に失敗しました", guild_id)
+                logger.exception("guild %s: ラジオの監視に失敗しました", guild_key)
+
+    async def _supervise_guild(self, guild_key: Any, raw: Any) -> None:
+        """_supervisor のサーバー1件分。失敗は呼び出し側で吸収する。"""
+        cfg = clean_radio_settings(raw)
+        if not (cfg["always_on"] and cfg["playing"]):
+            return
+        try:
+            guild_id = int(guild_key)
+        except (TypeError, ValueError):
+            return
+        guild = self.bot.get_guild(guild_id)
+        if guild is None or cfg["channel_id"] is None:
+            return
+        vc = getattr(guild, "voice_client", None)
+        if self.session_has_radio(guild_id) and vc is not None and vc.is_connected():
+            if not has_audio_source(vc, SOURCE_KEY):
+                self._play(guild_id, vc, STATION_BY_ID[cfg["station"]])
+            return
+        channel = guild.get_channel(cfg["channel_id"])
+        if channel is None:
+            return
+        try:
+            await self.start_radio(guild, channel, self.bot.user, cfg["station"])
+        except VoiceBusy:
+            logger.debug("guild %s: 他の機能が VC 使用中のためラジオ復帰を次周期に回します", guild_id)
+        except Exception:
+            logger.exception("guild %s: ラジオの自動復帰に失敗しました", guild_id)
 
     @_supervisor.before_loop
     async def _supervisor_before(self) -> None:

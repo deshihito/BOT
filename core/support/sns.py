@@ -1285,7 +1285,13 @@ class SnsSupportMixin:
     @tasks.loop(seconds=SNS_POLL_SECONDS)
     async def sns_poll(self):
         store = guild_settings.get_store()
-        await store.ensure_loaded()
+        try:
+            await store.ensure_loaded()
+        except Exception:
+            # 設定の読み込み失敗でループごと止まると SNS 通知が無言で死ぬ。
+            # 次周期に再試行できるよう、ここで吸収する（.error は最終報告のみ）。
+            logger.exception("SNS通知の巡回に失敗しました（設定の読み込み）")
+            return
         cache: dict[tuple, object] = {}
 
         for guild in list(self.bot.guilds):
