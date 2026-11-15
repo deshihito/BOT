@@ -66,7 +66,7 @@ PREFIX_ARGUMENTS = {
     'ffversion': {},
     'ai': {}, 'aitools': {}, 'generate': {},
     'gvcperm': {'room_name': 'room'},
-    'logs': {}, 'sttdebug': {}, 'usage_stats': {},
+    'logs': {}, 'sttdebug': {}, 'usage_stats': {}, 'wbstate': {'user_id': '123456789012345678'},
 }
 
 # このテストで見つかった既知の問題。直したら消すこと（消し忘れは test_known_issues_are_still_present が知らせる）。
@@ -79,6 +79,7 @@ SILENT_BY_DESIGN = {
     '!check_api': '許可されたユーザー以外には反応しない（tests/test_admin_prefix.py）',
     '!usage_stats': '許可されたユーザー以外には反応しない（!check_api と同じ流儀）',
     '!guild': '許可されたユーザー以外には反応しない（tests/test_guild_list.py で両方を確認）',
+    '!wbstate': '許可されたユーザー以外には反応しない（!all_stats と同じ流儀）',
 }
 
 # discord.py 標準のヘルプコマンドは対象外（cog のコマンドではない）。

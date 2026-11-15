@@ -248,6 +248,7 @@ const TILE_ERROR_LABEL: Record<string, string> = {
   no_block: "ブロックがない",
   on_capital: "首都には置けない",
   not_enough_items: "足りない",
+  world_frozen: "いまは変更できない（凍結中）",
   too_far: "遠すぎる",
   depleted: "もう無い",
   needs_pickaxe: "ツルハシが必要",
@@ -534,6 +535,29 @@ export default function WorldBoxClient() {
     if (inviteGuildId) setGuildBoardOpen(true);
   }, [inviteGuildId]);
   const [guildShopOpen, setGuildShopOpen] = useState(false);
+  const [reportOpen, setReportOpen] = useState(false);
+  const [reportText, setReportText] = useState("");
+  const sendReport = async () => {
+    const text = reportText.trim();
+    if (!text) return;
+    try {
+      const res = await fetch("/api/worldbox/ops", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "report",
+          text,
+          x: Math.floor(playerPosRef.current.x),
+          y: Math.floor(playerPosRef.current.y),
+        }),
+      });
+      setTileMsg(res.ok ? "通報した" : "通報できない");
+      if (res.ok) {
+        setReportText("");
+        setReportOpen(false);
+      }
+    } catch { /* noop */ }
+  };
   const [boardPosts, setBoardPosts] = useState<BoardPost[]>([]);
   const [boardLoggedIn, setBoardLoggedIn] = useState(false);
   const [boardText, setBoardText] = useState("");
@@ -4778,6 +4802,12 @@ export default function WorldBoxClient() {
       show: spaceUi === "world",
       run: () => setMapView((v) => !v),
     },
+    {
+      id: "report",
+      label: "通報する",
+      show: true,
+      run: () => setReportOpen(true),
+    },
     { id: "close", label: "閉じる", show: true, run: () => {} },
   ];
 
@@ -5596,6 +5626,31 @@ export default function WorldBoxClient() {
       )}
       {arenaOpen && spaceUi === "lobby" && (
         <WorldBoxArenaPanel onClose={() => setArenaOpen(false)} />
+      )}
+      {reportOpen && (
+        <div style={{ ...panelOverlay, width: "min(330px, calc(100% - 20px))" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <strong>通報</strong>
+            <span style={{ flex: 1 }} />
+            <button type="button" style={btn} onClick={() => setReportOpen(false)}>閉じる</button>
+          </div>
+          <textarea
+            value={reportText}
+            onChange={(e) => setReportText(e.target.value)}
+            rows={3}
+            maxLength={300}
+            style={{
+              width: "100%", marginTop: 8, borderRadius: 8, padding: 8, boxSizing: "border-box",
+              border: "1px solid rgba(255,255,255,0.25)", background: "rgba(255,255,255,0.08)", color: "#fff",
+            }}
+            aria-label="通報内容"
+          />
+          <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 8 }}>
+            <button type="button" style={btn} disabled={!reportText.trim()} onClick={() => { void sendReport(); }}>
+              送る
+            </button>
+          </div>
+        </div>
       )}
       {machinePanel && spaceUi === "world" && (
         <WorldBoxMachinePanel

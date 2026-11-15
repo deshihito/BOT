@@ -356,6 +356,10 @@ const containersRoute = await routeImport("api/worldbox/containers/route.ts", [
   ['"@/lib/worldbox/user-lock"', userLockUrl],
 ]);
 const machinesUrl = bundleModule(["worldbox/items.ts", "worldbox/machines.ts"], ["isMachineItem", "machineBufferCount"]);
+const opsOnlineStubUrl = dataUrl(`
+export async function loadFrozen() { return false; }
+export async function appendTileJournal() {}
+`);
 const metricsOnlineStubUrl = dataUrl(`
 export async function recordPresenceMetric() {}
 export async function recordFirstStep() {}
@@ -387,6 +391,7 @@ const tilesRoute = await routeImport("api/worldbox/tiles/route.ts", [
   ['"@/lib/worldbox/machines"', machinesUrl],
   ['"@/lib/worldbox/machines-online"', machinesOnlineStubUrl],
   ['"@/lib/worldbox/metrics-online"', metricsOnlineStubUrl],
+  ['"@/lib/worldbox/ops-online"', opsOnlineStubUrl],
   ['"@/lib/worldbox/user-lock"', userLockUrl],
 ]);
 

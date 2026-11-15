@@ -310,3 +310,19 @@ AGO WORLD BOX（web/app/games/worldbox）に関わる作業をする Muse は、
 - 招待導線: ギルドボードに自国の招待リンク（/games/worldbox?union=<サーバーID>）
   のコピーボタンを置き、リンクから開くとボードが開いて該当サーバーの
   参加行が先頭に強調される。
+
+## 運用: 荒らし対策・バックアップ・Discord状態パネル（バッチ9b、2026-11-16）
+
+- タイル差分ジャーナル: tiles ルートの成功した書き換えを bot_kv
+  `worldbox_tile_journal`（日次、直近500件）に prev/next つきで記録する。
+- 凍結と巻き戻し: /api/worldbox/ops（運営 = WORLDBOX_ADMIN_IDS、既定は
+  オーナーの Discord ID）。freeze でタイル書き換えを 423 で止め、
+  rollback_tile はジャーナルから指定時刻の状態へ復元する。通報は
+  ログイン中の誰でも送れ、bot_kv `worldbox_ops` に貯まる。
+  クライアントは ≡ メニューに通報フォームを持つ。
+- バックアップ/復旧: tools/worldbox_backup.py が worldbox_* 名前空間を
+  JSON へ dump / restore する（restore は --yes で実行、既定はドライラン）。
+- Discord 状態パネル: 管理者向け隠しコマンド `!wbstate <ユーザーID>`
+  （core/support/worldbox）が Web と同じ bot_kv レコードから残高・
+  所持品・現在地・所属ユニオンを V2 パネルで表示する。スラッシュ
+  コマンドは増やしていない（!all_stats と同じ許可リスト）。

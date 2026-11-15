@@ -150,6 +150,8 @@ COMMAND_META: dict[str, dict] = {
     "!d1ping": {"category": "admin", "summary": "d1 サーバーの応答を確かめ、止まっていれば起動します",
                 "permissions": ["bot_admin"], "hidden": True},
     "!all_stats": {"category": "admin", "summary": "Bot とサーバーの状態を表示します", "hidden": True},
+    "!wbstate": {"category": "admin", "summary": "プレイヤーの WORLD BOX 状態を表示します", "permissions": ["bot_admin"],
+                 "usage": "!wbstate <ユーザーID>", "hidden": True},
     "!terminal": {"category": "admin", "summary": "持ち主専用の操作パネルを表示します", "permissions": ["bot_admin"],
                   "hidden": True},
     "!guild": {"category": "admin", "summary": "Bot が入っているサーバーの一覧を表示します", "permissions": ["bot_admin"],
