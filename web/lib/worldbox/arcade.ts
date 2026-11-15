@@ -3,7 +3,8 @@
 // このファイルは「どのタイトルをどの区分・どの順で筐体化するか」のデータだけを持つ。
 // 人数・タイトルは registry 側（各ゲームモジュール）が正で、ここでは重複して持たない。
 // ネットコードは作らない（既存の OnlineShell / useOnlineRoom のルーム基盤に載せる）。
-// 筐体スプライトは L3 で作成する（web/public/img/worldbox/lobby/arcade_<id>.png）。
+// 筐体スプライトは L3 で作成済み（web/public/img/worldbox/lobby/arcade_<id>.png、
+// textures.ts の LOBBY_SPRITE_SRC に登録）。第1弾の配置は lobby-floors.ts の 2F 北弧。
 // 経済: アーケードの対戦に AGO コインを賭ける機能は入れない（案Bのみ・ミント禁止）。
 
 /** 筐体の区分。移植の優先順は faceoff → party → realtime。 */
