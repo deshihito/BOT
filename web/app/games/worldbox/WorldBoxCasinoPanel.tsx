@@ -5,13 +5,22 @@
 // 位置の検証はサーバー側（プレゼンス）が行い、このパネルは今いる機器を
 // 表示して遊ぶだけ。コインの正は AGO コイン本体: プレイは経済ブリッジの
 // オプとして Bot 本体が適用し、残高はその結果を読み直して表示する。
+// 演出はドーパミン濃いめ: リールは1つずつ止まり、先2つが揃えばリーチで
+// 3つ目が長く回る。配当は階級（casino-fx）で紙吹雪・カウントアップ・
+// フラッシュ・シェイク・効果音の強さが変わる。
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   CASINO_BET_TIERS, SLOT_SYMBOLS,
   type CasinoMachine, type RouletteColor, type RoulettePick,
 } from "@/lib/worldbox/casino";
 import { DICE_RANGES } from "@/lib/worldbox/casino-games";
+import {
+  confettiParticles, countUpValue, isReach, tierFx, winTier, type WinTier,
+} from "@/lib/worldbox/casino-fx";
 import type { EconomyOp } from "@/lib/worldbox/economy-bridge";
+import {
+  sfxCorrect, sfxDeal, sfxDice, sfxFlip, sfxJingle, sfxLose, sfxPlace, sfxTick, sfxWin, sfxWrong,
+} from "@/lib/sfx";
 
 type LoadState = "loading" | "ready" | "guest" | "unavailable";
 
@@ -52,6 +61,12 @@ type PlayResult =
   | { game: "dice"; rolled: number; hit: boolean; payout: number };
 
 type Tab = "slot" | "slot7" | "roulette" | "dice" | "blackjack" | "double";
+
+interface Celebration {
+  key: number;
+  tier: WinTier;
+  amount: number;
+}
 
 const ERROR_LABEL: Record<string, string> = {
   not_enough_coins: "コインが足りません",
@@ -149,8 +164,100 @@ const cardBox: React.CSSProperties = {
   width: 40, height: 54, borderRadius: 6, display: "flex", flexDirection: "column",
   alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 17,
   background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.3)",
+  animation: "wb-casino-deal 0.28s ease-out",
 };
 const tabBtn: React.CSSProperties = { ...btn, minHeight: 32, padding: "2px 10px", fontSize: 13 };
+
+const JUICE_CSS = `
+@keyframes wb-casino-pop { 0% { transform: scale(0.6); } 55% { transform: scale(1.18); } 100% { transform: scale(1); } }
+@keyframes wb-casino-shake { 0%,100% { margin-left: 0; } 20% { margin-left: -7px; } 40% { margin-left: 6px; } 60% { margin-left: -4px; } 80% { margin-left: 3px; } }
+@keyframes wb-casino-flash { 0% { opacity: 0.55; } 100% { opacity: 0; } }
+@keyframes wb-casino-reach { 0%,100% { box-shadow: 0 0 0 rgba(255,60,60,0); border-color: rgba(255,210,62,0.45); } 50% { box-shadow: 0 0 34px rgba(255,60,60,0.75); border-color: #ff5050; } }
+@keyframes wb-casino-gold { 0%,100% { box-shadow: 0 0 6px rgba(255,210,62,0.35); } 50% { box-shadow: 0 0 22px rgba(255,210,62,0.85); } }
+@keyframes wb-casino-deal { 0% { transform: translateY(-10px) rotate(-4deg); opacity: 0; } 100% { transform: translateY(0) rotate(0); opacity: 1; } }
+@keyframes wb-casino-bounce { 0% { transform: scale(0.5); } 60% { transform: scale(1.22); } 100% { transform: scale(1); } }
+@media (prefers-reduced-motion: reduce) {
+  .wb-casino-juice * { animation: none !important; }
+}
+`;
+
+/** 配当のカウントアップ表示。 */
+function CountUp({ value, durationMs, runKey }: { value: number; durationMs: number; runKey: number }) {
+  const [shown, setShown] = useState(0);
+  useEffect(() => {
+    if (durationMs <= 0) { setShown(value); return; }
+    let raf = 0;
+    const start = performance.now();
+    const stepFn = (now: number) => {
+      const t = (now - start) / durationMs;
+      setShown(countUpValue(0, value, t));
+      if (t < 1) raf = requestAnimationFrame(stepFn);
+    };
+    raf = requestAnimationFrame(stepFn);
+    return () => cancelAnimationFrame(raf);
+  }, [value, durationMs, runKey]);
+  return <>{shown.toLocaleString()}</>;
+}
+
+/** 紙吹雪キャンバス。celebration が差し替わるたびに噴き出す。 */
+function ConfettiCanvas({ celebration }: { celebration: Celebration | null }) {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  useEffect(() => {
+    if (!celebration || celebration.tier === 0) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const parent = canvas.parentElement;
+    if (!parent) return;
+    canvas.width = parent.clientWidth;
+    canvas.height = parent.clientHeight;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    const fx = tierFx(celebration.tier);
+    const parts = confettiParticles(fx.confetti, Math.random).map((p) => ({
+      ...p,
+      x: p.x * canvas.width,
+      y: p.y * canvas.height,
+      vx: p.vx * 260,
+      vy: p.vy * 260,
+      rot: 0,
+    }));
+    let raf = 0;
+    const start = performance.now();
+    const lifeMs = fx.countUpMs + 1400;
+    const stepFn = (now: number) => {
+      const t = (now - start) / 1000;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      let alive = false;
+      for (const p of parts) {
+        if (t < p.delay) { alive = true; continue; }
+        const lt = t - p.delay;
+        const x = p.x + p.vx * lt;
+        const y = p.y + p.vy * lt + 340 * lt * lt;
+        const alpha = Math.max(0, 1 - lt / (lifeMs / 1000));
+        if (alpha <= 0 || y > canvas.height + 20) continue;
+        alive = true;
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.rotate(p.rot + p.spin * lt);
+        ctx.globalAlpha = alpha;
+        ctx.fillStyle = p.color;
+        ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+        ctx.restore();
+      }
+      if (alive && now - start < lifeMs + 500) raf = requestAnimationFrame(stepFn);
+      else ctx.clearRect(0, 0, canvas.width, canvas.height);
+    };
+    raf = requestAnimationFrame(stepFn);
+    return () => cancelAnimationFrame(raf);
+  }, [celebration]);
+  return (
+    <canvas
+      ref={canvasRef}
+      aria-hidden
+      style={{ position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none", zIndex: 3 }}
+    />
+  );
+}
 
 export default function WorldBoxCasinoPanel({ onClose }: { onClose: () => void }) {
   const [loadState, setLoadState] = useState<LoadState>("loading");
@@ -169,7 +276,37 @@ export default function WorldBoxCasinoPanel({ onClose }: { onClose: () => void }
   const [bjFinal, setBjFinal] = useState<SessionView | null>(null);
   const [lastSpin, setLastSpin] = useState<{ reward: number; penalty: number; events: string[] } | null>(null);
   const [lastGo, setLastGo] = useState<{ win: boolean; currentValue: number } | null>(null);
+  // 演出用
+  const [celebration, setCelebration] = useState<Celebration | null>(null);
+  const [slotPending, setSlotPending] = useState<PlayResult | null>(null);
+  const [stopped, setStopped] = useState(3);
+  const [reach, setReach] = useState(false);
+  const [wheelNum, setWheelNum] = useState(0);
+  const [diceFace, setDiceFace] = useState(1);
+  const [rolling7, setRolling7] = useState<number[] | null>(null);
   const aliveRef = useRef(true);
+  const timersRef = useRef<number[]>([]);
+
+  const later = useCallback((fn: () => void, ms: number) => {
+    const id = window.setTimeout(() => { if (aliveRef.current) fn(); }, ms);
+    timersRef.current.push(id);
+  }, []);
+
+  const celebrate = useCallback((payout: number, betAmount: number, forceTier?: WinTier) => {
+    const tier = forceTier ?? winTier(payout, betAmount);
+    if (tier === 0) return;
+    setCelebration({ key: Date.now(), tier, amount: payout });
+    if (tier >= 3) { sfxJingle(true); sfxWin(); }
+    else if (tier === 2) sfxWin();
+    else sfxCorrect();
+    later(() => setCelebration(null), tierFx(tier).countUpMs + 1600);
+  }, [later]);
+
+  const badFlash = useCallback(() => {
+    setCelebration({ key: Date.now(), tier: 0, amount: 0 });
+    sfxWrong();
+    later(() => setCelebration(null), 700);
+  }, [later]);
 
   const refresh = useCallback(async () => {
     try {
@@ -196,12 +333,15 @@ export default function WorldBoxCasinoPanel({ onClose }: { onClose: () => void }
     aliveRef.current = true;
     void refresh();
     const timer = window.setInterval(() => void refresh(), 3000);
+    const timers = timersRef.current;
     return () => {
       aliveRef.current = false;
       window.clearInterval(timer);
+      for (const id of timers) window.clearTimeout(id);
     };
   }, [refresh]);
 
+  // 回転中の目まぐるしい切り替え（スロット/ルーレット/ダイス共通）
   useEffect(() => {
     if (!spinning) return;
     const timer = window.setInterval(() => {
@@ -210,9 +350,20 @@ export default function WorldBoxCasinoPanel({ onClose }: { onClose: () => void }
         Math.floor(Math.random() * SLOT_SYMBOLS.length),
         Math.floor(Math.random() * SLOT_SYMBOLS.length),
       ]);
-    }, 90);
+      setWheelNum(Math.floor(Math.random() * 37));
+      setDiceFace(1 + Math.floor(Math.random() * diceRange));
+    }, 70);
     return () => window.clearInterval(timer);
-  }, [spinning]);
+  }, [spinning, diceRange]);
+
+  // セブンの数字ロール
+  useEffect(() => {
+    if (!rolling7) return;
+    const timer = window.setInterval(() => {
+      setRolling7(Array.from({ length: 7 }, () => Math.floor(Math.random() * 10)));
+    }, 60);
+    return () => window.clearInterval(timer);
+  }, [rolling7 !== null]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const post = useCallback(async (payload: Record<string, unknown>) => {
     const res = await fetch("/api/worldbox/casino", {
@@ -224,12 +375,27 @@ export default function WorldBoxCasinoPanel({ onClose }: { onClose: () => void }
     return { res, data };
   }, []);
 
+  const finishPlay = useCallback((r: PlayResult, betAmount: number) => {
+    setResult(r);
+    setSpinning(false);
+    if (r.game === "slot" || r.game === "roulette" || r.game === "dice") {
+      if (r.payout > 0) celebrate(r.payout, betAmount);
+      else sfxWrong();
+    }
+    void refresh();
+  }, [celebrate, refresh]);
+
   const play = async () => {
     if (!state?.machine || spinning) return;
     const game = tab === "dice" ? "dice" : state.machine;
     setMsg("");
     setResult(null);
+    setCelebration(null);
+    setSlotPending(null);
+    setStopped(0);
+    setReach(false);
     setSpinning(true);
+    if (game === "dice") sfxDice();
     try {
       const payload: Record<string, unknown> = { action: "play", game, bet };
       if (game === "roulette") payload.pick = pick;
@@ -237,23 +403,46 @@ export default function WorldBoxCasinoPanel({ onClose }: { onClose: () => void }
       const { res, data } = await post(payload);
       if (!res.ok) {
         setMsg(ERROR_LABEL[data.error ?? ""] ?? "遊べませんでした");
+        setSpinning(false);
         return;
       }
-      await new Promise((resolve) => window.setTimeout(resolve, 650));
-      if (!aliveRef.current) return;
       const r = data.result as { reels?: [number, number, number]; number?: number; color?: RouletteColor; rolled?: number; hit?: boolean } | undefined;
+      const payout = (data.payout as number) ?? 0;
       if (game === "slot" && r?.reels) {
-        setResult({ game, reels: r.reels, payout: data.payout as number ?? 0 });
+        const finalResult: PlayResult = { game, reels: r.reels, payout };
+        setSlotPending(finalResult);
+        const reachHit = isReach(r.reels);
+        later(() => { setStopped(1); sfxPlace(); }, 450);
+        later(() => {
+          setStopped(2);
+          sfxPlace();
+          if (reachHit) {
+            setReach(true);
+            for (let i = 0; i < 5; i++) later(() => sfxTick(), 200 + i * 210);
+          }
+        }, 950);
+        later(() => {
+          setStopped(3);
+          setReach(false);
+          setSlotPending(null);
+          finishPlay(finalResult, bet);
+        }, reachHit ? 2250 : 1450);
       } else if (game === "roulette" && typeof r?.number === "number" && r.color) {
-        setResult({ game, number: r.number, color: r.color, payout: data.payout as number ?? 0 });
+        const num = r.number;
+        const color = r.color;
+        later(() => finishPlay({ game, number: num, color, payout }, bet), 1000);
       } else if (game === "dice" && typeof r?.rolled === "number") {
-        setResult({ game, rolled: r.rolled, hit: r.hit === true, payout: data.payout as number ?? 0 });
+        const rolled = r.rolled;
+        const hit = r.hit === true;
+        later(() => finishPlay({ game, rolled, hit, payout }, bet), 800);
+      } else {
+        setSpinning(false);
       }
-      void refresh();
     } catch {
-      if (aliveRef.current) setMsg("遊べませんでした");
-    } finally {
-      if (aliveRef.current) setSpinning(false);
+      if (aliveRef.current) {
+        setMsg("遊べませんでした");
+        setSpinning(false);
+      }
     }
   };
 
@@ -276,6 +465,24 @@ export default function WorldBoxCasinoPanel({ onClose }: { onClose: () => void }
     }
   };
 
+  const spin7 = () => {
+    if (busy) return;
+    setRolling7(Array.from({ length: 7 }, () => Math.floor(Math.random() * 10)));
+    void act({ action: "slot7_spin" }, (data) => {
+      const spin = data.spin as { reward: number; penalty: number; events: string[] } | undefined;
+      later(() => {
+        setRolling7(null);
+        if (!spin) return;
+        setLastSpin(spin);
+        if (spin.events.includes("super_jackpot")) celebrate(spin.reward, bet, 4);
+        else if (spin.events.includes("seven_bonus")) celebrate(spin.reward, bet, Math.max(3, winTier(spin.reward, bet)) as WinTier);
+        else if (spin.events.includes("kakuhen_start")) celebrate(spin.reward, bet, 2);
+        else if (spin.reward > 0) celebrate(spin.reward, bet);
+        else if (spin.penalty > 0 || spin.events.includes("six_confiscate")) badFlash();
+      }, 620);
+    });
+  };
+
   const header = (
     <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
       <strong>カジノ</strong>
@@ -295,8 +502,14 @@ export default function WorldBoxCasinoPanel({ onClose }: { onClose: () => void }
 
   const machine = state.machine;
   const session = state.session;
-  const shownReels: [number, number, number] =
-    result?.game === "slot" ? result.reels : spinReels;
+  const slotReels: [number, number, number] = slotPending?.game === "slot"
+    ? slotPending.reels
+    : result?.game === "slot" ? result.reels : spinReels;
+  const shownReels: [number, number, number] = [
+    stopped >= 1 ? slotReels[0] : spinReels[0],
+    stopped >= 2 ? slotReels[1] : spinReels[1],
+    stopped >= 3 ? slotReels[2] : spinReels[2],
+  ];
   const pending = state.ops.filter((op) => op.status === "pending");
   const recent = state.ops.slice(0, 3);
   const tabs: { id: Tab; label: string }[] =
@@ -335,8 +548,44 @@ export default function WorldBoxCasinoPanel({ onClose }: { onClose: () => void }
     </button>
   );
 
+  const fx = celebration ? tierFx(celebration.tier) : null;
+  const rootAnim = reach
+    ? "wb-casino-reach 0.55s ease-in-out infinite"
+    : fx?.shake ? "wb-casino-shake 0.45s ease-in-out" : undefined;
+
+  const payoutBanner = celebration && celebration.tier > 0 && celebration.amount > 0 && (
+    <div
+      key={celebration.key}
+      role="status"
+      style={{
+        marginTop: 10, textAlign: "center", fontWeight: 800,
+        fontSize: celebration.tier >= 3 ? 30 : 22, color: "#ffd23e",
+        animation: "wb-casino-pop 0.35s ease-out",
+        textShadow: "0 0 18px rgba(255,210,62,0.65)",
+      }}
+    >
+      +<CountUp value={celebration.amount} durationMs={fx?.countUpMs ?? 0} runKey={celebration.key} />
+    </div>
+  );
+
   return (
-    <div style={root} role="dialog" aria-label="カジノ">
+    <div
+      style={{ ...root, animation: rootAnim, position: "absolute", overflow: "hidden auto" }}
+      role="dialog" aria-label="カジノ" className="wb-casino-juice"
+    >
+      <style>{JUICE_CSS}</style>
+      {celebration && (
+        <div
+          key={`flash-${celebration.key}`}
+          aria-hidden
+          style={{
+            position: "absolute", inset: 0, pointerEvents: "none", zIndex: 2,
+            background: celebration.tier === 0 ? "rgba(255,60,60,0.5)" : "rgba(255,210,62,0.55)",
+            animation: "wb-casino-flash 0.6s ease-out forwards",
+          }}
+        />
+      )}
+      <ConfettiCanvas celebration={celebration} />
       {header}
 
       {machine === null && (
@@ -347,7 +596,7 @@ export default function WorldBoxCasinoPanel({ onClose }: { onClose: () => void }
         <div style={{ display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap" }}>
           {tabs.map((t) => (
             <button key={t.id} type="button" style={{ ...tabBtn, ...(activeTab === t.id ? chipOn : {}) }}
-              onClick={() => { setTab(t.id); setResult(null); setBjFinal(null); }} aria-pressed={activeTab === t.id}>
+              onClick={() => { setTab(t.id); setResult(null); setBjFinal(null); setCelebration(null); }} aria-pressed={activeTab === t.id}>
               {t.label}
             </button>
           ))}
@@ -359,11 +608,23 @@ export default function WorldBoxCasinoPanel({ onClose }: { onClose: () => void }
         <>
           <div style={{ display: "flex", gap: 8, justifyContent: "center", marginTop: 12 }}>
             {shownReels.map((idx, i) => (
-              <div key={i} style={{ ...reelBox, color: SLOT_SYMBOLS[idx].color }}>
+              <div
+                key={i}
+                style={{
+                  ...reelBox, color: SLOT_SYMBOLS[idx].color,
+                  ...(reach && i === 2 ? { borderColor: "#ff5050", boxShadow: "0 0 16px rgba(255,60,60,0.8)" } : {}),
+                  ...(stopped === i + 1 || (stopped >= 3 && i === 2) ? { animation: "wb-casino-bounce 0.3s ease-out" } : {}),
+                }}
+              >
                 {SLOT_SYMBOLS[idx].glyph}
               </div>
             ))}
           </div>
+          {reach && (
+            <p role="status" style={{ margin: "8px 0 0", textAlign: "center", fontWeight: 800, color: "#ff5050", fontSize: 18 }}>
+              リーチ
+            </p>
+          )}
           {betRow(
             <button type="button" disabled={spinning || bet > state.effectiveBalance}
               style={{ ...btn, background: "rgba(255,210,62,0.25)", borderColor: "rgba(255,210,62,0.7)", fontWeight: 700 }}
@@ -371,7 +632,8 @@ export default function WorldBoxCasinoPanel({ onClose }: { onClose: () => void }
               回す
             </button>,
           )}
-          {result?.game === "slot" && !spinning && (
+          {payoutBanner}
+          {result?.game === "slot" && !spinning && !celebration && (
             <p role="status" style={{ margin: "10px 0 0", fontWeight: 700 }}>
               {result.payout > 0 ? `当たり 配当 ${result.payout}` : "はずれ"}
             </p>
@@ -384,8 +646,13 @@ export default function WorldBoxCasinoPanel({ onClose }: { onClose: () => void }
         <div style={{ marginTop: 12 }}>
           {session?.kind === "slot7" ? (
             <>
-              <div style={{ display: "flex", gap: 4 }}>
-                {(session.lastReels ?? [null, null, null, null, null, null, null]).map((d, i) => (
+              <div
+                style={{
+                  display: "flex", gap: 4, padding: 4, borderRadius: 10,
+                  ...(state.userState.kakuhen > 0 ? { animation: "wb-casino-gold 1.1s ease-in-out infinite" } : {}),
+                }}
+              >
+                {(rolling7 ?? session.lastReels ?? [null, null, null, null, null, null, null]).map((d, i) => (
                   <div key={i} style={{ ...digitBox, ...(d === 7 ? { color: "#ffd23e" } : {}), ...(d === 6 ? { color: "#ff7a7a" } : {}) }}>
                     {d ?? "―"}
                   </div>
@@ -397,7 +664,8 @@ export default function WorldBoxCasinoPanel({ onClose }: { onClose: () => void }
                 {(session.pendingPenalty ?? 0) > 0 && <span style={{ color: "#ff7a7a" }}>ペナルティ {session.pendingPenalty}</span>}
                 {state.userState.kakuhen > 0 && <span style={{ color: "#ffd23e" }}>確変 {state.userState.kakuhen}</span>}
               </div>
-              {lastSpin && (
+              {payoutBanner}
+              {lastSpin && !celebration && (
                 <p role="status" style={{ margin: "8px 0 0", fontWeight: 700 }}>
                   {lastSpin.events.includes("super_jackpot") ? "超JACKPOT"
                     : lastSpin.events.includes("six_confiscate") ? "66666"
@@ -406,12 +674,9 @@ export default function WorldBoxCasinoPanel({ onClose }: { onClose: () => void }
                 </p>
               )}
               <div style={{ marginTop: 10 }}>
-                <button type="button" disabled={busy || (session.remaining ?? 0) <= 0}
+                <button type="button" disabled={busy || rolling7 !== null || (session.remaining ?? 0) <= 0}
                   style={{ ...btn, width: "100%", background: "rgba(255,210,62,0.25)", borderColor: "rgba(255,210,62,0.7)", fontWeight: 700 }}
-                  onClick={() => void act({ action: "slot7_spin" }, (data) => {
-                    const spin = data.spin as { reward: number; penalty: number; events: string[] } | undefined;
-                    if (spin) setLastSpin(spin);
-                  })}>
+                  onClick={spin7}>
                   回す（{session.bet}）
                 </button>
               </div>
@@ -449,12 +714,13 @@ export default function WorldBoxCasinoPanel({ onClose }: { onClose: () => void }
                 alignItems: "center", justifyContent: "center", fontSize: 34, fontWeight: 700,
                 border: "2px solid rgba(255,255,255,0.35)",
                 background:
-                  result?.game === "roulette"
+                  !spinning && result?.game === "roulette"
                     ? result.color === "red" ? "#b03030" : result.color === "green" ? "#2e7d46" : "#26262e"
                     : "#26262e",
+                ...(result?.game === "roulette" && !spinning ? { animation: "wb-casino-bounce 0.35s ease-out" } : {}),
               }}
             >
-              {result?.game === "roulette" ? result.number : "―"}
+              {spinning ? wheelNum : result?.game === "roulette" ? result.number : "―"}
             </div>
             <div style={{ display: "grid", gap: 8 }}>
               <button type="button" style={{ ...btn, ...(pick === "red" ? { background: "#b03030", borderColor: "#ff8a8a" } : {}) }}
@@ -474,7 +740,8 @@ export default function WorldBoxCasinoPanel({ onClose }: { onClose: () => void }
               賭ける
             </button>,
           )}
-          {result?.game === "roulette" && !spinning && (
+          {payoutBanner}
+          {result?.game === "roulette" && !spinning && !celebration && (
             <p role="status" style={{ margin: "10px 0 0", fontWeight: 700 }}>
               {result.payout > 0 ? `当たり 配当 ${result.payout}` : "はずれ"}
             </p>
@@ -490,8 +757,9 @@ export default function WorldBoxCasinoPanel({ onClose }: { onClose: () => void }
               width: 84, height: 84, borderRadius: 14, display: "flex", alignItems: "center",
               justifyContent: "center", fontSize: 34, fontWeight: 700,
               background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.22)",
+              ...(result?.game === "dice" && !spinning ? { animation: "wb-casino-bounce 0.35s ease-out" } : {}),
             }}>
-              {result?.game === "dice" ? result.rolled : "―"}
+              {spinning ? diceFace : result?.game === "dice" ? result.rolled : "―"}
             </div>
             <div style={{ display: "grid", gap: 8 }}>
               <div style={{ display: "flex", gap: 6 }}>
@@ -520,7 +788,8 @@ export default function WorldBoxCasinoPanel({ onClose }: { onClose: () => void }
               振る
             </button>,
           )}
-          {result?.game === "dice" && !spinning && (
+          {payoutBanner}
+          {result?.game === "dice" && !spinning && !celebration && (
             <p role="status" style={{ margin: "10px 0 0", fontWeight: 700 }}>
               {result.hit ? `当たり 配当 ${result.payout}` : "はずれ"}
             </p>
@@ -534,10 +803,14 @@ export default function WorldBoxCasinoPanel({ onClose }: { onClose: () => void }
           {(() => {
             const view = session?.kind === "blackjack" ? session : bjFinal;
             if (!view) {
-              return betRow(startBtn("配る", () => void act({ action: "bj_start", bet }, (data) => {
-                const f = data.final as SessionView | null;
-                if (f) setBjFinal(f);
-              })));
+              return betRow(startBtn("配る", () => {
+                sfxDeal();
+                later(() => sfxDeal(), 140);
+                void act({ action: "bj_start", bet }, (data) => {
+                  const f = data.final as SessionView | null;
+                  if (f) setBjFinal(f);
+                });
+              }));
             }
             const player = view.playerHand ?? [];
             const dealer = view.dealerHand ?? [];
@@ -549,7 +822,7 @@ export default function WorldBoxCasinoPanel({ onClose }: { onClose: () => void }
                 </div>
                 <div style={{ display: "flex", gap: 6, marginTop: 4, flexWrap: "wrap" }}>
                   {dealer.map((c, i) => (
-                    <div key={i} style={cardBox}>
+                    <div key={`${i}-${c.rank}-${c.suit}`} style={cardBox}>
                       {view.dealerHidden && i > 0 ? "?" : (
                         <>
                           <span>{rankLabel(c.rank)}</span>
@@ -564,7 +837,7 @@ export default function WorldBoxCasinoPanel({ onClose }: { onClose: () => void }
                 </div>
                 <div style={{ display: "flex", gap: 6, marginTop: 4, flexWrap: "wrap" }}>
                   {player.map((c, i) => (
-                    <div key={i} style={cardBox}>
+                    <div key={`${i}-${c.rank}-${c.suit}`} style={cardBox}>
                       <span>{rankLabel(c.rank)}</span>
                       <span style={{ color: SUIT_GLYPH[c.suit]?.color }}>{SUIT_GLYPH[c.suit]?.glyph}</span>
                     </div>
@@ -573,16 +846,16 @@ export default function WorldBoxCasinoPanel({ onClose }: { onClose: () => void }
                 {inPlay && session?.kind === "blackjack" ? (
                   <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
                     <button type="button" style={btn} disabled={busy}
-                      onClick={() => void act({ action: "bj_hit" }, (data) => {
+                      onClick={() => { sfxFlip(); void act({ action: "bj_hit" }, (data) => {
                         const f = data.final as SessionView | null;
-                        if (f) setBjFinal(f);
-                      })}>
+                        if (f) { setBjFinal(f); bjOutcomeFx(f); }
+                      }); }}>
                       ヒット
                     </button>
                     <button type="button" style={btn} disabled={busy}
                       onClick={() => void act({ action: "bj_stand" }, (data) => {
                         const f = data.final as SessionView | null;
-                        if (f) setBjFinal(f);
+                        if (f) { setBjFinal(f); bjOutcomeFx(f); }
                       })}>
                       スタンド
                     </button>
@@ -590,7 +863,7 @@ export default function WorldBoxCasinoPanel({ onClose }: { onClose: () => void }
                       <button type="button" style={btn} disabled={busy}
                         onClick={() => void act({ action: "bj_double" }, (data) => {
                           const f = data.final as SessionView | null;
-                          if (f) setBjFinal(f);
+                          if (f) { setBjFinal(f); bjOutcomeFx(f); }
                         })}>
                         ダブル
                       </button>
@@ -621,11 +894,24 @@ export default function WorldBoxCasinoPanel({ onClose }: { onClose: () => void }
           {session?.kind === "double" ? (
             <>
               <div style={{ display: "flex", gap: 12, alignItems: "baseline", flexWrap: "wrap" }}>
-                <span style={{ fontSize: 30, fontWeight: 700 }}>×{(session.multiplier ?? 1).toFixed(2)}</span>
-                <span>{session.currentValue} コイン</span>
+                <span
+                  key={session.multiplier}
+                  style={{
+                    fontSize: 30, fontWeight: 700, display: "inline-block",
+                    animation: "wb-casino-pop 0.3s ease-out",
+                    ...((session.streak ?? 0) >= 3 || state.userState.internalMode === "FEVER"
+                      ? { color: "#ffd23e", textShadow: "0 0 14px rgba(255,210,62,0.7)" } : {}),
+                  }}
+                >
+                  ×{(session.multiplier ?? 1).toFixed(2)}
+                </span>
+                <span>
+                  <CountUp value={session.currentValue ?? 0} durationMs={450} runKey={session.currentValue ?? 0} /> コイン
+                </span>
                 <span style={{ opacity: 0.8 }}>{session.streak} 連勝</span>
                 {state.userState.internalMode === "FEVER" && <span style={{ color: "#ffd23e" }}>FEVER</span>}
               </div>
+              {payoutBanner}
               {lastGo && (
                 <p role="status" style={{ margin: "8px 0 0", fontWeight: 700 }}>
                   {session.busted ? "バースト" : lastGo.win ? "成功" : ""}
@@ -637,12 +923,21 @@ export default function WorldBoxCasinoPanel({ onClose }: { onClose: () => void }
                     style={{ ...btn, flex: 1, background: "rgba(255,210,62,0.25)", borderColor: "rgba(255,210,62,0.7)", fontWeight: 700 }}
                     onClick={() => void act({ action: "double_go" }, (data) => {
                       const go = data.go as { win: boolean; currentValue: number } | undefined;
-                      if (go) setLastGo(go);
+                      if (go) {
+                        setLastGo(go);
+                        if (go.win) sfxCorrect();
+                      }
                     })}>
                     GO
                   </button>
                   <button type="button" disabled={busy} style={{ ...btn, flex: 1 }}
-                    onClick={() => void act({ action: "double_cashout" }, () => setLastGo(null))}>
+                    onClick={() => {
+                      const amount = session.currentValue ?? 0;
+                      void act({ action: "double_cashout" }, () => {
+                        setLastGo(null);
+                        if (amount > 0) celebrate(amount, session.bet);
+                      });
+                    }}>
                     キャッシュアウト
                   </button>
                 </div>
@@ -679,4 +974,10 @@ export default function WorldBoxCasinoPanel({ onClose }: { onClose: () => void }
       {msg && <p role="status" style={{ margin: "10px 0 0" }}>{msg}</p>}
     </div>
   );
+
+  function bjOutcomeFx(f: SessionView) {
+    if (f.outcome === "blackjack") celebrate(0, bet, 3);
+    else if (f.outcome === "win") celebrate(0, bet, 1);
+    else if (f.outcome === "lose" || f.outcome === "bust" || f.outcome === "dealer_blackjack") sfxLose();
+  }
 }
