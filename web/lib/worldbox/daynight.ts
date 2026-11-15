@@ -14,6 +14,15 @@ export function advancePhase(phase: number, dt: number): number {
   return next < 0 ? next + 1 : next;
 }
 
+/**
+ * 共有時計（v3）: 位相は unix 時刻から一意に決まる（全員が同じ時刻を生きる）。
+ * セーブには位相を持たず、クライアントは毎フレームこれで現在位相を求める。
+ */
+export function phaseAtTime(unixSec: number): number {
+  const t = (unixSec / DAY_CYCLE_SEC) % 1;
+  return t < 0 ? t + 1 : t;
+}
+
 /** 夜の暗さ（0=昼、1=真夜中）。描画の暗転と敵出現の両方がこの値を共有する。 */
 export function nightAmount(t: number): number {
   if (t < 0.18 || t > 0.9) return 1;

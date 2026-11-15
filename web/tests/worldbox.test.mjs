@@ -207,32 +207,34 @@ test("物理: 壁（原木）に横移動でぶつかって止まる", () => {
   assert.ok(body.x > spawn.x, "右へ進めていない");
 });
 
-test("保存: serialize → parse の往復で状態が一致する", () => {
+test("保存: serialize → parse の往復でプレイヤー状態が一致する（v3: タイルは保存しない）", () => {
   const world = wb.generateWorld(99);
   const inv = wb.createInventory();
   const got = wb.digTile(world, inv, 10, world.surfaces[10]);
   assert.ok(got !== null);
-  const state = { seed: 99, tiles: world.tiles, inventory: inv, player: { x: 12.5, y: 15.25 }, hp: 8, dayPhase: 0.42 };
-  const parsed = wb.parseSave(wb.serializeSave(state));
+  const state = { inventory: inv, player: { x: 12.5, y: 15.25 }, hp: 8 };
+  const json = wb.serializeSave(state);
+  assert.ok(!json.includes("tilesB64"), "v3 セーブにタイルが含まれている");
+  const parsed = wb.parseSave(json);
   assert.ok(parsed);
-  assert.equal(parsed.seed, 99);
-  assert.deepEqual(Array.from(parsed.tiles), Array.from(world.tiles));
   assert.deepEqual(parsed.inventory, inv);
   assert.deepEqual(parsed.player, { x: 12.5, y: 15.25 });
   assert.equal(parsed.hp, 8);
-  assert.ok(Math.abs(parsed.dayPhase - 0.42) < 1e-9);
+  assert.equal(parsed.tiles, undefined, "v3 の状態にタイルが含まれている");
 });
 
-test("保存: 壊れたデータは null（新規ワールドへフォールバック）", () => {
+test("保存: 壊れたデータは null（新規プレイヤー状態へフォールバック）", () => {
   assert.equal(wb.parseSave(null), null);
   assert.equal(wb.parseSave(""), null);
   assert.equal(wb.parseSave("{not json"), null);
   assert.equal(wb.parseSave(JSON.stringify({ version: 999 })), null);
-  // タイル長が合わない
+  // 位置が数値でない
   assert.equal(
-    wb.parseSave(JSON.stringify({ version: 1, seed: 1, tilesB64: "AAAA", inventory: {}, player: { x: 0, y: 0 } })),
+    wb.parseSave(JSON.stringify({ version: 2, slots: [], player: { x: "a", y: 0 } })),
     null,
   );
+  // 位置そのものが無い
+  assert.equal(wb.parseSave(JSON.stringify({ version: 3, slots: [] })), null);
 });
 
 test("カタログ: worldbox が playable で登録されている", async () => {

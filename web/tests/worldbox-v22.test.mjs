@@ -250,31 +250,35 @@ test("松明: クラフト（石炭鉱石1＋原木1→4つ）→設置→掘っ
   assert.equal(wb.countOf(inv, wb.TORCH), before + 1, "掘った松明が戻っていない");
 });
 
-test("松明・作業台: セーブ往復と v2 形式の互換（バージョンは据え置き）", () => {
-  assert.equal(wb.SAVE_VERSION, 2, "セーブ形式は v2.2 でも v2 のまま");
-  const world = flatWorld();
-  wb.setTile(world, 50, 20, wb.TORCH);
-  wb.setTile(world, 52, 29, wb.WORKBENCH);
+test("松明・作業台: 所持品は v3 セーブで往復し、置いたタイルはセーブに含まれない", () => {
+  assert.equal(wb.SAVE_VERSION, 3, "セーブ形式は v3（プレイヤー状態のみ）");
   const inv = wb.createInventory();
   wb.addItem(inv, wb.TORCH, 5);
   wb.addItem(inv, wb.WORKBENCH, 2);
-  const state = {
-    seed: world.seed,
-    tiles: world.tiles,
-    inventory: inv,
-    player: { x: 10, y: 20 },
-    hp: 10,
-    dayPhase: 0.3,
-  };
-  const back = wb.parseSave(wb.serializeSave(state));
+  const state = { inventory: inv, player: { x: 10, y: 20 }, hp: 10 };
+  const json = wb.serializeSave(state);
+  assert.ok(!json.includes("tilesB64"), "v3 セーブにタイルが含まれている");
+  const back = wb.parseSave(json);
   assert.ok(back, "保存した状態が読み戻せない");
-  assert.equal(back.tiles[20 * wb.WORLD_W + 50], wb.TORCH, "松明タイルが往復で消えた");
-  assert.equal(back.tiles[29 * wb.WORLD_W + 52], wb.WORKBENCH, "作業台タイルが往復で消えた");
   assert.equal(wb.countOf(back.inventory, wb.TORCH), 5);
   assert.equal(wb.countOf(back.inventory, wb.WORKBENCH), 2);
-  // v2 セーブ（新タイルなし）もそのまま読める
-  const plain = wb.parseSave(wb.serializeSave({ ...state, tiles: wb.generateWorld(9).tiles, inventory: wb.createInventory() }));
-  assert.ok(plain, "新タイルを含まない v2 セーブが読めない");
+  // v2 セーブ（タイル付き）もプレイヤー状態だけ移行して読める
+  const world = flatWorld();
+  wb.setTile(world, 50, 20, wb.TORCH);
+  const v2json = JSON.stringify({
+    version: 2,
+    seed: world.seed,
+    tilesB64: wb.encodeTiles(world.tiles),
+    slots: inv.slots,
+    player: { x: 10, y: 20 },
+    hp: 7,
+    dayPhase: 0.3,
+  });
+  const migrated = wb.parseSave(v2json);
+  assert.ok(migrated, "v2 セーブが読めない");
+  assert.equal(wb.countOf(migrated.inventory, wb.TORCH), 5);
+  assert.equal(migrated.hp, 7);
+  assert.equal(migrated.tiles, undefined, "v2 のタイルが移行で残ってしまった");
 });
 
 // ---------- 洞窟・固定シード ----------

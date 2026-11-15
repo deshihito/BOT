@@ -460,7 +460,7 @@ test("崩落: 宙に置いた緩いブロックは落ち、落ちたブロック
 
 // ---------- セーブ: 移行・保存先選択 ----------
 
-test("保存: v1 セーブは5枠へ移行して読める（6種目は切り捨て、HP満タン・昼）", () => {
+test("保存: v1 セーブは5枠へ移行して読める（6種目は切り捨て、HP満タン）", () => {
   const world = wb.generateWorld(5);
   const v1 = JSON.stringify({
     version: 1,
@@ -479,26 +479,26 @@ test("保存: v1 セーブは5枠へ移行して読める（6種目は切り捨�
   assert.equal(wb.countOf(parsed.inventory, wb.LEAVES), 9);
   assert.equal(wb.countOf(parsed.inventory, wb.SAND), 0, "6種目の砂が入ってしまった");
   assert.equal(parsed.hp, wb.PLAYER_MAX_HP);
-  assert.equal(parsed.dayPhase, 0.3);
-  // 移行後に v2 で保存し直すと往復する
+  // 移行後に v3 で保存し直すと往復する
   const again = wb.parseSave(wb.serializeSave(parsed));
   assert.ok(again);
   assert.equal(wb.countOf(again.inventory, wb.DIRT), 10);
 });
 
-test("保存: v2 は道具と位相とHPを往復保持する", () => {
-  const world = wb.generateWorld(21);
+test("保存: v3 は道具とHPを往復保持し、タイルと位相は保存しない", () => {
   const inv = wb.createInventory();
   wb.addItem(inv, wb.COPPER_PICKAXE, 1);
   wb.addItem(inv, wb.COPPER_INGOT, 4);
-  const state = { seed: 21, tiles: world.tiles, inventory: inv, player: { x: 3.5, y: 9.5 }, hp: 4, dayPhase: 0.9 };
-  const parsed = wb.parseSave(wb.serializeSave(state));
+  const state = { inventory: inv, player: { x: 3.5, y: 9.5 }, hp: 4 };
+  const json = wb.serializeSave(state);
+  assert.ok(!json.includes("tilesB64") && !json.includes("dayPhase"), "v3 セーブにタイル/位相が含まれている");
+  const parsed = wb.parseSave(json);
   assert.ok(parsed);
   assert.equal(wb.countOf(parsed.inventory, wb.COPPER_PICKAXE), 1);
   assert.equal(wb.countOf(parsed.inventory, wb.COPPER_INGOT), 4);
   assert.equal(parsed.hp, 4);
-  assert.ok(Math.abs(parsed.dayPhase - 0.9) < 1e-9);
-  assert.equal(wb.SAVE_VERSION, 2);
+  assert.deepEqual(parsed.player, { x: 3.5, y: 9.5 });
+  assert.equal(wb.SAVE_VERSION, 3);
 });
 
 test("保存先選択: ログイン時はオンライン優先、無ければローカルを移行、ゲストはローカルのみ", () => {

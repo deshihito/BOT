@@ -1,7 +1,7 @@
 // AGO WORLD BOX のオンラインセーブ（サーバー専用）。
 // 保存先は既存の bot_kv 機構（lib/bot-api 経由）で、名前空間 "worldbox_save"、
 // キーはセッションの所有者キー（"discord:<user_id>" 等）。
-// 値は v2 セーブ JSON 文字列そのもの。検証は lib/worldbox/save.ts の
+// 値は v3 プレイヤーセーブ JSON 文字列そのもの。検証は lib/worldbox/save.ts の
 // parseSave が担い、ここは文字列の出し入れだけを行う。
 import { isBotApiConfigured, kvGet, kvSet } from "../bot-api";
 
