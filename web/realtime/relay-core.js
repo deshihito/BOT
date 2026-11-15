@@ -20,10 +20,11 @@ const TOKEN_TTL_MS = 10 * 60 * 1000;
 const SPACE_BOUNDS = {
   world: { width: 1024, height: 1024 },
   lobby: { width: 56, height: 64 },
+  tent: { width: 13, height: 10 },
 };
 
 function sanitizeSpace(raw) {
-  return raw === "lobby" ? "lobby" : "world";
+  return raw === "lobby" ? "lobby" : raw === "tent" ? "tent" : "world";
 }
 
 function clampNum(v, min, max) {

@@ -142,10 +142,27 @@ const presenceOnlineUrl = dataUrl(
     .replaceAll('"../bot-api"', JSON.stringify(botApiStubUrl))
     .replaceAll('"./presence"', JSON.stringify(presenceUrl)),
 );
+const tentUrl = dataUrl(
+  transpile("worldbox/tent.ts")
+    .replaceAll('"./mapgen"', JSON.stringify(mapgenUrl))
+    .replaceAll('"./lobby"', JSON.stringify(lobbyUrl)),
+);
+const saveUrl = dataUrl(
+  transpile("worldbox/save.ts")
+    .replaceAll('"./lobby"', JSON.stringify(lobbyUrl))
+    .replaceAll('"./tent"', JSON.stringify(tentUrl))
+    .replaceAll('"./mapgen"', JSON.stringify(mapgenUrl)),
+);
+const saveOnlineUrl = dataUrl(
+  transpile("worldbox/save-online.ts").replaceAll('"../bot-api"', JSON.stringify(botApiStubUrl)),
+);
 const stationOnlineUrl = dataUrl(
   transpile("worldbox/station-online.ts")
     .replaceAll('"./lobby"', JSON.stringify(lobbyUrl))
-    .replaceAll('"./presence-online"', JSON.stringify(presenceOnlineUrl)),
+    .replaceAll('"./tent"', JSON.stringify(tentUrl))
+    .replaceAll('"./presence-online"', JSON.stringify(presenceOnlineUrl))
+    .replaceAll('"./save"', JSON.stringify(saveUrl))
+    .replaceAll('"./save-online"', JSON.stringify(saveOnlineUrl)),
 );
 const arenaOnlineUrl = dataUrl(
   transpile("worldbox/arena-online.ts")
