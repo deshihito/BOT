@@ -7,7 +7,7 @@ import { L_DARK, L_MARBLE, L_SAND, L_WALL, isSolidLobbyTile, type LobbyData, typ
 import { T_GRASS, T_ROCK, tilesSource, type TopDownMap } from "./mapgen";
 import { makeRng } from "./rng";
 import { specialObjectById, type SpecialObjectDef } from "./objects";
-import type { PlacedMob } from "./mobs";
+import { mobById, type PlacedMob } from "./mobs";
 
 export type InstanceKind = "cave" | "ruins" | "dungeon";
 
@@ -463,5 +463,215 @@ export function buildRuins(seed: number, entranceX: number, entranceY: number): 
     roomCenters: rooms.map((r) => ({ x: r.cx, y: r.cy })),
   };
   ruinsCache.set(cacheKey, result);
+  return result;
+}
+
+/* ================= ダンジョン（バッチ5） =================
+ * パーティ別インスタンス。マップ自体は入口ごとに決定的生成（52×52、部屋＋通路）。
+ * パーティ分離は状態キー（"#<partyKey>"）とプレゼンスの party フィールドで担保し、
+ * 空間 ID は cave/ruins と同じ `dungeon:<入口x>,<入口y>:<フロア>` 形式を使う。
+ * フロア 1〜3 + フロア 4 がボス部屋。各フロア: 鍵扉の先にフロアボス、
+ * フロアボスを倒すと階段が開く。鍵は番人（ghost）が落とす。
+ */
+
+export const DUNGEON_W = 52;
+export const DUNGEON_H = 52;
+export const DUNGEON_FLOORS = 4;
+/** dungeon_clear の earn 額（暫定。Plan A の原資範囲内、週1回）。 */
+export const DUNGEON_CLEAR_EARN = 500;
+/** パーティ人数ごとのモブ HP 倍率（攻撃は不変）。 */
+export const DUNGEON_HP_SCALES = [1, 1.6, 2.2, 2.8] as const;
+
+export function dungeonHpScale(partySize: number): number {
+  const idx = Math.max(1, Math.min(4, Math.floor(partySize) || 1)) - 1;
+  return DUNGEON_HP_SCALES[idx];
+}
+
+/** 入口ごとに決定的に選ばれるボス（3種）。 */
+export const DUNGEON_BOSSES = ["ogre", "spider_queen", "dungeon_dragon"] as const;
+export function dungeonBossForEntrance(seed: number, entranceX: number, entranceY: number): string {
+  const h = hashSeed(seed, entranceX, entranceY, 4242) >>> 0;
+  return DUNGEON_BOSSES[h % DUNGEON_BOSSES.length];
+}
+
+/** フロアボス（中ボス）は入口ハッシュとフロアで回す。 */
+export function dungeonFloorBossFor(seed: number, entranceX: number, entranceY: number, floor: number): string {
+  if (floor >= DUNGEON_FLOORS) return dungeonBossForEntrance(seed, entranceX, entranceY);
+  const h = (hashSeed(seed, entranceX, entranceY, 5150) >>> 0) + floor;
+  return h % 2 === 0 ? "ogre" : "spider_queen";
+}
+
+export type DungeonChest = { idx: number; x: number; y: number; bossChest: boolean };
+export type DungeonDoor = { idx: number; x: number; y: number };
+export type DungeonFloorData = {
+  data: LobbyData;
+  portal: { x: number; y: number };
+  stairsDown: { x: number; y: number } | null;
+  boss: { mobId: string; x: number; y: number };
+  keyHolder: { mobId: string; x: number; y: number };
+  chests: DungeonChest[];
+  doors: DungeonDoor[];
+  mobs: PlacedMob[];
+  floor: number;
+};
+
+const dungeonCache = new Map<string, DungeonFloorData>();
+
+export function buildDungeonFloor(seed: number, entranceX: number, entranceY: number, layer: number): DungeonFloorData {
+  // layer は空間 ID の層（0 始まり。洞窟と同じ）。フロア番号は layer+1。
+  const f = Math.max(1, Math.min(DUNGEON_FLOORS, (Math.floor(layer) || 0) + 1));
+  const cacheKey = `dungeon:${seed}:${entranceX},${entranceY}:${f}`;
+  const cached = dungeonCache.get(cacheKey);
+  if (cached) return cached;
+
+  const rng = makeRng(hashSeed(seed, entranceX, entranceY, 9000 + f * 131));
+  const tiles = new Uint8Array(DUNGEON_W * DUNGEON_H).fill(L_WALL);
+  const floorSet = new Set<string>();
+  const carve = (x: number, y: number) => {
+    if (x < 1 || y < 1 || x >= DUNGEON_W - 1 || y >= DUNGEON_H - 1) return;
+    tiles[y * DUNGEON_W + x] = L_DARK;
+    floorSet.add(`${x},${y}`);
+  };
+  const COLS = 3;
+  const ROWS = 3;
+  const rooms: { x: number; y: number; w: number; h: number; cx: number; cy: number }[] = [];
+  for (let ry = 0; ry < ROWS; ry++) {
+    for (let rx = 0; rx < COLS; rx++) {
+      const w = 7 + Math.floor(rng() * 3);
+      const h = 6 + Math.floor(rng() * 3);
+      const x = 2 + rx * 16 + Math.floor(rng() * 3);
+      const y = 2 + ry * 16 + Math.floor(rng() * 3);
+      for (let dy = 0; dy < h; dy++) for (let dx = 0; dx < w; dx++) carve(x + dx, y + dy);
+      rooms.push({ x, y, w, h, cx: x + Math.floor(w / 2), cy: y + Math.floor(h / 2) });
+    }
+  }
+  const corridor = (x0: number, y0: number, x1: number, y1: number) => {
+    let x = x0;
+    let y = y0;
+    while (x !== x1) { carve(x, y); carve(x, y + 1); x += Math.sign(x1 - x); }
+    while (y !== y1) { carve(x, y); carve(x + 1, y); y += Math.sign(y1 - y); }
+    carve(x, y);
+  };
+  for (let ry = 0; ry < ROWS; ry++) {
+    for (let rx = 0; rx < COLS; rx++) {
+      const room = rooms[ry * COLS + rx];
+      if (rx + 1 < COLS) corridor(room.cx, room.cy, rooms[ry * COLS + rx + 1].cx, rooms[ry * COLS + rx + 1].cy);
+      if (ry + 1 < ROWS) corridor(room.cx, room.cy, rooms[(ry + 1) * COLS + rx].cx, rooms[(ry + 1) * COLS + rx].cy);
+    }
+  }
+  const entranceRoom = rooms[(ROWS - 1) * COLS + 1];
+  const portal = { x: entranceRoom.cx, y: entranceRoom.cy + 2 };
+  carve(portal.x, portal.y);
+  const dist = new Map<string, number>([[`${portal.x},${portal.y}`, 0]]);
+  const queue = [{ ...portal }];
+  while (queue.length) {
+    const cur = queue.shift()!;
+    const d = dist.get(`${cur.x},${cur.y}`)!;
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const nx = cur.x + dx;
+      const ny = cur.y + dy;
+      const key = `${nx},${ny}`;
+      if (dist.has(key) || !floorSet.has(key)) continue;
+      dist.set(key, d + 1);
+      queue.push({ x: nx, y: ny });
+    }
+  }
+  const roomDist = rooms.map((r) => dist.get(`${r.cx},${r.cy}`) ?? 0);
+  const bossRoomIdx = roomDist.indexOf(Math.max(...roomDist));
+  const bossRoom = rooms[bossRoomIdx];
+
+  // 鍵扉: ボス部屋の境界に接する通路タイル（遺跡と同じ方式）。
+  const doors: DungeonDoor[] = [];
+  {
+    const candidates: { x: number; y: number }[] = [];
+    for (const key of floorSet) {
+      const [x, y] = key.split(",").map(Number);
+      const inBoss = x >= bossRoom.x && x < bossRoom.x + bossRoom.w && y >= bossRoom.y && y < bossRoom.y + bossRoom.h;
+      if (inBoss) continue;
+      const touches = [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) => {
+        const nx = x + dx;
+        const ny = y + dy;
+        return nx >= bossRoom.x && nx < bossRoom.x + bossRoom.w && ny >= bossRoom.y && ny < bossRoom.y + bossRoom.h && floorSet.has(`${nx},${ny}`);
+      });
+      if (touches) candidates.push({ x, y });
+    }
+    candidates.sort((a, b) => (dist.get(`${b.x},${b.y}`) ?? 0) - (dist.get(`${a.x},${a.y}`) ?? 0));
+    if (candidates.length > 0) doors.push({ idx: 0, x: candidates[0].x, y: candidates[0].y });
+  }
+  const doorSet = new Set(doors.map((d) => `${d.x},${d.y}`));
+
+  const boss = {
+    mobId: dungeonFloorBossFor(seed, entranceX, entranceY, f),
+    x: bossRoom.cx,
+    y: bossRoom.cy,
+  };
+  // 番人（鍵持ち）は入口とボス部屋の中間の部屋に置く。
+  const sortedByDist = rooms.map((r, i) => ({ r, i, d: roomDist[i] })).sort((a, b) => a.d - b.d);
+  const midRoom = sortedByDist[Math.floor(sortedByDist.length / 2)].r;
+  const keyHolder = { mobId: "ghost", x: midRoom.cx, y: midRoom.cy };
+
+  // 雑魚モブ: 部屋ごとに決定的に配置（入口部屋とボス部屋のボス以外は薄く）。
+  const mobs: PlacedMob[] = [];
+  const mobPool = f === 1 ? ["skeleton", "slime", "spider"] : f === 2 ? ["skeleton", "spider", "ghost"] : ["ghost", "skeleton", "spider"];
+  for (const [i, room] of rooms.entries()) {
+    if (room === entranceRoom) continue;
+    const n = 1 + Math.floor(rng() * 2);
+    for (let k = 0; k < n; k++) {
+      const mobId = mobPool[Math.floor(rng() * mobPool.length)];
+      const def = mobById(mobId);
+      mobs.push({
+        mobId,
+        x: room.x + 1 + Math.floor(rng() * Math.max(1, room.w - 2)),
+        y: room.y + 1 + Math.floor(rng() * Math.max(1, room.h - 2)),
+        biome: "highland",
+        size: def?.size ?? 1,
+      });
+    }
+    void i;
+  }
+  mobs.push({ mobId: keyHolder.mobId, x: keyHolder.x, y: keyHolder.y, biome: "highland", size: mobById(keyHolder.mobId)?.size ?? 2 });
+  mobs.push({ mobId: boss.mobId, x: boss.x, y: boss.y, biome: "highland", size: mobById(boss.mobId)?.size ?? 4 });
+
+  const chests: DungeonChest[] = [];
+  if (f >= DUNGEON_FLOORS) {
+    chests.push({ idx: 0, x: bossRoom.cx + 2, y: bossRoom.cy, bossChest: true });
+  } else {
+    let idx = 0;
+    for (const room of rooms) {
+      if (room === entranceRoom || room === bossRoom) continue;
+      if (rng() < 0.35) continue;
+      chests.push({
+        idx: idx++,
+        x: room.x + 1 + Math.floor(rng() * Math.max(1, room.w - 2)),
+        y: room.y + 1 + Math.floor(rng() * Math.max(1, room.h - 2)),
+        bossChest: false,
+      });
+    }
+  }
+  const stairsDown = f < DUNGEON_FLOORS ? { x: bossRoom.cx - 2, y: bossRoom.cy } : null;
+
+  const objects: LobbyObject[] = [
+    { sprite: "warp_pad", x: portal.x, y: portal.y, w: 1, h: 1, solid: false },
+    ...(stairsDown ? [{ sprite: "stairs", x: stairsDown.x, y: stairsDown.y, w: 1, h: 1, solid: false } as LobbyObject] : []),
+    ...doors.map((d) => ({ sprite: "gold_door", x: d.x, y: d.y, w: 1, h: 1, solid: true })),
+    ...chests.map((c) => ({ sprite: "dungeon_chest", x: c.x, y: c.y, w: 1, h: 1, solid: true })),
+  ];
+  const blocked = new Set<string>();
+  for (const o of objects) if (o.solid) blocked.add(`${o.x},${o.y}`);
+  const moveTiles = new Uint8Array(DUNGEON_W * DUNGEON_H);
+  for (let i = 0; i < tiles.length; i++) moveTiles[i] = isSolidLobbyTile(tiles[i]) ? T_ROCK : T_GRASS;
+  const moveMap: TopDownMap = tilesSource(0, DUNGEON_W, DUNGEON_H, moveTiles);
+  const result: DungeonFloorData = {
+    data: { width: DUNGEON_W, height: DUNGEON_H, tiles, objects, npcs: [], blocked, moveMap },
+    portal,
+    stairsDown,
+    boss,
+    keyHolder,
+    chests,
+    doors,
+    mobs,
+    floor: f,
+  };
+  dungeonCache.set(cacheKey, result);
   return result;
 }

@@ -51,8 +51,8 @@ import {
 import { genreById, type ShopGenreId } from "@/lib/worldbox/shops";
 import { TENT_ENTRY, TENT_EXIT, TENT_H, TENT_W, buildTent, tentTileAt } from "@/lib/worldbox/tent";
 import {
-  buildCaveLayer, buildRuins, lightRadiusTiles, makeInstanceSpace, parseInstanceSpace,
-  type CaveLayer, type RuinsMap,
+  buildCaveLayer, buildDungeonFloor, buildRuins, dungeonHpScale, lightRadiusTiles, makeInstanceSpace, parseInstanceSpace,
+  type CaveLayer, type DungeonFloorData, type RuinsMap,
 } from "@/lib/worldbox/instances";
 import { structureById, structuresForChunk, type PlacedStructure } from "@/lib/worldbox/maplogic";
 import { specialObjectById } from "@/lib/worldbox/objects";
@@ -64,7 +64,7 @@ import {
   type TileActionKind, type TileOverridesMap,
 } from "@/lib/worldbox/tiles";
 import { CROPS, ITEMS, itemById } from "@/lib/worldbox/items";
-import { HP_MAX, HUNGER_MAX, countItem, maxHpFor, type ItemSlot, type PlayerProfile, type SlotRef } from "@/lib/worldbox/profile";
+import { HP_MAX, HUNGER_MAX, countItem, maxHpFor, type AdventureRoleId, type ItemSlot, type PlayerProfile, type SlotRef } from "@/lib/worldbox/profile";
 import {
   containerCapacity, isContainerItem, type ContainerSlotRef,
 } from "@/lib/worldbox/containers";
@@ -811,19 +811,97 @@ export default function WorldBoxClient() {
   };
   const refreshCaveStateRef = useRef(refreshCaveState);
   refreshCaveStateRef.current = refreshCaveState;
+  /** ダンジョンのセッション状態（宝箱・扉・ボス進行）。サーバーが正、ここは表示用。 */
+  const dungeonStateRef = useRef<{
+    opened: Record<string, boolean>; doors: Record<string, boolean>;
+    floorBossDead: Record<string, boolean>; bossDead: boolean; size: number;
+  }>({ opened: {}, doors: {}, floorBossDead: {}, bossDead: false, size: 1 });
+  const refreshDungeonState = async (space: string) => {
+    try {
+      const res = await fetch(`/api/worldbox/instances?space=${encodeURIComponent(space)}`, {
+        headers: { Accept: "application/json" },
+      });
+      if (!res.ok) return;
+      const data = (await res.json()) as {
+        chests?: Record<string, number>; doors?: Record<string, boolean>;
+        floorBossDead?: Record<string, boolean>; bossDead?: boolean; size?: number;
+      };
+      dungeonStateRef.current = {
+        opened: Object.fromEntries(Object.keys(data.chests ?? {}).map((k) => [k, true])), doors: data.doors ?? {},
+        floorBossDead: data.floorBossDead ?? {}, bossDead: data.bossDead ?? false,
+        size: data.size ?? 1,
+      };
+    } catch { /* 読めなくても歩き続けられる */ }
+  };
+  const refreshDungeonStateRef = useRef(refreshDungeonState);
+  refreshDungeonStateRef.current = refreshDungeonState;
+  /** パーティ状態（編成・招待）。サーバーが正、ここは表示と導線用。 */
+  type PartyViewClient = {
+    id: string; entrance: { x: number; y: number };
+    members: { name: string; role: AdventureRoleId; rank: number }[];
+  };
+  const [partyUi, setPartyUi] = useState<{
+    party: PartyViewClient | null; partyKey: string; isLeader: boolean;
+    invite: { partyId: string; leaderName: string } | null;
+  }>({ party: null, partyKey: "", isLeader: false, invite: null });
+  const partyRef = useRef(partyUi);
+  partyRef.current = partyUi;
+  const myPartyKeyRef = useRef("");
+  const [nearDungeonEntrance, setNearDungeonEntrance] = useState(false);
+  const refreshParty = async () => {
+    try {
+      const res = await fetch("/api/worldbox/party", { headers: { Accept: "application/json" } });
+      if (!res.ok) return;
+      const data = (await res.json()) as {
+        party?: PartyViewClient | null; partyKey?: string; isLeader?: boolean;
+        invite?: { partyId: string; leaderName: string } | null;
+      };
+      myPartyKeyRef.current = data.partyKey ?? "";
+      setPartyUi({
+        party: data.party ?? null, partyKey: data.partyKey ?? "",
+        isLeader: data.isLeader ?? false, invite: data.invite ?? null,
+      });
+    } catch { /* noop */ }
+  };
+  const refreshPartyRef = useRef(refreshParty);
+  refreshPartyRef.current = refreshParty;
+  useEffect(() => {
+    void refreshParty();
+    const timer = window.setInterval(() => { void refreshPartyRef.current(); }, 4000);
+    return () => window.clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const postParty = async (action: string, extra: Record<string, unknown> = {}): Promise<{ ok: boolean; space?: string; error?: string }> => {
+    try {
+      const res = await fetch("/api/worldbox/party", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, px: playerPosRef.current.x, py: playerPosRef.current.y, ...extra }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { space?: string; error?: string };
+      void refreshParty();
+      return { ok: res.ok, space: data.space, error: data.error };
+    } catch {
+      return { ok: false, error: "network" };
+    }
+  };
+  const postPartyRef = useRef(postParty);
+  postPartyRef.current = postParty;
+  /** エンジン側の入場フロー（入口座標→セッション作成→空間遷移）。 */
+  const enterDungeonRef = useRef<((ex: number, ey: number) => void) | null>(null);
   /** インスタンス内アクション（洞窟の採掘/宝箱/温泉、遺跡の宝箱/扉/罠）。検証と付与はサーバーが担う。 */
   const postInstance = async (
-    action: "mine" | "open_chest" | "onsen" | "open_door" | "trap",
+    action: "mine" | "open_chest" | "onsen" | "open_door" | "trap" | "leave",
     extra?: { veinKey?: string; chestIdx?: number; doorIdx?: number; trapIdx?: number },
   ) => {
     const space = spaceUi;
     const kindNow = parseInstanceSpace(space)?.kind;
-    if (kindNow !== "cave" && kindNow !== "ruins") return;
+    if (kindNow !== "cave" && kindNow !== "ruins" && kindNow !== "dungeon") return;
     try {
       const res = await fetch("/api/worldbox/instances", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action, space, ...extra }),
+        body: JSON.stringify({ action, space, px: playerPosRef.current.x, py: playerPosRef.current.y, ...extra }),
       });
       const data = (await res.json().catch(() => ({}))) as {
         error?: string; gained?: Record<string, number>; trapped?: boolean; profile?: PlayerProfile;
@@ -849,6 +927,7 @@ export default function WorldBoxClient() {
         playWbSe("success");
       }
       if (kindNow === "cave") void refreshCaveState(space);
+      else if (kindNow === "dungeon") void refreshDungeonState(space);
       else void refreshRuinsState(space);
     } catch { /* 失敗しても歩き続けられる */ }
   };
@@ -1248,10 +1327,30 @@ export default function WorldBoxClient() {
       }
       return ruinsCache;
     };
-    /** モブ状態のキー（インスタンス内は空間 ID で前置し、地表の同座標個体と分ける）。 */
-    const mobKeyFor = (placed: PlacedMob): string =>
-      parseInstanceSpace(space) ? `${space}|${mobKeyOf(placed)}` : mobKeyOf(placed);
-    const indoorData = (): LobbyData => caveLayerNow()?.data ?? ruinsNow()?.data ?? (space === "tent" ? tent : lobby);
+    let dungeonCacheKey = "";
+    let dungeonCache: DungeonFloorData | null = null;
+    const dungeonNow = (): DungeonFloorData | null => {
+      const inst = parseInstanceSpace(space);
+      if (inst?.kind !== "dungeon") return null;
+      if (dungeonCacheKey !== space) {
+        dungeonCacheKey = space;
+        dungeonCache = buildDungeonFloor(MAP_SEED, inst.entranceX, inst.entranceY, inst.layer);
+      }
+      return dungeonCache;
+    };
+    /** モブ状態のキー（インスタンス内は空間 ID で前置し、地表の同座標個体と分ける。
+     * ダンジョンはパーティキーでも分ける）。 */
+    const mobKeyFor = (placed: PlacedMob): string => {
+      const inst = parseInstanceSpace(space);
+      if (inst?.kind === "dungeon") return `${space}#${myPartyKeyRef.current}|${mobKeyOf(placed)}`;
+      return inst ? `${space}|${mobKeyOf(placed)}` : mobKeyOf(placed);
+    };
+    /** ダンジョンではモブ HP がパーティ人数で倍率される（サーバーと同じ式）。 */
+    const defFor = (def: NonNullable<ReturnType<typeof mobById>>) =>
+      parseInstanceSpace(space)?.kind === "dungeon"
+        ? { ...def, hp: Math.max(1, Math.round(def.hp * dungeonHpScale(dungeonStateRef.current.size))) }
+        : def;
+    const indoorData = (): LobbyData => caveLayerNow()?.data ?? ruinsNow()?.data ?? dungeonNow()?.data ?? (space === "tent" ? tent : lobby);
     const textures = loadTextures();
     const dungeon = loadDungeonTiles();
     const lobbySprites = loadLobbySprites();
@@ -1313,6 +1412,7 @@ export default function WorldBoxClient() {
       const inst = parseInstanceSpace(space);
       if (inst?.kind === "cave") return rectBounds(64, 64);
       if (inst?.kind === "ruins") return rectBounds(48, 48);
+      if (inst?.kind === "dungeon") return rectBounds(52, 52);
       return space === "lobby" ? rectBounds(LOBBY_W, LOBBY_H) : space === "tent" ? rectBounds(TENT_W, TENT_H) : worldBounds();
     };
     // モブ占有を差し引いた今フレームの固体集合（モブの真上に立つ間の救済用）
@@ -1320,6 +1420,16 @@ export default function WorldBoxClient() {
     const activeBlocked = (): ReadonlySet<string> | undefined => {
       if (mobFrameBlocked) return mobFrameBlocked;
       if (space === "world") return blockedRef.current;
+      const dungeonF = dungeonNow();
+      if (dungeonF) {
+        const opened = dungeonStateRef.current.doors;
+        const instD = parseInstanceSpace(space);
+        if (instD && dungeonF.doors.some((d) => opened[`${instD.layer}:${d.idx}`])) {
+          const set = new Set(indoorData().blocked);
+          for (const d of dungeonF.doors) if (opened[`${instD.layer}:${d.idx}`]) set.delete(`${d.x},${d.y}`);
+          return set;
+        }
+      }
       const ruins = ruinsNow();
       if (ruins) {
         // 開けた金の鍵の扉は通れる（個人状態が正、ここは表示・移動用）
@@ -1492,7 +1602,7 @@ export default function WorldBoxClient() {
     const sendWsHeartbeat = () => {
       if (!rtSocket || rtSocket.readyState !== WebSocket.OPEN) return;
       try {
-        rtSocket.send(JSON.stringify({ t: "hb", x: player.x, y: player.y, vx: player.vx, vy: player.vy, face: player.face, space }));
+        rtSocket.send(JSON.stringify({ t: "hb", x: player.x, y: player.y, vx: player.vx, vy: player.vy, face: player.face, space, party: myPartyKeyRef.current || undefined }));
       } catch { /* noop */ }
     };
     /** 中継への接続（トークン取得→接続→受信→再接続）。失敗してもポーリングが続く。 */
@@ -1562,12 +1672,36 @@ export default function WorldBoxClient() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
         name: "", x: player.x, y: player.y, vx: player.vx, vy: player.vy, face: player.face, space,
+        party: myPartyKeyRef.current || undefined,
         role: invRef.current?.role ?? "free",
         rank: invRef.current ? masteryRankOf(invRef.current, invRef.current.role) : 1,
       }),
       }).catch(() => { /* noop */ });
     };
+    let nearDungeonShown = false;
     const pollOthers = async () => {
+      // ダンジョン入口の近接（パーティパネル表示用）
+      if (space === "world") {
+        const ptx = Math.floor(player.x);
+        const pty = Math.floor(player.y);
+        let near = false;
+        const ccx = Math.floor(ptx / CHUNK_SIZE);
+        const ccy = Math.floor(pty / CHUNK_SIZE);
+        for (let dy = -1; dy <= 1 && !near; dy++) {
+          for (let dx = -1; dx <= 1 && !near; dx++) {
+            for (const st of structuresForChunk(MAP_SEED, ccx + dx, ccy + dy)) {
+              if (st.structureId === "dungeon_entrance" && Math.hypot(st.x - ptx, st.y - pty) <= 6) { near = true; break; }
+            }
+          }
+        }
+        if (near !== nearDungeonShown) {
+          nearDungeonShown = near;
+          setNearDungeonEntrance(near);
+        }
+      } else if (nearDungeonShown) {
+        nearDungeonShown = false;
+        setNearDungeonEntrance(false);
+      }
       const before = Date.now();
       try {
         const res = await fetch(`/api/worldbox/presence?space=${space}`, { headers: { Accept: "application/json" } });
@@ -1578,6 +1712,10 @@ export default function WorldBoxClient() {
         const now = presenceNow();
         const seen = new Set<string>();
         for (const entry of body.players ?? []) {
+          if (
+            parseInstanceSpace(space)?.kind === "dungeon" &&
+            entry.party && myPartyKeyRef.current && entry.party !== myPartyKeyRef.current
+          ) continue;
           seen.add(entry.id);
           missedPolls.delete(entry.id);
           applyPresenceEntry(entry, now);
@@ -1683,7 +1821,7 @@ export default function WorldBoxClient() {
           const def = mobById(placed.mobId);
           if (!def) continue;
           const key = mobKeyFor(placed);
-          if (!mobHpNow(def, mobStatesRef.current[key] ?? null, nowMs).alive) continue;
+          if (!mobHpNow(defFor(def), mobStatesRef.current[key] ?? null, nowMs).alive) continue;
           const r = mobRenders.get(key);
           candidates.push({
             mobId: placed.mobId,
@@ -1707,7 +1845,7 @@ export default function WorldBoxClient() {
         const def = mobById(placed.mobId);
         if (!def) continue;
         const key = mobKeyFor(placed);
-        if (!mobHpNow(def, mobStatesRef.current[key] ?? null, nowMs).alive) continue;
+        if (!mobHpNow(defFor(def), mobStatesRef.current[key] ?? null, nowMs).alive) continue;
         const r = mobRenders.get(key);
         const cx = r ? Math.floor(r.wx) : placed.x;
         const cy = r ? Math.floor(r.wy) : placed.y;
@@ -1725,6 +1863,39 @@ export default function WorldBoxClient() {
           lastAttackAt = nowMs;
           void attackMobRef.current(placed);
         }
+        return true;
+      }
+      return false;
+    };
+    /** ダンジョン内タップ: 宝箱と鍵扉が対象（検証と付与はサーバー）。 */
+    const handleDungeonTap = (t: { x: number; y: number }): boolean => {
+      const dfloor = dungeonNow();
+      if (!dfloor) return false;
+      const inst = parseInstanceSpace(space);
+      if (!inst) return false;
+      const px = Math.floor(player.x);
+      const py = Math.floor(player.y);
+      const chest = dfloor.chests.find((c) => c.x === t.x && c.y === t.y);
+      if (chest) {
+        if (dungeonStateRef.current.opened[`${inst.layer}:${chest.idx}`]) {
+          setTileMsg(TILE_ERROR_LABEL.depleted);
+          return true;
+        }
+        if (Math.hypot(px - t.x, py - t.y) > 2) {
+          setTileMsg(TILE_ERROR_LABEL.too_far);
+          return true;
+        }
+        void postInstanceRef.current("open_chest", { chestIdx: chest.idx });
+        return true;
+      }
+      const door = dfloor.doors.find((d) => d.x === t.x && d.y === t.y);
+      if (door) {
+        if (dungeonStateRef.current.doors[`${inst.layer}:${door.idx}`]) return false;
+        if (Math.hypot(px - t.x, py - t.y) > 2) {
+          setTileMsg(TILE_ERROR_LABEL.too_far);
+          return true;
+        }
+        void postInstanceRef.current("open_door", { doorIdx: door.idx });
         return true;
       }
       return false;
@@ -1857,6 +2028,17 @@ export default function WorldBoxClient() {
       }
       if (space === "world" || parseInstanceSpace(space)) {
         const t = toTile(e);
+        // パーティリーダーが他プレイヤーをタップしたら招待（入口付近の編成導線）
+        if (space === "world" && partyRef.current.isLeader && partyRef.current.party) {
+          for (const [oid, other] of others) {
+            if (Math.floor(other.track.rx) === t.x && Math.floor(other.track.ry) === t.y) {
+              void postPartyRef.current("invite", { targetId: oid }).then((r) => {
+                setTileMsg(r.ok ? "招待した" : "招待できない");
+              });
+              return;
+            }
+          }
+        }
         // ダブルタップ（320ms 以内・同タイル近傍）は冒険役職の技が消費する。
         // クールタイム中・役職なしでは発動せず通常タップとして処理する。
         const lastTap = lastTapRef.current;
@@ -1871,6 +2053,7 @@ export default function WorldBoxClient() {
               if (!handleMobTap(t)) {
                 if (space === "world") handleTileTap(t);
                 else if (parseInstanceSpace(space)?.kind === "ruins") handleRuinsTap(t);
+                else if (parseInstanceSpace(space)?.kind === "dungeon") handleDungeonTap(t);
                 else handleCaveTap(t);
               }
             }
@@ -1881,6 +2064,7 @@ export default function WorldBoxClient() {
         if (!handleMobTap(t)) {
           if (space === "world") handleTileTap(t);
           else if (parseInstanceSpace(space)?.kind === "ruins") handleRuinsTap(t);
+          else if (parseInstanceSpace(space)?.kind === "dungeon") handleDungeonTap(t);
           else handleCaveTap(t);
         }
       }
@@ -2124,7 +2308,7 @@ export default function WorldBoxClient() {
       space = target;
       setSpaceUi(target);
       const inst = parseInstanceSpace(target);
-      setStatusText(inst?.kind === "cave" ? `洞窟 B${(inst.layer ?? 0) + 1}` : inst?.kind === "ruins" ? "遺跡" : "インスタンス");
+      setStatusText(inst?.kind === "cave" ? `洞窟 B${(inst.layer ?? 0) + 1}` : inst?.kind === "ruins" ? "遺跡" : inst?.kind === "dungeon" ? `ダンジョン ${(inst.layer ?? 0) + 1}F` : "インスタンス");
       lastStation = null;
       setStationUi(null);
       setBoardOpen(false);
@@ -2141,6 +2325,22 @@ export default function WorldBoxClient() {
         void refreshRuinsStateRef.current(target);
         void refreshMobsRef.current();
       }
+      if (inst?.kind === "dungeon") {
+        void refreshDungeonStateRef.current(target);
+        void refreshMobsRef.current();
+      }
+    };
+    /** ダンジョン入場フロー: セッション作成（サーバー検証）を待ってから遷移する。 */
+    enterDungeonRef.current = (ex: number, ey: number) => {
+      void (async () => {
+        const result = await postPartyRef.current("enter", { entrance: { x: ex, y: ey } });
+        if (!result.ok || !result.space) {
+          setTileMsg(result.error === "leader_not_entered" ? "リーダーの入場待ち" : "入れない");
+          return;
+        }
+        const floor = buildDungeonFloor(MAP_SEED, ex, ey, 0);
+        warpToInstance(result.space, { x: floor.portal.x + 0.5, y: floor.portal.y + 0.5 });
+      })();
     };
     /** 構造物（入口など）をタイル座標で探す（自チャンク+隣接）。 */
     const structureAt = (tx: number, ty: number): PlacedStructure | null => {
@@ -2205,6 +2405,8 @@ export default function WorldBoxClient() {
           } else if (stDef?.kind === "entrance" && stDef.targetSpace === "ruins") {
             const r = buildRuins(MAP_SEED, tx, ty);
             warpToInstance(makeInstanceSpace("ruins", tx, ty, 0), { x: r.portal.x + 0.5, y: r.portal.y + 0.5 });
+          } else if (stDef?.kind === "entrance" && stDef.targetSpace === "dungeon") {
+            enterDungeonRef.current?.(tx, ty);
           }
         }
         return;
@@ -2232,6 +2434,40 @@ export default function WorldBoxClient() {
           }
           if (cave.onsen.some((t) => t.x === tx && t.y === ty)) {
             void postInstanceRef.current("onsen");
+          }
+          return;
+        }
+        if (inst?.kind === "dungeon") {
+          const dfloor = dungeonNow();
+          if (!dfloor) return;
+          if (tx === dfloor.portal.x && ty === dfloor.portal.y) {
+            if (inst.layer <= 0) {
+              void postInstanceRef.current("leave");
+              doWarp("world");
+            } else {
+              const prev = buildDungeonFloor(MAP_SEED, inst.entranceX, inst.entranceY, inst.layer - 1);
+              const down = prev.stairsDown ?? prev.portal;
+              warpToInstance(makeInstanceSpace("dungeon", inst.entranceX, inst.entranceY, inst.layer - 1), { x: down.x + 0.5, y: down.y + 0.5 });
+            }
+            return;
+          }
+          if (dfloor.stairsDown && tx === dfloor.stairsDown.x && ty === dfloor.stairsDown.y) {
+            if (!dungeonStateRef.current.floorBossDead[String(inst.layer + 1)]) {
+              setTileMsg("ボスを倒すと開く");
+              return;
+            }
+            {
+              const nextFloor = inst.layer + 2;
+              const need = nextFloor >= 4 ? 3 : 2;
+              const ranks = partyRef.current.party?.members.map((m) => m.rank) ?? [invRef.current ? masteryRankOf(invRef.current, invRef.current.role) : 1];
+              if (!ranks.some((r) => r >= need)) {
+                setTileMsg("熟練ランクが足りない");
+                return;
+              }
+            }
+            const next = buildDungeonFloor(MAP_SEED, inst.entranceX, inst.entranceY, inst.layer + 1);
+            warpToInstance(makeInstanceSpace("dungeon", inst.entranceX, inst.entranceY, inst.layer + 1), { x: next.portal.x + 0.5, y: next.portal.y + 0.5 });
+            return;
           }
           return;
         }
@@ -2897,7 +3133,8 @@ export default function WorldBoxClient() {
         const vy1 = Math.ceil(cam.y + ch / TILE / 2) + 3;
         const caveNow = caveLayerNow();
         const ruinsMobNow = ruinsNow();
-        const cacheKey = caveNow ? `cave:${space}` : ruinsMobNow ? `ruins:${space}:${ruinsStateRef.current.summons.length}` : `${vx0 >> 5},${vy0 >> 5},${vx1 >> 5},${vy1 >> 5},${isNight ? 1 : 0}`;
+        const dungeonMobNow = dungeonNow();
+        const cacheKey = caveNow ? `cave:${space}` : ruinsMobNow ? `ruins:${space}:${ruinsStateRef.current.summons.length}` : dungeonMobNow ? `dungeon:${space}` : `${vx0 >> 5},${vy0 >> 5},${vx1 >> 5},${vy1 >> 5},${isNight ? 1 : 0}`;
         if (cacheKey !== mobCacheKey) {
           mobCacheKey = cacheKey;
           mobCache = caveNow
@@ -2906,7 +3143,9 @@ export default function WorldBoxClient() {
               ? ruinsStateRef.current.summons.map((sm) => ({
                   mobId: sm.mobId, x: sm.x, y: sm.y, biome: "plains" as const, size: mobById(sm.mobId)?.size ?? 1,
                 }))
-              : visibleMobs(MAP_SEED, vx0, vy0, vx1, vy1, isNight);
+              : dungeonMobNow
+                ? [...dungeonMobNow.mobs]
+                : visibleMobs(MAP_SEED, vx0, vy0, vx1, vy1, isNight);
           const keys = new Set(mobCache.map((m) => mobKeyFor(m)));
           for (const k of [...mobRenders.keys()]) if (!keys.has(k)) mobRenders.delete(k);
         }
@@ -2914,7 +3153,7 @@ export default function WorldBoxClient() {
           const def = mobById(placed.mobId);
           if (!def) continue;
           const key = mobKeyFor(placed);
-          const hpNow = mobHpNow(def, mobStatesRef.current[key] ?? null, nowMs);
+          const hpNow = mobHpNow(defFor(def), mobStatesRef.current[key] ?? null, nowMs);
           if (!hpNow.alive) {
             // 死んでいる間は見た目状態を捨てる（復活時はアンカーでポップして出る）
             mobRenders.delete(key);
@@ -2992,7 +3231,7 @@ export default function WorldBoxClient() {
           }
           r.kx *= Math.exp(-9 * dt);
           r.ky *= Math.exp(-9 * dt);
-          mobDrawQueue.push({ placed, r, hpFrac: hpNow.hp / def.hp });
+          mobDrawQueue.push({ placed, r, hpFrac: hpNow.hp / defFor(def).hp });
         }
       }
 
@@ -3183,7 +3422,7 @@ export default function WorldBoxClient() {
       for (const d of drawList) d.draw();
 
       // 洞窟の闇: 明かりの半径の外を暗くする（松明 6 / ランプ 9 タイル）。
-      if (parseInstanceSpace(space)?.kind === "cave") {
+      if (parseInstanceSpace(space)?.kind === "cave" || parseInstanceSpace(space)?.kind === "dungeon") {
         const radius = lightRadiusTiles(invRef.current?.items) * TILE;
         const cxp = Math.round(lobbyOx + player.x * TILE);
         const cyp = Math.round(lobbyOy + player.y * TILE);
@@ -4116,6 +4355,86 @@ export default function WorldBoxClient() {
             >
               インベントリ
             </button>
+          </div>
+        )}
+        {partyUi.invite && (
+          <div
+            style={{
+              position: "absolute", top: 64, left: "50%", transform: "translateX(-50%)",
+              display: "flex", alignItems: "center", gap: 8, padding: "6px 10px",
+              borderRadius: 10, background: "rgba(10,12,24,0.88)", color: "#fff", fontSize: 13, zIndex: 5,
+            }}
+          >
+            <span>{partyUi.invite.leaderName} のパーティ</span>
+            <button
+              type="button"
+              style={btn}
+              onClick={() => { void postParty("accept", { partyId: partyUi.invite?.partyId }); }}
+            >
+              参加
+            </button>
+            <button
+              type="button"
+              style={btn}
+              onClick={() => { void postParty("decline", { partyId: partyUi.invite?.partyId }); }}
+            >
+              断る
+            </button>
+          </div>
+        )}
+        {spaceUi === "world" && nearDungeonEntrance && (
+          <div
+            style={{
+              position: "absolute", right: 10, bottom: 120, width: 168,
+              padding: "8px 10px", borderRadius: 10, background: "rgba(10,12,24,0.88)",
+              color: "#fff", fontSize: 12, zIndex: 5, display: "flex", flexDirection: "column", gap: 6,
+            }}
+          >
+            {partyUi.party ? (
+              <>
+                {partyUi.party.members.map((m, i) => (
+                  <div key={i} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <span aria-hidden style={{ fontSize: 14 }}>{roleById(m.role).symbol}</span>
+                    <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.name}</span>
+                    <span aria-hidden style={{ color: "#f2c53c", fontSize: 9, letterSpacing: 1 }}>{"●".repeat(m.rank)}</span>
+                  </div>
+                ))}
+                <div style={{ display: "flex", gap: 6 }}>
+                  <button
+                    type="button"
+                    style={{ ...btn, flex: 1 }}
+                    onClick={() => {
+                      if (partyUi.party) enterDungeonRef.current?.(partyUi.party.entrance.x, partyUi.party.entrance.y);
+                    }}
+                  >
+                    入場
+                  </button>
+                  <button type="button" style={btn} onClick={() => { void postParty("leave"); }}>
+                    {partyUi.isLeader ? "解散" : "離脱"}
+                  </button>
+                </div>
+              </>
+            ) : (
+              <button
+                type="button"
+                style={btn}
+                onClick={() => { void postParty("create"); }}
+              >
+                パーティ編成
+              </button>
+            )}
+          </div>
+        )}
+        {parseInstanceSpace(spaceUi)?.kind === "dungeon" && partyUi.party && (
+          <div
+            style={{
+              position: "absolute", top: 64, right: 10, display: "flex", gap: 4,
+              padding: "4px 6px", borderRadius: 8, background: "rgba(10,12,24,0.7)", zIndex: 5,
+            }}
+          >
+            {partyUi.party.members.map((m, i) => (
+              <span key={i} title={m.name} aria-hidden style={{ fontSize: 15, color: "#fff" }}>{roleById(m.role).symbol}</span>
+            ))}
           </div>
         )}
         {tileMsg && (
