@@ -650,6 +650,9 @@ export default function WorldBoxClient() {
   const spaceUiRef = useRef<SaveSpace>("world");
   spaceUiRef.current = spaceUi;
   const [menuOpen, setMenuOpen] = useState(false);
+  // ≡ メニュー内の「設定」開閉: BGM・効果音・通報はここへ格納し、
+  // メニュー本体はアクションだけに保つ（2026-11-17 ユーザー指示）。
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [collectionSel, setCollectionSel] = useState<string | null>(null);
   const [stationUi, setStationUi] = useState<LobbyStation | null>(null);
   /** ワールドで設置した作業施設の近くにいるときの作業種別（カンマ区切り。経済パネル用）。 */
@@ -5698,12 +5701,6 @@ export default function WorldBoxClient() {
       show: spaceUi === "world",
       run: () => setMapView((v) => !v),
     },
-    {
-      id: "report",
-      label: "通報する",
-      show: true,
-      run: () => setReportOpen(true),
-    },
     { id: "close", label: "閉じる", show: true, run: () => {} },
   ];
 
@@ -5859,17 +5856,36 @@ export default function WorldBoxClient() {
             <button
               type="button"
               style={{ ...btn, background: "rgba(255,255,255,0.10)", color: "#fff" }}
-              onClick={() => toggleSound("bgm")}
+              aria-expanded={settingsOpen}
+              onClick={() => { playWbSe("click"); setSettingsOpen((v) => !v); }}
             >
-              {soundSettings.bgm ? "BGMを切る" : "BGMを入れる"}
+              設定
             </button>
-            <button
-              type="button"
-              style={{ ...btn, background: "rgba(255,255,255,0.10)", color: "#fff" }}
-              onClick={() => toggleSound("se")}
-            >
-              {soundSettings.se ? "効果音を切る" : "効果音を入れる"}
-            </button>
+            {settingsOpen && (
+              <div style={{ display: "grid", gap: 6, paddingLeft: 14 }}>
+                <button
+                  type="button"
+                  style={{ ...btn, background: "rgba(255,255,255,0.10)", color: "#fff" }}
+                  onClick={() => toggleSound("bgm")}
+                >
+                  {soundSettings.bgm ? "BGMを切る" : "BGMを入れる"}
+                </button>
+                <button
+                  type="button"
+                  style={{ ...btn, background: "rgba(255,255,255,0.10)", color: "#fff" }}
+                  onClick={() => toggleSound("se")}
+                >
+                  {soundSettings.se ? "効果音を切る" : "効果音を入れる"}
+                </button>
+                <button
+                  type="button"
+                  style={{ ...btn, background: "rgba(255,255,255,0.10)", color: "#fff" }}
+                  onClick={() => { playWbSe("click"); setReportOpen(true); setMenuOpen(false); }}
+                >
+                  通報する
+                </button>
+              </div>
+            )}
             <div style={{ borderTop: "1px solid rgba(255,255,255,0.18)", paddingTop: 6 }}>
               <div style={{ fontSize: 12, display: "flex", gap: 6 }}>
                 <span style={{ flex: 1 }}>{SEASON_NAMES[seasonOf(Date.now())]}</span>
