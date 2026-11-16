@@ -1,10 +1,10 @@
-// AGO WORLD BOX ロビーのアーケード筐体パネル・ルーム起動（L4）の検証:
+// AGO WORLD BOX ロビーのアーケード筐体パネル・ルーム起動（L4/L4b）の検証:
 // - 全26筐体に station "arcade" とゲーム ID が付き、ARCADE_GAMES と一致する
 // - 筐体の前に立つと stationNear が "arcade"、stationArcadeNear がそのゲームを返す
 // - 全タイトルがカタログで playable、かつ /games/<id> の振り分けに存在する
-//   （パネルの遷移先が実在すること）
-// - パネルは既存 online 基盤（作成/参加/public）を使い、セッションを
-//   useOnlineRoom と同じ sessionStorage 形式で保存してから遷移する
+// - パネルはゲームページへ遷移せず、ゲーム本体の部品を WORLD BOX の筐体画面に
+//   埋め込んでそのまま遊べる（L4b）。部品は全タイトル分が遅延読み込みで登録され、
+//   実ファイルが props 無しの default export であることまで確認する
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -98,17 +98,26 @@ test("panel: 全タイトルがカタログで playable で、遷移先 /games/<
   }
 });
 
-test("panel: パネルは online 基盤へ作成/参加し、セッション保存後にゲームページへ遷移する", () => {
+test("panel: パネルはゲームページへ遷移せず、ゲーム本体を筐体画面に埋め込む（L4b）", () => {
   const src = fs.readFileSync(path.join(appDir, "games/worldbox/WorldBoxArcadePanel.tsx"), "utf8");
-  assert.match(src, /\/api\/online\/\$\{encodeURIComponent\(gameId\)\}/, "online API のベースが無い");
-  assert.match(src, /`\$\{base\}\/rooms`/, "ルーム作成の POST 先が無い");
-  assert.match(src, /`\$\{base\}\/rooms\/join`/, "ルーム参加の POST 先が無い");
-  assert.match(src, /`\$\{base\}\/rooms\/public`/, "公開ルーム一覧の GET 先が無い");
-  // useOnlineRoom と同じ保存形式（sessionStorage の online:<gameId> に {code, token}）
-  assert.match(src, /sessionStorage\.setItem\(`online:\$\{gameId\}`, JSON\.stringify\(\{ code, token \}\)\)/, "セッション保存が useOnlineRoom の形式と違う");
-  assert.match(src, /window\.location\.assign\(`\$\{prefix\}\/games\/\$\{gameId\}`\)/, "ゲームページへの遷移が無い");
-  // 名前は OnlineShell と同じ保存キーで共有する
-  assert.match(src, /"online-display-name"/, "表示名の共有キーが無い");
+  assert.match(src, /arcadeClientFor\(gameId\)/, "筐体のゲーム本体を引いていない");
+  assert.match(src, /<Client \/>/, "ゲーム本体を描画していない");
+  assert.doesNotMatch(src, /location\.assign|location\.href|router\.push/, "ゲームページへ遷移してしまう");
+  assert.doesNotMatch(src, /\/api\/online\//, "パネルが独自に online API を叩いている（本体の OnlineShell に任せる）");
+});
+
+test("panel: 全タイトルのゲーム本体が遅延読み込みで登録され、実ファイルが存在する", () => {
+  const src = fs.readFileSync(path.join(appDir, "games/worldbox/arcade-clients.tsx"), "utf8");
+  assert.match(src, /from "next\/dynamic"/, "next/dynamic の遅延読み込みでない");
+  for (const e of arcade.ARCADE_GAMES) {
+    const m = src.match(new RegExp(`${e.id}: lazy\\(\\(\\) => import\\("\\.\\./([a-z0-9]+)/([A-Za-z0-9]+)"\\)\\)`));
+    assert.ok(m, `${e.id} が ARCADE_CLIENTS に遅延読み込みで登録されていない`);
+    const file = path.join(appDir, "games", m[1], `${m[2]}.tsx`);
+    assert.ok(fs.existsSync(file), `${e.id} の本体ファイルが無い: ${file}`);
+    const clientSrc = fs.readFileSync(file, "utf8");
+    assert.match(clientSrc, /export default function \w+\(\)/, `${e.id} の本体が props 無しの default export でない`);
+    assert.match(clientSrc, /OnlineShell/, `${e.id} の本体が OnlineShell を使っていない`);
+  }
 });
 
 test("panel: クライアント配線（チップの名前札・遊ぶボタン・パネル描画・離脱で閉じる）", () => {
@@ -121,4 +130,6 @@ test("panel: クライアント配線（チップの名前札・遊ぶボタン�
   assert.match(src, /if \(stationUi !== "arcade"\) setArcadeOpen\(false\)/, "筐体から離れたらパネルが閉じない");
   assert.match(src, /arcadeOpen && stationArcade && \(spaceUi === "lobby2" \|\| spaceUi === "lobby3"\)/, "パネル描画の条件が 2F/3F になっていない");
   assert.match(src, /<WorldBoxArcadePanel/, "WorldBoxArcadePanel が描画されていない");
+  // 筐体で遊んでいる間はワールド側の移動キーを受けない（ゲーム側のキー入力と競合するため）
+  assert.match(src, /if \(arcadeOpenRef\.current\) return;/, "筐体プレイ中のキー入力ガードが無い");
 });

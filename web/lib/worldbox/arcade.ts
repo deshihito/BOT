@@ -6,8 +6,9 @@
 // 筐体スプライトは L3/L6 で作成済み（web/public/img/worldbox/lobby/arcade_<id>.png、
 // textures.ts の LOBBY_SPRITE_SRC に登録）。第1弾の配置は lobby-floors.ts の 2F 北弧、
 // 第2弾は 2F 南弧＋3F 西弧・東弧・南弧・北デッキ（26タイトル全て）。
-// 起動導線は L4 で配線済み: 筐体は station "arcade" を持ち、前のプレイヤーには
-// WorldBoxArcadePanel（ルーム作成・公開ルーム参加→ゲームページへ遷移）が出る。
+// 起動導線は L4/L4b で配線済み: 筐体は station "arcade" を持ち、前のプレイヤーには
+// WorldBoxArcadePanel（筐体画面）が出て、ゲーム本体を WORLD BOX の中でそのまま
+// 遊べる（ゲームページへは遷移しない。ゲーム本体は arcade-clients.tsx が遅延読込）。
 // 経済: アーケードの対戦に AGO コインを賭ける機能は入れない（案Bのみ・ミント禁止）。
 
 /** 筐体の区分。移植の優先順は faceoff → party → realtime。 */
