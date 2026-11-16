@@ -110,7 +110,10 @@ export async function payChampionPrizeInner(t: Tournament): Promise<Tournament> 
 /** 不成立の返金を決定的 ID で積む（1大会・1人1件）。 */
 export async function payRefundsInner(t: Tournament): Promise<Tournament> {
   if (t.status !== "done" || t.champion || t.refundPaid) return t;
-  let out = t;
+  // refundPaid は全員ぶん積めたときだけ立てる。1件でも失敗したら
+  // フラグを立てず、次回の進行で決定的 ID の冪等登録により再試行する
+  // （成功済みの人へは二重に積まれない）。
+  let allPaid = true;
   for (const discordId of t.entrants) {
     const op = buildEconomyOp(
       {
@@ -120,10 +123,9 @@ export async function payRefundsInner(t: Tournament): Promise<Tournament> {
       tournamentRefundOpId(t.id, discordId),
       Date.now(),
     );
-    if (!op) continue;
-    if (await enqueueEconomyOpOnce(op)) out = { ...out, refundPaid: true };
+    if (!op || !(await enqueueEconomyOpOnce(op))) allPaid = false;
   }
-  return out;
+  return allPaid ? { ...t, refundPaid: true } : t;
 }
 
 /**

@@ -65,14 +65,14 @@ export function tournamentPrizeOpId(tournamentId: string): string {
   return `t-prize-${tournamentId}`;
 }
 
-/** 参加費オプの決定的 ID（1大会・1人1件）。 */
+/** 参加費オプの決定的 ID（1大会・1人1件）。Discord ID は末尾4桁でなく全文を使う: 末尾4桁だと他人のオプとキーが衝突し、enqueueEconomyOpOnce の存在確認（userKey 一致）を通り抜けて kvSet で上書きしてしまう。 */
 export function tournamentFeeOpId(tournamentId: string, discordId: string): string {
-  return `t-fee-${tournamentId}-${discordId.slice(-4)}`;
+  return `t-fee-${tournamentId}-${discordId}`;
 }
 
 /** 不成立時の返金オプの決定的 ID（1大会・1人1件）。 */
 export function tournamentRefundOpId(tournamentId: string, discordId: string): string {
-  return `t-refund-${tournamentId}-${discordId.slice(-4)}`;
+  return `t-refund-${tournamentId}-${discordId}`;
 }
 
 /** トーナメント表の段数（2/4/8 人用）。 */

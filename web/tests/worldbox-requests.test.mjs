@@ -408,6 +408,17 @@ function apiReset() {
     }));
   }
 }
+// Bot ワーカーが escrow オプを処理した状態を再現する（本番では投稿の
+// 数秒後に done/failed が付く。納品・取消のゲートはこの状態を見る）。
+function apiSetEscrowStatus(id, status) {
+  for (const [k, v] of globalThis.__wbReqStore) {
+    if (v && typeof v === "object" && v.id === `escrow-${id}`) {
+      globalThis.__wbReqStore.set(k, { ...v, status });
+      return;
+    }
+  }
+  assert.fail("escrow op not found");
+}
 async function apiPost(cookie) {
   const res = await apiRequestsRoute.POST(apiReq(cookie, { action: "post", itemId: "wood", count: 2, reward: 100 }));
   assert.equal(res.status, 200);
@@ -426,6 +437,7 @@ test("API(requests): 投稿の預かりは決定的 ID の spend 1件だけ", as
 test("API(requests): 納品が並行しても報酬 earn は1件だけ（二重納品の回帰防止）", async () => {
   apiReset();
   const id = await apiPost(apiCookie(API_POSTER, "poster"));
+  apiSetEscrowStatus(id, "done");
   const results = await Promise.all([
     apiRequestsRoute.POST(apiReq(apiCookie(API_MEMBER1, "m1"), { action: "fulfill", requestId: id })),
     apiRequestsRoute.POST(apiReq(apiCookie(API_MEMBER2, "m2"), { action: "fulfill", requestId: id })),
@@ -441,6 +453,7 @@ test("API(requests): 納品が並行しても報酬 earn は1件だけ（二重�
 test("API(requests): 納品と取消が競合しても払われるのは報酬か返金のどちらか1件だけ", async () => {
   apiReset();
   const id = await apiPost(apiCookie(API_POSTER, "poster"));
+  apiSetEscrowStatus(id, "done");
   const results = await Promise.all([
     apiRequestsRoute.POST(apiReq(apiCookie(API_POSTER, "poster"), { action: "cancel", requestId: id })),
     apiRequestsRoute.POST(apiReq(apiCookie(API_MEMBER1, "m1"), { action: "fulfill", requestId: id })),
@@ -450,4 +463,31 @@ test("API(requests): 納品と取消が競合しても払われるのは報酬�
     (o) => o.id === `reward-${id}` || o.id === `refund-${id}`,
   );
   assert.equal(payouts.length, 1, "報酬と返金が両方払われることはない");
+});
+
+test("API(requests): escrow 未確定の間は納品も取消も進まない（escrow_pending）", async () => {
+  apiReset();
+  const id = await apiPost(apiCookie(API_POSTER, "poster"));
+  // escrow は pending のまま（ワーカー未処理）
+  const f = await apiRequestsRoute.POST(apiReq(apiCookie(API_MEMBER1, "m1"), { action: "fulfill", requestId: id }));
+  assert.equal(f.status, 409);
+  assert.equal((await f.json()).error, "escrow_pending");
+  const c = await apiRequestsRoute.POST(apiReq(apiCookie(API_POSTER, "poster"), { action: "cancel", requestId: id }));
+  assert.equal(c.status, 409);
+  assert.equal((await c.json()).error, "escrow_pending");
+  assert.equal(apiFindOps((o) => o.id === `reward-${id}` || o.id === `refund-${id}`).length, 0);
+});
+
+test("API(requests): escrow が failed の依頼は納品不可、取消は返金なしで通る", async () => {
+  apiReset();
+  const id = await apiPost(apiCookie(API_POSTER, "poster"));
+  apiSetEscrowStatus(id, "failed"); // 投稿後に残高を抜いて預かれなかった状態
+  const f = await apiRequestsRoute.POST(apiReq(apiCookie(API_MEMBER1, "m1"), { action: "fulfill", requestId: id }));
+  assert.equal(f.status, 409);
+  assert.equal((await f.json()).error, "escrow_failed");
+  const c = await apiRequestsRoute.POST(apiReq(apiCookie(API_POSTER, "poster"), { action: "cancel", requestId: id }));
+  assert.equal(c.status, 200);
+  // 預かっていないので返金オプは積まれない（無担保の払い戻し防止）
+  assert.equal(apiFindOps((o) => o.id === `refund-${id}`).length, 0);
+  assert.equal(apiFindOps((o) => o.id === `reward-${id}`).length, 0);
 });
