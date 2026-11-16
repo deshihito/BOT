@@ -19,7 +19,7 @@ test("クライアントの外枠は .wb-shell で、画面外クロームを持
 });
 
 test("ステータスはステージ内のオーバーレイで出す（レイアウトを消費しない）", () => {
-  assert.match(client, /position: "absolute", top: 10, left: "50%", transform: "translateX\(-50%\)"/);
+  assert.match(client, /position: "absolute", top: "calc\(10px \+ env\(safe-area-inset-top, 0px\)\)", left: "50%", transform: "translateX\(-50%\)"/);
   assert.match(client, /pointerEvents: "none", zIndex: 4/);
 });
 

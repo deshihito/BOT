@@ -96,7 +96,7 @@ export default function WorldBoxGuildShopPanel({
     : [];
 
   return (
-    <div style={panelStyle} role="dialog" aria-label="ギルドショップ">
+    <div style={panelStyle} role="dialog" aria-label="ギルドショップ" className="wb-panel">
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <strong style={{ fontSize: 15 }}>ギルドショップ</strong>
         <span style={{ flex: 1 }} />

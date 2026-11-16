@@ -458,6 +458,25 @@ body:has(.wb-shell) > main { max-width:none; min-height:0; margin:0; padding:0; 
 .wb-shell button { transition: transform 80ms ease-out; }
 .wb-shell button:active { transform: scale(0.96); }
 @keyframes wb-chip-pop { from { transform: translateX(-50%) scale(0.92); opacity: 0; } to { transform: translateX(-50%) scale(1); opacity: 1; } }
+/* --- WORLD BOX スマホ向けパネル（.wb-panel） ---
+   パネル類（経済/カジノ/闘技場/ギルド/装置/アーケード/クライアント内蔵）の
+   ルートに付ける共通クラス。ブレークポイントは lib/worldbox/layout.ts の
+   WB_PORTRAIT_MAX_WIDTH / WB_LANDSCAPE_MAX_HEIGHT と一致させる。
+   縦持ちスマホでは中央モーダルをやめて下端シートにし、ステージ内に
+   収める（はみ出す分はシート内スクロール）。パネルの位置指定は
+   インラインスタイルが正なので、ここだけ !important で上書きする。 */
+@media (max-width: 759px) and (orientation: portrait) {
+  .wb-shell .wb-panel {
+    left: 0 !important; right: 0 !important; top: auto !important; bottom: 0 !important;
+    transform: none !important; width: auto !important; max-width: none !important;
+    max-height: 88% !important; border-radius: 16px 16px 0 0 !important;
+    padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px)) !important;
+  }
+}
+/* 横持ちスマホ（低丈）: 中央のまま、高さだけステージ内に締める。 */
+@media (orientation: landscape) and (max-height: 499px) {
+  .wb-shell .wb-panel { max-height: calc(100% - 12px) !important; }
+}
 @keyframes wb-deny-shake { 0%, 100% { transform: translateX(-50%); } 20% { transform: translateX(calc(-50% - 4px)); } 40% { transform: translateX(calc(-50% + 4px)); } 60% { transform: translateX(calc(-50% - 3px)); } 80% { transform: translateX(calc(-50% + 2px)); } }
 /* --- WEB ゲーム（/games） --- */
 .games-shell[data-activity-root] { max-width:880px; margin:0 auto; padding:18px 16px 48px; }

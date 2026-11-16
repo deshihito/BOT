@@ -13,6 +13,8 @@ import {
 const panelStyle: React.CSSProperties = {
   position: "absolute", left: "50%", bottom: 12, transform: "translateX(-50%)",
   width: "min(340px, calc(100% - 20px))", zIndex: 30,
+  // 低丈の横持ちでもステージからはみ出さない（従来は高さ制限が無く溢れた）
+  maxHeight: "calc(100% - 24px)", overflowY: "auto", overscrollBehavior: "contain",
   background: "rgba(16,20,18,0.94)", border: "1px solid rgba(255,255,255,0.22)",
   borderRadius: 12, padding: "10px 12px", color: "#fff",
   boxShadow: "0 8px 28px rgba(0,0,0,0.45)",
@@ -91,7 +93,7 @@ export default function WorldBoxMachinePanel({
   };
 
   return (
-    <div style={panelStyle} role="dialog" aria-label="自動収穫機">
+    <div style={panelStyle} role="dialog" aria-label="自動収穫機" className="wb-panel">
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <strong style={{ fontSize: 14 }}>自動収穫機</strong>
         <span style={{ flex: 1 }} />
