@@ -97,7 +97,9 @@ test("API と クライアント: now 返却・補正・適応間隔・欠落グ
   assert.ok(client.includes("stepRemoteTrack(o.track, presenceNowMs"), "描画追跡が補正時刻でない");
   assert.ok(client.includes("missedPolls"), "欠落グレースが無い");
   assert.ok(client.includes("wsSeenAt"), "WS 経由の鮮度が欠落グレースに反映されていない");
-  assert.ok(client.includes("setInterval(pollOthers, 1000)"), "ポーリングが1秒でない");
+  assert.ok(client.includes("setInterval(pollTick, 1000)"), "ポーリング tick が1秒でない");
+  assert.ok(client.includes("presencePollDue("), "ポーリング間引き判定を使っていない");
+  assert.ok(client.includes("isWsHealthy("), "WS 生存判定を使っていない");
   assert.ok(client.includes("moving ? 500 : 2000"), "ハートビートの適応間隔が無い");
   assert.ok(client.includes("movedDist <= 4"), "ジャンプ時の即時送信が無い");
 });
