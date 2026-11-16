@@ -170,8 +170,8 @@ test("tournament: 2人未満で締め切られた大会は不成立", () => {
 test("tournament: 賞金総額は参加費の総額、ID は決定的", () => {
   assert.equal(T.tournamentPrizePool(tournament([A, B, C, D])), 800);
   assert.equal(T.tournamentPrizeOpId(`t-${NOW}`), `t-prize-t-${NOW}`);
-  assert.equal(T.tournamentFeeOpId(`t-${NOW}`, A), `t-fee-t-${NOW}-1111`);
-  assert.equal(T.tournamentRefundOpId(`t-${NOW}`, A), `t-refund-t-${NOW}-1111`);
+  assert.equal(T.tournamentFeeOpId(`t-${NOW}`, A), `t-fee-t-${NOW}-${A}`);
+  assert.equal(T.tournamentRefundOpId(`t-${NOW}`, A), `t-refund-t-${NOW}-${A}`);
   for (const id of [T.tournamentPrizeOpId(`t-${NOW}`), T.tournamentFeeOpId(`t-${NOW}`, A)]) {
     assert.match(id, /^[A-Za-z0-9-]{8,64}$/);
   }
