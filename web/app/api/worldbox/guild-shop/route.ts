@@ -6,12 +6,14 @@ import {
 } from "@/lib/worldbox/economy-bridge-online";
 import {
   GUILD_LISTING_MAX, GUILD_PLOT_ANCHORS, GUILD_PLOT_COUNT, GUILD_PLOT_FEE,
-  findListing, listingAvailable, plotOfGuild, sellerProceeds,
+  findListing, listingAvailable, plotOfGuild, saleTaxAmount, sellerProceeds,
   type GuildShopState,
 } from "@/lib/worldbox/guild-shop";
 import { isGuildShopEnabled, loadGuildShopState, storeGuildShopState } from "@/lib/worldbox/guild-shop-online";
 import { itemById } from "@/lib/worldbox/items";
 import { loadNationsState } from "@/lib/worldbox/nations-online";
+import { memberKeysOf, resolveMemberRole, taxRateOf } from "@/lib/worldbox/nation-settings";
+import { loadNationSettings, updateNationSettings } from "@/lib/worldbox/nation-settings-online";
 import { listPresence } from "@/lib/worldbox/presence-online";
 import { presenceIdFor } from "@/lib/worldbox/presence";
 import { addItem, countItem, removeItem } from "@/lib/worldbox/profile";
@@ -29,7 +31,8 @@ export const runtime = "nodejs";
 // unregister（出品は売り手へ返却）/ list（所属員が出品、アイテムは
 // エスクローでプロフィールから引く）/ unlist（返却）/
 // buy（区画カウンター近くでのみ。購入 spend guild_shop_buy + 売り手 earn
-// guild_shop_sale（手数料5%差し引き）、オプ ID は決定的で冪等）。
+// guild_shop_sale（区画の国の税率を差し引き、税分はシンク+累計へ記録）、
+// オプ ID は決定的で冪等）。役職は国家設定込みで解決する（任命大臣も可）。
 // 状態の read-modify-write は全体ロックで直列化する。
 
 const NO_STORE = { "Cache-Control": "no-store, max-age=0" };
@@ -82,6 +85,22 @@ function view(state: GuildShopState, nations: Awaited<ReturnType<typeof loadNati
   };
 }
 
+/** 国家設定込みの実効役職（任命大臣を含む）。 */
+async function resolvedRole(
+  nations: Awaited<ReturnType<typeof loadNationsState>>,
+  ownerKey: string,
+) {
+  const membership = nations.members[ownerKey];
+  if (!membership) return null;
+  const nation = nations.nations[membership.nationId];
+  if (!nation) return membership.role;
+  const settings = await loadNationSettings(membership.nationId);
+  const resolved = resolveMemberRole(
+    nation, settings, ownerKey, membership.role, memberKeysOf(nations, membership.nationId),
+  );
+  return resolved?.role ?? membership.role;
+}
+
 export async function GET(request: Request) {
   const session = getRequestSession(request);
   if (!session) return err("unauthorized", 401);
@@ -93,7 +112,7 @@ export async function GET(request: Request) {
     {
       ...view(state, nations),
       myGuildId: membership?.nationId ?? null,
-      myRole: membership?.role ?? null,
+      myRole: await resolvedRole(nations, ownerKey),
     },
     { headers: NO_STORE },
   );
@@ -122,11 +141,12 @@ export async function POST(request: Request) {
     const [state, nations] = await Promise.all([loadGuildShopState(), loadNationsState()]);
     const membership = nations.members[ownerKey];
     const myGuild = membership?.nationId ?? null;
-    const isLeader = membership?.role === "king" || membership?.role === "minister";
+    const myRole = await resolvedRole(nations, ownerKey);
+    const isLeader = myRole === "king" || myRole === "minister";
     const respond = async (next: GuildShopState) => {
       if (!(await storeGuildShopState(next))) return err("store_failed", 503);
       return NextResponse.json(
-        { ok: true, ...view(next, nations), myGuildId: myGuild, myRole: membership?.role ?? null },
+        { ok: true, ...view(next, nations), myGuildId: myGuild, myRole },
         { headers: NO_STORE },
       );
     };
@@ -240,17 +260,26 @@ export async function POST(request: Request) {
         Date.now(),
       );
       if (!buyOp || !(await enqueueEconomyOpOnce(buyOp))) return err("economy_failed", 503);
-      // 売り手への入金（手数料5%を引いた額）。売り手が Discord 連携でない場合は積まない
+      // 売り手への入金（区画の国の税率を引いた額）。税分はシンクし、
+      // 累計税収へ表示用に加算する。売り手が Discord 連携でない場合は積まない
+      const plotSettings = await loadNationSettings(found.plot.guildId);
+      const taxRate = taxRateOf(plotSettings);
       const sellerDiscord = found.listing.sellerKey.startsWith("discord:")
         ? found.listing.sellerKey.slice("discord:".length)
         : null;
       if (sellerDiscord) {
         const saleOp = buildEconomyOp(
-          { kind: "earn", userKey: found.listing.sellerKey, discordId: sellerDiscord, amount: sellerProceeds(found.listing.price, count), reason: "guild_shop_sale" },
+          { kind: "earn", userKey: found.listing.sellerKey, discordId: sellerDiscord, amount: sellerProceeds(found.listing.price, count, taxRate), reason: "guild_shop_sale" },
           `gshop-sale-${found.listing.id}-${newSold}`,
           Date.now(),
         );
         if (saleOp) await enqueueEconomyOpOnce(saleOp);
+      }
+      const tax = saleTaxAmount(found.listing.price, count, taxRate);
+      if (tax > 0) {
+        await updateNationSettings(found.plot.guildId, (cur) => ({
+          ...cur, taxCollected: cur.taxCollected + tax,
+        }));
       }
       const profile = await loadProfile(ownerKey);
       await storeProfile(ownerKey, addItem(profile, found.listing.itemId, count));

@@ -5,7 +5,8 @@
 // 「冒険役職」（剣士/守護/斥候/採掘者/薬師/テレポーターの選択と熟練ランク表示。
 // 初めての選択は無料、以降の変更は 100,000 コイン）と
 // 「掲示」（ユニオンチャットと Discord 連携設定）と
-// 「戦争」（レイド宣言・マーク攻防・繁栄ランキング・戦績）。
+// 「戦争」（レイド宣言・マーク攻防・繁栄ランキング・戦績）と
+// 「設定」（国家設定: 税率・公開/非公開・大臣の任命。王のみ変更可）。
 // 役職まわりの home はここ: ≡ メニューには置かない。
 // コインの正は AGO コイン本体: 依頼の預かり・報酬・返金は API 側が
 // 経済ブリッジのオプとして積む（このパネルは結果を表示するだけ）。
@@ -35,6 +36,41 @@ const REQUEST_ERROR_LABEL: Record<string, string> = {
   store_failed: "保存に失敗しました",
   unauthorized: "ログインが必要です",
   discord_required: "Discord ログインが必要です",
+};
+
+const SETTINGS_ERROR_LABEL: Record<string, string> = {
+  king_only: "王だけができます",
+  not_at_guild_board: "ギルドボードの前で操作してください",
+  not_member: "国民ではありません",
+  no_union: "国に所属していません",
+  invalid_tax_rate: "税率が不正です",
+  invalid_visibility: "公開設定が不正です",
+  invalid_target: "対象が不正です",
+  store_failed: "保存に失敗しました",
+  nation_settings_unavailable: "いま使えません",
+  unauthorized: "ログインが必要です",
+};
+
+/** 国家設定タブで選べる税率（%）。サーバー側 TAX_RATE_STEPS と一致させる。 */
+const TAX_RATE_PERCENT_STEPS = [0, 1, 2, 3, 5, 7, 10];
+
+type NationSettingsMember = {
+  key: string;
+  name: string;
+  tag: string;
+  role: NationRole;
+  appointed: boolean;
+  discordMinister: boolean;
+};
+
+type NationSettingsData = {
+  guildId: string;
+  guildName: string;
+  role: NationRole;
+  taxRate: number;
+  visibility: "open" | "private";
+  taxCollected: number;
+  members: NationSettingsMember[];
 };
 
 const WAR_ERROR_LABEL: Record<string, string> = {
@@ -155,7 +191,45 @@ export default function WorldBoxGuildBoardPanel({
   /** 招待リンク（?union=）で指定されたサーバー。該当行を先頭に強調する。 */
   inviteGuildId?: string | null;
 }) {
-  const [tab, setTab] = useState<"requests" | "roles" | "adventure" | "board" | "war">("requests");
+  const [tab, setTab] = useState<"requests" | "roles" | "adventure" | "board" | "war" | "settings">("requests");
+  // 国家設定（税率・公開/非公開・大臣）
+  const [nsData, setNsData] = useState<NationSettingsData | null>(null);
+  const [nsLoaded, setNsLoaded] = useState(false);
+  const refreshSettings = useCallback(async () => {
+    try {
+      const res = await fetch("/api/worldbox/nation-settings", { headers: { Accept: "application/json" } });
+      if (res.ok) setNsData((await res.json()) as NationSettingsData);
+      else setNsData(null);
+    } catch {
+      setNsData(null);
+    } finally {
+      setNsLoaded(true);
+    }
+  }, []);
+  useEffect(() => {
+    if (tab === "settings") void refreshSettings();
+  }, [tab, refreshSettings]);
+  const settingsAct = async (body: Record<string, unknown>) => {
+    setMsg("");
+    setBusy(true);
+    try {
+      const res = await fetch("/api/worldbox/nation-settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const json = (await res.json().catch(() => ({}))) as NationSettingsData & { error?: string };
+      if (!res.ok) {
+        setMsg(SETTINGS_ERROR_LABEL[json.error as string] ?? "失敗しました");
+        return;
+      }
+      setNsData(json);
+    } catch {
+      setMsg("失敗しました");
+    } finally {
+      setBusy(false);
+    }
+  };
   // ユニオン戦争（レイド宣言・マーク攻防・繁栄ランキング・戦績）
   const [warData, setWarData] = useState<WarData | null>(null);
   const [warTarget, setWarTarget] = useState("");
@@ -300,7 +374,7 @@ export default function WorldBoxGuildBoardPanel({
 
   return (
     <div style={root} role="dialog" aria-label="ギルドボード" className="wb-panel">
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
         <strong>ギルドボード</strong>
         <span style={{ flex: 1 }} />
         <button
@@ -342,6 +416,14 @@ export default function WorldBoxGuildBoardPanel({
           onClick={() => setTab("war")}
         >
           戦争
+        </button>
+        <button
+          type="button"
+          style={{ ...tabBtn, ...(tab === "settings" ? tabOn : {}) }}
+          aria-pressed={tab === "settings"}
+          onClick={() => setTab("settings")}
+        >
+          設定
         </button>
         <button type="button" style={tabBtn} onClick={onClose}>
           閉じる
@@ -681,6 +763,129 @@ export default function WorldBoxGuildBoardPanel({
               {msg && <p role="status" style={{ margin: "10px 0 0", fontSize: 13 }}>{msg}</p>}
             </div>
           )}
+        </div>
+      )}
+
+      {tab === "settings" && (
+        <div style={{ marginTop: 10 }}>
+          {!nsLoaded ? (
+            <p style={{ margin: 0, fontSize: 13, opacity: 0.75 }}>読み込み中…</p>
+          ) : !nsData ? (
+            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+              <span style={{ fontSize: 13, opacity: 0.75 }}>国に所属していません</span>
+              <button type="button" style={btn} onClick={() => setTab("roles")}>
+                役職を見る
+              </button>
+            </div>
+          ) : (
+            <div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                {(() => {
+                  const color = nations.nations.find((n) => n.id === nsData.guildId)?.color;
+                  return color ? (
+                    <span aria-hidden style={{ width: 12, height: 12, borderRadius: 3, background: color, display: "inline-block" }} />
+                  ) : null;
+                })()}
+                <strong style={{ fontSize: 14 }}>{nsData.guildName}</strong>
+                <span style={{ fontSize: 13, opacity: 0.75 }}>{ROLE_LABEL[nsData.role]}</span>
+              </div>
+              <div style={rowStyle}>
+                <span style={{ fontSize: 13, opacity: 0.8 }}>税率</span>
+                <span style={{ flex: 1 }} />
+                {nsData.role === "king" ? (
+                  TAX_RATE_PERCENT_STEPS.map((p) => (
+                    <button
+                      key={p}
+                      type="button"
+                      style={{ ...tabBtn, ...(Math.round(nsData.taxRate * 100) === p ? tabOn : {}) }}
+                      aria-pressed={Math.round(nsData.taxRate * 100) === p}
+                      disabled={busy}
+                      onClick={() => void settingsAct({ action: "set_tax", taxRate: p / 100 })}
+                    >
+                      {p}%
+                    </button>
+                  ))
+                ) : (
+                  <span style={{ fontSize: 14 }}>{Math.round(nsData.taxRate * 100)}%</span>
+                )}
+              </div>
+              <div style={rowStyle}>
+                <span style={{ fontSize: 13, opacity: 0.8 }}>公開</span>
+                <span style={{ flex: 1 }} />
+                {nsData.role === "king" ? (
+                  <>
+                    <button
+                      type="button"
+                      style={{ ...tabBtn, ...(nsData.visibility === "open" ? tabOn : {}) }}
+                      aria-pressed={nsData.visibility === "open"}
+                      disabled={busy}
+                      onClick={() => void settingsAct({ action: "set_visibility", visibility: "open" })}
+                    >
+                      公開
+                    </button>
+                    <button
+                      type="button"
+                      style={{ ...tabBtn, ...(nsData.visibility === "private" ? tabOn : {}) }}
+                      aria-pressed={nsData.visibility === "private"}
+                      disabled={busy}
+                      onClick={() => void settingsAct({ action: "set_visibility", visibility: "private" })}
+                    >
+                      非公開
+                    </button>
+                  </>
+                ) : (
+                  <span style={{ fontSize: 14 }}>{nsData.visibility === "private" ? "非公開" : "公開"}</span>
+                )}
+              </div>
+              <div style={rowStyle}>
+                <span style={{ fontSize: 13, opacity: 0.8 }}>税収</span>
+                <span style={{ flex: 1 }} />
+                <span style={{ fontSize: 14 }}>{nsData.taxCollected.toLocaleString("ja-JP")}</span>
+              </div>
+              <p style={{ margin: "10px 0 6px", fontSize: 13 }}>大臣</p>
+              <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
+                {nsData.members.filter((m) => m.role !== "king").map((m) => (
+                  <li key={m.key} style={rowStyle}>
+                    <span style={{ fontSize: 14 }}>{m.name}</span>
+                    {m.appointed && (
+                      <span style={{ fontSize: 11, padding: "1px 6px", borderRadius: 6, border: "1px solid rgba(255,210,62,0.7)", color: "#ffd23e" }}>
+                        任命
+                      </span>
+                    )}
+                    {m.discordMinister && (
+                      <span style={{ fontSize: 11, padding: "1px 6px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.35)", opacity: 0.85 }}>
+                        Discord
+                      </span>
+                    )}
+                    <span style={{ fontSize: 12, opacity: 0.75 }}>{ROLE_LABEL[m.role]}</span>
+                    <span style={{ flex: 1 }} />
+                    {nsData.role === "king" && (
+                      m.appointed ? (
+                        <button
+                          type="button"
+                          style={btn}
+                          disabled={busy}
+                          onClick={() => void settingsAct({ action: "set_minister", targetKey: m.key, minister: false })}
+                        >
+                          解除
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          style={btn}
+                          disabled={busy}
+                          onClick={() => void settingsAct({ action: "set_minister", targetKey: m.key, minister: true })}
+                        >
+                          大臣にする
+                        </button>
+                      )
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {msg && <p role="status" style={{ margin: "10px 0 0", fontSize: 13 }}>{msg}</p>}
         </div>
       )}
 

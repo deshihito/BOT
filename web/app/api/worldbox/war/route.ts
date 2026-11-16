@@ -12,6 +12,10 @@ import {
   activeWarFor, attackMark, declareWar, expireWars, prosperityRanking, repairMark,
   warView, WAR_MARK_RANGE, type WarState,
 } from "@/lib/worldbox/war";
+import {
+  isNationHiddenFrom, memberKeysOf, resolveMemberRole,
+} from "@/lib/worldbox/nation-settings";
+import { loadNationSettings, loadNationSettingsMap } from "@/lib/worldbox/nation-settings-online";
 
 export const runtime = "nodejs";
 
@@ -80,7 +84,9 @@ export async function GET(request: Request) {
   if (!isWarsEnabled()) return err("wars_unavailable", 503);
   const ownerKey = sessionOwnerKey(session);
   const now = Date.now();
-  const [warState, nationsState] = await Promise.all([loadExpired(now), loadNationsState()]);
+  const [warState, nationsState, settingsMap] = await Promise.all([
+    loadExpired(now), loadNationsState(), loadNationSettingsMap(),
+  ]);
   const views = nationViews(nationsState);
   const mine = nationsState.members[ownerKey];
   const wars = Object.values(warState.wars)
@@ -91,10 +97,15 @@ export async function GET(request: Request) {
     {
       wars,
       history: warState.history,
-      ranking: prosperityRanking(views.map((n) => ({
-        id: n.guildId, name: n.name, color: n.color,
-        members: n.members, prosperity: n.prosperity, createdAt: n.createdAt,
-      }))),
+      // 非公開の国はランキングに載せない（自国民には自国分のみ見える）
+      ranking: prosperityRanking(
+        views
+          .filter((n) => !isNationHiddenFrom(settingsMap.get(n.guildId), n.guildId, mine?.nationId ?? null))
+          .map((n) => ({
+            id: n.guildId, name: n.name, color: n.color,
+            members: n.members, prosperity: n.prosperity, createdAt: n.createdAt,
+          })),
+      ),
       me: mine ? { nationId: mine.nationId, role: mine.role } : null,
       loggedIn: true,
     },
@@ -128,7 +139,15 @@ export async function POST(request: Request) {
   if (!mine) return err("not_in_nation");
 
   if (fields.action === "declare") {
-    if (mine.role !== "king" && mine.role !== "minister") return err("forbidden_role", 403);
+    // 役職は国家設定込みで解決する（任命大臣も宣言できる）
+    const myNation = nationsState.nations[mine.nationId];
+    const mySettings = await loadNationSettings(mine.nationId);
+    const resolved = myNation
+      ? resolveMemberRole(myNation, mySettings, ownerKey, mine.role, memberKeysOf(nationsState, mine.nationId))
+      : null;
+    if (!resolved || (resolved.role !== "king" && resolved.role !== "minister")) {
+      return err("forbidden_role", 403);
+    }
     if ((await loadMyLobbyStation(ownerKey)) !== "guild") return err("not_at_guild_board");
     const targetId = typeof fields.targetId === "string" ? fields.targetId : "";
     const attacker = nationsState.nations[mine.nationId];

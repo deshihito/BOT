@@ -11,6 +11,10 @@ import { parseSave, serializeSave } from "@/lib/worldbox/save";
 import { loadWorldBoxSave, storeWorldBoxSave } from "@/lib/worldbox/save-online";
 import { putPresence } from "@/lib/worldbox/presence-online";
 import { annotateMyGuilds, getUserGuilds, roleInGuild, type UserGuildsResult } from "@/lib/worldbox/guilds";
+import {
+  isNationHiddenFrom, isPrivateNation, memberKeysOf, resolveMemberRole,
+} from "@/lib/worldbox/nation-settings";
+import { loadNationSettings, loadNationSettingsMap } from "@/lib/worldbox/nation-settings-online";
 
 export const runtime = "nodejs";
 
@@ -88,10 +92,28 @@ export async function GET(request: Request) {
       guildsScopeRequired = true;
     }
   }
-  return NextResponse.json(
-    buildNationsResponse(state, selfKey, { myGuilds, guildsScopeRequired }),
-    { headers: NO_STORE },
+  const response = buildNationsResponse(state, selfKey, { myGuilds, guildsScopeRequired });
+  // 国家設定（公開/非公開・任命大臣）を反映する: 非公開の国は国一覧に
+  // 載せない（自国民には自国だけ見える）。自分の役職は任命大臣込みで解決する。
+  const settingsMap = await loadNationSettingsMap();
+  const myMembership = selfKey ? state.members[selfKey] : undefined;
+  response.nations = response.nations.filter(
+    (n) => !isNationHiddenFrom(settingsMap.get(n.guildId), n.guildId, myMembership?.nationId ?? null),
   );
+  if (selfKey && myMembership && response.me) {
+    const myNation = state.nations[myMembership.nationId];
+    const resolved = myNation
+      ? resolveMemberRole(
+          myNation,
+          settingsMap.get(myMembership.nationId),
+          selfKey,
+          myMembership.role,
+          memberKeysOf(state, myMembership.nationId),
+        )
+      : null;
+    if (resolved) response.me = { nationId: myMembership.nationId, role: resolved.role };
+  }
+  return NextResponse.json(response, { headers: NO_STORE });
 }
 
 export async function POST(request: Request) {
@@ -161,6 +183,10 @@ export async function POST(request: Request) {
       result = applyFound(state, ownerKey, guild, worldTileSource(), Date.now());
     } else {
       if (!guild) return errorResponse("not_member");
+      // 非公開の国には自力参加できない（招待リンク・一覧経由も同じ）
+      if (isPrivateNation(await loadNationSettings(fields.guildId))) {
+        return errorResponse("nation_private");
+      }
       result = applyJoin(state, ownerKey, fields.guildId, roleInGuild(guild));
     }
   } else if (action === "leave") {
