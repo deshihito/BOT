@@ -10,9 +10,9 @@ import logging
 import discord
 from discord.ext import commands
 
-from core.game.game import party_ranking
-from core.game.game import game_panels
-from core.game.game.game_v2 import GamePanelView, LobbyView, text_panel
+from core.game.hub import party_ranking
+from core.game.hub import game_panels
+from core.game.hub.game_v2 import GamePanelView, LobbyView, text_panel
 from core.game.thirtyone.thirtyone import ThirtyOneGame
 
 logger = logging.getLogger(__name__)

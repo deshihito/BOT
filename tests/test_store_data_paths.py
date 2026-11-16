@@ -31,7 +31,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from core.support import data_paths
 from core.game import lottery, mining
-from core.game.game import elo, game_records, game_restore, prison
+from core.game.hub import elo, game_records, game_restore, prison
 from core.game.gambling import gambling
 from core.game.zeta import store as zeta_store
 from core.general.circulation import economy_pool

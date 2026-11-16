@@ -153,14 +153,14 @@ class MyBot(commands.Bot):
         """再起動（デプロイ・クラッシュ等）で失われたセッションを復旧する。
 
         スナップショット（VC は core/voice_restore.py、対局中ゲームは
-        core/game/game/game_restore.py）が存在すれば常に reconcile する。
+        core/game/hub/game_restore.py）が存在すれば常に reconcile する。
         on_ready をブロックせず、cog 単位で失敗を隔離する。
         """
         logger = logging.getLogger(__name__)
         # 復旧で作られる VC セッションでは「VC参加時の自動開始」を発動しない
         # （復旧は既存仕様が優先。core/vc/auto_start 側の抑止フラグ）。
         from core.vc.auto_start import restore_suppression
-        from core.game.game import game_restore
+        from core.game.hub import game_restore
         from core.vc import vc_feature_restore, voice_restore
 
         def snapshot_count(cog_name):

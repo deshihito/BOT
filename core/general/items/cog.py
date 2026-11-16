@@ -25,7 +25,7 @@ import config
 from core.general import economy_helpers
 from core.economy_image import PanelRow, render_panel_png
 from core.general.items import items as items_core
-from core.game.game import prison as prison_core
+from core.game.hub import prison as prison_core
 from core.support.messages import (
     COIN_UPDATE_FAILED_RETRY,
     ITEM_INVALID_INPUT,

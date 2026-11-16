@@ -11,8 +11,8 @@ import logging
 import discord
 from discord.ext import commands
 
-from core.game.game import party_ranking
-from core.game.game.game_v2 import GamePanelView, preview_notice_line, text_panel, lobby_auto_start_text, lobby_not_enough_text
+from core.game.hub import party_ranking
+from core.game.hub.game_v2 import GamePanelView, preview_notice_line, text_panel, lobby_auto_start_text, lobby_not_enough_text
 from core.game.liardice.liardice import LiarDiceGame, is_legal_raise
 
 logger = logging.getLogger(__name__)

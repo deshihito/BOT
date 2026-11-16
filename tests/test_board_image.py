@@ -1,4 +1,4 @@
-"""盤面画像（core/game/game/board_image.py と各 cog のレンダラー）のテスト。
+"""盤面画像（core/game/hub/board_image.py と各 cog のレンダラー）のテスト。
 
 盤面画像化タスク（2026-11-06）: 描画は純関数なので、サイズ・決定性・
 主要状態の描画成功を検証する。実画像の見た目は目視確認に委ねる。
@@ -11,8 +11,8 @@ from unittest.mock import MagicMock
 
 from PIL import Image
 
-from core.game.game import board_image
-from core.game.game.board_image import (
+from core.game.hub import board_image
+from core.game.hub.board_image import (
     FONT_PATH, render_2048, render_bingo_card, render_cached, render_minesweeper,
     render_nonogram, render_sudoku, render_wirecut_board,
 )
@@ -208,7 +208,7 @@ class PanelConstructionTest(unittest.TestCase):
 
     def test_minesweeper_panels(self):
         import core.game.minesweeper.cog as cog
-        from core.game.game.game_v2 import assert_within_limits, count_buttons
+        from core.game.hub.game_v2 import assert_within_limits, count_buttons
         from core.game.minesweeper.minesweeper import MinesweeperBoard
         for key in ("easy", "wide", "expert"):
             panel = cog.BoardPanel(MagicMock(), self.owner(),
@@ -221,7 +221,7 @@ class PanelConstructionTest(unittest.TestCase):
 
     def test_sudoku_panels(self):
         import core.game.sudoku.cog as cog
-        from core.game.game.game_v2 import assert_within_limits
+        from core.game.hub.game_v2 import assert_within_limits
         from core.game.sudoku.sudoku import generate
         puzzle, solution = generate(random.Random(1), "easy")
         view = cog.SudokuView(MagicMock(), self.owner(), puzzle, solution, "easy")
@@ -230,7 +230,7 @@ class PanelConstructionTest(unittest.TestCase):
 
     def test_nonogram_panels(self):
         import core.game.nonogram.cog as cog
-        from core.game.game.game_v2 import assert_within_limits
+        from core.game.hub.game_v2 import assert_within_limits
         from core.game.nonogram.nonogram import NonogramPuzzle
         puzzle = NonogramPuzzle.pick("8x8", rng=random.Random(0))
         view = cog.NonogramView(MagicMock(), self.owner(), puzzle)
@@ -239,7 +239,7 @@ class PanelConstructionTest(unittest.TestCase):
 
     def test_2048_panel(self):
         from core.game.game2048.cog import Board2048View
-        from core.game.game.game_v2 import assert_within_limits, count_buttons
+        from core.game.hub.game_v2 import assert_within_limits, count_buttons
         view = Board2048View(MagicMock(), self.owner())
         assert_within_limits(view)
         self.assertEqual(count_buttons(view), 5)

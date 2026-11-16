@@ -11,7 +11,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from core import ads as partner_ads
-from core.game.game.game_v2 import text_panel
+from core.game.hub.game_v2 import text_panel
 from core.support import guild_settings
 from core.support.messages import MANAGE_GUILD_REQUIRED
 from core.support.panel_v2 import as_panel_v2, edit_panel_v2

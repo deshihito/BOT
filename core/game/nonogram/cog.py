@@ -4,7 +4,7 @@
 ヒント数字を頼りにマスを塗って絵を浮かばせる。5×5 と 8×8。
 入力は X（横）セレクト→Y（縦）セレクト→操作ボタン（塗る／バツ／消す）
 （座標表記は X/Y 統一、レビュー対応 2026-11-06）。
-クリアタイムは core/game/game/game_records.py の nonogram にサイズ別で残る。
+クリアタイムは core/game/hub/game_records.py の nonogram にサイズ別で残る。
 
 盤面画像化タスク（2026-11-06）: 盤面＋行列ヒントの表示をテキストから
 PIL 画像（core/game/board_image.render_nonogram）に差し替え、パネルは
@@ -19,9 +19,9 @@ import time
 import discord
 from discord.ext import commands
 
-from core.game.game import game_records
-from core.game.game.board_image import render_cached, render_nonogram
-from core.game.game.game_v2 import GamePanelView
+from core.game.hub import game_records
+from core.game.hub.board_image import render_cached, render_nonogram
+from core.game.hub.game_v2 import GamePanelView
 from core.game.nonogram.nonogram import SIZES, NonogramBoard, NonogramPuzzle
 from core.support.panel_v2 import edit_panel_v2
 

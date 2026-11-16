@@ -156,7 +156,7 @@ def set_store(store: Optional[GuildSettings]) -> None:
     _store = store
 
 
-# ---------------------------------------------------------------- 放置したプレイヤーの代打ち（core/game/game/autoplay.py）
+# ---------------------------------------------------------------- 放置したプレイヤーの代打ち（core/game/hub/autoplay.py）
 AUTOPLAY_SECTION = "autoplay"
 AUTOPLAY_DEFAULTS = {"enabled": True}
 

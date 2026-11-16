@@ -20,10 +20,10 @@ import discord
 from discord.ext import commands
 
 from core.support.emojis import POYOPOYO
-from core.game.game import game_panels, party_ranking
+from core.game.hub import game_panels, party_ranking
 from core.game.bingo.bingo import BingoSession, format_card  # noqa: F401  format_card は cogs.bingo シムの再輸出用
-from core.game.game.board_image import render_bingo_board, render_bingo_card, render_cached
-from core.game.game.game_v2 import GamePanelView, LobbyView, original_response_or_none, safe_delete, text_panel, lobby_auto_start_text, board_image_panel
+from core.game.hub.board_image import render_bingo_board, render_bingo_card, render_cached
+from core.game.hub.game_v2 import GamePanelView, LobbyView, original_response_or_none, safe_delete, text_panel, lobby_auto_start_text, board_image_panel
 
 logger = logging.getLogger(__name__)
 

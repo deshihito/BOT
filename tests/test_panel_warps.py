@@ -28,7 +28,7 @@ def _genre_keys(root: str) -> set:
         from cogs.support import SUPPORT_GENRES
         return set(SUPPORT_GENRES)
     if root == "game":
-        from core.game.game.cog import GAME_GENRES
+        from core.game.hub.cog import GAME_GENRES
         return set(GAME_GENRES)
     raise AssertionError(f"unknown root: {root}")
 

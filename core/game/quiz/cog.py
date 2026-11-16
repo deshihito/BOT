@@ -13,9 +13,9 @@ import time
 import discord
 from discord.ext import commands
 
-from core.game.game import game_panels, party_ranking
-from core.game.game.board_image import render_bars, render_cached
-from core.game.game.game_v2 import GamePanelView, LobbyView, original_response_or_none, safe_delete, text_panel
+from core.game.hub import game_panels, party_ranking
+from core.game.hub.board_image import render_bars, render_cached
+from core.game.hub.game_v2 import GamePanelView, LobbyView, original_response_or_none, safe_delete, text_panel
 from core.game.quiz.quiz_bank import default_source
 from core.game.quiz.quiz_game import QuizSession
 

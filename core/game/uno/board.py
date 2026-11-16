@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """UNO の盤面と手札を PIL で描く純関数群。
 
-方針は core/game/game/board_image.py と同じ（テキスト再現だと安っぽく
+方針は core/game/hub/board_image.py と同じ（テキスト再現だと安っぽく
 なる盤面は画像化する）。Discord オブジェクトには触れず、カード文字列と
 プレイヤー情報だけを受け取って PNG の bytes を返すので単体テストできる。
 

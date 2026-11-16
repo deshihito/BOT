@@ -17,7 +17,7 @@ import time
 
 import discord
 
-from core.game.game.game_guides import preview_notice_line
+from core.game.hub.game_guides import preview_notice_line
 
 __all__ = [
     "GamePanelView",

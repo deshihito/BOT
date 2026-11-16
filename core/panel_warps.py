@@ -9,7 +9,7 @@
 - ``from_genre`` / ``to_genre`` は各ルートの実ジャンルキーを使う
   （general: core/general/common.py の GENERAL_GENRES、vc: core/vc/common.py
   の VOICE_GENRES、support: core/support/common.py の SUPPORT_GENRES、
-  game: core/game/game/cog.py の GAME_GENRES）。
+  game: core/game/hub/cog.py の GAME_GENRES）。
 - ジャンルでなくルートのハブ全体が起点/着地の場合は ``None`` を使う
   （game ハブはジャンル未選択が既定で、今月のゲーム王ボタンもハブにある。
   vc ハブも同様にジャンル未選択で開ける）。
@@ -151,7 +151,7 @@ def build_warp_panel(bot, warp: PanelWarp, owner_id: int | None = None):
         cog = bot.get_cog("GameHub")
         if cog is None:
             return None
-        from core.game.game.cog import GameHubView
+        from core.game.hub.cog import GameHubView
 
         # GameHubView はジャンル引数を持たず、ハブ（ジャンル未選択）が着地。
         return GameHubView(cog, owner_id=owner_id)

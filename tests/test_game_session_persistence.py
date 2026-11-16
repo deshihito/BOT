@@ -1,4 +1,4 @@
-"""対局中ゲームセッションの再起動復旧テスト（core/game/game/game_restore.py と各ゲーム cog）。
+"""対局中ゲームセッションの再起動復旧テスト（core/game/hub/game_restore.py と各ゲーム cog）。
 
 Discord には接続しない。検証すること:
 
@@ -18,7 +18,7 @@ from pathlib import Path
 from game_fakes import (FakeBot, FakeChannel, FakeGuild, FakeInteraction,
                         FakeMember, FakeMessage, choose, fast_time, real_sleep)
 
-from core.game.game import game_restore
+from core.game.hub import game_restore
 from core.game.shogi.shogi_engine import Color as ShogiColor
 import core.game.babanuki.cog as babanuki_mod
 import core.game.chess.cog as chess_mod
