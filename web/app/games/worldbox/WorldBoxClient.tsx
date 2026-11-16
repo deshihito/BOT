@@ -47,7 +47,7 @@ import {
   L_PLAZA, L_SAND, L_VOID,
   LOBBY_ENTRY, LOBBY_FLOOR_FALLBACK, LOBBY_FLOOR_SPRITE, LOBBY_H, LOBBY_STAIRS_DOWN, LOBBY_STAIRS_UP,
   LOBBY_DOWN_LANDING, LOBBY_UP_LANDING, LOBBY_W, LOBBY_WARP_PAD,
-  buildLobby, lobbyTileAt, stationGenreNear, stationNear, type LobbyData, type LobbyObject, type LobbyStation,
+  buildLobby, lobbyTileAt, stationArcadeNear, stationGenreNear, stationNear, type LobbyData, type LobbyObject, type LobbyStation,
 } from "@/lib/worldbox/lobby";
 import {
   LOBBY2_H, LOBBY2_W, LOBBY3_H, LOBBY3_W,
@@ -92,6 +92,8 @@ import {
 import { useGamesNav } from "../GamesShell";
 import WorldBoxCasinoPanel from "./WorldBoxCasinoPanel";
 import WorldBoxArenaPanel from "./WorldBoxArenaPanel";
+import WorldBoxArcadePanel from "./WorldBoxArcadePanel";
+import { getWebGame } from "@/lib/games-catalog";
 import WorldBoxMachinePanel from "./WorldBoxMachinePanel";
 import WorldBoxEconomyPanel from "./WorldBoxEconomyPanel";
 import WorldBoxGuildBoardPanel from "./WorldBoxGuildBoardPanel";
@@ -408,6 +410,7 @@ const STATION_LABEL: Record<LobbyStation, string> = {
   smith: "鍛冶屋",
   fountain: "噴水",
   rest: "休憩",
+  arcade: "アーケード",
 };
 
 export default function WorldBoxClient() {
@@ -551,6 +554,9 @@ export default function WorldBoxClient() {
   const [stationUi, setStationUi] = useState<LobbyStation | null>(null);
   /** いま接している店の品目ジャンル（鍛冶屋は "smith"）。経済パネルの品目選別に使う。 */
   const [stationGenre, setStationGenre] = useState<ShopGenreId | null>(null);
+  /** いま接しているアーケード筐体のゲーム ID（L4）。筐体パネルの起動に使う。 */
+  const [stationArcade, setStationArcade] = useState<string | null>(null);
+  const [arcadeOpen, setArcadeOpen] = useState(false);
   const warpActionRef = useRef<(target: SaveSpace) => void>(() => {});
   const instanceWarpRef = useRef<(target: string, entry: { x: number; y: number }) => void>(() => {});
   /** 開催中イベント（期間ダンジョンの入場導線用）。 */
@@ -728,6 +734,7 @@ export default function WorldBoxClient() {
     if (stationUi !== "casino") setCasinoOpen(false);
     if (stationUi !== "guild") setGuildBoardOpen(false);
     if (stationUi !== "arena") setArenaOpen(false);
+    if (stationUi !== "arcade") setArcadeOpen(false);
     setPlazaMsg("");
   }, [stationUi]);
 
@@ -2900,6 +2907,7 @@ export default function WorldBoxClient() {
     let lastTileKey = "";
     let lastStation: LobbyStation | null = null;
     let lastStationGenre: ShopGenreId | null = null;
+    let lastStationArcade: string | null = null;
     const placePlayer = (x: number, y: number) => {
       const free = findFreeNear(activeMap(), x, y, activeBlocked(), { swim: space === "world" });
       player.x = free.x;
@@ -2946,6 +2954,8 @@ export default function WorldBoxClient() {
           setStationUi(null);
           lastStationGenre = null;
           setStationGenre(null);
+          lastStationArcade = null;
+          setStationArcade(null);
           const dest = worldReturn ?? spawn;
           placePlayer(dest.x, dest.y);
         }
@@ -3044,6 +3054,8 @@ export default function WorldBoxClient() {
           setStationUi(null);
           lastStationGenre = null;
           setStationGenre(null);
+          lastStationArcade = null;
+          setStationArcade(null);
           setBoardOpen(false);
         }
         placePlayer(x, y);
@@ -3406,6 +3418,13 @@ export default function WorldBoxClient() {
         if (genre !== lastStationGenre) {
           lastStationGenre = genre;
           setStationGenre(genre);
+        }
+        const arcade = st === "arcade"
+          ? stationArcadeNear(indoorData().objects, tx, ty)
+          : null;
+        if (arcade !== lastStationArcade) {
+          lastStationArcade = arcade;
+          setStationArcade(arcade);
         }
       }
       player.vx = (player.x - prevX) / dt;
@@ -5164,7 +5183,7 @@ export default function WorldBoxClient() {
               animation: "wb-chip-pop 240ms ease-out",
             }}
           >
-            <span>{stationUi === "shop" && stationGenre ? (genreById(stationGenre)?.name ?? STATION_LABEL[stationUi]) : STATION_LABEL[stationUi]}</span>
+            <span>{stationUi === "shop" && stationGenre ? (genreById(stationGenre)?.name ?? STATION_LABEL[stationUi]) : stationUi === "arcade" && stationArcade ? (getWebGame(stationArcade)?.title ?? STATION_LABEL[stationUi]) : STATION_LABEL[stationUi]}</span>
             {stationUi === "board" && (
               <button
                 type="button"
@@ -5181,6 +5200,15 @@ export default function WorldBoxClient() {
                 onClick={() => setCasinoOpen((v) => !v)}
               >
                 {casinoOpen ? "閉じる" : "遊ぶ"}
+              </button>
+            )}
+            {stationUi === "arcade" && (
+              <button
+                type="button"
+                style={{ ...btn, minHeight: 32, padding: "2px 10px" }}
+                onClick={() => setArcadeOpen((v) => !v)}
+              >
+                {arcadeOpen ? "閉じる" : "遊ぶ"}
               </button>
             )}
             {stationUi === "guild" && (
@@ -5787,6 +5815,15 @@ export default function WorldBoxClient() {
       )}
       {arenaOpen && spaceUi === "lobby" && (
         <WorldBoxArenaPanel onClose={() => setArenaOpen(false)} />
+      )}
+      {arcadeOpen && stationArcade && (spaceUi === "lobby2" || spaceUi === "lobby3") && (
+        <WorldBoxArcadePanel
+          gameId={stationArcade}
+          prefix={prefix}
+          defaultName={identity?.name ?? ""}
+          avatarUrl={identity?.avatarUrl}
+          onClose={() => setArcadeOpen(false)}
+        />
       )}
       {reportOpen && (
         <div style={{ ...panelOverlay, width: "min(330px, calc(100% - 20px))" }}>

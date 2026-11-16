@@ -7,7 +7,8 @@
 // 階段の遷移は L2b で配線済み: 判定はこのファイルの floorWarpAt（純粋ロジック）、
 // 実行（フェード遷移）は WorldBoxClient.tsx の doFloorWarp が担う。
 // アーケード筐体（L3 第1弾6台・L6 第2弾20台）は新規スプライト arcade_<id>.png を使う（textures.ts に登録）。
-// 筐体パネル・ルーム起動の配線は L4（station はまだ付けない）。
+// 筐体パネル・ルーム起動は L4 で配線済み: put2/put3 が arcade_ スプライトに
+// station "arcade" とゲーム ID を自動で付ける（WorldBoxArcadePanel が起動する）。
 import { T_GRASS, T_ROCK, tilesSource, type TopDownMap } from "./mapgen";
 import {
   L_CARPET,
@@ -66,7 +67,13 @@ function floor2At(x: number, y: number): number {
 const objects2: LobbyObject[] = [];
 const occupied2 = new Set<string>();
 
-type PutOpts = { w?: number; h?: number; solid?: boolean; station?: LobbyStation; genre?: ShopGenreId };
+type PutOpts = { w?: number; h?: number; solid?: boolean; station?: LobbyStation; genre?: ShopGenreId; arcade?: string };
+
+/** 筐体スプライト（arcade_<id>）なら station とゲーム ID を補う（L4）。明示指定が優先。 */
+function arcadeFields(sprite: string, opts: PutOpts): { station?: LobbyStation; arcade?: string } {
+  if (!sprite.startsWith("arcade_")) return { station: opts.station, arcade: opts.arcade };
+  return { station: opts.station ?? "arcade", arcade: opts.arcade ?? sprite.slice("arcade_".length) };
+}
 
 function put2(sprite: string, x: number, y: number, opts: PutOpts = {}): void {
   const w = opts.w ?? 1;
@@ -78,7 +85,8 @@ function put2(sprite: string, x: number, y: number, opts: PutOpts = {}): void {
       occupied2.add(key);
     }
   }
-  objects2.push({ sprite, x, y, w, h, solid: opts.solid ?? true, station: opts.station, genre: opts.genre });
+  const af = arcadeFields(sprite, opts);
+  objects2.push({ sprite, x, y, w, h, solid: opts.solid ?? true, station: af.station, genre: opts.genre, arcade: af.arcade });
 }
 
 // --- 階段（通過可） ---
@@ -108,7 +116,7 @@ put2("lamp", 22, 22);
 // --- 中央ラウンジ北弧: アーケード筐体（L3 第1弾・1タイル1ゲーム） ---
 // 対面3＋パーティ3を ARCADE_FIRST_WAVE の順に左から並べる（カジノの
 // 機器列と同じく1マス空け）。前に立つのは南側の y=10（円の中心側）。
-// station は付けない（筐体パネル・ルーム起動の配線は L4 で行う）。
+// station "arcade" とゲーム ID は put2 がスプライト名から自動で付ける。
 put2("arcade_reversi", 15, 9);
 put2("arcade_connect4", 17, 9);
 put2("arcade_battleship", 19, 9);
@@ -260,7 +268,8 @@ function put3(sprite: string, x: number, y: number, opts: PutOpts = {}): void {
       occupied3.add(key);
     }
   }
-  objects3.push({ sprite, x, y, w, h, solid: opts.solid ?? true, station: opts.station, genre: opts.genre });
+  const af = arcadeFields(sprite, opts);
+  objects3.push({ sprite, x, y, w, h, solid: opts.solid ?? true, station: af.station, genre: opts.genre, arcade: af.arcade });
 }
 
 // --- 階段（通過可） ---
@@ -290,7 +299,7 @@ put3("lamp", 21, 17);
 // 1マス空けで縦に4台ずつ。南弧 y=18（前は北側 y=17）は x=10,12,20,22 の
 // 4台（y=19 の休憩家具と干渉しない位置）。北デッキ y=3 は x=17,19 の2台
 // （前は y=4、階段 x=15,16・ベンチ・L5 アンカー本棚 x=13,14 を避ける）。
-// station は付けない（筐体パネル・ルーム起動の配線は L4 で行う）。
+// station "arcade" とゲーム ID は put3 がスプライト名から自動で付ける。
 put3("arcade_shiritori", 9, 10);
 put3("arcade_nanja", 9, 12);
 put3("arcade_liarsdice", 9, 14);
