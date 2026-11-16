@@ -6,7 +6,8 @@
 // （Bot 側ワーカーがチャンネルへ投稿する）。
 import { isBotApiConfigured, kvGet, kvSet } from "../bot-api";
 import {
-  parseChatMessage, pruneChatMessages, type ChatChannel, type ChatMessage,
+  parseChatMessage, parseUnionChatSettings, pruneChatMessages,
+  type ChatChannel, type ChatMessage, type UnionChatSettings,
 } from "./chat";
 
 export const WORLDBOX_CHAT_NAMESPACE = "worldbox_chat";
@@ -68,28 +69,27 @@ export async function appendChatMessage(message: ChatMessage): Promise<boolean> 
   return storeList(message.channel, key, next);
 }
 
-/** ユニオンの Discord 連携設定。 */
-export type UnionChatSettings = { chatChannelId: string };
+/** ユニオンの Discord 連携設定（mode 形式。旧 chatChannelId は移行読込）。 */
+export type { UnionChatSettings } from "./chat";
 
 export async function loadUnionChatSettings(guildId: string): Promise<UnionChatSettings> {
   try {
     const raw = await kvGet(WORLDBOX_UNION_SETTINGS_NAMESPACE, guildId);
-    if (raw === null) return { chatChannelId: "" };
-    const parsed = (typeof raw === "string" ? JSON.parse(raw) : raw) as { chatChannelId?: unknown };
-    return {
-      chatChannelId: typeof parsed.chatChannelId === "string" ? parsed.chatChannelId.slice(0, 32) : "",
-    };
+    if (raw === null) return { mode: "none", channelId: null, updatedAt: 0 };
+    const parsed: unknown = typeof raw === "string" ? JSON.parse(raw) : raw;
+    return parseUnionChatSettings(parsed);
   } catch {
-    return { chatChannelId: "" };
+    return { mode: "none", channelId: null, updatedAt: 0 };
   }
 }
 
 export async function storeUnionChatSettings(
   guildId: string,
-  settings: UnionChatSettings,
+  settings: Pick<UnionChatSettings, "mode" | "channelId">,
 ): Promise<boolean> {
   try {
-    await kvSet(WORLDBOX_UNION_SETTINGS_NAMESPACE, guildId, JSON.stringify(settings));
+    const full: UnionChatSettings = { ...settings, updatedAt: Date.now() };
+    await kvSet(WORLDBOX_UNION_SETTINGS_NAMESPACE, guildId, JSON.stringify(full));
     return true;
   } catch {
     return false;
