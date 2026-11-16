@@ -13,8 +13,10 @@ import {
 
 /** コンテナとして使える家具と、その容量（枠数）。 */
 export const CONTAINER_DEFS: Readonly<Record<string, { capacity: number }>> = {
+  crate: { capacity: 8 },
   barrel: { capacity: 10 },
   chest_box: { capacity: 15 },
+  storage_chest: { capacity: 20 },
 };
 
 /** そのアイテムのコンテナ容量。コンテナでないアイテムは 0。 */

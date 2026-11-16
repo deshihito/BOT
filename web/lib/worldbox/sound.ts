@@ -223,7 +223,7 @@ export type WbSeName =
   | "place" | "build" | "debris" | "splash" | "step" | "dash" | "warp" | "poof"
   | "swing" | "hit" | "kill" | "hurt"
   | "coin" | "buy" | "sell" | "craft"
-  | "open" | "close" | "click" | "error" | "success";
+  | "open" | "close" | "click" | "error" | "success" | "note";
 
 /** SE の優先度階層（sfx.ts と同じ配分: 勝敗・撃破 > ヒット > 行為 > 移動 > 刻み）。 */
 export type WbSeTier = 1 | 2 | 3 | 4 | 5;
@@ -237,7 +237,7 @@ export const WB_SE_TIERS: Record<WbSeName, WbSeTier> = {
   hit: 2, hurt: 2, coin: 2, error: 2,
   chop: 3, mine: 3, till: 3, plant: 3, harvest: 3,
   place: 3, build: 3, debris: 3, splash: 3, warp: 3,
-  buy: 3, sell: 3, craft: 3,
+  buy: 3, sell: 3, craft: 3, note: 3,
   swing: 4, dash: 4, poof: 4, open: 4, close: 4, click: 4,
   step: 5,
 };
@@ -252,6 +252,7 @@ export const WB_SE_MIN_INTERVAL_MS: Partial<Record<WbSeName, number>> = {
   kill: 150,
   coin: 90,
   success: 150,
+  note: 60,
 };
 
 /** fx.ts のバースト種別 → SE。演出の粒と音は同じイベントから出す。 */
@@ -645,6 +646,12 @@ const SE_RECIPES: Record<WbSeName, (t: number) => void> = {
   success: (t) => {
     [523.25, 659.25, 783.99, 1046.5].forEach((f, i) =>
       tone({ freq: f, dur: 0.18, type: "triangle", gain: tierGain("success", 0.8), at: t + i * 0.07 }));
+  },
+  // 楽器の単音（ピアノ等）: 基音 C5 を pitch でずらして音階にする。倍音を薄く重ねる
+  note: (t) => {
+    tone({ freq: 523.25, dur: 0.5, type: "triangle", gain: tierGain("note", 1.1), at: t });
+    tone({ freq: 523.25 * 2, dur: 0.25, type: "sine", gain: tierGain("note", 0.4), at: t });
+    tone({ freq: 523.25 * 3, dur: 0.12, type: "sine", gain: tierGain("note", 0.15), at: t });
   },
 };
 

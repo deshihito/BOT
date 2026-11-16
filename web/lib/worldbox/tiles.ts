@@ -63,6 +63,8 @@ export type TileOverride = {
   stump?: boolean;
   /** 設置されたブロック/施設。固体ブロックのタイルは立てない。施設は占有のみで通過できる。 */
   block?: PlacedBlock;
+  /** 植木鉢・プランターに植えた飾りのアイテム ID（現在は "flower" のみ）。 */
+  deco?: string;
   /** 最後に手を入れた人（作物の所有者）の不透明 ID。 */
   ownerId: string;
   /** この上書きが失効する時刻（木の再生）。過ぎたら地形どおりに戻る。 */
@@ -166,7 +168,7 @@ export function hasTool(profile: PlayerProfile, kind: ToolKind): boolean {
 
 export type TileActionKind =
   | "chop" | "mine" | "till" | "plant" | "harvest"
-  | "place_block" | "mine_block";
+  | "place_block" | "mine_block" | "plant_flower" | "remove_flower";
 
 export type TileActionResult =
   | {
@@ -487,6 +489,7 @@ export function applyMineBlock(
   }
   const rest: TileOverride = { ...active, ownerId: selfId };
   delete rest.block;
+  delete rest.deco; // 植えた花は鉢ごと失われる
   const empty =
     rest.tile === undefined && rest.farmland !== true && rest.crop === undefined &&
     rest.stump !== true && rest.until === undefined;
@@ -498,6 +501,73 @@ export function applyMineBlock(
     profile: addItem(profile, def.id, 1),
     view: viewAfter(map, overrides, key, next, x, y, now, ownerKey),
     gained: { [def.id]: 1 },
+  };
+}
+
+/** 花を植えられる施設（植木鉢・プランター）。 */
+export const FLOWER_POT_ITEM_IDS: readonly string[] = ["planter", "flower_pot"];
+
+export function isFlowerPotItem(itemId: unknown): boolean {
+  return typeof itemId === "string" && FLOWER_POT_ITEM_IDS.includes(itemId);
+}
+
+/** 座れる家具（ベンチ・椅子・ソファ）。座る動作はクライアント側の見た目だけ。 */
+export const SEAT_ITEM_IDS: readonly string[] = ["bench", "chair", "sofa"];
+
+export function isSeatItem(itemId: unknown): boolean {
+  return typeof itemId === "string" && SEAT_ITEM_IDS.includes(itemId);
+}
+
+/** 植えられる飾りは花（素材）だけ。 */
+export const PLANTABLE_DECO_ID = "flower";
+
+/**
+ * 植木鉢・プランターへの花の植え付け/取り除き（所有者だけ）。
+ * 植える: 花（素材）を1つ消費して deco に記録する。取り除く: 花が手元に戻る。
+ * 状態はタイル上書きの deco に持つ（鉢が壊れたら花も失われる）。
+ */
+export function applyFlowerAction(
+  current: TileOverride | null,
+  profile: PlayerProfile,
+  map: TopDownMap,
+  ownerKey: string,
+  xRaw: unknown,
+  yRaw: unknown,
+  action: "plant_flower" | "remove_flower",
+  now: number,
+): TileActionResult {
+  const tile = checkedTile(xRaw, yRaw);
+  if (!tile) return { ok: false, error: "invalid_tile" };
+  const { x, y } = tile;
+  const key = tileKey(x, y);
+  const active = isOverrideActive(current, now) ? current : null;
+  const block = active?.block;
+  if (!active || !block || !isFlowerPotItem(block.itemId)) return { ok: false, error: "no_block" };
+  const selfId = presenceIdFor(ownerKey);
+  if (block.ownerId !== selfId) return { ok: false, error: "not_owner" };
+  const overrides: TileOverridesMap = { [key]: active };
+  if (action === "plant_flower") {
+    if (active.deco) return { ok: false, error: "tile_blocked" };
+    const removed = removeItem(profile, PLANTABLE_DECO_ID, 1);
+    if (!removed) return { ok: false, error: "not_enough_items" };
+    const next: TileOverride = { ...active, deco: PLANTABLE_DECO_ID };
+    return {
+      ok: true,
+      override: next,
+      profile: removed,
+      view: viewAfter(map, overrides, key, next, x, y, now, ownerKey),
+      gained: {},
+    };
+  }
+  if (!active.deco) return { ok: false, error: "tile_blocked" };
+  const next: TileOverride = { ...active };
+  delete next.deco;
+  return {
+    ok: true,
+    override: next,
+    profile: addItem(profile, PLANTABLE_DECO_ID, 1),
+    view: viewAfter(map, overrides, key, next, x, y, now, ownerKey),
+    gained: { [PLANTABLE_DECO_ID]: 1 },
   };
 }
 
@@ -554,6 +624,7 @@ export function parseTileOverride(raw: unknown): TileOverride | null {
     const crop = parseCropState(v.crop);
     if (crop) out.crop = crop;
   }
+  if (v.deco === "flower") out.deco = "flower";
   if (typeof v.until === "number" && Number.isFinite(v.until)) out.until = v.until;
   return out;
 }
