@@ -14,7 +14,9 @@ import { loadTileOverride } from "@/lib/worldbox/tiles-online";
 import { buildCaveLayer, buildDungeonFloor, makeInstanceSpace, parseInstanceSpace, weekKeyOf } from "@/lib/worldbox/instances";
 import { loadRuinsPersonal } from "@/lib/worldbox/instances-online";
 import { listPresenceWithOwners } from "@/lib/worldbox/presence-online";
-import { addMasteryXp, GUARD_AURA_REDUCTION } from "@/lib/worldbox/roles";
+import { addMasteryXp, BLADE_ATTACK_MULT, GUARD_AURA_REDUCTION } from "@/lib/worldbox/roles";
+import { playerAttack } from "@/lib/worldbox/arena";
+import { withUserLock } from "@/lib/worldbox/user-lock";
 import { recordDeath } from "@/lib/worldbox/roles-online";
 import { loadMobState } from "@/lib/worldbox/mobs-online";
 import {
@@ -24,7 +26,8 @@ import { partyKeyOf } from "@/lib/worldbox/party";
 import { loadPartyOf } from "@/lib/worldbox/party-online";
 import type { PlayerProfile, RespawnPoint } from "@/lib/worldbox/profile";
 import {
-  activityForWindow, applyDeath, applyMobDamage, resolveRespawnPoint, setBedRespawn, stepVitals,
+  activityForWindow, applyDeath, applyMobDamage, applyPvpDamage, pvpSpaceAllowed,
+  PVP_ATTACK_MAX_DISTANCE, resolveRespawnPoint, setBedRespawn, stepVitals,
 } from "@/lib/worldbox/vitals";
 
 export const runtime = "nodejs";
@@ -36,6 +39,9 @@ export const runtime = "nodejs";
 //   死亡したら死亡処理まで行う
 // POST { action: "damage", mobId, x, y, px?, py? }: モブ接触ダメージ。
 //   配置の再計算で実在を検証し、距離は mobs ルートと同じ方式（プレゼンス→申告→セーブ）
+// POST { action: "pvp", target, px?, py? }: プレイヤーへの攻撃。
+//   相手はプレゼンス ID で解決し、空間（ワールド/洞窟/遺跡のみ）・距離を検証する。
+//   被害者が死亡したら被害者側の死亡処理を行い、通知は被害者の次回 sync で配送する
 // POST { action: "set_bed", x, y }: そのタイルのベッドをリスポーン点にする（近接検証）
 // 死亡時は { died: true, dropped, respawn: {x, y} } を返し、クライアントが移動する。
 // REST ハートビートには触らない（サーバー検証の正はプレゼンス側）。
@@ -124,6 +130,37 @@ async function settleDeath(
   );
 }
 
+/**
+ * PvP で倒された被害者側の死亡処理。死亡処理そのものは本人の settleDeath と
+ * 同じ規則（死亡地点の記録→所持品の半分ドロップ→リスポーン先の解決）だが、
+ * 被害者の画面への配送は被害者の次回 sync で行うため、復活後プロフィールに
+ * pendingTeleport（リスポーン地点）と lastDeath（死亡通知）を対で残す。
+ * ダンジョン内は PvP 不可なので、入口復活の分岐は無い。
+ */
+async function settleVictimDeath(
+  victimKey: string,
+  profile: PlayerProfile,
+  now: number,
+  name: string,
+): Promise<{ dropped: Record<string, number> } | null> {
+  const savedAtDeath = parseSave(await loadWorldBoxSave(victimKey));
+  if (savedAtDeath) {
+    await recordDeath({
+      ownerKey: victimKey, name, space: savedAtDeath.space, x: savedAtDeath.x, y: savedAtDeath.y, at: now,
+    });
+  }
+  const { profile: revived, dropped } = applyDeath(profile, now);
+  const mark = await unionMarkOf(victimKey);
+  const { point } = resolveRespawnPoint(revived, mark, { x: 0.5, y: 0.5 });
+  const notified: PlayerProfile = {
+    ...revived,
+    pendingTeleport: { space: "world", x: point.x, y: point.y },
+    lastDeath: { at: now, dropped },
+  };
+  if (!(await storeProfile(victimKey, notified))) return null;
+  return { dropped };
+}
+
 export async function POST(request: Request) {
   if (!sameOrigin(request)) return errorResponse("forbidden", 403);
   const session = getRequestSession(request);
@@ -137,6 +174,7 @@ export async function POST(request: Request) {
   }
   const data = (body ?? {}) as {
     action?: unknown; mobId?: unknown; x?: unknown; y?: unknown; px?: unknown; py?: unknown; space?: unknown;
+    target?: unknown;
   };
   const ownerKey = sessionOwnerKey(session);
   const now = Date.now();
@@ -168,6 +206,21 @@ export async function POST(request: Request) {
       ? { ...settled.profile, vitalX: cur.x, vitalY: cur.y, vitalSpace: cur.space }
       : settled.profile;
     if (died) return settleDeath(ownerKey, profile, now, session.username ?? "");
+    if (profile.lastDeath) {
+      // PvP で倒されていた: 死亡通知とリスポーン地点を対で配送し、両方消す
+      // （モブ死と同じクライアント死亡フローに乗せる）。
+      const death = profile.lastDeath;
+      const teleport = profile.pendingTeleport;
+      const cleared = { ...profile, pendingTeleport: null, lastDeath: null };
+      if (!(await storeProfile(ownerKey, cleared))) return errorResponse("store_failed", 503);
+      return NextResponse.json(
+        {
+          profile: cleared, died: true, dropped: death.dropped,
+          ...(teleport ? { respawn: { x: teleport.x, y: teleport.y } } : {}),
+        },
+        { headers: NO_STORE },
+      );
+    }
     if (profile.pendingTeleport) {
       const teleport = profile.pendingTeleport;
       const cleared = { ...profile, pendingTeleport: null };
@@ -280,6 +333,53 @@ export async function POST(request: Request) {
       { profile: result.profile, died: false, applied: result.applied, poisoned: result.poisoned },
       { headers: NO_STORE },
     );
+  }
+
+  if (data.action === "pvp") {
+    const targetId = typeof data.target === "string" ? data.target : "";
+    if (!targetId) return errorResponse("invalid_request", 400);
+    // 相手はプレゼンス ID で解決する（所有者キーつき列挙は鮮度フィルタ済み）
+    const owners = await listPresenceWithOwners();
+    const target = owners.find((o) => o.entry.id === targetId);
+    if (!target) return errorResponse("target_not_found", 409);
+    if (target.ownerKey === ownerKey) return errorResponse("invalid_target", 409);
+    const space = target.entry.space;
+    // 許可空間はワールドと洞窟・遺跡のインスタンスだけ（ロビー系・テント・ダンジョンは不可）
+    if (!pvpSpaceAllowed(space)) return errorResponse("pvp_not_allowed", 409);
+    // 攻撃者も同じ空間にいること（自分のプレゼンスが別空間を指していたら拒否）
+    const selfEntry = owners.find((o) => o.ownerKey === ownerKey);
+    if (selfEntry && selfEntry.entry.space !== space) return errorResponse("pvp_not_allowed", 409);
+    const reported =
+      typeof data.px === "number" && typeof data.py === "number" &&
+      Number.isFinite(data.px) && Number.isFinite(data.py) &&
+      Math.abs(data.px) <= WORLD_COORD_LIMIT && Math.abs(data.py) <= WORLD_COORD_LIMIT
+        ? { x: data.px, y: data.py }
+        : null;
+    const pos = await actorWorldPosition(ownerKey, reported, space);
+    if (!pos) return errorResponse("too_far", 409);
+    // 相手の位置は相手のプレゼンス実測。自分の位置は damage と同じ優先順で解決する
+    const dist = Math.hypot(pos.x - target.entry.x, pos.y - target.entry.y);
+    if (dist > PVP_ATTACK_MAX_DISTANCE) return errorResponse("too_far", 409);
+    // ダメージ量はモブ戦と同じ式（playerAttack、剣士は倍率）
+    const attackPower = playerAttack(current.items, current.enhance) * (current.role === "blade" ? BLADE_ATTACK_MULT : 1);
+    // 被害者プロフィールの読み書きは被害者単位で直列化する（同時攻撃の競合防止）
+    return withUserLock(`vitals-pvp:${target.ownerKey}`, async () => {
+      const victim = await loadProfile(target.ownerKey);
+      const result = applyPvpDamage(victim, attackPower, now);
+      if (result.died) {
+        const settled = await settleVictimDeath(target.ownerKey, result.profile, now, target.entry.name ?? "");
+        if (!settled) return errorResponse("store_failed", 503);
+        return NextResponse.json(
+          { applied: result.applied, damage: result.damage, died: true },
+          { headers: NO_STORE },
+        );
+      }
+      if (!(await storeProfile(target.ownerKey, result.profile))) return errorResponse("store_failed", 503);
+      return NextResponse.json(
+        { applied: result.applied, damage: result.damage, died: false },
+        { headers: NO_STORE },
+      );
+    });
   }
 
   if (data.action === "set_bed") {

@@ -104,6 +104,9 @@ export type PlayerProfile = {
   spawnProtectedUntil: number;
   /** 蘇生で戻される先（次回 sync でクライアントが適用し、サーバーが消す）。 */
   pendingTeleport: { space: string; x: number; y: number } | null;
+  /** PvP で倒された死亡通知（次回 sync で本人へ配送し、サーバーが消す）。
+   * pendingTeleport（リスポーン地点）と対でセットされる。 */
+  lastDeath: { at: number; dropped: Record<string, number> } | null;
 };
 
 function emptySlots(size: number): ItemSlot[] {
@@ -118,6 +121,7 @@ export const DEFAULT_PROFILE: PlayerProfile = {
   tauntUntil: 0,
   reviveMark: null,
   pendingTeleport: null,
+  lastDeath: null,
   tentTier: 0,
   enhance: {},
   spawnProtectedUntil: 0,
@@ -246,7 +250,7 @@ export function parseProfile(raw: unknown): PlayerProfile {
   }
   const inv = invOf({
     coins: 0, hunger: 0, hp: HP_MAX, status: [], vitalAt: 0, respawn: null, restPoint: null, lastDamageAt: 0, deaths: 0, stealActorAt: 0, stealTargetAt: 0,
-    role: "free", rolePicked: false, mastery: {}, skillAt: {}, tauntUntil: 0, reviveMark: null, pendingTeleport: null, tentTier: 0, enhance: {}, spawnProtectedUntil: 0,
+    role: "free", rolePicked: false, mastery: {}, skillAt: {}, tauntUntil: 0, reviveMark: null, pendingTeleport: null, lastDeath: null, tentTier: 0, enhance: {}, spawnProtectedUntil: 0,
     items: data.items as Record<string, number>,
     hotbar: data.hotbar as ItemSlot[],
     storage: data.storage as ItemSlot[],
@@ -278,6 +282,7 @@ export function parseProfile(raw: unknown): PlayerProfile {
     tauntUntil: clampInt(data.tauntUntil, 0, Number.MAX_SAFE_INTEGER, 0),
     reviveMark: parseReviveMark(data.reviveMark),
     pendingTeleport: parsePendingTeleport(data.pendingTeleport),
+    lastDeath: parseLastDeath(data.lastDeath),
     tentTier: clampInt(data.tentTier, 0, 2, 0),
     enhance: parseEnhance(data.enhance),
     spawnProtectedUntil: clampInt(data.spawnProtectedUntil, 0, Number.MAX_SAFE_INTEGER, 0),
@@ -317,6 +322,22 @@ function parsePendingTeleport(raw: unknown): { space: string; x: number; y: numb
   if (typeof v.space !== "string" || typeof v.x !== "number" || typeof v.y !== "number") return null;
   if (!Number.isFinite(v.x) || !Number.isFinite(v.y)) return null;
   return { space: v.space.slice(0, 64), x: v.x, y: v.y };
+}
+
+/** PvP 死亡通知を読む（落とした物は定義のあるアイテムだけ残す）。 */
+function parseLastDeath(raw: unknown): { at: number; dropped: Record<string, number> } | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const v = raw as { at?: unknown; dropped?: unknown };
+  if (typeof v.at !== "number" || !Number.isFinite(v.at) || v.at <= 0) return null;
+  const dropped: Record<string, number> = {};
+  if (v.dropped && typeof v.dropped === "object" && !Array.isArray(v.dropped)) {
+    for (const [id, count] of Object.entries(v.dropped as Record<string, unknown>)) {
+      if (!itemById(id)) continue;
+      const n = clampInt(count, 0, 9999, 0);
+      if (n > 0) dropped[id] = n;
+    }
+  }
+  return { at: Math.floor(v.at), dropped };
 }
 
 /** 強化レベルの復元（道具以外・範囲外は落とす）。 */
@@ -412,6 +433,7 @@ export function serializeProfile(profile: PlayerProfile): string {
     tauntUntil: clampInt(profile.tauntUntil, 0, Number.MAX_SAFE_INTEGER, 0),
     reviveMark: parseReviveMark(profile.reviveMark),
     pendingTeleport: parsePendingTeleport(profile.pendingTeleport),
+    lastDeath: parseLastDeath(profile.lastDeath),
     tentTier: clampInt(profile.tentTier, 0, 2, 0),
     enhance: parseEnhance(profile.enhance),
     spawnProtectedUntil: clampInt(profile.spawnProtectedUntil, 0, Number.MAX_SAFE_INTEGER, 0),

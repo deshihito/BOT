@@ -7,6 +7,7 @@
 //   0 が続くと HP が減る
 // - 毒は一定間隔で HP を削り、時間経過か解毒で消える
 // - モブの接触ダメージはサーバー側が配置と距離を検証してからここで適用する
+// - プレイヤー同士の攻撃（PvP）も同じ被弾規則（精算・保護・クールダウン）で適用する
 // - 死亡時は道具（tool）を落とさず、それ以外を半分落とす
 // - リスポーン優先順: ベッド → 最後の休憩地点 → 所属国のマーク（首都）
 // 割合・間隔などの数値はユーザー向けに開示しない（探索優先の原則）。
@@ -279,6 +280,53 @@ export function applyMobDamage(
     poisoned = true;
   }
   return { profile: next, applied: true, died: next.hp <= 0, poisoned };
+}
+
+/** PvP の攻撃が届く距離（ユークリッド）。剣の間合い2＋見た目の余裕。 */
+export const PVP_ATTACK_MAX_DISTANCE = 2.5;
+
+/** PvP ができるインスタンス空間の ID 形式（洞窟・遺跡のみ。ダンジョンは協力なので不可）。 */
+const PVP_INSTANCE_SPACE_RE = /^(cave|ruins):-?\d+,-?\d+:\d+$/;
+
+/**
+ * PvP が許可される空間か。ワールドと洞窟・遺跡のインスタンスだけが対象で、
+ * ロビー系・テント・ダンジョン（パーティ協力）では不可。
+ * （このファイルは単体でトランスパイルされるため、インスタンス空間の
+ * 正規表現は instances.ts から import せず複製する。形式の正は instances.ts。）
+ */
+export function pvpSpaceAllowed(space: unknown): boolean {
+  if (space === "world") return true;
+  if (typeof space !== "string") return false;
+  return PVP_INSTANCE_SPACE_RE.test(space);
+}
+
+/**
+ * プレイヤーからの攻撃ダメージを適用する。モブの接触ダメージ
+ * （applyMobDamage）と同じ形: 先にバイタルを精算し、スポーン保護中は
+ * 無効、被弾クールダウン（MOB_DAMAGE_COOLDOWN_MS を共有）中も無効。
+ * 毒は無い。ダメージ量の式（arena の playerAttack、剣士倍率）は
+ * 呼び出し側が算出して渡す。
+ */
+export function applyPvpDamage(
+  profile: PlayerProfile,
+  attack: number,
+  now: number,
+): { profile: PlayerProfile; applied: boolean; died: boolean; damage: number } {
+  const settled = stepVitals(profile, now).profile;
+  // スポーン保護中（新規プレイヤーの最初の数分）はプレイヤーの攻撃も受けない
+  if ((settled.spawnProtectedUntil ?? 0) > now) {
+    return { profile: settled, applied: false, died: false, damage: 0 };
+  }
+  if (now - settled.lastDamageAt < MOB_DAMAGE_COOLDOWN_MS || settled.hp <= 0) {
+    return { profile: settled, applied: false, died: settled.hp <= 0, damage: 0 };
+  }
+  const damage = Math.max(0, Math.floor(attack));
+  const next: PlayerProfile = {
+    ...settled,
+    hp: Math.max(0, settled.hp - damage),
+    lastDamageAt: now,
+  };
+  return { profile: next, applied: true, died: next.hp <= 0, damage };
 }
 
 /**
