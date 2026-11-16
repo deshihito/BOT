@@ -319,6 +319,7 @@ export default function WorldBoxCasinoPanel({ onClose }: { onClose: () => void }
   // カジノ状態のポーリングガード（S6）: 3s 間隔で重ねて走らせず、古い
   // レスポンスでプレイ後の残高表示を巻き戻さない。
   const refreshGuardRef = useRef<PollGuard>(createPollGuard());
+  const tournamentGuardRef = useRef<PollGuard>(createPollGuard());
   const timersRef = useRef<number[]>([]);
 
   const later = useCallback((fn: () => void, ms: number) => {
@@ -368,13 +369,17 @@ export default function WorldBoxCasinoPanel({ onClose }: { onClose: () => void }
   }, []);
 
   const refreshTournament = useCallback(async () => {
+    const ticket = tournamentGuardRef.current.begin();
+    if (ticket === null) return;
     try {
       const res = await fetch("/api/worldbox/casino-tournament", { headers: { Accept: "application/json" } });
       if (!res.ok) return;
       const data = (await res.json()) as CasinoTournamentState;
-      if (aliveRef.current) setTournament(data.tournament);
+      if (aliveRef.current && tournamentGuardRef.current.isCurrent(ticket)) setTournament(data.tournament);
     } catch {
       // 大会の取得失敗はカジノの表示を壊さない（次の更新で取り直す）
+    } finally {
+      tournamentGuardRef.current.end(ticket);
     }
   }, []);
 

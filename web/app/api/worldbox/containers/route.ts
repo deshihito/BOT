@@ -139,15 +139,14 @@ export async function POST(request: Request) {
   if (!coord) return errorJson("invalid_tile", 400);
   const ownerKey = sessionOwnerKey(session);
 
-  // 隣接検証（本人の位置がサーバー側で分かる場合だけ、タイル行為と同じ）
+  // 隣接検証（タイル行為と同じ。位置不明は素通りさせず拒否する）
   const pos = await actorWorldPosition(ownerKey);
-  if (pos) {
-    const dist = Math.max(
-      Math.abs(Math.floor(pos.x) - coord.x),
-      Math.abs(Math.floor(pos.y) - coord.y),
-    );
-    if (dist > MAX_ACTION_DISTANCE) return errorJson("too_far", 409);
-  }
+  if (!pos) return errorJson("position_unknown", 409);
+  const dist = Math.max(
+    Math.abs(Math.floor(pos.x) - coord.x),
+    Math.abs(Math.floor(pos.y) - coord.y),
+  );
+  if (dist > MAX_ACTION_DISTANCE) return errorJson("too_far", 409);
 
   // 同一ユーザーへの並行リクエストを直列化する（S4）: コンテナと
   // プロフィールの両方を読み書きするため、ロック無しだと二重移動や

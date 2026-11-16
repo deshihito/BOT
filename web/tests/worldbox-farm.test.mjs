@@ -494,7 +494,10 @@ test("API(tiles): 伐採は素手でも適用され（収量1）、斧がある�
   const cookie = sessionCookie(ME, "farm-user");
   globalThis.__wbFarmTiles.clear();
   globalThis.__wbFarmProfiles.clear();
-  globalThis.__wbFarmPresence = [];
+  globalThis.__wbFarmPresence = [{
+    id: (await import(presenceBundleUrl)).presenceIdFor(MY_KEY),
+    name: "farm-user", x: treeAt.x, y: treeAt.y, vx: 0, vy: 0, face: 1, space: "world", ts: Date.now(),
+  }];
   // 素手（空のプロフィール）でも伐採できる
   const bare = await tilesRoute.POST(apiRequest(URL_T, "POST", cookie, { action: "chop", x: treeAt.x, y: treeAt.y }));
   assert.equal(bare.status, 200);

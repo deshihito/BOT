@@ -276,7 +276,8 @@ export async function POST(request: Request) {
         ? { x: data.px, y: data.py }
         : null;
     const pos = await actorWorldPosition(ownerKey, reported, (inCave || inRuins || inDungeon) && typeof data.space === "string" ? data.space : "world");
-    if (pos) {
+    if (!pos) return errorResponse("position_unknown", 409);
+    {
       const dist = mobDistance(Math.floor(pos.x), Math.floor(pos.y), { x, y, size: def.size });
       if (dist > MOB_ATTACK_MAX_DISTANCE) return errorResponse("too_far", 409);
     }
@@ -392,7 +393,8 @@ export async function POST(request: Request) {
     const override = await loadTileOverride(x, y);
     if (!override?.block || override.block.itemId !== "bed") return errorResponse("not_a_bed", 409);
     const pos = await actorWorldPosition(ownerKey, null);
-    if (pos && Math.max(Math.abs(Math.floor(pos.x) - x), Math.abs(Math.floor(pos.y) - y)) > 2) {
+    if (!pos) return errorResponse("position_unknown", 409);
+    if (Math.max(Math.abs(Math.floor(pos.x) - x), Math.abs(Math.floor(pos.y) - y)) > 2) {
       return errorResponse("too_far", 409);
     }
     const next = setBedRespawn(current, x, y);
