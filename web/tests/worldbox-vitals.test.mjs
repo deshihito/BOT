@@ -49,7 +49,7 @@ const v = loadBundle(
   ["worldbox/items.ts", "worldbox/profile.ts", "worldbox/roles.ts", "worldbox/vitals.ts", "worldbox/economy.ts"],
   [
     "ITEMS", "itemById", "DEFAULT_PROFILE", "parseProfile", "serializeProfile", "addItem",
-    "HP_MAX", "HUNGER_MAX", "stepVitals", "applyMobDamage", "applyPoison", "curePoison",
+    "HP_MAX", "HUNGER_MAX", "stepVitals", "applyMobDamage", "applyPlayerDamage", "applyPoison", "curePoison",
     "isPoisoned", "consumeEffect", "applyDeath", "resolveRespawnPoint", "setBedRespawn",
     "applyRest", "eatItem", "POISON_DURATION_MS", "MOB_DAMAGE_COOLDOWN_MS",
   ],
@@ -71,10 +71,12 @@ test("vitals: HP・毒・リスポーン点が往復する", () => {
     ...fresh(), hp: 37, hunger: 55,
     status: [{ kind: "poison", until: T0 + 5000 }],
     respawn: { x: 10.5, y: 20.5 }, restPoint: { x: 3.5, y: 4.5 }, deaths: 2,
+    pendingDeath: { x: 7.5, y: 8.5 },
   };
   const back = v.parseProfile(v.serializeProfile(p));
   assert.equal(back.hp, 37);
   assert.deepEqual(back.status, [{ kind: "poison", until: T0 + 5000 }]);
+  assert.deepEqual(back.pendingDeath, { x: 7.5, y: 8.5 });
   assert.deepEqual(back.respawn, { x: 10.5, y: 20.5 });
   assert.deepEqual(back.restPoint, { x: 3.5, y: 4.5 });
   assert.equal(back.deaths, 2);
@@ -140,6 +142,33 @@ test("vitals: モブ接触ダメージとクールダウン", () => {
   const third = v.applyMobDamage(hit.profile, "wolf", 6, T0 + 1000 + v.MOB_DAMAGE_COOLDOWN_MS, () => 0.99);
   assert.equal(third.applied, true);
   assert.equal(third.profile.hp, v.HP_MAX - 12);
+});
+
+test("vitals: プレイヤー攻撃ダメージはモブ接触と同じクールダウンで適用される", () => {
+  const p = { ...fresh(), vitalAt: T0 };
+  const hit = v.applyPlayerDamage(p, 12, T0 + 1000);
+  assert.equal(hit.applied, true);
+  assert.equal(hit.died, false);
+  assert.equal(hit.profile.hp, v.HP_MAX - 12);
+  // 被弾クールダウン中は通らない（モブ接触と共有）
+  const again = v.applyPlayerDamage(hit.profile, 12, T0 + 1000 + v.MOB_DAMAGE_COOLDOWN_MS - 1);
+  assert.equal(again.applied, false);
+  assert.equal(again.profile.hp, v.HP_MAX - 12);
+  const third = v.applyPlayerDamage(hit.profile, 12, T0 + 1000 + v.MOB_DAMAGE_COOLDOWN_MS);
+  assert.equal(third.applied, true);
+  assert.equal(third.profile.hp, v.HP_MAX - 24);
+});
+
+test("vitals: プレイヤー攻撃はスポーン保護中は通らず、HP を 0 にすると死亡する", () => {
+  const prot = { ...fresh(), vitalAt: T0, spawnProtectedUntil: T0 + 60_000 };
+  const blocked = v.applyPlayerDamage(prot, 12, T0 + 1000);
+  assert.equal(blocked.applied, false);
+  assert.equal(blocked.profile.hp, v.HP_MAX);
+  const weak = { ...fresh(), vitalAt: T0, hp: 8 };
+  const dead = v.applyPlayerDamage(weak, 12, T0 + 1000);
+  assert.equal(dead.applied, true);
+  assert.equal(dead.died, true);
+  assert.equal(dead.profile.hp, 0);
 });
 
 test("vitals: クモは毒を与え、毒で死ぬこともある", () => {
