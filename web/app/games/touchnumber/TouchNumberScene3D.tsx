@@ -12,7 +12,7 @@
 // WebGL が使えない場合は onFail で親へ知らせ、親は 2D 表示に切り替える。
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import * as THREE from "three";
-import { createStage, type Stage } from "@/lib/three-kit/stage";
+import { createStage, FIT_REFERENCE_ASPECT, type Stage } from "@/lib/three-kit/stage";
 import { canvasTexture } from "@/lib/three-kit/primitives";
 import { attachPickPointer } from "@/lib/three-kit/pointer";
 import SceneBox from "@/lib/three-kit/SceneBox";
@@ -46,7 +46,7 @@ function cellPos(index: number, cols: number, rows: number): [number, number] {
 function fitCamera(stage: Stage, container: HTMLElement, cols: number, rows: number) {
   const w = container.clientWidth || 420;
   const h = container.clientHeight || 400;
-  const aspect = w / h;
+  const aspect = Math.max(w / h, FIT_REFERENCE_ASPECT); // stage の画角フィットと二重に効かせないよう基準アスペクトで下限クランプ
   const vFov = (42 * Math.PI) / 180;
   const hFov = 2 * Math.atan(Math.tan(vFov / 2) * aspect);
   const distW = (cols / 2 + 0.9) / Math.tan(hFov / 2);
