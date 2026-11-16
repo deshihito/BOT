@@ -30,21 +30,14 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from core.paths import repo_root as _shared_repo_root
+
 logger = logging.getLogger(__name__)
 
 
 def repo_root() -> Path:
-    """リポジトリルートを返す。
-
-    同梱フォント (font.ttf) と assets/fonts/ の両方を持つ最下位の祖先を
-    ルートとみなす (core/general/exp/exp.py の _repo_root と同じ解決)。
-    見つからなければこのファイルの配置 (core/support/ 直下) を前提に返す。
-    """
-    here = Path(__file__).resolve()
-    for anc in here.parents:
-        if (anc / "font.ttf").is_file() and (anc / "assets" / "fonts").is_dir():
-            return anc
-    return here.parents[2]
+    """リポジトリルートを返す (解決の正は core/paths.py)。"""
+    return _shared_repo_root()
 
 
 _REPO_ROOT = repo_root()

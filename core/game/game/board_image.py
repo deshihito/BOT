@@ -20,13 +20,14 @@
 import io
 from collections import OrderedDict
 from pathlib import Path
+from core.paths import DEFAULT_FONT_PATH
 
 from PIL import Image, ImageDraw, ImageFont
 
-# このファイルは core/game/ 配下にあるため、リポジトリ直下の font.ttf は parents[2]。
-# （core/ 直下にあった時代の parent.parent のままだと core/font.ttf を指して
-#  存在せず、全描画が PIL 既定フォントに silently フォールバックしていた。）
-FONT_PATH = Path(__file__).resolve().parents[3] / "font.ttf"
+# リポジトリ直下の主フォント。パス解決は core/paths.py に集約する
+# （モジュール配置の深さで parents[N] を数えると、再編のたびに存在しない
+#  パスを指して PIL 既定フォントへ silently フォールバックする事故になる）。
+FONT_PATH = DEFAULT_FONT_PATH
 TILE = 64
 GAP = 6
 PAD = 12

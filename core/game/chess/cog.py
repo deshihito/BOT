@@ -4,6 +4,7 @@ import io
 import logging
 import random
 from pathlib import Path
+from core.paths import DEFAULT_FONT_PATH, asset_path
 from core.support.emojis import LEFT, RIGHT
 
 import discord
@@ -56,7 +57,7 @@ async def record_draw(g) -> str:
 COLOR = 0x6F4E37
 RECRUIT_SECONDS = 30
 TURN_SECONDS = 90
-ASSET = Path(__file__).resolve().parents[3] / "Assets" / "chess" / "IMG_4904.png"
+ASSET = asset_path("chess", "IMG_4904.png")
 MOVE_LABELS = tuple("123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz")
 # Discord の Select は最大25択。候補は1ページ24件までとし、残りの枠を
 # ページ移動用の疑似選択肢に使う（前後両方の移動が要る中間ページは23件）。
@@ -391,7 +392,7 @@ def render_board(board, labels=(), selected=None):
             sprite.thumbnail((cell - 12, cell - 12), Image.Resampling.LANCZOS)
             board_img.alpha_composite(sprite, (c * cell + (cell - sprite.width) // 2, r * cell + (cell - sprite.height) // 2))
     draw = ImageDraw.Draw(board_img, "RGBA")
-    font = ImageFont.truetype(str(ASSET.parents[2] / "font.ttf"), 30)
+    font = ImageFont.truetype(str(DEFAULT_FONT_PATH), 30)
     if selected:
         r, c = selected
         draw.rectangle((c * cell + 3, r * cell + 3, (c + 1) * cell - 3, (r + 1) * cell - 3), outline=(224, 69, 46, 255), width=7)

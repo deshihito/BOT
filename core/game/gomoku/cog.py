@@ -10,6 +10,7 @@ import io
 import logging
 import random
 from pathlib import Path
+from core.paths import DEFAULT_FONT_PATH
 
 import discord
 from discord.ext import commands
@@ -75,7 +76,7 @@ def render_board_image(board, last=None):
         cx, cy = MARGIN + hc * step, MARGIN + hr * step
         draw.ellipse([cx - 3.5, cy - 3.5, cx + 3.5, cy + 3.5], fill=(90, 60, 20))
     try:
-        font = ImageFont.truetype(str(Path(__file__).resolve().parents[3] / "font.ttf"), 16)
+        font = ImageFont.truetype(str(DEFAULT_FONT_PATH), 16)
     except Exception:
         font = ImageFont.load_default()
     for i in range(SIZE):

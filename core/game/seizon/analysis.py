@@ -22,13 +22,14 @@ import io
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
+from core.paths import DEFAULT_FONT_PATH
 
 JST = timezone(timedelta(hours=9))
 
 ANALYSIS_WINDOW_DAYS = 30
 ANALYSIS_MIN_DAYS = 3
 
-_FONT_PATH = Path(__file__).resolve().parents[3] / "font.ttf"
+_FONT_PATH = DEFAULT_FONT_PATH
 
 _BG = (24, 26, 32)
 _FG = (245, 245, 245)

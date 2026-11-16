@@ -9,12 +9,13 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from core.paths import shared_asset_path
 
 import numpy as np
 
 logger = logging.getLogger("cogs.sio_music")
 
-_HRTF_PATH = Path(__file__).resolve().parents[3] / "assets" / "hrtf" / "kemar_hrir_48k.npz"
+_HRTF_PATH = shared_asset_path("hrtf", "kemar_hrir_48k.npz")
 # 計測仰角 → エンジン側の帯域の高さキー（低域=-4 / 中域=0 / 高域=+4）
 _ELEVATION_TO_Y = {-30: -4.0, 0: 0.0, 30: 4.0}
 

@@ -9,6 +9,7 @@ import io
 import logging
 import random
 from pathlib import Path
+from core.paths import DEFAULT_FONT_PATH
 
 import discord
 from discord.ext import commands
@@ -44,7 +45,7 @@ def render_board_image(board, last=None):
     draw.rounded_rectangle([3, 3, WIDTH - 4, HEIGHT - 4], radius=14,
                            outline=(14, 34, 88), width=4)
     try:
-        font = ImageFont.truetype(str(Path(__file__).resolve().parents[3] / "font.ttf"), 20)
+        font = ImageFont.truetype(str(DEFAULT_FONT_PATH), 20)
     except Exception:
         font = ImageFont.load_default()
     for c in range(COLS):

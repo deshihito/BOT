@@ -13,12 +13,13 @@ from __future__ import annotations
 import io
 from functools import lru_cache
 from pathlib import Path
+from core.paths import DEFAULT_FONT_PATH, REPO_ROOT, font_path
 
 from PIL import Image, ImageDraw, ImageFont
 
-_ROOT = Path(__file__).resolve().parents[3]
-_FONT_PATH = _ROOT / "font.ttf"  # Hachi Maru Pop (日本語)
-_DISPLAY_FONT_PATH = _ROOT / "assets" / "fonts" / "DelaGothicOne-Regular.ttf"
+_ROOT = REPO_ROOT
+_FONT_PATH = DEFAULT_FONT_PATH  # Hachi Maru Pop (日本語)
+_DISPLAY_FONT_PATH = font_path("DelaGothicOne-Regular.ttf")
 
 _SS = 2  # 内部は2倍解像度で描いて縮小 (ジャギー防止)
 

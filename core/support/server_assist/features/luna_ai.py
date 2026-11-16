@@ -38,6 +38,7 @@ from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
+from core.paths import asset_path
 from typing import Any
 
 import aiohttp
@@ -87,7 +88,7 @@ WEBHOOK_NAME = "AGOBOT-LunaAI"
 PERSONA_NAME = "Luna"
 # 専用アイコン（ユーザー支給）の同梱アセット。webhook 自身のアバターに設定する。
 # 配置はリポジトリのアセット流儀（ルート Assets/、Path(__file__).parents で解決）。
-ICON_PATH = Path(__file__).resolve().parents[4] / "Assets" / "luna_ai_icon.jpg"
+ICON_PATH = asset_path("luna_ai_icon.jpg")
 # Snapshot push がテキストのみのため、正本アセットは base64 テキストで同梱する。
 ICON_B64_PATH = ICON_PATH.with_name("luna_ai_icon.jpg.b64")
 

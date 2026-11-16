@@ -5,6 +5,7 @@ import logging
 import random
 from copy import deepcopy
 from pathlib import Path
+from core.paths import DEFAULT_FONT_PATH, REPO_ROOT, asset_path
 from core.support.emojis import LEFT, RIGHT
 
 import discord
@@ -40,7 +41,7 @@ async def record_win(s, winner) -> str:
 COLOR = 0x8b4513
 RECRUIT_SECONDS = 45
 TURN_SECONDS = 90
-ASSET_DIR = Path(__file__).resolve().parents[3] / "Assets" / "shogi"
+ASSET_DIR = asset_path("shogi")
 SQUARE_SIZE = 68
 MARGIN = 140
 BOARD_SIZE = 9 * SQUARE_SIZE
@@ -192,7 +193,7 @@ _PIECE_FONT_CACHE: dict[int, "ImageFont.FreeTypeFont"] = {}
 
 def _piece_font(size: int):
     if size not in _PIECE_FONT_CACHE:
-        root = ASSET_DIR.parent.parent
+        root = REPO_ROOT
         for candidate in (root / "assets" / "fonts" / "YujiSyuku-Regular.ttf",
                           root / "font.ttf"):
             if candidate.exists():
@@ -255,8 +256,8 @@ _PIECE_TEXT_PROMOTED = {
 
 class ShogiRenderer:
     def __init__(self):
-        self.font_label = ImageFont.truetype(str(ASSET_DIR.parent.parent / "font.ttf"), 16)
-        self.font_hand = ImageFont.truetype(str(ASSET_DIR.parent.parent / "font.ttf"), 18)
+        self.font_label = ImageFont.truetype(str(DEFAULT_FONT_PATH), 16)
+        self.font_hand = ImageFont.truetype(str(DEFAULT_FONT_PATH), 18)
         self.cache = {}
 
     def _piece_img(self, piece: Piece) -> Image.Image:

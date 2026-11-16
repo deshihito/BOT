@@ -2,6 +2,8 @@
 """EXP・レベルの計算と永続化。元 cogs/general.py から分割。"""
 from __future__ import annotations
 
+from core.paths import repo_root as _shared_repo_root
+
 from ..common import *
 
 def exp_for_next(level: int, base: int, ratio: float) -> int:
@@ -60,18 +62,8 @@ def _as_int(value, default: int = 0) -> int:
 # このcog専用のJSONファイルへ保存する(一時ファイル→置換のアトミック書き込み)。
 # 保存先は環境変数 EXP_DATA_PATH で変更可能。既定は <プロジェクト直下>/data/exp.json
 def _repo_root() -> Path:
-    """リポジトリルートを返す。
-
-    同梱フォント (font.ttf) と assets/fonts/ の両方を持つ最下位の祖先を
-    ルートとみなす。モジュールをサブパッケージへ移しても __file__ 起点の
-    相対パスがずれないようにするための解決で、見つからなければ現在の
-    配置 (core/general/exp/ から3つ上) を前提にフォールバックする。
-    """
-    here = Path(__file__).resolve()
-    for anc in here.parents:
-        if (anc / "font.ttf").is_file() and (anc / "assets" / "fonts").is_dir():
-            return anc
-    return here.parents[3]
+    """リポジトリルートを返す (解決の正は core/paths.py)。"""
+    return _shared_repo_root()
 
 
 _REPO_ROOT = _repo_root()
