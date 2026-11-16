@@ -150,7 +150,7 @@ function floorAt(x: number, y: number): number {
 
 // ---------- オブジェクト配置 ----------
 
-export type LobbyStation = "board" | "shop" | "bank" | "casino" | "arena" | "smith" | "guild" | "fountain" | "rest" | "arcade" | "race";
+export type LobbyStation = "board" | "shop" | "bank" | "casino" | "arena" | "smith" | "guild" | "fountain" | "rest" | "arcade" | "race" | "sell";
 
 export type LobbyObject = {
   sprite: string;
@@ -216,6 +216,7 @@ row("shop_counter", 8, 10, 20, { station: "shop", genre: "blocks" });
 row("shop_counter", 12, 14, 20, { station: "shop", genre: "furniture" });
 row("shop_counter", 4, 6, 27, { station: "shop", genre: "food" });
 row("shop_counter", 12, 14, 27, { station: "shop", genre: "farm" });
+row("shop_counter", 15, 16, 27, { station: "sell" }); // 売却専用（買取）カウンター: 売るだけの店。かばんを開かずここで売る
 put("sign_board", 16, 20);
 put("planter", 3, 19);
 put("planter", 17, 19);
@@ -356,7 +357,7 @@ export const LOBBY_OBJECTS: readonly LobbyObject[] = objects;
 /** 店員NPC（あごむに）が立つタイル。カウンターの背面で、当たり判定なし。 */
 export const LOBBY_NPCS: readonly { x: number; y: number }[] = [
   { x: 5, y: 19 }, { x: 9, y: 19 }, { x: 13, y: 19 }, // 北カウンターの店員レーン
-  { x: 5, y: 28 }, { x: 13, y: 28 }, // 南カウンターの店員レーン
+  { x: 5, y: 28 }, { x: 13, y: 28 }, { x: 15, y: 28 }, // 南カウンターの店員レーン（15 は買取カウンター）
   { x: 74, y: 24 }, // 競馬場の馬券カウンターの係員レーン
 ];
 
