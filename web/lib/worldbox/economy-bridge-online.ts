@@ -4,7 +4,7 @@
 // Bot 本体のワーカーが dict として読み、結果を同じキーへ書き戻す）。
 // 残高の読み取りは Bot API の許可テーブル users への select のみで、
 // Web から残高を書き換える経路はここにも存在しない。
-import { isBotApiConfigured, kvGet, kvList, kvSet, tableSelect } from "../bot-api";
+import { isBotApiConfigured, kvDelete, kvGet, kvList, kvSet, tableSelect } from "../bot-api";
 import {
   WORLDBOX_ECONOMY_NAMESPACE, parseEconomyOp, recentEconomyOps, type EconomyOp,
 } from "./economy-bridge";
@@ -66,6 +66,21 @@ export async function findEconomyOp(userKey: string, opId: string): Promise<Econ
     return op && op.userKey === userKey ? op : null;
   } catch {
     return null;
+  }
+}
+
+/**
+ * オプを1件消す。終端した失敗オプだけを対象にする: 金が動いていない
+ * 失敗オプが決定的 ID に残っていると、その ID の再試行（テント拡張など）
+ * が塞がれてしまうため、消してから積み直す。成功したら true。
+ */
+export async function deleteEconomyOp(opId: string): Promise<boolean> {
+  if (!isBotApiConfigured()) return false;
+  try {
+    await kvDelete(WORLDBOX_ECONOMY_NAMESPACE, opId);
+    return true;
+  } catch {
+    return false;
   }
 }
 

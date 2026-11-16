@@ -7,7 +7,7 @@ import {
 } from "@/lib/worldbox/economy";
 import { buildEconomyOp, type EconomyOp } from "@/lib/worldbox/economy-bridge";
 import {
-  enqueueEconomyOp, enqueueEconomyOpOnce, isEconomyEnabled, readUserBalance, waitForOpDone,
+  deleteEconomyOp, enqueueEconomyOp, enqueueEconomyOpOnce, findEconomyOp, isEconomyEnabled, readUserBalance, waitForOpDone,
 } from "@/lib/worldbox/economy-bridge-online";
 import { TENT_MAX_TIER, TENT_TIERS } from "@/lib/worldbox/tent";
 import {
@@ -142,6 +142,11 @@ async function handlePost(request: Request, session: AuthedSession) {
    * コインが動く遷移の保存: プロフィールを先に保存し、続けてオプを積む。
    * オプを積めなければプロフィールを元へ戻して 503（コインだけ動いて
    * アイテムが付かない／その逆の事故を避ける）。
+   * 積んだオプが server-side wait のうちに failed になった場合も同じく
+   * プロフィールを元へ戻して 409 を返す（構造問題#4「即時 spend の
+   * 無担保交付」の是正: 交付だけ残してコインが動かない状態を作らない）。
+   * wait を超えて pending のままの場合は従来どおり交付し、クライアントの
+   * ポーリングに引き継ぐ（その後 failed になる窓は残る。将来の是正課題）。
    */
   const saveWithCoin = async (
     result:
@@ -164,6 +169,13 @@ async function handlePost(request: Request, session: AuthedSession) {
       // 残高も同一レスポンスで返す。予算を超えて pending のままなら
       // 従来どおり（残高はクライアントの次の取得で反映される）。
       const settled = await waitForOpDone(ownerKey, op.id);
+      if (settled && settled.status === "failed") {
+        await storeProfile(ownerKey, current);
+        return NextResponse.json(
+          { error: "economy_failed", opError: settled.error ?? null },
+          { status: 409, headers: NO_STORE },
+        );
+      }
       if (settled && settled.status !== "pending") {
         const balance = await readUserBalance(discordId);
         return NextResponse.json(
@@ -224,6 +236,8 @@ async function handlePost(request: Request, session: AuthedSession) {
     case "expand_tent": {
       // テント（個人空間）の拡張: 次の段階の価格を spend し、段階を上げる。
       // オプ ID は決定的（tent-expand-<discordId>-<tier>）で二重課金しない。
+      // 決済が failed なら段階は上げない（無担保交付にしない）。pending の
+      // ままなら従来どおり上げてクライアントのポーリングに引き継ぐ。
       const gate = coinGate();
       if ("response" in gate) return gate.response;
       const nextTier = current.tentTier + 1;
@@ -232,12 +246,27 @@ async function handlePost(request: Request, session: AuthedSession) {
       const balance = await readUserBalance(gate.discordId);
       if (balance === null) return statusError("economy_unavailable", 503);
       if (balance < price) return statusError("insufficient_balance", 409);
+      const opId = `tent-expand-${gate.discordId}-${nextTier}`;
+      const existing = await findEconomyOp(ownerKey, opId);
+      if (existing && existing.status === "failed") {
+        // 前の試行の失敗オプが残っていると決定的 ID が塞がれて再試行できない。
+        // 金は動いていない終端オプなので消してから積み直す。消せなくても
+        // 下の wait が failed を見て 409 を返す（安全側）。
+        await deleteEconomyOp(opId);
+      }
       const op = buildEconomyOp(
         { kind: "spend", userKey: ownerKey, discordId: gate.discordId, amount: price, reason: "tent_expand" },
-        `tent-expand-${gate.discordId}-${nextTier}`,
+        opId,
         Date.now(),
       );
       if (!op || !(await enqueueEconomyOpOnce(op))) return statusError("economy_failed", 503);
+      const settled = await waitForOpDone(ownerKey, op.id);
+      if (settled && settled.status === "failed") {
+        return NextResponse.json(
+          { error: "economy_failed", opError: settled.error ?? null },
+          { status: 409, headers: NO_STORE },
+        );
+      }
       return saveAndReturn({ ok: true, profile: { ...current, tentTier: nextTier } });
     }
     case "sell": {
