@@ -4,7 +4,7 @@
 // 読取側は鮮度でふるう（古いキーは読取時に無視され、次回 PUT で上書きされる）。
 import { isBotApiConfigured, kvDelete, kvGet, kvList, kvSet } from "../bot-api";
 import {
-  PRESENCE_FRESH_MS, isFreshPresence, parsePresenceEntry, presenceIdFor,
+  PRESENCE_FRESH_MS, isFreshPresence, parsePresenceEntry, presenceIdFor, tabVerdict,
   type Heartbeat, type PresenceEntry,
 } from "./presence";
 
@@ -22,6 +22,28 @@ export async function putPresence(ownerKey: string, heartbeat: Heartbeat, ts: nu
     return true;
   } catch {
     return false;
+  }
+}
+
+/**
+ * タブ世代ガードつきの保存（presence ルート専用）。
+ * 保存済みエントリと世代を比べ、旧タブからの書き込みは "rejected" を返して保存しない。
+ * 世代交代（新しいタブの初回）は "stored" で、以後は旧タブが "rejected" になる。
+ */
+export async function putPresenceTabGuarded(
+  ownerKey: string,
+  heartbeat: Heartbeat,
+  ts: number,
+): Promise<"stored" | "rejected" | "failed"> {
+  if (!isBotApiConfigured()) return "failed";
+  try {
+    const raw = await kvGet(WORLDBOX_PRESENCE_NAMESPACE, ownerKey);
+    const stored = raw === null ? null : parsePresenceEntry(presenceIdFor(ownerKey), raw);
+    if (tabVerdict(stored, heartbeat, ts) === "reject") return "rejected";
+    await kvSet(WORLDBOX_PRESENCE_NAMESPACE, ownerKey, JSON.stringify({ ...heartbeat, ts }));
+    return "stored";
+  } catch {
+    return "failed";
   }
 }
 
