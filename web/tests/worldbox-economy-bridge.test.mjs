@@ -203,6 +203,7 @@ export class NextResponse {
 const stationStubUrl = dataUrl(`
 export async function loadMyLobbyStation() { return globalThis.__wbStationValue ?? "shop"; }
 export async function loadMyLobbyShopGenre() { return globalThis.__wbShopGenre ?? "farm"; }
+export async function loadMyWorldStationKinds() { return new Set(); }
 `);
 const economyRoute = await import(
   dataUrl(
@@ -411,7 +412,7 @@ export function checkDailyStock() { return null; }
 export function dailyPriceFor(item) { return item.price; }
 export function shopDayKeyOf() { return "test-day"; }
 `);
-const itemsOnlyUrl = bundleModule(["worldbox/items.ts"], ["itemById"]);
+const itemsOnlyUrl = bundleModule(["worldbox/items.ts"], ["itemById", "recipeById", "recipeKind"]);
 const tentStubUrl = dataUrl(`export const TENT_MAX_TIER = 2; export const TENT_TIERS = [{ w: 13, h: 10, price: 0 }, { w: 17, h: 13, price: 3000 }, { w: 22, h: 17, price: 10000 }];`);
 
 const profileRoute = await import(

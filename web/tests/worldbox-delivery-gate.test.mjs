@@ -105,16 +105,6 @@ const profileOnlineUrl = dataUrl(
     .replaceAll('"./profile"', JSON.stringify(profileUrl)),
 );
 const shopsUrl = dataUrl(transpile("worldbox/shops.ts").replaceAll('"./items"', JSON.stringify(itemsUrl)));
-const stationOnlineUrl = dataUrl(
-  transpile("worldbox/station-online.ts")
-    .replaceAll('"./lobby"', JSON.stringify(lobbyUrl))
-    .replaceAll('"./lobby-floors"', JSON.stringify(lobbyFloorsUrl))
-    .replaceAll('"./tent"', JSON.stringify(tentUrl))
-    .replaceAll('"./presence-online"', JSON.stringify(presenceOnlineUrl))
-    .replaceAll('"./save"', JSON.stringify(saveUrl))
-    .replaceAll('"./save-online"', JSON.stringify(saveOnlineUrl))
-    .replaceAll('"./profile-online"', JSON.stringify(profileOnlineUrl)),
-);
 const rolesUrl = dataUrl(transpile("worldbox/roles.ts").replaceAll('"./profile"', JSON.stringify(profileUrl)));
 const userLockUrl = dataUrl(transpile("worldbox/user-lock.ts"));
 const arenaUrl = dataUrl(transpile("worldbox/arena.ts"));
@@ -175,6 +165,18 @@ const tilesOnlineUrl = dataUrl(
   transpile("worldbox/tiles-online.ts")
     .replaceAll('"../bot-api"', JSON.stringify(botStubUrl))
     .replaceAll('"./tiles"', JSON.stringify(tilesUrl)),
+);
+const stationOnlineUrl = dataUrl(
+  transpile("worldbox/station-online.ts")
+    .replaceAll('"./lobby"', JSON.stringify(lobbyUrl))
+    .replaceAll('"./lobby-floors"', JSON.stringify(lobbyFloorsUrl))
+    .replaceAll('"./tent"', JSON.stringify(tentUrl))
+    .replaceAll('"./presence-online"', JSON.stringify(presenceOnlineUrl))
+    .replaceAll('"./save"', JSON.stringify(saveUrl))
+    .replaceAll('"./save-online"', JSON.stringify(saveOnlineUrl))
+    .replaceAll('"./tiles"', JSON.stringify(tilesUrl))
+    .replaceAll('"./tiles-online"', JSON.stringify(tilesOnlineUrl))
+    .replaceAll('"./profile-online"', JSON.stringify(profileOnlineUrl)),
 );
 const instancesUrl = dataUrl(
   transpile("worldbox/instances.ts")

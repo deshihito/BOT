@@ -81,6 +81,8 @@ test("レシピの参照がすべて実在し、合成品は売ると素材代�
       inputCost += input.price * n;
     }
     if (recipe.id === "bread") continue; // パンは利便性レシピ（小麦をまとめて食べやすくする）
+    // 精錬・織りの変換レシピも利便性レシピ（素材を中間材に変えるだけ。売却益でなく用途が価値）
+    if (recipe.kind === "smelt" || recipe.kind === "weave") continue;
     assert.ok(
       eco.sellPrice(output) * recipe.outputCount > inputCost,
       `${recipe.id}: sell=${eco.sellPrice(output)} cost=${inputCost}`,
@@ -293,7 +295,7 @@ test("クライアント配線: 経済パネルと API がつながっている"
 
 test("売買・合成・送金は施設の前でのみ開く（クライアントがステーションを渡し、パネルと API が制限する）", () => {
   const client = fs.readFileSync(path.join(rootDir, "app/games/worldbox/WorldBoxClient.tsx"), "utf8");
-  assert.match(client, /<WorldBoxEconomyPanel space=\{spaceUi\} station=\{stationUi\} genre=\{stationGenre\} onClose=\{\(\) => setShowEconomy\(false\)\} \/>/);
+  assert.match(client, /<WorldBoxEconomyPanel space=\{spaceUi\} station=\{stationUi\} genre=\{stationGenre\} worldStationKinds=\{worldStationKinds\} onClose=\{\(\) => setShowEconomy\(false\)\} \/>/);
   const panel = fs.readFileSync(path.join(rootDir, "app/games/worldbox/WorldBoxEconomyPanel.tsx"), "utf8");
   assert.match(panel, /space === "lobby"/);
   // タブは「ロビーにいる」だけでは出ない。対応する施設の前にいる時だけ
