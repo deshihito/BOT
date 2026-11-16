@@ -351,6 +351,18 @@ test("vitals: API ルートがサーバー検証つきで配線されている",
   assert.doesNotMatch(route, /worldbox_presence/);
 });
 
+test("vitals: 死亡・蘇生の移動先へプレゼンスとセーブをそろえる（B4）", () => {
+  const route = fs.readFileSync(path.join(rootDir, "app/api/worldbox/vitals/route.ts"), "utf8");
+  // 死亡（自死）と蘇生配送の両方で、移動先が新しい連続性の基準になる
+  assert.match(route, /movePresenceAndSave/);
+  assert.match(route, /movePresenceAndSave\(ownerKey, \{ space: "world", x: front\.x, y: front\.y \}, now, name\)/);
+  assert.match(route, /movePresenceAndSave\(ownerKey, \{ space: "world", x: point\.x, y: point\.y \}, now, name\)/);
+  // 配送の更新に失敗したら pendingTeleport/lastDeath を残して次回再送する
+  assert.match(route, /movePresenceAndSave\(ownerKey, teleport, now, session\.username/);
+  // 失敗時は died:false で返し（通常 sync の返却と合わせて 3 箇所）、次回 sync で再送される
+  assert.equal(route.match(/return NextResponse\.json\(\{ profile, died: false \}, \{ headers: NO_STORE \}\)/g)?.length, 3);
+});
+
 test("vitals: sync / damage / set_bed はユーザー単位ロック内で読み直す（B3）", () => {
   const route = fs.readFileSync(path.join(rootDir, "app/api/worldbox/vitals/route.ts"), "utf8");
   // ロック外のスナップショットで保存すると、並走する精算・被弾と

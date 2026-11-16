@@ -426,6 +426,15 @@ const presenceOnlineUrl = dataUrl(
     .replaceAll('"../bot-api"', JSON.stringify(botApiStubUrl))
     .replaceAll('"./presence"', JSON.stringify(presenceUrl)),
 );
+const saveUrl = dataUrl(
+  transpile("worldbox/save.ts")
+    .replaceAll('"./lobby"', JSON.stringify(lobbyUrl))
+    .replaceAll('"./tent"', JSON.stringify(tentUrl))
+    .replaceAll('"./mapgen"', JSON.stringify(mapgenUrl)),
+);
+const saveOnlineUrl = dataUrl(
+  transpile("worldbox/save-online.ts").replaceAll('"../bot-api"', JSON.stringify(botApiStubUrl)),
+);
 const nextServerStubUrl = dataUrl(`
 export class NextResponse {
   static json(body, init = {}) {
@@ -454,6 +463,8 @@ const presenceRoute = await import(
       .replaceAll('"@/lib/worldbox/tent"', JSON.stringify(tentUrl))
       .replaceAll('"@/lib/worldbox/presence-online"', JSON.stringify(presenceOnlineUrl))
       .replaceAll('"@/lib/worldbox/presence"', JSON.stringify(presenceUrl))
+      .replaceAll('"@/lib/worldbox/save"', JSON.stringify(saveUrl))
+      .replaceAll('"@/lib/worldbox/save-online"', JSON.stringify(saveOnlineUrl))
       .replaceAll('"@/lib/worldbox/metrics-online"', JSON.stringify(metricsOnlineStubUrl)),
   ),
 );

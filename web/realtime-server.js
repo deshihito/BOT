@@ -51,6 +51,8 @@ try {
 const room = core.createRoom();
 /** ws -> { pid, name, space, joined, lastMsgAt, alive } */
 const clients = new Map();
+/** bot-api の設定（未設定なら null = relay の kv 機能は無効）。 */
+const kvCfg = botkv.botKvConfig();
 
 function broadcast(space, exceptWs, obj) {
   const text = JSON.stringify(obj);
@@ -62,11 +64,94 @@ function broadcast(space, exceptWs, obj) {
   }
 }
 
+// ---- 移動連続性の外部基準（B4） ----
+// 部屋に前回が無い再接続後の初回ハートビートを照合する基準。bot_kv の
+// プレゼンス（ts 付きなら時刻基準）、無ければセーブ（ts 無しのため固定距離）。
+// 読み終わるまで受信ハートビートをためておき、未照合のまま通さない。
+
+/** プレゼンス値（JSON）→ { x, y, space, ts }。壊れていれば null。 */
+function parsePresenceBaseline(raw) {
+  if (typeof raw !== "string" || !raw) return null;
+  try {
+    const v = JSON.parse(raw);
+    if (!v || typeof v.x !== "number" || typeof v.y !== "number" || typeof v.ts !== "number") return null;
+    if (!Number.isFinite(v.x) || !Number.isFinite(v.y) || !Number.isFinite(v.ts)) return null;
+    return { x: v.x, y: v.y, space: typeof v.space === "string" ? v.space : "world", ts: v.ts };
+  } catch {
+    return null;
+  }
+}
+
+/** セーブ値（JSON）→ { x, y, space }（ts 無し）。壊れていれば null。 */
+function parseSaveBaseline(raw) {
+  if (typeof raw !== "string" || !raw) return null;
+  try {
+    const v = JSON.parse(raw);
+    if (!v || typeof v.x !== "number" || typeof v.y !== "number") return null;
+    if (!Number.isFinite(v.x) || !Number.isFinite(v.y)) return null;
+    return { x: v.x, y: v.y, space: typeof v.space === "string" ? v.space : "world" };
+  } catch {
+    return null;
+  }
+}
+
+/** bot_kv から外部基準を読む。読めなければ null（= 照合なしで受け入れる）。 */
+async function loadExternalBaseline(ownerKey) {
+  if (!kvCfg || !ownerKey) return null;
+  try {
+    const pres = parsePresenceBaseline(await botkv.kvGet(kvCfg, "worldbox_presence", ownerKey));
+    if (pres) return pres;
+    return parseSaveBaseline(await botkv.kvGet(kvCfg, "worldbox_save", ownerKey));
+  } catch {
+    return null;
+  }
+}
+
 if (wss) {
+  /** ハートビート1件の処理（中継・集約書き込み・配信）。却下された申告は
+   * 保存せず、送り主へ保管位置（jump）を返してそこへ戻させる。 */
+  const handleHeartbeat = (ws, info, msg, now) => {
+    const entry = core.acceptHeartbeat(room, info.pid, info.name, msg, now, info.baseline);
+    if (!entry) return;
+    if (entry.rejected) {
+      try {
+        ws.send(JSON.stringify({ t: "jump", x: entry.x, y: entry.y, space: entry.space }));
+      } catch { /* noop */ }
+      return;
+    }
+    info.lastEntry = entry;
+    writePresenceKv(info, entry, false);
+    const prevSpace = info.space;
+    info.space = entry.space;
+    if (prevSpace && prevSpace !== entry.space) {
+      broadcast(prevSpace, ws, { t: "bye", id: info.pid });
+    }
+    if (!info.joined) {
+      info.joined = true;
+      try {
+        ws.send(JSON.stringify({ t: "snap", now, players: core.snapshot(room, entry.space, info.pid, now) }));
+      } catch { /* noop */ }
+    }
+    broadcast(entry.space, ws, { t: "up", now, p: entry });
+  };
+
   wss.on("connection", (ws) => {
     const auth = ws._rtAuth;
-    const info = { pid: auth.pid, name: auth.name, ok: auth.ok ?? null, space: null, joined: false, lastMsgAt: 0, alive: true, lastEntry: null };
+    const info = { pid: auth.pid, name: auth.name, ok: auth.ok ?? null, space: null, joined: false, lastMsgAt: 0, alive: true, lastEntry: null, baseline: undefined, pendingHbs: [] };
     clients.set(ws, info);
+    // 移動連続性の外部基準（B4）: 接続時に bot_kv から1回だけ読む。
+    // 読み終わるまで受信ハートビートをため、解決後に受信時刻つきで順に処理する。
+    if (kvCfg && info.ok) {
+      loadExternalBaseline(info.ok).then((b) => {
+        // 解決前に切断されていたら、ためた分は捨てる
+        if (!clients.has(ws)) return;
+        info.baseline = b;
+        const queued = info.pendingHbs.splice(0);
+        for (const q of queued) handleHeartbeat(ws, info, q.msg, q.now);
+      });
+    } else {
+      info.baseline = null;
+    }
     // プレゼンス集約の合図（Phase 2）: 集約が有効で所有者キーがある
     // 接続にだけ送る。これを受けたクライアントは REST ハートビートを止める。
     if (aggState.on && info.ok) {
@@ -88,22 +173,12 @@ if (wss) {
         return;
       }
       if (!msg || msg.t !== "hb") return;
-      const entry = core.acceptHeartbeat(room, info.pid, info.name, msg, now);
-      if (!entry) return;
-      info.lastEntry = entry;
-      writePresenceKv(info, entry, false);
-      const prevSpace = info.space;
-      info.space = entry.space;
-      if (prevSpace && prevSpace !== entry.space) {
-        broadcast(prevSpace, ws, { t: "bye", id: info.pid });
+      // 外部基準が未解決ならためておき、解決後に受信時刻つきで処理する
+      if (info.baseline === undefined) {
+        info.pendingHbs.push({ msg, now });
+        return;
       }
-      if (!info.joined) {
-        info.joined = true;
-        try {
-          ws.send(JSON.stringify({ t: "snap", now, players: core.snapshot(room, entry.space, info.pid, now) }));
-        } catch { /* noop */ }
-      }
-      broadcast(entry.space, ws, { t: "up", now, p: entry });
+      handleHeartbeat(ws, info, msg, now);
     });
     const onGone = () => {
       if (!clients.delete(ws)) return;
@@ -163,7 +238,7 @@ if (wss) {
   // tiles/mobs/board/nations）を、relay が名前空間ごとに1回だけ読んで
   // 差分を配る形に集約する。bot-api 未設定なら watch は無効で、
   // クライアントは従来ポーリングのまま動く。
-  const kvCfg = botkv.botKvConfig();
+  // （kvCfg は接続時の外部基準読みにも使うため、ファイル冒頭で定義済み）
 
   // ---- プレゼンス集約書き込み（Phase 2） ----
   // WS で受けた位置を relay が bot_kv（worldbox_presence）へスロットル

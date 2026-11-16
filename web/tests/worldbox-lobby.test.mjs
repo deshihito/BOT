@@ -437,6 +437,15 @@ const presenceOnlineUrl = dataUrl(
     .replaceAll('"../bot-api"', JSON.stringify(botApiStubUrl))
     .replaceAll('"./presence"', JSON.stringify(presenceUrl)),
 );
+const saveUrl = dataUrl(
+  transpile("worldbox/save.ts")
+    .replaceAll('"./lobby"', JSON.stringify(lobbyModUrl))
+    .replaceAll('"./tent"', JSON.stringify(tentModUrl))
+    .replaceAll('"./mapgen"', JSON.stringify(mapgenUrl)),
+);
+const saveOnlineUrl = dataUrl(
+  transpile("worldbox/save-online.ts").replaceAll('"../bot-api"', JSON.stringify(botApiStubUrl)),
+);
 const boardUrl = dataUrl(transpile("worldbox/board.ts"));
 const boardOnlineUrl = dataUrl(
   transpile("worldbox/board-online.ts")
@@ -471,6 +480,8 @@ const presenceRoute = await import(
       .replaceAll('"@/lib/worldbox/tent"', JSON.stringify(tentModUrl))
       .replaceAll('"@/lib/worldbox/presence-online"', JSON.stringify(presenceOnlineUrl))
       .replaceAll('"@/lib/worldbox/presence"', JSON.stringify(presenceUrl))
+      .replaceAll('"@/lib/worldbox/save"', JSON.stringify(saveUrl))
+      .replaceAll('"@/lib/worldbox/save-online"', JSON.stringify(saveOnlineUrl))
       .replaceAll('"@/lib/worldbox/metrics-online"', JSON.stringify(metricsOnlineStubUrl)),
   ),
 );

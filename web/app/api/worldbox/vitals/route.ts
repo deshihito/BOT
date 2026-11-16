@@ -7,13 +7,13 @@ import { mobDistance, mobExistsAt, MOB_ATTACK_MAX_DISTANCE } from "@/lib/worldbo
 import { isProfileEnabled, loadProfile, storeProfile } from "@/lib/worldbox/profile-online";
 import { listPresence } from "@/lib/worldbox/presence-online";
 import { presenceIdFor } from "@/lib/worldbox/presence";
-import { parseSave } from "@/lib/worldbox/save";
-import { loadWorldBoxSave } from "@/lib/worldbox/save-online";
+import { parseSave, serializeSave } from "@/lib/worldbox/save";
+import { loadWorldBoxSave, storeWorldBoxSave } from "@/lib/worldbox/save-online";
 import { loadNationsState } from "@/lib/worldbox/nations-online";
 import { loadTileOverride } from "@/lib/worldbox/tiles-online";
 import { buildCaveLayer, buildDungeonFloor, makeInstanceSpace, parseInstanceSpace, weekKeyOf } from "@/lib/worldbox/instances";
 import { loadRuinsPersonal } from "@/lib/worldbox/instances-online";
-import { listPresenceWithOwners } from "@/lib/worldbox/presence-online";
+import { listPresenceWithOwners, putPresence } from "@/lib/worldbox/presence-online";
 import { addMasteryXp, BLADE_ATTACK_MULT, GUARD_AURA_REDUCTION } from "@/lib/worldbox/roles";
 import { playerAttack } from "@/lib/worldbox/arena";
 import { withUserLock } from "@/lib/worldbox/user-lock";
@@ -118,6 +118,12 @@ async function settleDeath(
     }
     const front = savedAtDeath?.worldReturn ?? { x: dungeonInst.entranceX + 0.5, y: dungeonInst.entranceY + 0.5 };
     if (!(await storeProfile(ownerKey, revived))) return errorResponse("store_failed", 503);
+    // リスポーン先が新しい連続性の基準になる。更新に失敗しても
+    // クライアントは応答で移動する（次回ハートビートで保管位置へ
+    // 戻される場合があるが、30秒のリセットで復旧する）。
+    if (!(await movePresenceAndSave(ownerKey, { space: "world", x: front.x, y: front.y }, now, name))) {
+      console.warn("[worldbox] vitals: respawn position update failed", ownerKey);
+    }
     return NextResponse.json(
       { profile: revived, died: true, dropped, respawn: { x: front.x, y: front.y, source: "entrance" } },
       { headers: NO_STORE },
@@ -128,6 +134,9 @@ async function settleDeath(
     revived, mark, { x: 0.5, y: 0.5 },
   );
   if (!(await storeProfile(ownerKey, revived))) return errorResponse("store_failed", 503);
+  if (!(await movePresenceAndSave(ownerKey, { space: "world", x: point.x, y: point.y }, now, name))) {
+    console.warn("[worldbox] vitals: respawn position update failed", ownerKey);
+  }
   return NextResponse.json(
     { profile: revived, died: true, dropped, respawn: { x: point.x, y: point.y, source } },
     { headers: NO_STORE },
@@ -163,6 +172,31 @@ async function settleVictimDeath(
   };
   if (!(await storeProfile(victimKey, notified))) return null;
   return { dropped };
+}
+
+/**
+ * リスポーン・蘇生の移動先へプレゼンスとセーブをそろえる（B4）。
+ * ワープと同じく、サーバー側の移動は両方を目的地へ更新する（移動先が
+ * 新しい連続性の基準になる）。worldReturn は従来の値を維持する。
+ * どちらかが失敗したら false を返し、呼び出し側が再送・再試行を決める。
+ */
+async function movePresenceAndSave(
+  ownerKey: string,
+  dest: { space: string; x: number; y: number },
+  now: number,
+  name: string,
+): Promise<boolean> {
+  const prev = parseSave(await loadWorldBoxSave(ownerKey));
+  const saved = await storeWorldBoxSave(
+    ownerKey,
+    serializeSave({ space: dest.space, x: dest.x, y: dest.y, worldReturn: prev?.worldReturn ?? null }),
+  );
+  if (!saved) return false;
+  return putPresence(
+    ownerKey,
+    { name: name.trim() || "プレイヤー", x: dest.x, y: dest.y, vx: 0, vy: 0, face: 1, space: dest.space },
+    now,
+  );
 }
 
 export async function POST(request: Request) {
@@ -220,6 +254,15 @@ export async function POST(request: Request) {
         // （モブ死と同じクライアント死亡フローに乗せる）。
         const death = profile.lastDeath;
         const teleport = profile.pendingTeleport;
+        // 移動先へプレゼンスとセーブをそろえてから配送する。更新に失敗
+        // したら配送せず、両方残して次回 sync で再送する（更新しないまま
+        // 配送すると、次回ハートビートが保管位置への戻しを食らう）。
+        if (teleport) {
+          if (!(await movePresenceAndSave(ownerKey, teleport, now, session.username ?? ""))) {
+            if (!(await storeProfile(ownerKey, profile))) return errorResponse("store_failed", 503);
+            return NextResponse.json({ profile, died: false }, { headers: NO_STORE });
+          }
+        }
         const cleared = { ...profile, pendingTeleport: null, lastDeath: null };
         if (!(await storeProfile(ownerKey, cleared))) return errorResponse("store_failed", 503);
         return NextResponse.json(
@@ -232,6 +275,11 @@ export async function POST(request: Request) {
       }
       if (profile.pendingTeleport) {
         const teleport = profile.pendingTeleport;
+        // 蘇生の移動先も同じく、更新してから配送する。失敗したら残して次回再送。
+        if (!(await movePresenceAndSave(ownerKey, teleport, now, session.username ?? ""))) {
+          if (!(await storeProfile(ownerKey, profile))) return errorResponse("store_failed", 503);
+          return NextResponse.json({ profile, died: false }, { headers: NO_STORE });
+        }
         const cleared = { ...profile, pendingTeleport: null };
         if (!(await storeProfile(ownerKey, cleared))) return errorResponse("store_failed", 503);
         return NextResponse.json({ profile: cleared, died: false, teleport }, { headers: NO_STORE });

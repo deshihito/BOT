@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { getRequestSession, publicOrigin, sessionOwnerKey } from "@/lib/auth";
 import { parseSave, serializeSave } from "@/lib/worldbox/save";
 import { MAX_SAVE_JSON_LENGTH, isOnlineSaveEnabled, loadWorldBoxSave, storeWorldBoxSave } from "@/lib/worldbox/save-online";
+import { loadMyPresence } from "@/lib/worldbox/presence-online";
+import { checkMovementContinuity, checkSaveFallbackContinuity } from "@/lib/worldbox/presence";
 import { pickRandomSpawn } from "@/lib/worldbox/spawn";
 
 export const runtime = "nodejs";
@@ -66,10 +68,36 @@ export async function PUT(request: Request) {
     return NextResponse.json({ error: "invalid_save" }, { status: 400, headers: NO_STORE });
   }
   // 壊れたデータを保存して続きが壊れるのを防ぐ（解釈できるセーブだけ通す）
-  if (!parseSave(save)) {
+  const parsed = parseSave(save);
+  if (!parsed) {
     return NextResponse.json({ error: "invalid_save" }, { status: 400, headers: NO_STORE });
   }
-  const stored = await storeWorldBoxSave(sessionOwnerKey(session), save);
+  // 移動連続性（B4）: セーブも申告位置なので、ハートビートと同じ規則で守る。
+  // 基準は新鮮なプレゼンス（時刻基準）。プレゼンスが古い/無いときは
+  // サーバー保存のセーブを固定距離で基準にする（初回作成・復帰時の
+  // findFreeNear のずれは 12 タイル以内に収まる）。これが無いと、
+  // プレゼンス消去→セーブ移転→ハートビートの順で即テレポートできてしまう。
+  // 空間が変われば受け入れる（入退室・階段・階層移動の正当な不連続）。
+  const ownerKey = sessionOwnerKey(session);
+  const now = Date.now();
+  const freshPresence = await loadMyPresence(ownerKey);
+  if (freshPresence) {
+    if (!checkMovementContinuity(freshPresence, parsed, now).ok) {
+      return NextResponse.json(
+        { error: "position_jump", x: freshPresence.x, y: freshPresence.y, space: freshPresence.space },
+        { status: 409, headers: NO_STORE },
+      );
+    }
+  } else {
+    const storedSave = parseSave(await loadWorldBoxSave(ownerKey));
+    if (storedSave && !checkSaveFallbackContinuity(storedSave, parsed).ok) {
+      return NextResponse.json(
+        { error: "position_jump", x: storedSave.x, y: storedSave.y, space: storedSave.space },
+        { status: 409, headers: NO_STORE },
+      );
+    }
+  }
+  const stored = await storeWorldBoxSave(ownerKey, save);
   if (!stored) {
     return NextResponse.json({ error: "save_failed" }, { status: 500, headers: NO_STORE });
   }
