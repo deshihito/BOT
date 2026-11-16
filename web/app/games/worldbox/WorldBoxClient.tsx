@@ -2113,6 +2113,8 @@ export default function WorldBoxClient() {
       behavior: MobBehaviorState; provokedUntil: number; lastSpeed: number;
     };
     const mobRenders = new Map<string, MobRender>();
+    /** HP バーを出す個体（自分が攻撃しようとした敵だけ。当てても外しても出す）。 */
+    const revealedMobs = new Set<string>();
     /** パターンの予兆マーカー（地面描画）と投射物・糸跡（見た目のみ、ダメージ経路は持たない）。 */
     type MobTelegraph = { pattern: MobPatternId; x: number; y: number; tx: number; ty: number; dirX: number; dirY: number; from: number; until: number; size: number };
     const mobTelegraphs: MobTelegraph[] = [];
@@ -2551,6 +2553,8 @@ export default function WorldBoxClient() {
         }
         const target = attackTarget(px, py, t.x, t.y, candidates);
         if (target) {
+          // 攻撃しようとした敵は、外しても HP バーを出す
+          revealedMobs.add(mobKeyFor(target.placed));
           if (nowMs - lastAttackAt >= 350) {
             lastAttackAt = nowMs;
             void attackMobRef.current(target.placed, { x: target.x, y: target.y });
@@ -2569,11 +2573,14 @@ export default function WorldBoxClient() {
         const cy = r ? Math.floor(r.wy) : placed.y;
         if (!mobOccupiesTile(placed.size, cx, cy, t.x, t.y)) continue;
         if (mobDistance(px, py, { x: cx, y: cy, size: placed.size }) > MOB_ATTACK_RANGE) {
+          // 届かなくても「攻撃しようとした」ので HP バーは出す
+          revealedMobs.add(key);
           setTileMsg(TILE_ERROR_LABEL.too_far);
           denyAtTile(t.x, t.y);
           return true;
         }
         // 向きをモブへ向けて即時に振る（HP と粒はサーバー応答で返す）
+        revealedMobs.add(key);
         player.face = cx + 0.5 >= player.x ? 1 : -1;
         const slot = invRef.current.hotbar[selSlotRef.current] ?? null;
         swing = { startedAt: performance.now(), itemId: slot?.id ?? null, face: player.face, whiff: false };
@@ -3964,8 +3971,8 @@ export default function WorldBoxClient() {
       }
 
       // ---- モブ: 配置は決定的、HP/死亡はサーバー状態、動きは見た目だけここで作る ----
-      const mobDrawQueue: { placed: PlacedMob; r: MobRender; hpFrac: number }[] = [];
-      const drawMob = (placed: PlacedMob, r: MobRender, hpFrac: number) => {
+      const mobDrawQueue: { placed: PlacedMob; r: MobRender; hpFrac: number; showHp: boolean }[] = [];
+      const drawMob = (placed: PlacedMob, r: MobRender, hpFrac: number, showHp: boolean) => {
         const def = mobById(placed.mobId);
         if (!def) return;
         const sizePx = TILE * Math.max(1, placed.size) * 0.94;
@@ -4054,16 +4061,18 @@ export default function WorldBoxClient() {
           }
         }
         ctx.restore();
-        // HP バー（傷ついた個体だけ）
-        if (hpFrac < 1) {
-          const bw = Math.max(26, w * 0.9);
+        // HP バー（自分が攻撃しようとした個体だけ。当てても外しても出す）
+        if (showHp) {
+          const bw = Math.min(180, Math.max(26, w * 0.9));
           const bh2 = 4;
-          const bxHp = cxp - bw / 2;
-          const byHp = by - 9;
+          const bxHp = Math.round(cxp - bw / 2);
+          const byHp = Math.round(by - 9);
           ctx.fillStyle = "rgba(12,14,12,0.55)";
           ctx.fillRect(bxHp - 1, byHp - 1, bw + 2, bh2 + 2);
+          ctx.fillStyle = "rgba(255,255,255,0.22)";
+          ctx.fillRect(bxHp, byHp, bw, bh2);
           ctx.fillStyle = hpFrac > 0.5 ? "#7ed957" : hpFrac > 0.25 ? "#f2c53c" : "#e2483a";
-          ctx.fillRect(bxHp, byHp, bw * Math.max(0, hpFrac), bh2);
+          ctx.fillRect(bxHp, byHp, Math.round(bw * Math.min(1, Math.max(0, hpFrac))), bh2);
         }
       };
       if (space === "world" || parseInstanceSpace(space)) {
@@ -4090,6 +4099,7 @@ export default function WorldBoxClient() {
                 : visibleMobs(MAP_SEED, vx0, vy0, vx1, vy1, isNight);
           const keys = new Set(mobCache.map((m) => mobKeyFor(m)));
           for (const k of [...mobRenders.keys()]) if (!keys.has(k)) mobRenders.delete(k);
+          for (const k of [...revealedMobs]) if (!keys.has(k)) revealedMobs.delete(k);
         }
         for (const placed of mobCache) {
           const def = mobById(placed.mobId);
@@ -4099,6 +4109,7 @@ export default function WorldBoxClient() {
           if (!hpNow.alive) {
             // 死んでいる間は見た目状態を捨てる（復活時はアンカーでポップして出る）
             mobRenders.delete(key);
+            revealedMobs.delete(key);
             continue;
           }
           let r = mobRenders.get(key);
@@ -4173,7 +4184,7 @@ export default function WorldBoxClient() {
           }
           r.kx *= Math.exp(-9 * dt);
           r.ky *= Math.exp(-9 * dt);
-          mobDrawQueue.push({ placed, r, hpFrac: hpNow.hp / defFor(def).hp });
+          mobDrawQueue.push({ placed, r, hpFrac: hpNow.hp / defFor(def).hp, showHp: revealedMobs.has(key) });
         }
         // React 側（攻撃・技の申告）へモブの現在タイルを渡すスナップショット。
         // サーバーはアンカーしか知らないため、見た目の現在位置を申告して
@@ -4357,7 +4368,7 @@ export default function WorldBoxClient() {
         }
       }
       for (const q of mobDrawQueue) {
-        drawList.push({ y: q.r.wy, draw: () => drawMob(q.placed, q.r, q.hpFrac) });
+        drawList.push({ y: q.r.wy, draw: () => drawMob(q.placed, q.r, q.hpFrac, q.showHp) });
       }
       drawList.push({
         y: player.y + PLAYER_RADIUS,
