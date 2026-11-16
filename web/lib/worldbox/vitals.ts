@@ -226,25 +226,30 @@ export function stepVitals(
   if (alertSec > 0 && hungerBefore > 50) {
     hp = Math.min(maxHpFor(profile), hp + ALERT_REGEN_PER_SEC * alertSec);
   }
-  // 毒: 生存区間の tick 回数ぶん削り、期限切れは掃除する。
+  // 毒: 生存区間の長さに比例して削り、期限切れは掃除する。
   // 毒の有効窓は [until - POISON_DURATION_MS, until] で、vitalAt は起点に
   // しない。罠は精算なしで毒を付けるため vitalAt が古いままになることが
   // あり、vitalAt 起点だと古さぶん tick を過剰に数えて即死する（S5）。
+  // ダメージは tick 単位で切り捨てず比例計算にする: 精算窓ごとに
+  // floor すると3秒未満の端数が毎回消え、頻繁な精算で毒が無力化する。
+  // 窓は vitalAt 起点で連続するので、比例ぶんの合計は一括精算と一致する。
   let status: StatusEffect[] = [];
   for (const e of statusOf(profile)) {
     if (e.kind === "poison") {
       const poisonStart = Math.max(profile.vitalAt, e.until - POISON_DURATION_MS);
       const activeMs = Math.max(0, Math.min(e.until, now) - poisonStart);
-      const ticks = Math.floor(activeMs / POISON_TICK_MS);
-      hp -= POISON_DAMAGE * ticks;
+      hp -= POISON_DAMAGE * (activeMs / POISON_TICK_MS);
       if (e.until > now) status.push(e);
     } else {
       status.push(e);
     }
   }
-  hp = Math.max(0, Math.floor(hp));
+  // HP・空腹は端数を保持する（profile.ts の clampVital と同じ理由）。
+  // 精算ごとに整数化すると、放置の空腹減少（15秒で約0.1）が毎回 -1 に
+  // 化けて約25分で空になり、活動倍率の差も消える。
+  hp = Math.round(Math.max(0, hp) * 1000) / 1000;
   return {
-    profile: { ...profile, hunger: Math.floor(hunger), hp, status, vitalAt: now },
+    profile: { ...profile, hunger: Math.round(hunger * 1000) / 1000, hp, status, vitalAt: now },
     died: hp <= 0,
   };
 }

@@ -80,7 +80,7 @@ function sanitizeHeartbeat(raw) {
     role: typeof raw.role === "string" && ROLE_IDS.includes(raw.role) ? raw.role : "free",
     rank: typeof raw.rank === "number" && Number.isFinite(raw.rank) ? Math.max(1, Math.min(5, Math.floor(raw.rank))) : 1,
     party: typeof raw.party === "string" ? raw.party.slice(0, 48) : "",
-    // 座り申告も REST の sanitizeHeartbeat と同じく通す（bot_kv 互換のため）
+    // 座り（sit）も presence.ts と同じ規則で通す（落とすと他者に座り姿勢が伝わらず、bot_kv 集約書き込みでも欠落する）。
     ...(raw.sit === true ? { sit: true } : {}),
   };
 }

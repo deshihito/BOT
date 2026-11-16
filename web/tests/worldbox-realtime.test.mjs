@@ -58,6 +58,11 @@ test("relay: 役職・ランク・パーティを通し、インスタンスの�
   assert.equal(e.role, "guard");
   assert.equal(e.rank, 5);
   assert.equal(e.party, "pk-1");
+  // 座り（sit）も通す。落とすと他者に座り姿勢が永遠に伝わらない。
+  const sitting = core.acceptHeartbeat(room, "p9", "P", hb(2, 2, { sit: true }), NOW);
+  assert.equal(sitting.sit, true);
+  const standing = core.acceptHeartbeat(room, "p8", "P", hb(2, 2, { sit: "yes" }), NOW);
+  assert.equal(standing.sit, undefined);
   const bad = core.acceptHeartbeat(room, "p2", "P", hb(1, 1, { role: "nope", rank: "x" }), NOW);
   assert.equal(bad.role, "free");
   assert.equal(bad.rank, 1);
