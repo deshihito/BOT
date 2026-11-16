@@ -14,10 +14,11 @@ import {
   countItem, ENHANCE_BASE_COST, ENHANCE_MATERIALS, ENHANCE_MAX_LEVEL, moveSlot, removeItem,
   swapSlots, type PlayerProfile,
 } from "@/lib/worldbox/profile";
-import { itemById } from "@/lib/worldbox/items";
+import { itemById, recipeById, recipeKind } from "@/lib/worldbox/items";
 import { findPresenceOwnerKey, isPresenceEnabled } from "@/lib/worldbox/presence-online";
 import { checkBuyGenre, checkBuySold, checkDailyStock, dailyPriceFor, shopDayKeyOf } from "@/lib/worldbox/shops";
-import { loadMyLobbyShopGenre, loadMyLobbyStation } from "@/lib/worldbox/station-online";
+import { loadMyLobbyShopGenre, loadMyLobbyStation, loadMyWorldStationKinds } from "@/lib/worldbox/station-online";
+import type { StationKind } from "@/lib/worldbox/tiles";
 import { isProfileEnabled, loadProfile, storeProfile } from "@/lib/worldbox/profile-online";
 import { withUserLock } from "@/lib/worldbox/user-lock";
 
@@ -203,6 +204,14 @@ async function handlePost(request: Request, session: AuthedSession) {
     return (await loadMyLobbyStation(ownerKey)) === station ? null : statusError(error, 409);
   };
 
+  /** 作業場所の検証: ロビーの鍛冶屋は全種別可。ワールドでは設置した
+   * 作業台・鍛冶台・金床・かまど・焚き火・調理鍋・織り機の近くでも可。 */
+  const workGate = async (kind: StationKind) => {
+    if ((await loadMyLobbyStation(ownerKey)) === "smith") return null;
+    const kinds = await loadMyWorldStationKinds(ownerKey);
+    return kinds.has(kind) ? null : statusError("not_at_workbench", 409);
+  };
+
   /** 売買の場所制約: 店（shop）か鍛冶屋（smith）の前にいなければ 409。 */
   const shopGate = async () => {
     const station = await loadMyLobbyStation(ownerKey);
@@ -300,7 +309,7 @@ async function handlePost(request: Request, session: AuthedSession) {
       // 道具強化: 鍛冶の前で、素材とコインを払って道具のレベルを上げる（最大3）。
       const gate = coinGate();
       if ("response" in gate) return gate.response;
-      const place = await stationGate("smith", "not_at_workbench");
+      const place = await workGate("enhance");
       if (place) return place;
       const def = itemById(data.itemId as string);
       if (!def || !def.tool) return errorResponse("unknown_item");
@@ -325,7 +334,10 @@ async function handlePost(request: Request, session: AuthedSession) {
       );
     }
     case "craft": {
-      const place = await stationGate("smith", "not_at_workbench");
+      // 種別ごとに場所が違う: 合成=作業台/鍛冶台、精錬=かまど、調理=焚き火/調理鍋、
+      // 織り=織り機（いずれもロビーの鍛冶屋でも可）
+      const recipe = recipeById(data.recipeId);
+      const place = await workGate(recipe ? recipeKind(recipe) : "craft");
       if (place) return place;
       // 発見の記録: 完全一致で作れたレシピだけを本人の図鑑へ足す（重複なし）
       const withDiscovery = (profile: PlayerProfile, recipeId: string): PlayerProfile => {
