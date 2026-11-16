@@ -6,6 +6,7 @@
 import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { PIN_POSITIONS } from "@/lib/games/bowling";
+import { fitFovForAspect } from "@/lib/three-kit/stage";
 import { sfxGutter, sfxPinHit, sfxPinsDown, sfxRollStart } from "@/lib/sfx";
 
 export interface BowlingSceneApi {
@@ -624,6 +625,8 @@ export default function BowlingScene3D({ standing, interactive, onResult, onBusy
       if (renderer.domElement.width !== Math.floor(w * renderer.getPixelRatio()) || renderer.domElement.height !== Math.floor(hgt * renderer.getPixelRatio())) {
         renderer.setSize(w, hgt, false);
         camera.aspect = w / hgt;
+        // 縦長画面では縦画角を広げ、レーン左右の見切れを防ぐ（three-kit 共通の画角フィット）。
+        camera.fov = fitFovForAspect(55, w / hgt);
         camera.updateProjectionMatrix();
       }
       renderer.render(scene, camera);

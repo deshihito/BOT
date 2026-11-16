@@ -104,6 +104,9 @@ test("panel: パネルはゲームページへ遷移せず、ゲーム本体を�
   assert.match(src, /<Client \/>/, "ゲーム本体を描画していない");
   assert.doesNotMatch(src, /location\.assign|location\.href|router\.push/, "ゲームページへ遷移してしまう");
   assert.doesNotMatch(src, /\/api\/online\//, "パネルが独自に online API を叩いている（本体の OnlineShell に任せる）");
+  // 本体は明色テーマ前提の部品（文字色を継承に頼る）: 筐体の枠はダーク（#fff）でも、
+  // 画面（body）はサイト標準の文字色・背景に切り替えて白文字化を防ぐ
+  assert.match(src, /background: "var\(--bg\)", color: "var\(--text\)"/, "筐体画面が明色の面＋標準文字色になっていない（白文字で読めなくなる）");
 });
 
 test("panel: 全タイトルのゲーム本体が遅延読み込みで登録され、実ファイルが存在する", () => {
