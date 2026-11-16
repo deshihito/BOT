@@ -1,15 +1,16 @@
 import { NextResponse } from "next/server";
 import { getRequestSession, publicOrigin, sessionOwnerKey } from "@/lib/auth";
 import { buildEconomyOp } from "@/lib/worldbox/economy-bridge";
-import { enqueueEconomyOp, isEconomyEnabled, loadMyEconomyOps, readUserBalance, waitForOpDone } from "@/lib/worldbox/economy-bridge-online";
+import { isEconomyEnabled, loadMyEconomyOps, readUserBalance, submitEconomyOp, waitForOpDone } from "@/lib/worldbox/economy-bridge-online";
 import { loadMyLobbyStation } from "@/lib/worldbox/station-online";
 
 export const runtime = "nodejs";
 
 // AGO WORLD BOX の経済ブリッジ（Web 側の入口）。
-// Web は残高を直接触らない: 読み取りは users への select のみ、
-// 送金は「オプ」を bot_kv（worldbox_economy）へ積むだけで、実際の
-// 残高移動は Bot 本体のワーカーが transfer_coins で適用する。
+// 残高の読み取りは users への select。送金は「オプ」を
+// submitEconomyOp へ渡し、bot-api の transfer_coins RPC でその場で
+// 適用する（直接適用できない環境では bot_kv のキュー経由で Bot
+// 本体のワーカーが適用する）。
 // GET: { balance, ops }（Discord ログイン中のみ。ops は自分の直近20件）
 // POST { action: "transfer", toDiscordId, amount }: 送金オプを積む。
 //   場所制約: ロビーの銀行の前にいること（サーバー側でプレゼンス検証）。
@@ -83,14 +84,15 @@ export async function POST(request: Request) {
   if ((await loadMyLobbyStation(sessionOwnerKey(session))) !== "bank") {
     return errorResponse("not_at_bank", 409);
   }
-  const stored = await enqueueEconomyOp(op);
-  if (!stored) return errorResponse("economy_failed", 500);
-  // 適用を server-side wait でその場で待ち、終端していれば最終残高も
-  // 同一レスポンスで返す。予算を超えて pending のままなら従来どおり
-  // 積んだオプを返し、状態はクライアントの次の取得で反映される。
+  // 提出は直接適用が正（submitEconomyOp）: 送金は transfer_coins RPC
+  // でその場で終端する。直接適用できずキューへ寄せた（pending）とき
+  // だけ従来どおり server-side wait で待ち、終端していれば最終残高も
+  // 同一レスポンスで返す。pending のままなら積んだオプを返し、状態は
+  // クライアントの次の取得で反映される。
   const userKey = sessionOwnerKey(session);
-  const settled = await waitForOpDone(userKey, op.id);
-  const finalOp = settled ?? op;
+  const submitted = await submitEconomyOp(op);
+  if (submitted.state === "unavailable") return errorResponse("economy_failed", 500);
+  const finalOp = submitted.state === "pending" ? (await waitForOpDone(userKey, op.id)) ?? submitted.op : submitted.op;
   if (finalOp.status !== "pending") {
     const balance = await readUserBalance(session.id);
     return NextResponse.json(
