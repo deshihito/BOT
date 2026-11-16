@@ -2,7 +2,9 @@
 // HP・空腹・毒・死亡・リスポーンの規則はここに集約し、保存は呼び出し側
 // （API ルート）が profile（bot_kv worldbox_profiles）に対して行う。
 // 状態そのものは PlayerProfile の hp / hunger / status / vitalAt 等に載る。
-// - 空腹は時間で減り（満腹から空まで約20分）、0 が続くと HP が減る
+// - 空腹は時間で減る（放置では満腹から空まで約4時間。移動・ダッシュでは
+//   少し速くなる。活動クラスはサーバー側が位置変化の平均速度から判定する）、
+//   0 が続くと HP が減る
 // - 毒は一定間隔で HP を削り、時間経過か解毒で消える
 // - モブの接触ダメージはサーバー側が配置と距離を検証してからここで適用する
 // - 死亡時は道具（tool）を落とさず、それ以外を半分落とす
@@ -15,8 +17,55 @@ import {
 } from "./profile";
 
 
-/** 空腹の減少（/秒）。満腹 100 → 0 まで約20分。 */
-export const HUNGER_DRAIN_PER_SEC = 100 / 1200;
+/** 空腹の活動クラス（サーバー側が位置変化の平均速度から判定する）。 */
+export type HungerActivity = "idle" | "move" | "dash";
+/** 放置中の空腹の減少（/秒）。満腹 100 → 0 まで約4時間。 */
+export const HUNGER_DRAIN_IDLE_PER_SEC = 100 / 14400;
+/** 移動中の空腹の減少倍率（対 放置）。 */
+export const HUNGER_MOVE_MULT = 1.6;
+/** ダッシュ中の空腹の減少倍率（対 放置）。 */
+export const HUNGER_DASH_MULT = 2.5;
+
+/** 活動クラスの空腹の減少（/秒）。 */
+export function hungerDrainPerSec(activity: HungerActivity): number {
+  if (activity === "dash") return HUNGER_DRAIN_IDLE_PER_SEC * HUNGER_DASH_MULT;
+  if (activity === "move") return HUNGER_DRAIN_IDLE_PER_SEC * HUNGER_MOVE_MULT;
+  return HUNGER_DRAIN_IDLE_PER_SEC;
+}
+
+/**
+ * 活動判定に使う平均速度の上限（タイル/秒）。歩行 4.4 / 泳ぎ 3.0 /
+ * ダッシュ泳 5.4 / ダッシュ 7.0 が根拠で、テレポート等の跳びは
+ * この速度で頭打ちにして過大評価しない。
+ */
+export const ACTIVITY_SPEED_CAP = 7;
+/** この平均速度未満は放置（idle）。 */
+export const ACTIVITY_IDLE_MAX_SPEED = 0.3;
+/** この平均速度以上はダッシュ（dash）。未満は移動（move）。 */
+export const ACTIVITY_DASH_MIN_SPEED = 5.6;
+
+/** 平均速度（タイル/秒）から活動クラスを決める。 */
+export function classifyActivity(avgSpeed: number): HungerActivity {
+  if (!Number.isFinite(avgSpeed)) return "idle";
+  const s = Math.min(Math.max(0, avgSpeed), ACTIVITY_SPEED_CAP);
+  if (s < ACTIVITY_IDLE_MAX_SPEED) return "idle";
+  if (s < ACTIVITY_DASH_MIN_SPEED) return "move";
+  return "dash";
+}
+
+/**
+ * 精算窓の活動クラス: 前回精算位置と現在位置の平均速度で決める。
+ * 前回位置が無い・空間が変わった・現在位置が不明・窓が無い場合は idle
+ * （空間が変わった窓は移動として数えない）。
+ */
+export function activityForWindow(
+  prev: { x: number; y: number; space: string } | null,
+  cur: { x: number; y: number; space: string } | null,
+  elapsedSec: number,
+): HungerActivity {
+  if (!prev || !cur || prev.space !== cur.space || !(elapsedSec > 0)) return "idle";
+  return classifyActivity(Math.hypot(cur.x - prev.x, cur.y - prev.y) / elapsedSec);
+}
 /** 飢え（空腹0）で HP が減る量（/秒）。 */
 export const STARVE_HP_PER_SEC = 0.5;
 /** 毒のダメージ（/tick）。 */
@@ -98,26 +147,78 @@ function buffActiveSec(profile: PlayerProfile, kind: "warm" | "alert", now: numb
   return Math.max(0, Math.min(e.until, now) - start) / 1000;
 }
 
+/**
+ * バフが精算窓 [vitalAt, windowEnd] と重なる区間（窓起点からの秒）。
+ * 重なりが無ければ null。windowEnd は精算キャップ後の窓の終端。
+ */
+function buffWindowSec(
+  profile: PlayerProfile,
+  kind: "warm" | "alert",
+  windowEnd: number,
+): { startSec: number; endSec: number } | null {
+  const e = statusOf(profile).find((x) => x.kind === kind);
+  if (!e) return null;
+  const start = Math.max(profile.vitalAt, e.until - BUFF_DURATION_MS[kind]);
+  const end = Math.min(e.until, windowEnd);
+  if (end <= start) return null;
+  return { startSec: (start - profile.vitalAt) / 1000, endSec: (end - profile.vitalAt) / 1000 };
+}
+
+/**
+ * 空腹 amount が実効レートで尽きるまでの秒数。実効レートは活動クラスの
+ * レートで、warm 区間だけ WARM_HUNGER_MULT 倍になる（区間ごとに積算する）。
+ */
+function secondsUntilHungerEmpty(
+  amount: number,
+  rate: number,
+  warmWin: { startSec: number; endSec: number } | null,
+  elapsedSec: number,
+): number {
+  const segments = warmWin
+    ? [
+        { from: 0, to: warmWin.startSec, mult: 1 },
+        { from: warmWin.startSec, to: warmWin.endSec, mult: WARM_HUNGER_MULT },
+        { from: warmWin.endSec, to: elapsedSec, mult: 1 },
+      ]
+    : [{ from: 0, to: elapsedSec, mult: 1 }];
+  let remaining = amount;
+  for (const seg of segments) {
+    const segRate = rate * seg.mult;
+    const segDrain = segRate * (seg.to - seg.from);
+    if (remaining > segDrain) {
+      remaining -= segDrain;
+      continue;
+    }
+    return seg.from + remaining / segRate;
+  }
+  return elapsedSec;
+}
+
 export function stepVitals(
   profile: PlayerProfile,
   now: number,
+  activity: HungerActivity = "idle",
 ): { profile: PlayerProfile; died: boolean } {
   if (profile.vitalAt <= 0 || now <= profile.vitalAt) {
     return { profile: { ...profile, vitalAt: now }, died: profile.hp <= 0 };
   }
   const elapsedMs = Math.min(now - profile.vitalAt, VITAL_SETTLE_CAP_MS);
   const elapsedSec = elapsedMs / 1000;
+  const windowEnd = profile.vitalAt + elapsedMs;
   let hunger = profile.hunger;
   let hp = profile.hp;
-  // 空腹の減少と、空腹0の間の飢えダメージ
-  // warm（温かい食事）の間は空腹の減りが緩やかになる
+  // 空腹の減少と、空腹0の間の飢えダメージ。減少レートは活動クラスで変わり、
+  // warm（温かい食事）の間はさらに緩やかになる。飢えの開始時刻は、窓内の
+  // 実効レート（活動 × warm）で空腹が尽きる時刻として求める。
   const hungerBefore = hunger;
-  const warmSec = buffActiveSec(profile, "warm", now);
+  const rate = hungerDrainPerSec(activity);
+  const warmWin = buffWindowSec(profile, "warm", windowEnd);
+  const warmSec = warmWin ? warmWin.endSec - warmWin.startSec : 0;
   const drainSec = elapsedSec - warmSec + warmSec * WARM_HUNGER_MULT;
-  hunger = Math.max(0, hunger - HUNGER_DRAIN_PER_SEC * drainSec);
-  const starveSec = hungerBefore <= 0
-    ? elapsedSec
-    : Math.max(0, elapsedSec - hungerBefore / HUNGER_DRAIN_PER_SEC);
+  hunger = Math.max(0, hunger - rate * drainSec);
+  let starveSec = 0;
+  if (hungerBefore <= 0) starveSec = elapsedSec;
+  else if (hunger <= 0) starveSec = elapsedSec - secondsUntilHungerEmpty(hungerBefore, rate, warmWin, elapsedSec);
   hp -= STARVE_HP_PER_SEC * starveSec;
   // alert（はちみつティー等）の間、満腹なら少しずつ回復する
   const alertSec = buffActiveSec(profile, "alert", now);
@@ -236,6 +337,10 @@ export function applyDeath(
       hunger: Math.max(next.hunger, RESPAWN_HUNGER),
       status: [],
       vitalAt: now,
+      // リスポーンはテレポートなので前回精算位置は捨てる（次の窓は idle から）
+      vitalX: undefined,
+      vitalY: undefined,
+      vitalSpace: undefined,
       lastDamageAt: now,
       deaths: (typeof next.deaths === "number" ? next.deaths : 0) + 1,
     },

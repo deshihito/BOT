@@ -52,6 +52,8 @@ const v = loadBundle(
     "HP_MAX", "HUNGER_MAX", "stepVitals", "applyMobDamage", "applyPoison", "curePoison",
     "isPoisoned", "consumeEffect", "applyDeath", "resolveRespawnPoint", "setBedRespawn",
     "applyRest", "eatItem", "POISON_DURATION_MS", "MOB_DAMAGE_COOLDOWN_MS",
+    "applyBuff", "classifyActivity", "activityForWindow", "hungerDrainPerSec",
+    "HUNGER_DRAIN_IDLE_PER_SEC", "HUNGER_MOVE_MULT", "HUNGER_DASH_MULT",
   ],
 );
 
@@ -80,28 +82,107 @@ test("vitals: HP・毒・リスポーン点が往復する", () => {
   assert.equal(back.deaths, 2);
 });
 
-test("vitals: 空腹は時間で減り、0 が続くと HP が減る", () => {
+test("vitals: 空腹は活動で減り方が変わり、0 が続くと HP が減る", () => {
   const p = { ...fresh(), vitalAt: T0 };
-  const after10min = v.stepVitals(p, T0 + 600_000);
-  assert.equal(after10min.profile.hunger, 50);
-  assert.equal(after10min.profile.hp, v.HP_MAX);
-  assert.equal(after10min.died, false);
-  // 満腹→空腹まで20分、その後10分飢えると HP は 0.5/秒 × 600秒で全損…ではなくキャップ内では 300 → 死亡
-  const starved = v.stepVitals(p, T0 + 1800_000);
+  // 放置（既定）: 10分でもわずかしか減らない（満腹→空まで約4時間）
+  const idle10 = v.stepVitals(p, T0 + 600_000);
+  assert.equal(idle10.profile.hunger, 95);
+  assert.equal(idle10.profile.hp, v.HP_MAX);
+  assert.equal(idle10.died, false);
+  // 移動は放置の1.6倍、ダッシュは2.5倍の速さで減る
+  assert.equal(v.stepVitals(p, T0 + 600_000, "move").profile.hunger, 93);
+  assert.equal(v.stepVitals(p, T0 + 600_000, "dash").profile.hunger, 89);
+  // 空腹が窓の途中で尽きると、残り時間ぶん飢えダメージが入る
+  const almost = { ...fresh(), vitalAt: T0, hunger: 10 };
+  const starved = v.stepVitals(almost, T0 + 1800_000, "dash");
   assert.equal(starved.profile.hunger, 0);
   assert.equal(starved.died, true);
+});
+
+test("vitals: 放置レートは満腹→空まで約4時間、活動倍率は 1.6 / 2.5", () => {
+  assert.ok(Math.abs(v.hungerDrainPerSec("idle") * 14400 - 100) < 1e-9);
+  assert.ok(Math.abs(v.hungerDrainPerSec("move") / v.hungerDrainPerSec("idle") - v.HUNGER_MOVE_MULT) < 1e-9);
+  assert.ok(Math.abs(v.hungerDrainPerSec("dash") / v.hungerDrainPerSec("idle") - v.HUNGER_DASH_MULT) < 1e-9);
+  assert.equal(v.HUNGER_DRAIN_IDLE_PER_SEC, 100 / 14400);
+  // 30分精算を7回つなげると（=3.5時間放置）空腹は残りわずかで HP は無事
+  let p = { ...fresh(), vitalAt: T0, hunger: 100 };
+  for (let i = 1; i <= 7; i++) p = v.stepVitals(p, T0 + i * 1800_000).profile;
+  assert.equal(p.hunger, 9); // 1回 12.5 ずつ減り、切り捨てで少しずつ目減りする
+  assert.equal(p.hp, v.HP_MAX);
+});
+
+test("vitals: warm は活動レートにも掛かる", () => {
+  const base = { ...fresh(), vitalAt: T0, hunger: 100 };
+  const warmed = v.applyBuff(base, "warm", T0);
+  // ダッシュ10分: 素では 89、warm 中は実効レート ×0.6 で 93
+  assert.equal(v.stepVitals(base, T0 + 600_000, "dash").profile.hunger, 89);
+  assert.equal(v.stepVitals(warmed, T0 + 600_000, "dash").profile.hunger, 93);
+});
+
+test("vitals: 飢えの開始は warm 込みの実効レートで決まる", () => {
+  const base = { ...fresh(), vitalAt: T0, hunger: 3, hp: 100 };
+  // ダッシュ: 空腹 3 は 3 / (100/14400×2.5) = 172.8秒で尽きる
+  // → 315秒の窓で飢えは 142.2秒、HP は 0.5 × 142.2 = 71.1 減る
+  const plain = v.stepVitals(base, T0 + 315_000, "dash");
+  assert.equal(plain.profile.hunger, 0);
+  assert.equal(plain.profile.hp, 28);
+  // warm が窓全体を覆うと実効レート ×0.6 で 288秒に尽き、飢えは 27秒だけ
+  const warmed = v.applyBuff(base, "warm", T0);
+  const withWarm = v.stepVitals(warmed, T0 + 315_000, "dash");
+  assert.equal(withWarm.profile.hunger, 0);
+  assert.equal(withWarm.profile.hp, 86); // 100 - 0.5 × 27 = 86.5 → floor
+});
+
+test("vitals: 活動クラスは平均速度で決まる（上限で頭打ち）", () => {
+  assert.equal(v.classifyActivity(0), "idle");
+  assert.equal(v.classifyActivity(0.29), "idle");
+  assert.equal(v.classifyActivity(0.3), "move");
+  assert.equal(v.classifyActivity(4.4), "move"); // 歩行
+  assert.equal(v.classifyActivity(5.4), "move"); // ダッシュ泳
+  assert.equal(v.classifyActivity(5.6), "dash");
+  assert.equal(v.classifyActivity(7), "dash"); // ダッシュ
+  assert.equal(v.classifyActivity(10000), "dash"); // テレポート等の跳びは上限で頭打ち
+  assert.equal(v.classifyActivity(Number.NaN), "idle");
+});
+
+test("vitals: activityForWindow は位置の無い窓・空間変更を idle にする", () => {
+  const prev = { x: 0, y: 0, space: "world" };
+  assert.equal(v.activityForWindow(null, { x: 0, y: 0, space: "world" }, 15), "idle");
+  assert.equal(v.activityForWindow(prev, null, 15), "idle");
+  assert.equal(v.activityForWindow(prev, { x: 0, y: 0, space: "lobby" }, 15), "idle");
+  assert.equal(v.activityForWindow(prev, { x: 1, y: 0, space: "world" }, 15), "idle"); // 0.07/秒
+  assert.equal(v.activityForWindow(prev, { x: 66, y: 0, space: "world" }, 15), "move"); // 4.4/秒=歩行
+  assert.equal(v.activityForWindow(prev, { x: 105, y: 0, space: "world" }, 15), "dash"); // 7/秒=ダッシュ
+  assert.equal(v.activityForWindow(prev, { x: 105, y: 0, space: "world" }, 0), "idle");
+});
+
+test("vitals: 前回精算位置（vitalX/vitalY/vitalSpace）が往復し、旧データでは未設定", () => {
+  const p = { ...fresh(), vitalX: 12.5, vitalY: -30.25, vitalSpace: "world" };
+  const back = v.parseProfile(v.serializeProfile(p));
+  assert.equal(back.vitalX, 12.5);
+  assert.equal(back.vitalY, -30.25);
+  assert.equal(back.vitalSpace, "world");
+  const old = v.parseProfile(JSON.stringify({ coins: 5, hunger: 40 }));
+  assert.equal(old.vitalX, undefined);
+  assert.equal(old.vitalY, undefined);
+  assert.equal(old.vitalSpace, undefined);
+  // 位置が無いプロフィールは serialize しても位置キーを持たない
+  assert.equal("vitalX" in JSON.parse(v.serializeProfile(fresh())), false);
+  // 死亡すると前回精算位置は捨てられる（リスポーン=テレポートを活動に数えない）
+  const died = v.applyDeath(p, T0);
+  assert.equal(died.profile.vitalX, undefined);
+  assert.equal(died.profile.vitalSpace, undefined);
 });
 
 test("vitals: 精算は30分で頭打ち（長期離脱で飢え死にしない）", () => {
   const p = { ...fresh(), hunger: 100, hp: 100, vitalAt: T0 };
   const after = v.stepVitals(p, T0 + 24 * 3600_000);
-  // 30分精算: 空腹は 20分で 0、残り10分の飢えで HP -300 → それでも死亡はする
-  // （キャップは「数日分を一気に引かない」ためのもので、30分放置は死亡圏内）
+  // 30分ぶんだけ精算する: 放置レートで 1800秒 × 100/14400 = 12.5 減るだけ
+  assert.equal(after.profile.hunger, 87);
   assert.equal(after.profile.vitalAt, T0 + 24 * 3600_000);
-  const half = v.stepVitals(p, T0 + 1500_000); // 25分: 空腹0到達は20分、飢え5分で -150 → 死亡
-  assert.equal(half.died, true);
-  const safe = v.stepVitals(p, T0 + 900_000); // 15分: 空腹 25、HP 無事
-  assert.equal(safe.profile.hunger, 25);
+  assert.equal(after.died, false);
+  const safe = v.stepVitals(p, T0 + 900_000); // 15分: 空腹 93、HP 無事
+  assert.equal(safe.profile.hunger, 93);
   assert.equal(safe.died, false);
 });
 
@@ -237,6 +318,10 @@ test("vitals: API ルートがサーバー検証つきで配線されている",
   assert.match(route, /applyDeath/);
   assert.match(route, /resolveRespawnPoint/);
   assert.match(route, /set_bed/);
+  // 空腹の活動クラスはサーバー側で位置から判定し、精算位置を profile に残す
+  assert.match(route, /activityForWindow/);
+  assert.match(route, /stepVitals\(current, now, activity\)/);
+  assert.match(route, /vitalX: cur\.x/);
   // REST ハートビートには触らない
   assert.doesNotMatch(route, /worldbox_presence/);
 });
@@ -249,6 +334,9 @@ test("vitals: クライアントが HP バー・接触ダメージ・定期精�
   assert.match(client, /action: "set_bed"/);
   assert.match(client, /HP_MAX/);
   assert.doesNotMatch(client, /プレイヤー HP は未実装/);
+  // 定期精算は現在位置と空間を送る（活動判定はサーバー側）
+  assert.match(client, /px: playerPosRef\.current\.x, py: playerPosRef\.current\.y/);
+  assert.match(client, /space: spaceUiRef\.current/);
 });
 
 test("vitals: 蘇生のテレポートは死亡した空間へ戻す（S5）", () => {
