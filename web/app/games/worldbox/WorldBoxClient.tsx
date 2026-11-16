@@ -37,6 +37,7 @@ import {
 } from "@/lib/worldbox/roles";
 import { clockOffsetEstimate, type PresenceEntry } from "@/lib/worldbox/presence";
 import { createPollGuard, type PollGuard } from "@/lib/poll-guard";
+import { isWsHealthy, presencePollDue } from "@/lib/worldbox/realtime-poll";
 import {
   STAMINA_MAX, canDash, createStamina, createTapTracker, isStickDash, registerKeyTap, rescueStamina,
   staminaGaugeVisible, stepStamina, type StaminaState, type StaminaUse, type TapTracker,
@@ -2300,6 +2301,10 @@ export default function WorldBoxClient() {
     let rtRetryAt = 0;
     let rtBackoffMs = 1000;
     let rtReconnectTimer: number | undefined;
+    /** WS で最後にメッセージを受けた時刻（生存判定とポーリング間引き用）。 */
+    let lastWsMsgAt = 0;
+    /** プレゼンス REST ポーリングの最終実行時刻（間引き判定用）。 */
+    let lastPresencePollAt = 0;
     // 初回接続と再接続の区別（再接続だけ薄い復帰パルスを出す）。
     let rtEverConnected = false;
     /** WS 経由のハートビート送信（中継は REST と同じ整形規則で受ける）。 */
@@ -2327,6 +2332,7 @@ export default function WorldBoxClient() {
         rtSocket = ws;
         ws.onopen = () => {
           rtBackoffMs = 1000;
+          lastWsMsgAt = Date.now();
           // 再接続の復帰演出: 薄いパルスだけ（暗転しない・入力は止めない）。
           // ワープ遷移中はそちらを優先して上書きしない。
           if (rtEverConnected && transitionStart < 0) {
@@ -2340,6 +2346,7 @@ export default function WorldBoxClient() {
         };
         ws.onmessage = (ev) => {
           const arrivedAt = Date.now();
+          lastWsMsgAt = arrivedAt;
           let msg: { t?: string; now?: number; p?: PresenceEntry; players?: PresenceEntry[]; id?: string };
           try {
             msg = JSON.parse(String(ev.data));
@@ -2400,7 +2407,8 @@ export default function WorldBoxClient() {
     // プレゼンスポーリングのガード（S6）: 1s 間隔で重ねて走らせず、古い
     // レスポンスで他者のゴースト復活・欠落の二重カウントを起こさない。
     const presenceGuard = createPollGuard();
-    const pollOthers = async () => {
+    /** ダンジョン入口の近接判定（ローカル計算のみ。1秒 tick で常時回す）。 */
+    const checkNearDungeonEntrance = () => {
       // ダンジョン入口の近接（パーティパネル表示用）
       if (space === "world") {
         const ptx = Math.floor(player.x);
@@ -2423,8 +2431,11 @@ export default function WorldBoxClient() {
         nearDungeonShown = false;
         setNearDungeonEntrance(false);
       }
+    };
+    const pollOthers = async () => {
       const ticket = presenceGuard.begin();
       if (ticket === null) return;
+      lastPresencePollAt = Date.now();
       const before = Date.now();
       try {
         const res = await fetch(`/api/worldbox/presence?space=${space}`, { headers: { Accept: "application/json" } });
@@ -2492,7 +2503,22 @@ export default function WorldBoxClient() {
       sendWsHeartbeat();
     };
     const heartbeatTimer = window.setInterval(heartbeatTick, 250);
-    const pollTimer = window.setInterval(pollOthers, 1000);
+    // プレゼンスポーリングの間引き（Phase 0）: WS 中継が健全な間は他者の
+    // 出現/移動/退室が push で届くため、REST 取得は 15 秒のセーフティに
+    // 落とす（WS だけでは拾えない = 中継に繋がっていない相手の回収用）。
+    // 切断・無応答なら従来の 1 秒に即戻る。入口近接の判定はローカル計算
+    // だけなので 1 秒 tick で常時回す。欠落カウントは取得ごとの回数の
+    // まま（セーフティ中は掃除が最大 2×15 秒まで遅れるが、その間も
+    // WS の bye/prune と鮮度切れが退室を担う）。
+    const pollTick = () => {
+      checkNearDungeonEntrance();
+      const nowMs = Date.now();
+      const healthy = isWsHealthy(rtSocket?.readyState === WebSocket.OPEN, lastWsMsgAt, nowMs);
+      if (presencePollDue({ now: nowMs, lastPollAt: lastPresencePollAt, wsHealthy: healthy })) {
+        void pollOthers();
+      }
+    };
+    const pollTimer = window.setInterval(pollTick, 1000);
     pollOthers();
 
     // ---- 入力 ----
