@@ -3,7 +3,7 @@
 // - 筐体はラウンジのカーペットの床の上にあり重ならず、固体で blocked に載る
 // - 南側の前列（y=10）に立て、入口から届く。列の隙間も歩行可（北踊り場への動線を塞がない）
 // - 筐体スプライトは 64x64 RGBA の PNG として存在し、textures.ts に登録済み
-// - station は付けない（筐体パネル・ルーム起動の配線は L4）
+// - station "arcade" とゲーム ID が付く（L4 で配線済み）
 // - 第1弾以外のアーケード筐体は 2F 南弧の第2弾6台だけ（3F の14台は cabinets-2 で検証）
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -131,9 +131,10 @@ test("cabinets: スプライト PNG が 64x64 RGBA で存在し、textures.ts �
   }
 });
 
-test("cabinets: 筐体に station は付いていない（L4 の配線対象）", () => {
+test("cabinets: 筐体に station arcade とゲーム ID が付いている（L4）", () => {
   for (const o of cabinets()) {
-    assert.equal(o.station, undefined, `${o.sprite} に station が付いている（L4 で配線する）`);
+    assert.equal(o.station, "arcade", `${o.sprite} に station arcade が付いていない`);
+    assert.equal(o.arcade, o.sprite.slice("arcade_".length), `${o.sprite} のゲーム ID がスプライト名と一致しない`);
   }
 });
 
