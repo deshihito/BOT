@@ -12,6 +12,10 @@ AGO WORLD BOX（web/app/games/worldbox）に関わる作業をする Muse は、
 
 ## 確定した決定（覆す場合はユーザー確認が必須）
 
+### リポジトリ上の扱い（2026-11-16、ユーザー決定）
+- WORLD BOX は**別リポジトリへ分離する可能性が高い**。そのため Bot 本体のジャンル軸と並ぶ **1ジャンル**として扱い、境界を保つ（詳細は `docs/ARCHITECTURE.md` の「WORLD BOX は1ジャンルとして扱う」）。
+- 境界の要点: 構成要素は `web/lib/worldbox/` + `web/app/games/worldbox` + `web/app/api/worldbox` + `web/realtime/` + Python 側 `core/support/worldbox/` と `core/general/circulation/worldbox_*.py`。外への依存は共通基盤（auth / bot-api 等）のみに寄せ、個別ゲームのロジックへの依存を増やさない。外から WORLD BOX 内部への import はしない（2026-11-16 実測で Web 側 0 件）。
+
 ### 世界と移動
 - 見下ろし型。マップはチャンク式（座標＋固定シードの純関数生成）で実質無制限。北に雪原バイオーム。初回スポーンはランダムな陸地。所属国のマークへファストトラベル可。
 - 同時接続プレゼンスあり（空間: world / lobby で分離）。他プレイヤーは向き反転＋補間移動で描く（瞬間移動させない）。
