@@ -7,6 +7,8 @@ import {
 import {
   appendChatMessage, enqueueChatOutbox, isChatEnabled, loadChatMessages, loadUnionChatSettings,
 } from "@/lib/worldbox/chat-online";
+import { resolveLinkedChannelId } from "@/lib/worldbox/discord-directory";
+import { loadDiscordDirectory } from "@/lib/worldbox/discord-directory-online";
 import { listPresence } from "@/lib/worldbox/presence-online";
 import { presenceIdFor, sanitizePresenceSpace } from "@/lib/worldbox/presence";
 import { loadNationsState } from "@/lib/worldbox/nations-online";
@@ -105,14 +107,17 @@ export async function POST(request: Request) {
     1,
     now,
   );
-  // ユニオンは Discord 連携チャンネルへも流す（Bot ワーカーが投稿する）
+  // ユニオンは Discord 連携チャンネルへも流す（Bot ワーカーが投稿する）。
+  // 宛先は連携 mode と Bot 公開ディレクトリから解決する（ID 手入力は無い）。
   if (fields.channel === "union" && membership) {
     const settings = await loadUnionChatSettings(membership.nationId);
-    if (settings.chatChannelId) {
+    const directory = settings.mode === "global" ? await loadDiscordDirectory(membership.nationId) : null;
+    const channelId = resolveLinkedChannelId(settings, directory);
+    if (channelId) {
       await enqueueChatOutbox({
         id: message.id,
         guildId: membership.nationId,
-        channelId: settings.chatChannelId,
+        channelId,
         name: message.name,
         text: message.text,
         at: now,

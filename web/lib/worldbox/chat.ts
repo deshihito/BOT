@@ -35,7 +35,45 @@ export type ChatMessage = {
   space: string;
   /** ユニオンチャンネルの宛先ギルド ID。 */
   guildId?: string;
+  /** Discord 側の投稿を取り込んだもの（Bot リレー）。 */
+  source?: "discord";
 };
+
+/** ユニオン掲示の Discord 連携モード。 */
+export type UnionChatMode = "global" | "channel" | "none";
+
+export type UnionChatSettings = {
+  mode: UnionChatMode;
+  /** mode = "channel" のときの専用チャンネル ID。 */
+  channelId: string | null;
+  updatedAt: number;
+};
+
+const CHANNEL_ID_RE = /^\d{17,20}$/;
+
+/**
+ * 連携設定を解釈する。旧形式 { chatChannelId } は mode "channel"
+ * （空なら "none"）として移行読込する。
+ */
+export function parseUnionChatSettings(raw: unknown): UnionChatSettings {
+  const fallback: UnionChatSettings = { mode: "none", channelId: null, updatedAt: 0 };
+  if (!raw || typeof raw !== "object") return fallback;
+  const v = raw as Record<string, unknown>;
+  const updatedAt = typeof v.updatedAt === "number" && Number.isFinite(v.updatedAt) ? v.updatedAt : 0;
+  if (v.mode === "global" || v.mode === "none") {
+    return { mode: v.mode, channelId: null, updatedAt };
+  }
+  if (v.mode === "channel") {
+    return typeof v.channelId === "string" && CHANNEL_ID_RE.test(v.channelId)
+      ? { mode: "channel", channelId: v.channelId, updatedAt }
+      : fallback;
+  }
+  // 旧形式: chatChannelId の手入力
+  if (typeof v.chatChannelId === "string" && CHANNEL_ID_RE.test(v.chatChannelId)) {
+    return { mode: "channel", channelId: v.chatChannelId, updatedAt };
+  }
+  return fallback;
+}
 
 export function isChatChannel(raw: unknown): raw is ChatChannel {
   return raw === "proximity" || raw === "global" || raw === "union";
@@ -74,6 +112,7 @@ export function parseChatMessage(raw: unknown): ChatMessage | null {
     y: num(v.y),
     space: typeof v.space === "string" ? v.space.slice(0, 64) : "world",
     guildId: typeof v.guildId === "string" ? v.guildId.slice(0, 32) : undefined,
+    source: v.source === "discord" ? "discord" : undefined,
   };
 }
 

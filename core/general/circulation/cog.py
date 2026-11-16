@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import asyncio
 import io
+import json
 import logging
 import random
 from datetime import datetime
@@ -40,6 +41,7 @@ from core.general.user_names import cached_display_name
 from core.game.gacha import gacha as gacha_core
 from core.general.circulation import economy_pool as economy_core
 from core.general.circulation import worldbox_chat as worldbox_chat_core
+from core.general.circulation import worldbox_discord as worldbox_discord_core
 from core.general.circulation import worldbox_economy as worldbox_economy_core
 from core.support.storage import KVStore
 from core.general.items import items as items_core
@@ -444,6 +446,16 @@ class CirculationCog(commands.Cog):
             kv=KVStore(worldbox_chat_core.NAMESPACE),
             channel_sender=self._send_worldbox_chat,
         )
+        # AGO WORLD BOX の Discord 連携: チャンネルディレクトリの公開と
+        # 連携チャンネル投稿のユニオン掲示への取り込み（受信リレー）
+        self.worldbox_discord = worldbox_discord_core.WorldBoxDiscordWorker(
+            directory_kv=KVStore(worldbox_discord_core.DIRECTORY_NAMESPACE),
+            nations_kv=KVStore(worldbox_discord_core.NATIONS_NAMESPACE),
+            settings_kv=KVStore(worldbox_discord_core.UNION_SETTINGS_NAMESPACE),
+            board_kv=KVStore(worldbox_discord_core.UNION_BOARD_NAMESPACE),
+            guild_channels_provider=self._worldbox_guild_channels,
+            global_channel_ids_provider=self._worldbox_global_channel_ids,
+        )
 
     def _item_store(self) -> items_core.ItemStore:
         """ItemStore は ItemsCog のものを共有する（二重化すると所持が割れる）。"""
@@ -461,6 +473,8 @@ class CirculationCog(commands.Cog):
             self.worldbox_economy_loop.start()
         if not self.worldbox_chat_loop.is_running():
             self.worldbox_chat_loop.start()
+        if not self.worldbox_discord_loop.is_running():
+            self.worldbox_discord_loop.start()
 
     async def cog_unload(self) -> None:
         if self.flush_loop.is_running():
@@ -469,6 +483,8 @@ class CirculationCog(commands.Cog):
             self.worldbox_economy_loop.cancel()
         if self.worldbox_chat_loop.is_running():
             self.worldbox_chat_loop.cancel()
+        if self.worldbox_discord_loop.is_running():
+            self.worldbox_discord_loop.cancel()
         self.mining_store.flush()
         self.lottery_store.flush()
         self.steal_store.flush()
@@ -527,6 +543,65 @@ class CirculationCog(commands.Cog):
     @worldbox_chat_loop.before_loop
     async def _before_worldbox_chat_loop(self) -> None:
         await self.bot.wait_until_ready()
+
+    def _worldbox_guild_channels(self) -> list[tuple[str, list[dict]]]:
+        """全ギルドについて、Bot が閲覧・送信できるテキストチャンネルを返す。"""
+        result: list[tuple[str, list[dict]]] = []
+        for guild in self.bot.guilds:
+            me = guild.me
+            if me is None:
+                continue
+            channels: list[dict] = []
+            for channel in guild.text_channels:
+                try:
+                    perms = channel.permissions_for(me)
+                except Exception:
+                    continue
+                if perms.view_channel and perms.send_messages:
+                    channels.append({"id": str(channel.id), "name": channel.name})
+            result.append((str(guild.id), channels))
+        return result
+
+    def _worldbox_global_channel_ids(self) -> set[str]:
+        """グローバルチャットの連携チャンネル ID 集合（文字列）。"""
+        cog = self.bot.get_cog("GlobalChatCog")
+        active = getattr(cog, "active_channels", None) if cog is not None else None
+        if active:
+            return {str(cid) for cid in active}
+        try:
+            with open("global_channels.json", encoding="utf-8") as f:
+                return {str(cid) for cid in json.load(f)}
+        except Exception:
+            return set()
+
+    @tasks.loop(seconds=worldbox_discord_core.DIRECTORY_INTERVAL_SECONDS)
+    async def worldbox_discord_loop(self) -> None:
+        # 失敗は publish_directory_once の中で吸収される（警告ログのみ）
+        await self.worldbox_discord.publish_directory_once()
+
+    @worldbox_discord_loop.before_loop
+    async def _before_worldbox_discord_loop(self) -> None:
+        await self.bot.wait_until_ready()
+
+    @commands.Cog.listener()
+    async def on_message(self, message: discord.Message) -> None:
+        # WORLD BOX 受信リレー: 連携チャンネルへの直接投稿をユニオン掲示へ。
+        # Bot 自身・webhook・リレー文面はワーカー側で弾く。
+        if message.guild is None:
+            return
+        try:
+            await self.worldbox_discord.handle_message({
+                "guild_id": str(message.guild.id),
+                "channel_id": str(message.channel.id),
+                "message_id": str(message.id),
+                "author_name": message.author.display_name,
+                "author_is_bot": bool(message.author.bot),
+                "is_webhook": message.webhook_id is not None,
+                "content": message.content or "",
+                "at_ms": int(message.created_at.timestamp() * 1000),
+            })
+        except Exception:
+            logger.exception("worldbox discord: 受信リレーで予期しない例外")
 
     # ------------------------------------------------------------------ 共通
     def _wallet(self):
