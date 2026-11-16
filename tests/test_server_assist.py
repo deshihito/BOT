@@ -177,7 +177,7 @@ class ServerAssistPanelTest(unittest.IsolatedAsyncioTestCase):
             # 25件以下・1ページに収まる（ページング前提は廃止）。
             self.assertLessEqual(len(items), 25, genre)
         self.assertEqual(len(SUPPORT_ACTIONS_BY_GENRE["automation"]), 22)
-        self.assertEqual(len(SUPPORT_ACTIONS_BY_GENRE["notices"]), 14)
+        self.assertEqual(len(SUPPORT_ACTIONS_BY_GENRE["notices"]), 15)
         # 旧ハブ値の権限エントリは互換分岐（案内のみ）のために残る。
         self.assertEqual(SupportCog.SUPPORT_REQUIRED_PERMISSIONS["server_assist"], "manage_guild")
 

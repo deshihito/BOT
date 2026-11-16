@@ -109,6 +109,7 @@ SUPPORT_ACTIONS = [
     app_commands.Choice(name="言語設定", value="language"),
     app_commands.Choice(name="グローバルチャット", value="globalchat"),
     app_commands.Choice(name="グローバルチャット モデレーション", value="globalchat_mod"),
+    app_commands.Choice(name="WORLD BOX連携", value="worldbox_link"),
     app_commands.Choice(name="Auto react設定", value="auto_react"),
     # SNS 再編: 旧 sns_notify は正リストから外し、プラットフォーム別入口
     # （sns ジャンル）に置き換える。旧 value は dispatch 互換で従来パネルを開く。
@@ -235,6 +236,7 @@ SUPPORT_ACTIONS_BY_GENRE = {
     "notices": _support_actions(
         "binjou", "binjou_custom", "auto_react", "levelup_notify", "levelup_card_theme",
         "voice_trigger", "quest_notify", "quest_manual", "earthquake", "news_notify", "language", "globalchat", "globalchat_mod",
+        "worldbox_link",
         "vc_auto_start",
     ),
     # 導線最適化 U2: 1件ジャンルだった "rta"（即抜けRTA設定）を吸収し、
