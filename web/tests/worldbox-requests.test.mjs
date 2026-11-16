@@ -250,6 +250,29 @@ export async function tableSelect(table, columns, filters, limit) {
   if (!users.has(id)) return [];
   return [{ balance: users.get(id) }];
 }
+export class BotApiError extends Error { constructor(status, code) { super("api " + status); this.status = status; this.code = code; } }
+export async function tableInsert(table, values) {
+  if (table === "users") { if (!users.has(values.user_id)) users.set(values.user_id, values.balance); return; }
+  if (table === "transaction_history") { (globalThis.__wbHistory ??= []).push(values); return; }
+  throw new Error("unexpected table " + table);
+}
+export async function tableUpdate(table, values, filters) {
+  if (table !== "users") throw new Error("unexpected table " + table);
+  const id = filters.find((f) => f.column === "user_id")?.value;
+  const bal = filters.find((f) => f.column === "balance")?.value;
+  if (!users.has(id)) return [];
+  if (bal !== undefined && users.get(id) !== bal) return [];
+  users.set(id, values.balance);
+  return [{ user_id: id, balance: values.balance }];
+}
+export async function rpc(name, params) {
+  if (name !== "transfer_coins") throw new Error("unexpected rpc " + name);
+  const senderBalance = users.get(params.p_sender_id) ?? 0;
+  if (senderBalance < params.p_amount) throw new BotApiError(400, "P0001");
+  users.set(params.p_sender_id, senderBalance - params.p_amount);
+  users.set(params.p_receiver_id, (users.has(params.p_receiver_id) ? users.get(params.p_receiver_id) : params.p_new_user_balance) + params.p_amount);
+  return users.get(params.p_sender_id);
+}
 `);
 const apiSubdomainUrl = dataUrl(transpile("subdomain.ts"));
 const apiHeadersStubUrl = dataUrl("export async function cookies() { throw new Error('tests do not use cookies()'); }");
