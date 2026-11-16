@@ -611,6 +611,9 @@ export default function WorldBoxClient() {
   }, [embedded, gate]);
   // 空間（ワールド / ロビー）とハンバーガーメニュー、ステーション、掲示板
   const [spaceUi, setSpaceUi] = useState<SaveSpace>("world");
+  /** spaceUi の ref ミラー（定期精算のタイマーから現在空間を読むため）。 */
+  const spaceUiRef = useRef<SaveSpace>("world");
+  spaceUiRef.current = spaceUi;
   const [menuOpen, setMenuOpen] = useState(false);
   const [stationUi, setStationUi] = useState<LobbyStation | null>(null);
   /** いま接している店の品目ジャンル（鍛冶屋は "smith"）。経済パネルの品目選別に使う。 */
@@ -1456,9 +1459,15 @@ export default function WorldBoxClient() {
     };
   }, [invProfile?.role, spaceUi]);
 
-  // バイタルの定期精算（空腹・毒・飢えはサーバー側の時刻で進む）
+  // バイタルの定期精算（空腹・毒・飢えはサーバー側の時刻で進む）。
+  // 現在位置と空間も送り、サーバーが前回精算位置との平均速度から
+  // 空腹の活動クラス（放置/移動/ダッシュ）を判定する。
   useEffect(() => {
-    const timer = window.setInterval(() => void postVitals({ action: "sync" }), 15000);
+    const timer = window.setInterval(() => void postVitals({
+      action: "sync",
+      px: playerPosRef.current.x, py: playerPosRef.current.y,
+      space: spaceUiRef.current,
+    }), 15000);
     return () => window.clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
