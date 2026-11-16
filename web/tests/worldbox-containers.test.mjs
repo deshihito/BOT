@@ -565,6 +565,14 @@ test("API(tiles): 中身がある樽は掘れず、空にすると回収でき�
   }));
   assert.equal(take.status, 200);
 
+  // HP制: 樽（既定 HP10）は素手6で2ヒット。1ヒットでは残り、状態も消えない
+  const hit = await tilesRoute.POST(apiRequest(URL_T, "POST", cookie, {
+    action: "mine_block", x: GRASS.x, y: GRASS.y,
+  }));
+  assert.equal(hit.status, 200);
+  assert.deepEqual((await hit.json()).gained, {});
+  assert.ok(globalThis.__wbContainerTiles.has(KEY), "1ヒットではブロックは残る");
+
   const dug = await tilesRoute.POST(apiRequest(URL_T, "POST", cookie, {
     action: "mine_block", x: GRASS.x, y: GRASS.y,
   }));
@@ -574,7 +582,7 @@ test("API(tiles): 中身がある樽は掘れず、空にすると回収でき�
   assert.equal(globalThis.__wbContainers.has(CKEY), false, "コンテナ状態も消える");
 });
 
-test("API(tiles, S4): 同じ樽への並行 mine_block は1件だけ成功する（二重掘りの回帰防止）", async () => {
+test("API(tiles, S4): 同じ樽への並行 mine_block でも回収は1回だけ（二重掘りの回帰防止）", async () => {
   resetStores();
   seedProfile(MY_KEY, profWith([slot("barrel", 1), null, null, null, null], emptySlots(10)));
   const cookie = sessionCookie(ME, "owner");
@@ -582,17 +590,16 @@ test("API(tiles, S4): 同じ樽への並行 mine_block は1件だけ成功する
     action: "place_block", x: GRASS.x, y: GRASS.y, itemId: "barrel",
   }));
   assert.equal(placed.status, 200);
-  // 二重タップ/リトライを再現して同時に掘る
-  const [first, second] = await Promise.all([
+  // 二重タップ/リトライを再現して同時に掘る（HP制: 樽 HP10 を素手6で
+  // 3連打すると ヒット→破壊→no_block になり、回収は1回だけ起きる）
+  const responses = await Promise.all([0, 1, 2].map(() =>
     tilesRoute.POST(apiRequest(URL_T, "POST", cookie, { action: "mine_block", x: GRASS.x, y: GRASS.y })),
-    tilesRoute.POST(apiRequest(URL_T, "POST", cookie, { action: "mine_block", x: GRASS.x, y: GRASS.y })),
-  ]);
-  const statuses = [first.status, second.status].sort();
-  assert.deepEqual(statuses, [200, 409], "片方だけが掘れて、もう片方は失敗する");
-  const okRes = first.status === 200 ? first : second;
-  assert.deepEqual((await okRes.json()).gained, { barrel: 1 });
-  const badRes = first.status === 200 ? second : first;
-  assert.equal((await badRes.json()).error, "no_block", "掘られた後のブロックは無い");
+  ));
+  const bodies = [];
+  for (const res of responses) bodies.push({ status: res.status, body: await res.json() });
+  assert.deepEqual(bodies.map((b) => b.status).sort(), [200, 200, 409], "ヒットと破壊が1回ずつ、残りは失敗する");
+  assert.equal(bodies.filter((b) => b.body.gained?.barrel === 1).length, 1, "回収は1回だけ");
+  assert.equal(bodies.find((b) => b.status === 409).body.error, "no_block", "掘られた後のブロックは無い");
 });
 
 // ---------- クライアント配線 ----------
