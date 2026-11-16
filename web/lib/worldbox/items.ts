@@ -28,6 +28,8 @@ export type ItemDef = {
   curePoison?: boolean;
   /** 食べると付く持続効果（warm=空腹が減りにくい / alert=満腹時に少しずつ回復）。 */
   buff?: { kind: "warm" | "alert"; minutes: number };
+  /** 食べた/飲んだ後に手元へ戻る容器のアイテム ID（水入りバケツ→バケツ）。 */
+  containerReturn?: string;
   /** 道具の種類（tool のみ）。 */
   tool?: ToolKind;
   /** 道具の素材段位 1=木 2=石 3=鉄（tool のみ）。 */
@@ -57,6 +59,7 @@ export const ITEMS: readonly ItemDef[] = [
   { id: "bread", name: "パン", desc: "軽くつまむ", category: "food", price: 100, hunger: 20 },
   { id: "onigiri", name: "おにぎり", desc: "手軽な携行食", category: "food", price: 150, hunger: 30 },
   { id: "energy_drink", name: "エナジードリンク", desc: "すばやく回復", category: "food", price: 250, hunger: 15 },
+  { id: "water_bucket", name: "水入りバケツ", desc: "井戸で汲んだ水。飲むとバケツに戻る", category: "food", price: 100, hunger: 10, containerReturn: "bucket" },
   { id: "meal", name: "定食", desc: "しっかり食べる", category: "food", price: 300, hunger: 55, heal: 8 },
   { id: "cake", name: "ケーキ", desc: "甘いごほうび", category: "food", price: 400, hunger: 45 },
   { id: "bento", name: "幕の内弁当", desc: "品数たっぷり", category: "food", price: 450, hunger: 80 },
@@ -499,7 +502,7 @@ export const ITEM_ICON_IDS: readonly string[] = [
   "miso_soup", "tofu", "fruit_salad", "roasted_sweet_potato", "pepper_stirfry",
   "eggplant_miso", "cotton_candy", "caramel", "jam", "dried_fruit",
   "tomato_soup", "melon_bread", "deluxe_meal", "fishing_rod", "bow",
-  "arrow", "bucket", "compass", "map_item", "gold_key", "explorer_compass",
+  "arrow", "bucket", "water_bucket", "compass", "map_item", "gold_key", "explorer_compass",
   "bomb", "dragon_charm", "ghost_lantern", "spider_silk", "turtle_shield",
   "chest_box", "market_stall", "flag_red", "flag_blue", "fountain",
   "stairs", "scepter", "tiara", "dragon_egg", "star_crown",

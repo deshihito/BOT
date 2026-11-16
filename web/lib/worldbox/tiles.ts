@@ -122,6 +122,10 @@ export type TileOverride = {
   deco?: string;
   /** 門（wooden_gate）の開閉状態。true は開いている（通過できる）。 */
   gateOpen?: boolean;
+  /** 看板（sign_board）に書かれたテキスト。所有者だけが編集できる。 */
+  signText?: string;
+  /** 棚（item_shelf）に展示中のアイテム ID。 */
+  display?: string;
   /** 最後に手を入れた人（作物の所有者）の不透明 ID。 */
   ownerId: string;
   /** この上書きが失効する時刻（木の再生）。過ぎたら地形どおりに戻る。 */
@@ -179,8 +183,8 @@ export type TileView = {
   farmland: boolean;
   stump: boolean;
   crop: { cropId: string; stage: 0 | 1 | 2; ready: boolean } | null;
-  /** 設置されたブロック（自分のものかどうか・残り HP 割合・門の開閉つき）。 */
-  block: { itemId: string; mine: boolean; hpFrac: number; gateOpen?: boolean } | null;
+  /** 設置されたブロック（自分のものかどうか・残り HP 割合・門の開閉・看板・展示つき）。 */
+  block: { itemId: string; mine: boolean; hpFrac: number; gateOpen?: boolean; signText?: string; display?: string } | null;
   /** 自分の作物・作業かどうか。 */
   mine: boolean;
 };
@@ -212,6 +216,8 @@ export function tileView(
           mine: selfId !== null && active.block.ownerId === selfId,
           hpFrac: blockHpFraction(active.block),
           ...(active.gateOpen !== undefined ? { gateOpen: active.gateOpen } : {}),
+          ...(active.signText ? { signText: active.signText } : {}),
+          ...(active.display ? { display: active.display } : {}),
         }
       : null,
     mine: selfId !== null && active !== null && active.ownerId === selfId,
@@ -226,7 +232,8 @@ export function hasTool(profile: PlayerProfile, kind: ToolKind): boolean {
 
 export type TileActionKind =
   | "chop" | "mine" | "till" | "plant" | "harvest"
-  | "place_block" | "mine_block" | "plant_flower" | "remove_flower" | "toggle_gate";
+  | "place_block" | "mine_block" | "plant_flower" | "remove_flower" | "toggle_gate"
+  | "set_sign" | "set_display" | "clear_display" | "draw_water";
 
 export type TileActionResult =
   | {
@@ -550,6 +557,8 @@ export function applyMineBlock(
   const rest: TileOverride = { ...active, ownerId: selfId };
   delete rest.block;
   delete rest.deco; // 植えた花は鉢ごと失われる
+  delete rest.signText; // 看板の文字も板ごと失われる
+  delete rest.display; // 展示品は棚ごと失われる（アイテムは戻らない）
   const empty =
     rest.tile === undefined && rest.farmland !== true && rest.crop === undefined &&
     rest.stump !== true && rest.until === undefined;
@@ -576,6 +585,158 @@ export const SEAT_ITEM_IDS: readonly string[] = ["bench", "chair", "sofa"];
 
 export function isSeatItem(itemId: unknown): boolean {
   return typeof itemId === "string" && SEAT_ITEM_IDS.includes(itemId);
+}
+
+/** テキストを書ける看板。 */
+export const SIGN_ITEM_IDS: readonly string[] = ["sign_board"];
+
+export function isSignItem(itemId: unknown): boolean {
+  return typeof itemId === "string" && SIGN_ITEM_IDS.includes(itemId);
+}
+
+/** 看板テキストの最大文字数。 */
+export const SIGN_TEXT_MAX = 40;
+
+/** 看板テキストの整形: 制御文字と改行を空白にし、前後を整えて最大長で切る。 */
+export function sanitizeSignText(raw: unknown): string {
+  if (typeof raw !== "string") return "";
+  return raw.replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, SIGN_TEXT_MAX);
+}
+
+/** アイテムを展示できる棚。 */
+export const SHELF_ITEM_IDS: readonly string[] = ["item_shelf"];
+
+export function isShelfItem(itemId: unknown): boolean {
+  return typeof itemId === "string" && SHELF_ITEM_IDS.includes(itemId);
+}
+
+/** 水を汲める井戸。 */
+export const WELL_ITEM_IDS: readonly string[] = ["well"];
+
+export function isWellItem(itemId: unknown): boolean {
+  return typeof itemId === "string" && WELL_ITEM_IDS.includes(itemId);
+}
+
+/**
+ * 井戸で水を汲む（誰でも可）: バケツを1つ消費して水入りバケツを1つ得る。
+ * 水入りバケツは飲むと空のバケツに戻る（economy.eatItem の containerReturn）。
+ * 売買の対象にしないため、汲み取りでコインは生まれない。
+ */
+export function applyDrawWater(
+  current: TileOverride | null,
+  profile: PlayerProfile,
+  map: TopDownMap,
+  ownerKey: string,
+  xRaw: unknown,
+  yRaw: unknown,
+  now: number,
+): TileActionResult {
+  const tile = checkedTile(xRaw, yRaw);
+  if (!tile) return { ok: false, error: "invalid_tile" };
+  const { x, y } = tile;
+  const key = tileKey(x, y);
+  const active = isOverrideActive(current, now) ? current : null;
+  if (!active?.block || !isWellItem(active.block.itemId)) return { ok: false, error: "no_block" };
+  const removed = removeItem(profile, "bucket", 1);
+  if (!removed) return { ok: false, error: "not_enough_items" };
+  const overrides: TileOverridesMap = { [key]: active };
+  return {
+    ok: true,
+    override: active,
+    profile: addItem(removed, "water_bucket", 1),
+    view: viewAfter(map, overrides, key, active, x, y, now, ownerKey),
+    gained: { water_bucket: 1 },
+  };
+}
+
+/**
+ * 看板テキストの設定（所有者だけ）。空文字はテキストの消去。
+ * 状態はタイル上書きの signText に持つ（板が壊れたら文字も失われる）。
+ */
+export function applySetSign(
+  current: TileOverride | null,
+  profile: PlayerProfile,
+  map: TopDownMap,
+  ownerKey: string,
+  xRaw: unknown,
+  yRaw: unknown,
+  textRaw: unknown,
+  now: number,
+): TileActionResult {
+  const tile = checkedTile(xRaw, yRaw);
+  if (!tile) return { ok: false, error: "invalid_tile" };
+  const { x, y } = tile;
+  const key = tileKey(x, y);
+  const active = isOverrideActive(current, now) ? current : null;
+  if (!active?.block || !isSignItem(active.block.itemId)) return { ok: false, error: "no_block" };
+  const selfId = presenceIdFor(ownerKey);
+  if (active.block.ownerId !== selfId) return { ok: false, error: "not_owner" };
+  const text = sanitizeSignText(textRaw);
+  const next: TileOverride = { ...active };
+  if (text) next.signText = text;
+  else delete next.signText;
+  const overrides: TileOverridesMap = { [key]: active };
+  return {
+    ok: true,
+    override: next,
+    profile,
+    view: viewAfter(map, overrides, key, next, x, y, now, ownerKey),
+    gained: {},
+  };
+}
+
+/**
+ * 棚への展示/回収（所有者だけ）。
+ * set_display: 手持ちのアイテムを1つ消費して展示する（既に展示中なら差し替えず不可）。
+ * clear_display: 展示品を手元に戻す。
+ * 状態はタイル上書きの display に持つ（棚が壊れたら展示品も失われる）。
+ */
+export function applyDisplayAction(
+  current: TileOverride | null,
+  profile: PlayerProfile,
+  map: TopDownMap,
+  ownerKey: string,
+  xRaw: unknown,
+  yRaw: unknown,
+  action: "set_display" | "clear_display",
+  itemIdRaw: unknown,
+  now: number,
+): TileActionResult {
+  const tile = checkedTile(xRaw, yRaw);
+  if (!tile) return { ok: false, error: "invalid_tile" };
+  const { x, y } = tile;
+  const key = tileKey(x, y);
+  const active = isOverrideActive(current, now) ? current : null;
+  if (!active?.block || !isShelfItem(active.block.itemId)) return { ok: false, error: "no_block" };
+  const selfId = presenceIdFor(ownerKey);
+  if (active.block.ownerId !== selfId) return { ok: false, error: "not_owner" };
+  const overrides: TileOverridesMap = { [key]: active };
+  if (action === "set_display") {
+    if (active.display) return { ok: false, error: "tile_blocked" };
+    const def = itemById(itemIdRaw);
+    if (!def) return { ok: false, error: "unknown_block" };
+    const removed = removeItem(profile, def.id, 1);
+    if (!removed) return { ok: false, error: "not_enough_items" };
+    const next: TileOverride = { ...active, display: def.id };
+    return {
+      ok: true,
+      override: next,
+      profile: removed,
+      view: viewAfter(map, overrides, key, next, x, y, now, ownerKey),
+      gained: {},
+    };
+  }
+  if (!active.display) return { ok: false, error: "tile_blocked" };
+  const shown = active.display;
+  const next: TileOverride = { ...active };
+  delete next.display;
+  return {
+    ok: true,
+    override: next,
+    profile: addItem(profile, shown, 1),
+    view: viewAfter(map, overrides, key, next, x, y, now, ownerKey),
+    gained: { [shown]: 1 },
+  };
 }
 
 /** 植えられる飾りは花（素材）だけ。 */
@@ -717,6 +878,11 @@ export function parseTileOverride(raw: unknown): TileOverride | null {
   }
   if (v.deco === "flower") out.deco = "flower";
   if (v.gateOpen === true) out.gateOpen = true;
+  if (typeof v.signText === "string") {
+    const text = sanitizeSignText(v.signText);
+    if (text) out.signText = text;
+  }
+  if (typeof v.display === "string" && itemById(v.display)) out.display = v.display;
   if (typeof v.until === "number" && Number.isFinite(v.until)) out.until = v.until;
   return out;
 }
