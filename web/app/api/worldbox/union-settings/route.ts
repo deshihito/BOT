@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { getRequestSession, publicOrigin, sessionOwnerKey } from "@/lib/auth";
 import { isChatEnabled, loadUnionChatSettings, storeUnionChatSettings } from "@/lib/worldbox/chat-online";
 import { loadNationsState } from "@/lib/worldbox/nations-online";
+import { memberKeysOf, resolveMemberRole } from "@/lib/worldbox/nation-settings";
+import { loadNationSettings } from "@/lib/worldbox/nation-settings-online";
 
 export const runtime = "nodejs";
 
@@ -30,9 +32,14 @@ export async function GET(request: Request) {
   const nations = await loadNationsState();
   const membership = nations.members[ownerKey];
   if (!membership) return err("no_union", 409);
+  const nation = nations.nations[membership.nationId];
+  const nationSettings = await loadNationSettings(membership.nationId);
+  const resolved = nation
+    ? resolveMemberRole(nation, nationSettings, ownerKey, membership.role, memberKeysOf(nations, membership.nationId))
+    : null;
   const settings = await loadUnionChatSettings(membership.nationId);
   return NextResponse.json(
-    { guildId: membership.nationId, role: membership.role, chatChannelId: settings.chatChannelId },
+    { guildId: membership.nationId, role: resolved?.role ?? membership.role, chatChannelId: settings.chatChannelId },
     { headers: NO_STORE },
   );
 }
@@ -56,7 +63,14 @@ export async function POST(request: Request) {
   const nations = await loadNationsState();
   const membership = nations.members[ownerKey];
   if (!membership) return err("no_union", 409);
-  if (membership.role !== "king" && membership.role !== "minister") {
+  // 役職は国家設定込みで解決する（任命大臣も設定できる）
+  const nation = nations.nations[membership.nationId];
+  const settings = await loadNationSettings(membership.nationId);
+  const resolved = nation
+    ? resolveMemberRole(nation, settings, ownerKey, membership.role, memberKeysOf(nations, membership.nationId))
+    : null;
+  const role = resolved?.role ?? membership.role;
+  if (role !== "king" && role !== "minister") {
     return err("forbidden_role", 403);
   }
   if (!(await storeUnionChatSettings(membership.nationId, { chatChannelId: channelId }))) {

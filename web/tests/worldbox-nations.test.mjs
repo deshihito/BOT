@@ -387,6 +387,17 @@ const nationsOnlineUrl = dataUrl(
     .replaceAll('"../bot-api"', JSON.stringify(botApiStubUrl))
     .replaceAll('"./nations"', JSON.stringify(nationsUrl)),
 );
+const nationSettingsUrl = dataUrl(
+  transpile("worldbox/nation-settings.ts")
+    .replaceAll('"./nations"', JSON.stringify(nationsUrl)),
+);
+const userLockUrl = dataUrl(transpile("worldbox/user-lock.ts"));
+const nationSettingsOnlineUrl = dataUrl(
+  transpile("worldbox/nation-settings-online.ts")
+    .replaceAll('"../bot-api"', JSON.stringify(botApiStubUrl))
+    .replaceAll('"./nation-settings"', JSON.stringify(nationSettingsUrl))
+    .replaceAll('"./user-lock"', JSON.stringify(userLockUrl)),
+);
 const nextServerStubUrl = dataUrl(`
 export class NextResponse {
   static json(body, init = {}) {
@@ -413,7 +424,9 @@ const nationsRoute = await import(
       .replaceAll('"@/lib/worldbox/save-online"', JSON.stringify(saveOnlineUrl))
       .replaceAll('"@/lib/worldbox/presence-online"', JSON.stringify(presenceOnlineUrl))
       .replaceAll('"@/lib/worldbox/station-online"', JSON.stringify(stationStubUrl))
-      .replaceAll('"@/lib/worldbox/guilds"', JSON.stringify(guildsUrl)),
+      .replaceAll('"@/lib/worldbox/guilds"', JSON.stringify(guildsUrl))
+      .replaceAll('"@/lib/worldbox/nation-settings"', JSON.stringify(nationSettingsUrl))
+      .replaceAll('"@/lib/worldbox/nation-settings-online"', JSON.stringify(nationSettingsOnlineUrl)),
   ),
 );
 const spawnUrl = dataUrl(

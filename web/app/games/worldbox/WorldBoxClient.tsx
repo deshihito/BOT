@@ -74,6 +74,7 @@ import {
 } from "@/lib/worldbox/tiles";
 import { CROPS, ITEMS, itemById } from "@/lib/worldbox/items";
 import { HP_MAX, HUNGER_MAX, countItem, maxHpFor, type AdventureRoleId, type ItemSlot, type PlayerProfile, type SlotRef } from "@/lib/worldbox/profile";
+import { pvpSpaceAllowed, PVP_ATTACK_MAX_DISTANCE } from "@/lib/worldbox/vitals";
 import {
   containerCapacity, isContainerItem, type ContainerSlotRef,
 } from "@/lib/worldbox/containers";
@@ -297,6 +298,7 @@ const NATION_ERROR_LABEL: Record<string, string> = {
   guilds_scope_required: "サーバー情報の取得に再ログインが必要です",
   guilds_unavailable: "サーバー情報を取得できませんでした",
   nation_not_found: "国が見つかりません",
+  nation_private: "非公開の国です",
   not_in_nation: "国に所属していません",
   king_must_transfer_or_disband: "国民がいる間、王は離脱できません",
   not_at_guild_board: "ギルドボードの前で操作してください",
@@ -1742,6 +1744,37 @@ export default function WorldBoxClient() {
   };
   const attackMobRef = useRef(attackMob);
   attackMobRef.current = attackMob;
+  /** プレイヤーへの攻撃（PvP。サーバーが空間・距離・HP の正）。結果は演出で返す。 */
+  const attackPlayer = async (targetId: string, tx: number, ty: number) => {
+    try {
+      const res = await fetch("/api/worldbox/vitals", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "pvp", target: targetId,
+          px: playerPosRef.current.x, py: playerPosRef.current.y,
+        }),
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        error?: string; applied?: boolean; died?: boolean;
+      };
+      if (!res.ok) {
+        if (data.error === "too_far") setTileMsg(TILE_ERROR_LABEL.too_far);
+        denyAtTile(tx, ty);
+        return;
+      }
+      if (data.applied) {
+        // ヒット/死亡の粒と音は fx イベント経由で描画ループが出す
+        fxEventsRef.current.push({ kind: data.died ? "death" : "hit", x: tx, y: ty });
+      } else {
+        fxEventsRef.current.push({ kind: "whiff", x: tx, y: ty });
+      }
+    } catch {
+      fxEventsRef.current.push({ kind: "whiff", x: tx, y: ty });
+    }
+  };
+  const attackPlayerRef = useRef(attackPlayer);
+  attackPlayerRef.current = attackPlayer;
   const refreshMobsRef = useRef(refreshMobs);
   refreshMobsRef.current = refreshMobs;
   /** テント拡張の購入（サーバー側 expand_tent が正）。 */
@@ -2762,10 +2795,31 @@ export default function WorldBoxClient() {
       }
       if (space === "world" || parseInstanceSpace(space)) {
         const t = toTile(e);
-        // 他プレイヤーをタップしたらプロフィールチップを出す（招待導線もここから）
+        // 他プレイヤーをタップ: PvP 可能な空間（ワールド/洞窟/遺跡）でも
+        // 近接範囲内だけが攻撃で、範囲外と PvP 不可空間（ロビー/テント/
+        // ダンジョン）ではプロフィールチップを出す（招待導線もここから）。
+        // モブ・タイルのタップより優先する。
         if (space === "world" || parseInstanceSpace(space)) {
           for (const [oid, other] of others) {
             if (Math.floor(other.track.rx) === t.x && Math.floor(other.track.ry) === t.y) {
+              // 振り分けは距離で分ける: サーバーの検証と同じユークリッド
+              // 2.5 タイル以内（両者の補間表示位置で判定）だけが攻撃。
+              // 範囲外はカードを開く（パーティ招待の送信導線がカード内
+              // UI だけのため、ワールドでも編成導線を壊さない）。
+              const inMeleeRange =
+                Math.hypot(other.track.rx - player.x, other.track.ry - player.y) <= PVP_ATTACK_MAX_DISTANCE;
+              if (pvpSpaceAllowed(space) && inMeleeRange) {
+                // モブ攻撃と同じ流れ: 向きを相手へ向けて即時に振り、結果は応答で返す
+                player.face = other.track.rx >= player.x ? 1 : -1;
+                const slot = invRef.current?.hotbar[selSlotRef.current] ?? null;
+                swing = { startedAt: performance.now(), itemId: slot?.id ?? null, face: player.face, whiff: false };
+                playWbSe("swing");
+                if (Date.now() - lastAttackAt >= 350) {
+                  lastAttackAt = Date.now();
+                  void attackPlayerRef.current(oid, Math.floor(other.track.rx), Math.floor(other.track.ry));
+                }
+                return;
+              }
               showPlayerCardRef.current({
                 id: oid,
                 name: other.track.entry.name || "プレイヤー",
