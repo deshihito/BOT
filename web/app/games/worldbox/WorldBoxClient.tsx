@@ -5374,15 +5374,6 @@ export default function WorldBoxClient() {
                 </div>
               </div>
             )}
-            <Link
-              href={`${prefix}/games`}
-              style={{
-                ...btn, background: "rgba(255,255,255,0.10)", color: "#fff",
-                textDecoration: "none", textAlign: "center",
-              }}
-            >
-              ゲーム一覧へ
-            </Link>
           </div>
         )}
         {spaceUi !== "world" && stationUi && (
