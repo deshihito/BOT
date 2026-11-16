@@ -7,7 +7,7 @@ import { presenceIdFor } from "@/lib/worldbox/presence";
 import { parseSave } from "@/lib/worldbox/save";
 import { loadWorldBoxSave } from "@/lib/worldbox/save-online";
 import {
-  applyMineBlock, applyPlaceBlock, applyTileAction, isOverrideActive, tileKey,
+  applyFlowerAction, applyMineBlock, applyPlaceBlock, applyTileAction, isOverrideActive, tileKey,
   type TileActionResult, type TileOverridesMap,
 } from "@/lib/worldbox/tiles";
 import { loadNationsState } from "@/lib/worldbox/nations-online";
@@ -223,6 +223,11 @@ export async function POST(request: Request) {
           }
           result = applyMineBlock(
             current, profile, map, ownerKey, fields.x, fields.y, Date.now(), { warBreakAllowed },
+          );
+        } else if (fields.action === "plant_flower" || fields.action === "remove_flower") {
+          // 植木鉢・プランターへの花の植え付け/取り除き（所有者だけ、サーバー検証）
+          result = applyFlowerAction(
+            current, profile, map, ownerKey, fields.x, fields.y, fields.action, Date.now(),
           );
         } else {
           result = applyTileAction(
