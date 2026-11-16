@@ -31,7 +31,7 @@ const INSTANCE_SPACE_RE = /^(cave|ruins|dungeon):(-?\d+),(-?\d+):(\d+)$/;
 /** インスタンス空間の辺（app/api/worldbox/presence/route.ts の境界と同じ値）。 */
 const INSTANCE_BOUNDS = { cave: 64, ruins: 48, dungeon: 52 };
 /** 冒険役職（presence.ts の sanitizeHeartbeat と同じ許可リスト）。 */
-const ROLE_IDS = ["blade", "guard", "scout", "miner", "medic"];
+const ROLE_IDS = ["blade", "guard", "scout", "miner", "medic", "teleporter"];
 
 /** 空間の座標範囲（min/max 形式）。ワールドは実質無制限。 */
 function boundsForSpace(space) {
