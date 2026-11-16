@@ -54,7 +54,7 @@ export default function ReversiScene3D({ cells, legalMoves, lastMove, flipped, m
     let detach: (() => void) | null = null;
     const stage = createStage(container, {
       background: 0x14532d,
-      camera: { position: [0, 7.6, 5.4], lookAt: [0, 0, 0.5], fov: 40 },
+      camera: { position: [0, 9.45, 6.59], lookAt: [0, 0, 0.5], fov: 40 },
       onFrame: (dt) => {
         const rt = rtRef.current;
         if (!rt) return;

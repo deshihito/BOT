@@ -97,7 +97,7 @@ export default function DartsScene3D({ state, onThrow, onFail, fallback }: Props
     let detach: (() => void) | null = null;
     const stage = createStage(container, {
       background: 0x2a2f36,
-      camera: { position: [0, 0.15, 3.4], lookAt: [0, 0, 0], fov: 42 },
+      camera: { position: [0, 0.17, 3.96], lookAt: [0, 0, 0], fov: 42 },
       onFrame: () => {
         const rt = rtRef.current;
         if (!rt) return;

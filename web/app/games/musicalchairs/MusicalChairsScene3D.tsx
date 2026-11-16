@@ -163,7 +163,7 @@ export default function MusicalChairsScene3D({ players, chairs, phase, round, my
     let detach: (() => void) | null = null;
     const stage = createStage(container, {
       background: 0x1f2733,
-      camera: { position: [0, 5.4, 5.8], lookAt: [0, 0.2, 0], fov: 44 },
+      camera: { position: [0, 7.06, 7.65], lookAt: [0, 0.2, 0], fov: 44 },
       onFrame: (dt, t) => {
         const rt = rtRef.current;
         if (!rt) return;

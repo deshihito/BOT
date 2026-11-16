@@ -131,6 +131,7 @@ export default function CraneScene3D({ prizes, craneX, craneY, phase, dropElapse
     prizeGroups: Map<number, THREE.Group>;
     prizeHome: Map<number, THREE.Vector3>;
     carriage: THREE.Group;
+    railBridge: THREE.Group;
     cable: THREE.Mesh;
     clawL: THREE.Mesh;
     clawR: THREE.Mesh;
@@ -151,7 +152,7 @@ export default function CraneScene3D({ prizes, craneX, craneY, phase, dropElapse
     let detach: (() => void) | null = null;
     const stage = createStage(container, {
       background: 0xfdf3d8,
-      camera: { position: [0, 3.4, 7.4], lookAt: [0, 1.35, 0], fov: 42 },
+      camera: { position: [0, 3.93, 9.29], lookAt: [0, 1.35, 0], fov: 42 },
       onFrame: (dt) => {
         const rt = rtRef.current;
         if (!rt) return;
@@ -189,6 +190,7 @@ export default function CraneScene3D({ prizes, craneX, craneY, phase, dropElapse
         }
         rt.carriagePos.lerp(target, Math.min(1, dt * 26));
         rt.carriage.position.copy(rt.carriagePos);
+        rt.railBridge.position.z = rt.carriagePos.z;
         // ケーブル長と爪: dropping は sin で降りて戻る（lib の CRANE_DROP_MS に同期）。
         const ratio = p.phase === "dropping" ? Math.min(1, p.dropElapsedMs / CRANE_DROP_MS) : 0;
         const dip = p.phase === "dropping" ? Math.sin(ratio * Math.PI) : 0;
@@ -272,10 +274,15 @@ export default function CraneScene3D({ prizes, craneX, craneY, phase, dropElapse
     railZ.position.set(0, TOP_Y + 0.28, 0);
     scene.add(railZ);
     // クレーン: 横レール＋キャリッジ＋ケーブル＋爪。
-    const carriage = new THREE.Group();
+    // 横レールは筐体の幅いっぱいに固定し、奥行き（z）だけキャリッジに追従させる。
+    // キャリッジの子にすると横移動でレール端が筐体からはみ出すため分離する。
+    const railBridge = new THREE.Group();
     const railX = new THREE.Mesh(new THREE.BoxGeometry(WORLD_W, 0.1, 0.14), frameMat);
     railX.position.y = 0.22;
-    carriage.add(railX);
+    railBridge.add(railX);
+    railBridge.position.set(0, TOP_Y, zFor(0));
+    scene.add(railBridge);
+    const carriage = new THREE.Group();
     const body = new THREE.Mesh(
       new THREE.BoxGeometry(0.62, 0.24, 0.5),
       new THREE.MeshStandardMaterial({ color: 0x37474f, roughness: 0.45, metalness: 0.3 }),
@@ -313,6 +320,7 @@ export default function CraneScene3D({ prizes, craneX, craneY, phase, dropElapse
       prizeGroups: new Map(),
       prizeHome: new Map(),
       carriage,
+      railBridge,
       cable,
       clawL,
       clawR,

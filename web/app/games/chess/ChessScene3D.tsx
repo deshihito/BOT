@@ -271,7 +271,7 @@ export default function ChessScene3D({ board, playerColor, selected, targets, la
     let detach: (() => void) | null = null;
     const stage = createStage(container, {
       background: 0x39524e,
-      camera: { position: [0, 7.9, 5.8], lookAt: [0, 0, 0.55], fov: 40 },
+      camera: { position: [0, 9.18, 6.65], lookAt: [0, 0, 0.55], fov: 40 },
       onFrame: (dt) => {
         const rt = rtRef.current;
         if (!rt) return;

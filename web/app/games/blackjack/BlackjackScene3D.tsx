@@ -68,12 +68,14 @@ function makeCardMesh(card: Card | null): THREE.Mesh {
 
 function handPos(side: "dealer" | "player", i: number, count: number): { pos: THREE.Vector3; yaw: number } {
   const offset = i - (count - 1) / 2;
+  // 枚数が多いときは間隔を詰めて扇の全体幅を画面内に収める。
+  const spacing = count > 1 ? Math.min(0.98, 6.6 / (count - 1)) : 0.98;
   if (side === "dealer") {
-    return { pos: new THREE.Vector3(offset * 0.98, 0.05, -1.35), yaw: -offset * 0.05 };
+    return { pos: new THREE.Vector3(offset * spacing, 0.05, -1.35), yaw: -offset * 0.05 };
   }
   // プレイヤー手札は扇状: 中央から離れるほど奥へ逃がし、反対向きに傾ける。
   return {
-    pos: new THREE.Vector3(offset * 0.98, 0.05, 1.28 + Math.abs(offset) * 0.06),
+    pos: new THREE.Vector3(offset * spacing, 0.05, 1.28 + Math.abs(offset) * 0.06),
     yaw: offset * 0.1,
   };
 }

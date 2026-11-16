@@ -215,13 +215,15 @@ export default function HeartsScene3D({
     }>();
 
     // 自分の手札（扇状）。パス選択中は持ち上げ、プレイ中の非合法手は減光。
+    // 13枚フルでも扇の全体幅が画面内に収まるよう間隔に上限を設ける。
+    const mySpacing = myHand.length > 1 ? Math.min(0.6, 6.6 / (myHand.length - 1)) : 0.6;
     myHand.forEach((id, i) => {
       const offset = i - (myHand.length - 1) / 2;
       const selected = selectedPass.includes(id);
       const playable = isPassPhase || legal.includes(id);
       desired.set(`h${i}`, {
         id,
-        pos: new THREE.Vector3(offset * 0.6, selected ? 0.22 : 0.05, 1.5 + Math.abs(offset) * 0.045),
+        pos: new THREE.Vector3(offset * mySpacing, selected ? 0.22 : 0.05, 1.5 + Math.abs(offset) * 0.045),
         yaw: offset * 0.07,
         fromPos: seatPos(2),
         dealOrder: i,
