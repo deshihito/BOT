@@ -4,11 +4,9 @@ import { rectBounds, worldBounds } from "@/lib/worldbox/mapgen";
 import { LOBBY_H, LOBBY_W } from "@/lib/worldbox/lobby";
 import { LOBBY2_H, LOBBY2_W, LOBBY3_H, LOBBY3_W } from "@/lib/worldbox/lobby-floors";
 import { TENT_MAX_H, TENT_MAX_W } from "@/lib/worldbox/tent";
-import { isPresenceEnabled, listPresence, loadStoredPresence, putPresence, removePresence } from "@/lib/worldbox/presence-online";
-import { parseSave } from "@/lib/worldbox/save";
-import { loadWorldBoxSave } from "@/lib/worldbox/save-online";
+import { isPresenceEnabled, listPresence, putPresenceTabGuarded, removePresence } from "@/lib/worldbox/presence-online";
 import { recordFirstStep, recordPresenceMetric } from "@/lib/worldbox/metrics-online";
-import { checkMovementContinuity, checkSaveFallbackContinuity, presenceIdFor, sanitizeHeartbeat, sanitizePresenceSpace, selectVisiblePlayers, thinPresenceNear } from "@/lib/worldbox/presence";
+import { presenceIdFor, sanitizeHeartbeat, sanitizePresenceSpace, selectVisiblePlayers, thinPresenceNear } from "@/lib/worldbox/presence";
 
 export const runtime = "nodejs";
 
@@ -87,35 +85,17 @@ export async function PUT(request: Request) {
     return NextResponse.json({ error: "invalid_heartbeat" }, { status: 400, headers: NO_STORE });
   }
   const name = session.username?.trim() || heartbeat.name || "プレイヤー";
-  const ownerKey = sessionOwnerKey(session);
-  const now = Date.now();
-  // 移動連続性（B4）: 申告位置が保管位置から移動可能な距離を超えていたら
-  // 却下する（station ゲートのスクリプト突破を防ぐ）。基準は保存済み
-  // プレゼンス（時刻基準）、無ければサーバー保存のセーブ（固定距離）。
-  // 却下されたハートビートは保存せず、保管位置は最後の正規位置のまま。
-  // 応答に保管位置を載せるので、クライアントはそこへ戻れる。
-  const stored = await loadStoredPresence(ownerKey);
-  if (stored) {
-    if (!checkMovementContinuity(stored, heartbeat, now).ok) {
-      return NextResponse.json(
-        { error: "position_jump", x: stored.x, y: stored.y, space: stored.space },
-        { status: 409, headers: NO_STORE },
-      );
-    }
-  } else {
-    const saved = parseSave(await loadWorldBoxSave(ownerKey));
-    if (saved && !checkSaveFallbackContinuity(saved, heartbeat).ok) {
-      return NextResponse.json(
-        { error: "position_jump", x: saved.x, y: saved.y, space: saved.space },
-        { status: 409, headers: NO_STORE },
-      );
-    }
+  const stored = await putPresenceTabGuarded(sessionOwnerKey(session), { ...heartbeat, name }, Date.now());
+  if (stored === "rejected") {
+    // 別のタブ（新しい世代）がこのアカウントで開かれている。旧タブの書き込みは受理しない。
+    return NextResponse.json({ error: "tab_superseded" }, { status: 409, headers: NO_STORE });
   }
-  const storedOk = await putPresence(ownerKey, { ...heartbeat, name }, now);
-  if (!storedOk) {
+  if (stored !== "stored") {
     return NextResponse.json({ error: "presence_failed" }, { status: 500, headers: NO_STORE });
   }
   // 計測（ベストエフォート）: DAU・同時接続ピーク・初回ステップ
+  const ownerKey = sessionOwnerKey(session);
+  const now = Date.now();
   const fresh = (await listPresence()).filter((e) => now - e.ts <= 15_000).length;
   void recordPresenceMetric(ownerKey, fresh, now);
   if (space === "lobby" || space === "lobby2" || space === "lobby3") {
