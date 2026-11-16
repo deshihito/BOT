@@ -127,6 +127,19 @@ if (wss) {
       broadcast(gone.space, null, { t: "bye", id: gone.id });
     }
   }, 5_000);
+
+  // 時計同期と生存通知の定期 tick: 無人の空間でもクライアントの時計補正
+  // （snap/up の now と同じ経路）が進み、WS の生存判定（無応答検知）が
+  // 効くようにする。プレゼンス REST ポーリング間引き（Phase 0）の前提。
+  setInterval(() => {
+    const text = JSON.stringify({ t: "tick", now: Date.now() });
+    for (const [ws] of clients) {
+      if (ws.readyState !== 1) continue;
+      try {
+        ws.send(text);
+      } catch { /* noop */ }
+    }
+  }, 15_000);
 }
 
 server.on("upgrade", (req, socket, head) => {
