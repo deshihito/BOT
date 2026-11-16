@@ -84,6 +84,17 @@ const mapgenUrl = bundleModule(
 const ICON_DIR = path.join(rootDir, "public/img/worldbox/items");
 
 function assertIconFile(item) {
+  // 失敗作 mystery_lump は新規 png を作らず slime のアイコンを明示指定で
+  // 流用する（PR-B の決定。ITEM_ICON_IDS にも登録しない）。流用元が実在し
+  // PNG であることは従来どおり検証する。
+  if (item.id === "mystery_lump") {
+    assert.equal(item.icon, "/img/worldbox/items/slime.png", "mystery_lump の流用アイコン");
+    const reuse = path.join(ICON_DIR, "slime.png");
+    assert.ok(fs.existsSync(reuse), "流用元アイコンが無い: slime.png");
+    const rbuf = fs.readFileSync(reuse);
+    assert.deepEqual([...rbuf.subarray(0, 8)], [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], "slime.png が PNG でない");
+    return;
+  }
   assert.equal(item.icon, `/img/worldbox/items/${item.id}.png`, `${item.id} の icon パス`);
   const file = path.join(ICON_DIR, `${item.id}.png`);
   assert.ok(fs.existsSync(file), `アイコンが無い: ${item.id}.png`);

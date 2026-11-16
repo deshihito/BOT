@@ -144,6 +144,11 @@ export const ITEMS: readonly ItemDef[] = [
   { id: "feather", name: "羽根", desc: "軽い素材", category: "material", price: 100 },
   { id: "bone", name: "骨", desc: "硬い素材", category: "material", price: 140 },
   { id: "slime", name: "スライム", desc: "粘る素材", category: "material", price: 220 },
+  // 合成の失敗作（PR-B）: レシピに無い組み合わせで台に入れると生まれる。
+  // レシピの材料にはしない（RECIPES には一切載せない）。アイコンは新規
+  // png を作らず、塊っぽいスライムの絵を明示指定で流用する
+  // （ITEM_ICON_IDS には足さない: 足すと存在しない mystery_lump.png を指す）。
+  { id: "mystery_lump", name: "なぞの塊", desc: "合成で生まれた正体不明の塊", category: "material", price: 50, icon: "/img/worldbox/items/slime.png" },
   { id: "leather", name: "革", desc: "丈夫な素材", category: "material", price: 240 },
   { id: "iron_ingot", name: "鉄インゴット", desc: "精錬した鉄", category: "material", price: 340 },
   { id: "gold_ingot", name: "金インゴット", desc: "精錬した金", category: "material", price: 950 },

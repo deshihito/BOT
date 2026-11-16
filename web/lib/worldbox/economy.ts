@@ -11,7 +11,7 @@ import {
   STEAL_ACTOR_COOLDOWN_SECONDS, STEAL_BALANCE_RATE, STEAL_FINE_AMOUNT,
   STEAL_MAX_AMOUNT, STEAL_SUCCESS_RATE, STEAL_TARGET_COOLDOWN_SECONDS,
   STEAL_TARGET_MIN_COINS, THIEF_MASK_BONUS, WORK_HUNGER_COST, WORK_REWARD_COINS,
-  itemById, recipeById, sellPrice, type ItemDef, type Recipe,
+  RECIPES, itemById, recipeById, sellPrice, type ItemDef, type Recipe,
 } from "./items";
 import {
   HP_MAX, HUNGER_MAX, maxHpFor, MEDIC_HEAL_MULT, addItem, countItem, removeItem, type PlayerProfile,
@@ -20,7 +20,7 @@ import {
 
 export type EconomyError =
   | "unknown_item" | "unknown_recipe" | "not_enough_coins" | "not_enough_items"
-  | "hunger_full" | "too_tired" | "invalid_count"
+  | "hunger_full" | "too_tired" | "invalid_count" | "invalid_request"
   | "steal_cooldown" | "target_protected" | "target_recently_stolen" | "self_target";
 
 /** 遷移に伴うコインの移動（ブリッジのオプとして積む材料）。 */
@@ -149,6 +149,95 @@ export function craftItem(
     if (rare) next = addItem(next, rare.id, 1);
   }
   return { ok: true, recipe, rare, profile: next };
+}
+
+/** 合成の気配（結果そのものは出さず、近いかどうかだけを匂わせる）。 */
+export type CraftHint = "exact" | "near" | "far";
+
+/** 自由セット式の合成で失敗したときに残る失敗作のアイテム ID。 */
+export const CRAFT_FAILURE_ITEM_ID = "mystery_lump";
+/** 台にセットできる素材の種類数と、1種あたりの個数の上限。 */
+export const CRAFT_MAX_KINDS = 4;
+export const CRAFT_MAX_PER_KIND = 6;
+
+/**
+ * 自由セット式の合成（§6: レシピはサーバー側の照合表としてだけ使う）。
+ * プレイヤーが台にセットした素材（アイテムID → 個数）を受け取り、
+ * RECIPES と完全一致すればその成果物、不一致なら素材を消費して
+ * 失敗作（mystery_lump）が残る。結果・確率・レア名は事前に返さず、
+ * 気配（hint）だけを返す: exact=完全一致、near=あるレシピと素材種の
+ * 半分超を共有、far=それ以外。コインは動かない（craftItem と同じ）。
+ */
+export function craftFromInputs(
+  profile: PlayerProfile,
+  inputsRaw: unknown,
+  rng: () => number = Math.random,
+): Transition<{
+  recipe: Recipe | null;
+  resultId: string;
+  rare: ItemDef | null;
+  hint: CraftHint;
+  matched: boolean;
+}> {
+  if (!inputsRaw || typeof inputsRaw !== "object" || Array.isArray(inputsRaw)) {
+    return { ok: false, error: "invalid_request" };
+  }
+  const entries = Object.entries(inputsRaw as Record<string, unknown>);
+  if (entries.length < 1 || entries.length > CRAFT_MAX_KINDS) {
+    return { ok: false, error: "invalid_request" };
+  }
+  const inputs: Record<string, number> = {};
+  for (const [id, countRaw] of entries) {
+    if (!itemById(id)) return { ok: false, error: "unknown_item" };
+    if (typeof countRaw !== "number" || !Number.isInteger(countRaw) || countRaw < 1 || countRaw > CRAFT_MAX_PER_KIND) {
+      return { ok: false, error: "invalid_request" };
+    }
+    inputs[id] = countRaw;
+  }
+  // 完全一致（キー集合と数が一致）するレシピを探す
+  const matched = RECIPES.find((recipe) => {
+    const keys = Object.keys(recipe.inputs);
+    return keys.length === entries.length && keys.every((k) => inputs[k] === recipe.inputs[k]);
+  });
+  if (matched) {
+    const result = craftItem(profile, matched.id, rng);
+    if (!result.ok) return result;
+    return {
+      ok: true,
+      profile: result.profile,
+      recipe: matched,
+      resultId: matched.output,
+      rare: result.rare,
+      hint: "exact",
+      matched: true,
+    };
+  }
+  // 不一致: 先に所持を全部確かめてから消費する（途中失敗で消費しない）
+  for (const [id, need] of Object.entries(inputs)) {
+    if (countItem(profile, id) < need) return { ok: false, error: "not_enough_items" };
+  }
+  let next = profile;
+  for (const [id, need] of Object.entries(inputs)) {
+    const removed = removeItem(next, id, need);
+    if (!removed) return { ok: false, error: "not_enough_items" };
+    next = removed;
+  }
+  next = addItem(next, CRAFT_FAILURE_ITEM_ID, 1);
+  const inputKinds = new Set(Object.keys(inputs));
+  const near = RECIPES.some((recipe) => {
+    const keys = Object.keys(recipe.inputs);
+    const shared = keys.filter((k) => inputKinds.has(k)).length;
+    return shared > keys.length / 2;
+  });
+  return {
+    ok: true,
+    profile: next,
+    recipe: null,
+    resultId: CRAFT_FAILURE_ITEM_ID,
+    rare: null,
+    hint: near ? "near" : "far",
+    matched: false,
+  };
 }
 
 // ---------------------------------------------------------------- steal

@@ -100,6 +100,9 @@ export type PlayerProfile = {
   tentTier: number;
   /** 道具の強化レベル（アイテム ID → 0..3）。 */
   enhance: Record<string, number>;
+  /** 自分で発見した合成レシピの ID（自由セット式の合成で完全一致した分だけ。
+   * 任意・後方互換: 旧データには無い）。本人の図鑑表示にだけ使う。 */
+  discoveredRecipes?: string[];
   /** スポーン保護の終了時刻（新規プレイヤーのみ、作成時に5分）。 */
   spawnProtectedUntil: number;
   /** 蘇生で戻される先（次回 sync でクライアントが適用し、サーバーが消す）。 */
@@ -124,6 +127,7 @@ export const DEFAULT_PROFILE: PlayerProfile = {
   lastDeath: null,
   tentTier: 0,
   enhance: {},
+  discoveredRecipes: [],
   spawnProtectedUntil: 0,
   coins: STARTING_COINS,
   hunger: HUNGER_MAX,
@@ -296,6 +300,7 @@ export function parseProfile(raw: unknown): PlayerProfile {
     lastDeath: parseLastDeath(data.lastDeath),
     tentTier: clampInt(data.tentTier, 0, 2, 0),
     enhance: parseEnhance(data.enhance),
+    discoveredRecipes: parseDiscoveredRecipes(data.discoveredRecipes),
     spawnProtectedUntil: clampInt(data.spawnProtectedUntil, 0, Number.MAX_SAFE_INTEGER, 0),
   };
 }
@@ -349,6 +354,18 @@ function parseLastDeath(raw: unknown): { at: number; dropped: Record<string, num
     }
   }
   return { at: Math.floor(v.at), dropped };
+}
+
+/** 発見済みレシピの復元（文字列だけ通し、重複を除いて上限で切る）。 */
+export function parseDiscoveredRecipes(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const out: string[] = [];
+  for (const v of raw) {
+    if (typeof v !== "string" || v.length === 0) continue;
+    if (!out.includes(v)) out.push(v);
+    if (out.length >= 500) break;
+  }
+  return out;
 }
 
 /** 強化レベルの復元（道具以外・範囲外は落とす）。 */
@@ -447,6 +464,7 @@ export function serializeProfile(profile: PlayerProfile): string {
     lastDeath: parseLastDeath(profile.lastDeath),
     tentTier: clampInt(profile.tentTier, 0, 2, 0),
     enhance: parseEnhance(profile.enhance),
+    discoveredRecipes: parseDiscoveredRecipes(profile.discoveredRecipes),
     spawnProtectedUntil: clampInt(profile.spawnProtectedUntil, 0, Number.MAX_SAFE_INTEGER, 0),
   });
 }
