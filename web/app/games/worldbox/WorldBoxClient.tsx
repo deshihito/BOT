@@ -634,6 +634,11 @@ export default function WorldBoxClient() {
   /** いま接しているアーケード筐体のゲーム ID（L4）。筐体パネルの起動に使う。 */
   const [stationArcade, setStationArcade] = useState<string | null>(null);
   const [arcadeOpen, setArcadeOpen] = useState(false);
+  /** 筐体で遊んでいる間はワールド側の移動キーを受けない（ゲーム側のキー入力と競合するため）。 */
+  const arcadeOpenRef = useRef(false);
+  useEffect(() => {
+    arcadeOpenRef.current = arcadeOpen;
+  }, [arcadeOpen]);
   const warpActionRef = useRef<(target: SaveSpace) => void>(() => {});
   const instanceWarpRef = useRef<(target: string, entry: { x: number; y: number }) => void>(() => {});
   /** 開催中イベント（期間ダンジョンの入場導線用）。 */
@@ -2442,6 +2447,7 @@ export default function WorldBoxClient() {
     const onKeyDown = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement | null)?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA") return; // 掲示板の入力中は歩かない
+      if (arcadeOpenRef.current) return; // 筐体で遊んでいる間は歩かない（ゲーム側のキー入力を優先）
       const k = e.key.toLowerCase();
       if (["arrowup", "arrowdown", "arrowleft", "arrowright", " "].includes(k)) e.preventDefault();
       keys.add(k);
@@ -5987,9 +5993,6 @@ export default function WorldBoxClient() {
       {arcadeOpen && stationArcade && (spaceUi === "lobby2" || spaceUi === "lobby3") && (
         <WorldBoxArcadePanel
           gameId={stationArcade}
-          prefix={prefix}
-          defaultName={identity?.name ?? ""}
-          avatarUrl={identity?.avatarUrl}
           onClose={() => setArcadeOpen(false)}
         />
       )}
