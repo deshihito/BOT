@@ -51,6 +51,26 @@ export function placedBlockSolid(itemId: string): boolean {
   return def !== null && def.facility !== true;
 }
 
+/** 設置した施設が提供する作業種別（レシピ種別＋強化）。 */
+export type StationKind = "craft" | "smelt" | "cook" | "weave" | "enhance";
+
+/** 設置物 → 近くでできる作業種別。作業台=合成、鍛冶台=合成+強化、金床=強化、
+ * かまど=精錬、焚き火・調理鍋=調理、織り機=織り。 */
+export const PLACED_STATION_KINDS: Readonly<Record<string, readonly StationKind[]>> = {
+  workbench: ["craft"],
+  smithing_table: ["craft", "enhance"],
+  anvil: ["enhance"],
+  furnace: ["smelt"],
+  campfire: ["cook"],
+  cooking_pot: ["cook"],
+  loom: ["weave"],
+};
+
+export function placedStationKinds(itemId: unknown): readonly StationKind[] {
+  if (typeof itemId !== "string") return [];
+  return PLACED_STATION_KINDS[itemId] ?? [];
+}
+
 /** 1タイルの上書き。無い項目は「地形どおり・素の状態」を意味する。 */
 export type TileOverride = {
   /** 地形の置き換え（伐採→草/雪、採掘→土）。 */
