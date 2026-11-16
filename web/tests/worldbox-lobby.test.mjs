@@ -284,10 +284,38 @@ test("lobby: 入場点から通路を通って競馬場の各所へ歩いて届�
     パドック: [107, 25],
     南スタンド前: [93, 45],
     競馬場の東端: [124, 26],
+    "東スタンド前（北）": [123, 18],
+    "東スタンド前（南）": [123, 34],
+    インフィールド南の小道: [93, 37],
+    厩舎の入口: [120, 39],
+    厩舎内部: [120, 41],
+    厩舎の餌場前: [117, 43],
   };
   for (const [name, [x, y]] of Object.entries(targets)) {
     assert.ok(reach.has(`${x},${y}`), `${name} (${x},${y}) に届かない`);
   }
+});
+
+test("lobby: 競馬場に厩舎と東・南スタンド増設、インフィールド南の植栽がある", () => {
+  const at = (x, y) => wb.LOBBY_OBJECTS.find((o) => x >= o.x && x < o.x + o.w && y >= o.y && y < o.y + o.h);
+  // 厩舎は柵囲いで、北側の入口（x120〜121）だけが開いている
+  assert.equal(at(116, 39)?.sprite, "fence_wood");
+  assert.equal(at(115, 42)?.sprite, "fence_wood");
+  assert.equal(at(120, 45)?.sprite, "fence_wood");
+  assert.equal(at(124, 42)?.sprite, "fence_wood");
+  assert.ok(!lobby.blocked.has("120,39") && !lobby.blocked.has("121,39"), "厩舎の入口が塞がれている");
+  assert.equal(at(114, 39)?.sprite, "sign_board"); // 厩舎の看板
+  assert.equal(at(116, 44)?.sprite, "crate"); // 餌置き場
+  assert.equal(at(123, 40)?.sprite, "workbench"); // 手入れ台
+  // 東スタンドは縦列、南スタンドは延長＋両翼2列目
+  assert.equal(at(124, 18)?.sprite, "bench");
+  assert.equal(at(124, 34)?.sprite, "bench");
+  assert.equal(at(80, 46)?.sprite, "bench");
+  assert.equal(at(105, 45)?.sprite, "bench");
+  // インフィールド南の植栽（生垣と植木）
+  assert.equal(at(84, 36)?.sprite, "hedge");
+  assert.equal(at(93, 34)?.sprite, "lamp");
+  assert.equal(at(89, 38)?.sprite, "planter");
 });
 
 test("lobby: 2階は階段着地点から区画と下り階段へ届く（1階とは地続きでない）", () => {
