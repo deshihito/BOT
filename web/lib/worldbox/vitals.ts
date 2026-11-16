@@ -287,6 +287,43 @@ export function applyMobDamage(
   return { profile: next, applied: true, died: next.hp <= 0, poisoned };
 }
 
+/** 環境ハザード（設置ブロック）の接触ダメージ量。足元のタイルで判定する。 */
+export const HAZARD_DAMAGE: Readonly<Record<string, number>> = {
+  cactus_block: 4,
+  magma_block: 10,
+};
+
+/** そのアイテムが環境ハザードならダメージ量、違えば 0。 */
+export function hazardDamageFor(itemId: string | null | undefined): number {
+  return itemId ? (HAZARD_DAMAGE[itemId] ?? 0) : 0;
+}
+
+/**
+ * 環境ハザードのダメージを適用する。モブ接触（applyMobDamage）と同じ規則:
+ * バイタル精算の後、スポーン保護中は無効、被弾クールダウン
+ * （MOB_DAMAGE_COOLDOWN_MS を共有）中も無効。位置とタイルの検証は
+ * API ルート側がサーバー位置で行う（申告位置は使わない）。
+ */
+export function applyHazardDamage(
+  profile: PlayerProfile,
+  amount: number,
+  now: number,
+): { profile: PlayerProfile; applied: boolean; died: boolean } {
+  const settled = stepVitals(profile, now).profile;
+  if ((settled.spawnProtectedUntil ?? 0) > now) {
+    return { profile: settled, applied: false, died: false };
+  }
+  if (now - settled.lastDamageAt < MOB_DAMAGE_COOLDOWN_MS || settled.hp <= 0) {
+    return { profile: settled, applied: false, died: settled.hp <= 0 };
+  }
+  const next: PlayerProfile = {
+    ...settled,
+    hp: Math.max(0, settled.hp - Math.max(0, Math.floor(amount))),
+    lastDamageAt: now,
+  };
+  return { profile: next, applied: true, died: next.hp <= 0 };
+}
+
 /** PvP の攻撃が届く距離（ユークリッド）。剣の間合い2＋見た目の余裕。 */
 export const PVP_ATTACK_MAX_DISTANCE = 2.5;
 
