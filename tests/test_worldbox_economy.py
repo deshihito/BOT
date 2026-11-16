@@ -629,6 +629,79 @@ class TestQueueBehavior(WorkerCase):
         self.assertEqual(self.record(fresh["id"])["status"], "done")
 
 
+class TestNextPollDelay(unittest.TestCase):
+    def test_full_batch_repolls_immediately(self):
+        self.assertEqual(wb.next_poll_delay(wb.MAX_BATCH, 5.0), 0.0)
+        self.assertEqual(wb.next_poll_delay(wb.MAX_BATCH + 1, 0.4), 0.0)
+
+    def test_busy_when_anything_handled(self):
+        self.assertEqual(wb.next_poll_delay(1, 5.0), wb.POLL_BUSY_SECONDS)
+        self.assertEqual(wb.next_poll_delay(3, 0.1), wb.POLL_BUSY_SECONDS)
+
+    def test_idle_backs_off_exponentially_to_cap(self):
+        delay = wb.POLL_BUSY_SECONDS
+        seen = []
+        for _ in range(6):
+            delay = wb.next_poll_delay(0, delay)
+            seen.append(delay)
+        self.assertEqual(seen[0], wb.POLL_BUSY_SECONDS * 2)
+        self.assertTrue(all(b >= a for a, b in zip(seen, seen[1:])))
+        self.assertEqual(seen[-1], wb.POLL_SECONDS)
+        self.assertEqual(wb.next_poll_delay(0, wb.POLL_SECONDS), wb.POLL_SECONDS)
+
+
+class TestAdaptiveEconomyLoop(unittest.IsolatedAsyncioTestCase):
+    async def test_loop_survives_poll_exceptions_and_cancels(self):
+        import asyncio
+
+        calls = {"n": 0}
+
+        class FlakyWorker:
+            async def poll_once(self):
+                calls["n"] += 1
+                if calls["n"] == 1:
+                    raise RuntimeError("boom")
+                return 0
+
+        loop = wb.AdaptiveEconomyLoop(FlakyWorker())
+        self.assertFalse(loop.is_running())
+        loop.start()
+        loop.start()  # 二重起動は無視される
+        self.assertTrue(loop.is_running())
+        # 例外を吸収して2回目以降も回り続ける（無言死しない）
+        for _ in range(100):
+            if calls["n"] >= 3:
+                break
+            await asyncio.sleep(0.05)
+        self.assertGreaterEqual(calls["n"], 3)
+        self.assertTrue(loop.is_running())
+        loop.cancel()
+        self.assertFalse(loop.is_running())
+        await asyncio.sleep(0.05)
+
+    async def test_loop_waits_for_before_callback(self):
+        import asyncio
+
+        ready = asyncio.Event()
+        polled = asyncio.Event()
+
+        class Worker:
+            async def poll_once(self):
+                polled.set()
+                return 0
+
+        async def before():
+            await ready.wait()
+
+        loop = wb.AdaptiveEconomyLoop(Worker(), before=before)
+        loop.start()
+        await asyncio.sleep(0.05)
+        self.assertFalse(polled.is_set())
+        ready.set()
+        await asyncio.wait_for(polled.wait(), timeout=2)
+        loop.cancel()
+
+
 if __name__ == "__main__":
     unittest.main()
 

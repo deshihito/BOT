@@ -8,6 +8,7 @@ import { clearArenaSession, loadArenaSession, saveArenaSession } from "@/lib/wor
 import { buildEconomyOp, type EconomyOp } from "@/lib/worldbox/economy-bridge";
 import {
   enqueueEconomyOp, enqueueEconomyOpOnce, findEconomyOp, isEconomyEnabled, loadMyEconomyOps, readUserBalance,
+  waitForOpDone,
 } from "@/lib/worldbox/economy-bridge-online";
 import { loadProfile } from "@/lib/worldbox/profile-online";
 import { loadMyLobbyStation } from "@/lib/worldbox/station-online";
@@ -162,7 +163,13 @@ async function handlePost(request: Request, session: AuthedSession) {
     const s = await loadArenaSession(ownerKey);
     if (!s) return errorResponse("no_session", 409);
     if (s.state === "paying") {
-      const feeOp = await findEconomyOp(ownerKey, s.feeOpId);
+      // 参加費の done を server-side wait でその場で待つ（従来は
+      // payment_pending を返してクライアントの再ポーリング頼みだった）。
+      // 予算を超えたら従来どおり payment_pending にフォールバックする。
+      let feeOp = await findEconomyOp(ownerKey, s.feeOpId);
+      if (feeOp?.status === "pending") {
+        feeOp = await waitForOpDone(ownerKey, s.feeOpId);
+      }
       if (!feeOp) {
         await clearArenaSession(ownerKey);
         return errorResponse("payment_failed", 409);

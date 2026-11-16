@@ -284,6 +284,43 @@ test("API(economy): POST transfer は pending オプを積み、残高は動か�
   assert.equal(after.ops[0].id, data.op.id);
 });
 
+test("API(bridge): waitForOpDone は done への遷移をその場で拾う", async () => {
+  const bridge = await import(economyOnlineUrl);
+  const op = eco.buildEconomyOp(
+    { kind: "spend", userKey: MY_KEY, discordId: ME, amount: 10, reason: "arena_entry" },
+    "op-wait-01", Date.now(),
+  );
+  globalThis.__wbEconomyStore.set(`worldbox_economy ${op.id}`, { ...op });
+  setTimeout(() => {
+    const cur = globalThis.__wbEconomyStore.get(`worldbox_economy ${op.id}`);
+    globalThis.__wbEconomyStore.set(`worldbox_economy ${op.id}`, { ...cur, status: "done", appliedAmount: 10 });
+  }, 60);
+  const settled = await bridge.waitForOpDone(MY_KEY, op.id, { timeoutMs: 2_000, intervalMs: 20 });
+  assert.equal(settled.status, "done");
+  assert.equal(settled.appliedAmount, 10);
+  // 他人のオプは待っても引けない（userKey で弾く）
+  assert.equal(await bridge.waitForOpDone("discord:699999999999999999", op.id, { timeoutMs: 50, intervalMs: 10 }), null);
+});
+
+test("API(bridge): waitForOpDone はタイムアウトで pending のまま返し、waitForOpsDone は混在を扱う", async () => {
+  const bridge = await import(economyOnlineUrl);
+  const op = eco.buildEconomyOp(
+    { kind: "spend", userKey: MY_KEY, discordId: ME, amount: 10, reason: "arena_entry" },
+    "op-wait-02", Date.now(),
+  );
+  globalThis.__wbEconomyStore.set(`worldbox_economy ${op.id}`, { ...op });
+  const started = Date.now();
+  const result = await bridge.waitForOpDone(MY_KEY, op.id, { timeoutMs: 120, intervalMs: 20 });
+  assert.equal(result.status, "pending");
+  assert.ok(Date.now() - started >= 100, "予算までは待つ");
+  const many = await bridge.waitForOpsDone(
+    [{ userKey: MY_KEY, opId: op.id }, { userKey: MY_KEY, opId: "op-wait-missing" }],
+    { timeoutMs: 50, intervalMs: 10 },
+  );
+  assert.equal(many[0].status, "pending");
+  assert.equal(many[1], null);
+});
+
 test("API(economy): spend / earn はクライアントから積めない（400）", async () => {
   const cookie = sessionCookie(ME, "eco-user");
   for (const action of ["spend", "earn", "gift", undefined]) {
@@ -344,6 +381,8 @@ export async function enqueueEconomyOp(op) { if (state.failEnqueue) return false
 export async function enqueueEconomyOpOnce(op) { if (state.failEnqueue) return false; if (state.ops.some((o) => o.id === op.id)) return true; state.ops.push(op); return true; }
 export async function loadMyEconomyOps() { return []; }
 export async function readUserBalance(id) { return state.balances.has(id) ? state.balances.get(id) : 0; }
+export async function findEconomyOp(userKey, opId) { const op = state.ops.find((o) => o.id === opId); return op && op.userKey === userKey ? op : null; }
+export async function waitForOpDone(userKey, opId) { return findEconomyOp(userKey, opId); }
 `);
 const profileOnlineStubUrl = dataUrl(`
 const store = (globalThis.__wbProfiles = new Map());

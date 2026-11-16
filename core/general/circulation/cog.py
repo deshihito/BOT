@@ -440,6 +440,18 @@ class CirculationCog(commands.Cog):
             balance_reader=self._balance,
             metrics_kv=KVStore(worldbox_economy_core.METRICS_NAMESPACE),
         )
+        # 経済ワーカーの駆動は適応ポーリング（処理がある間は短間隔、
+        # idle は最大 POLL_SECONDS まで backoff）。固定間隔の
+        # tasks.loop では実現できないため自前タスクで回すが、
+        # cog_load / cog_unload からは従来どおり
+        # is_running / start / cancel で扱える。開始前待機は実行時に
+        # 解決する（生成時に bot のメソッドへ触らない）。
+        async def _wait_until_ready() -> None:
+            await self.bot.wait_until_ready()
+
+        self.worldbox_economy_loop = worldbox_economy_core.AdaptiveEconomyLoop(
+            self.worldbox_economy, before=_wait_until_ready,
+        )
         # AGO WORLD BOX のユニオンチャット → Discord チャンネル連携:
         # Web が送信箱に積んだ投稿を連携先チャンネルへ流す
         self.worldbox_chat = worldbox_chat_core.WorldBoxChatWorker(
@@ -505,15 +517,6 @@ class CirculationCog(commands.Cog):
 
     @flush_loop.before_loop
     async def _before_flush_loop(self) -> None:
-        await self.bot.wait_until_ready()
-
-    @tasks.loop(seconds=worldbox_economy_core.POLL_SECONDS)
-    async def worldbox_economy_loop(self) -> None:
-        # 失敗は poll_once の中で吸収される（接続エラーは警告1行）
-        await self.worldbox_economy.poll_once()
-
-    @worldbox_economy_loop.before_loop
-    async def _before_worldbox_economy_loop(self) -> None:
         await self.bot.wait_until_ready()
 
     async def _send_worldbox_chat(self, channel_id: str, name: str, text: str) -> bool:

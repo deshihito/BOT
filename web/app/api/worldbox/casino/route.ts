@@ -22,6 +22,7 @@ import { recordCasinoTournamentScore } from "@/lib/worldbox/casino-tournament-on
 import { buildEconomyOp, ECONOMY_AMOUNT_MAX, GAMBLE_PAYOUT_MAX, type EconomyOp } from "@/lib/worldbox/economy-bridge";
 import {
   enqueueEconomyOp, findEconomyOp, isEconomyEnabled, loadMyEconomyOps, readUserBalance,
+  waitForOpDone, waitForOpsDone,
 } from "@/lib/worldbox/economy-bridge-online";
 import { buildLobby } from "@/lib/worldbox/lobby";
 import { isPresenceEnabled, loadMyPresence } from "@/lib/worldbox/presence-online";
@@ -121,6 +122,33 @@ async function spendStatus(userKey: string, opId: string): Promise<OpStatus> {
   const op = await findEconomyOp(userKey, opId);
   if (!op) return "missing";
   return op.status;
+}
+
+/** GET（パネルが3秒ごとに叩く）の server-side wait 予算。POST より短くする。 */
+const GET_WAIT_MS = 1_000;
+
+/**
+ * 先払いオプ群の状態を読む。pending があれば server-side wait で
+ * done をその場で待ち（予算 waitMs、未指定は共通既定）、最終状態を
+ * 返す。予算を超えても pending なら従来どおり「次回に回す」。
+ */
+async function spendStatuses(userKey: string, ids: readonly string[], waitMs?: number): Promise<OpStatus[]> {
+  let statuses: OpStatus[] = [];
+  for (const id of ids) statuses.push(await spendStatus(userKey, id));
+  if (statuses.some((s) => s === "pending")) {
+    await waitForOpsDone(ids.map((opId) => ({ userKey, opId })), { timeoutMs: waitMs });
+    statuses = [];
+    for (const id of ids) statuses.push(await spendStatus(userKey, id));
+  }
+  return statuses;
+}
+
+/** 単一の先払い状態を、pending なら done を待ってから返す。 */
+async function spendStatusWaited(userKey: string, opId: string): Promise<OpStatus> {
+  const first = await spendStatus(userKey, opId);
+  if (first !== "pending") return first;
+  const op = await waitForOpDone(userKey, opId);
+  return op ? op.status : "missing";
 }
 
 async function enqueue(userKey: string, discordId: string, input: {
@@ -228,13 +256,13 @@ async function settleBlackjack(ctx: Ctx, session: Extract<CasinoSession, { kind:
 
 /**
  * 終了済みセッションの精算を試みる。先払いが全て done のときだけ精算し、
- * failed があれば無効化（配当なしで閉じる）、pending があれば次回に回す。
+ * failed があれば無効化（配当なしで閉じる）。pending は server-side
+ * wait の予算内ではその場で done を待ち、超えた分だけ次回に回す。
  * 戻り値: 精算/無効化したら null、それ以外はセッションそのまま。
  */
-async function tryFinishSession(ctx: Ctx, session: CasinoSession): Promise<CasinoSession | null> {
+async function tryFinishSession(ctx: Ctx, session: CasinoSession, waitMs?: number): Promise<CasinoSession | null> {
   const spendIds = session.kind === "blackjack" ? session.spendOpIds : [session.prepayOpId];
-  const statuses: OpStatus[] = [];
-  for (const id of spendIds) statuses.push(await spendStatus(ctx.userKey, id));
+  const statuses = await spendStatuses(ctx.userKey, spendIds, waitMs);
   if (statuses.some((s) => s === "failed" || s === "missing")) {
     await clearCasinoSession(ctx.userKey);
     return null;
@@ -252,14 +280,13 @@ async function tryFinishSession(ctx: Ctx, session: CasinoSession): Promise<Casin
 }
 
 /** 期限切れセッションの後片付け（未使用分の返金つき）。 */
-async function expireSessionIfNeeded(ctx: Ctx, session: CasinoSession | null): Promise<CasinoSession | null> {
+async function expireSessionIfNeeded(ctx: Ctx, session: CasinoSession | null, waitMs?: number): Promise<CasinoSession | null> {
   if (!session) return null;
   if (Date.now() - session.createdAt <= CASINO_SESSION_TTL_MS) {
-    return tryFinishSession(ctx, session);
+    return tryFinishSession(ctx, session, waitMs);
   }
   const spendIds = session.kind === "blackjack" ? session.spendOpIds : [session.prepayOpId];
-  const statuses: OpStatus[] = [];
-  for (const id of spendIds) statuses.push(await spendStatus(ctx.userKey, id));
+  const statuses = await spendStatuses(ctx.userKey, spendIds, waitMs);
   if (statuses.some((s) => s === "pending")) return session;
   if (statuses.some((s) => s === "failed" || s === "missing")) {
     await clearCasinoSession(ctx.userKey);
@@ -283,9 +310,9 @@ async function expireSessionIfNeeded(ctx: Ctx, session: CasinoSession | null): P
   return ok ? null : session;
 }
 
-async function loadSessionFor(ctx: Ctx): Promise<CasinoSession | null> {
+async function loadSessionFor(ctx: Ctx, waitMs?: number): Promise<CasinoSession | null> {
   const session = await loadCasinoSession(ctx.userKey);
-  return expireSessionIfNeeded(ctx, session);
+  return expireSessionIfNeeded(ctx, session, waitMs);
 }
 
 function sessionJson(session: CasinoSession | null) {
@@ -305,7 +332,7 @@ async function handleGet(session: AuthedSession) {
     readUserBalance(session.id),
     loadMyEconomyOps(ctx.userKey),
     currentMachine(ctx.userKey),
-    loadSessionFor(ctx),
+    loadSessionFor(ctx, GET_WAIT_MS),
     loadCasinoUserState(ctx.userKey),
   ]);
   if (balance === null) return errorResponse("economy_unavailable", 503);
@@ -521,7 +548,7 @@ async function handlePost(request: Request, session: AuthedSession) {
     const { session: dbl, error } = requireSession("double");
     if (error || !dbl) return error ?? errorResponse("no_session", 409);
     if (dbl.busted) return errorResponse("session_finished", 409);
-    const prepayStatus = await spendStatus(ctx.userKey, dbl.prepayOpId);
+    const prepayStatus = await spendStatusWaited(ctx.userKey, dbl.prepayOpId);
     if (prepayStatus === "pending") return errorResponse("bet_pending", 409);
     if (prepayStatus !== "done") {
       await clearCasinoSession(ctx.userKey);
@@ -586,7 +613,7 @@ async function handlePost(request: Request, session: AuthedSession) {
     const { session: bjs, error } = requireSession("blackjack");
     if (error || !bjs) return error ?? errorResponse("no_session", 409);
     if (bjs.bj.phase !== "player" || !canDouble(bjs.bj)) return errorResponse("cannot_double", 409);
-    const firstStatus = await spendStatus(ctx.userKey, bjs.spendOpIds[0]);
+    const firstStatus = await spendStatusWaited(ctx.userKey, bjs.spendOpIds[0]);
     if (firstStatus === "pending") return errorResponse("bet_pending", 409);
     if (firstStatus !== "done") {
       await clearCasinoSession(ctx.userKey);

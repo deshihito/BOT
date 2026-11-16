@@ -39,6 +39,7 @@ kv・wallet・原資ストア・履歴記録は CirculationCog から差し込�
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
@@ -94,9 +95,15 @@ AMOUNT_MAX = 1_000_000
 #: gamble の配当上限（Web 側 GAMBLE_PAYOUT_MAX と同じ値）
 PAYOUT_MAX = 300_000_000
 REASON_MAX = 40
-#: ポーリング間隔（秒）。カジノは対話的な遊びなので短く回す
-#: （30 秒時代はプレイの速さに処理が追いつかず pending が滞留した）
+#: ポーリング間隔（秒）: 適応ポーリングの上限（idle 時の最大間隔）。
+#: 固定 5 秒時代は、オプが積まれてから拾われるまで平均 2.5 秒 / 最悪
+#: 5 秒かかり、カジノの先払い→精算ではワーカー周期が2周分積み重なって
+#: 体感の反映が最大で十数秒になっていた。現在は AdaptiveEconomyLoop が
+#: 処理がある間は短間隔、idle が続けばこの値まで backoff する。
 POLL_SECONDS = 5.0
+#: 処理がある間（直前のバッチで1件以上終端化したとき）の間隔（秒）。
+#: 先払いの直後に積まれる精算オプ等を早く拾うための値。
+POLL_BUSY_SECONDS = 0.4
 #: 1回のポーリングで処理する上限
 MAX_BATCH = 100
 #: claim がこの秒数を超えたら放棄されたものとして再処理可にする
@@ -578,3 +585,74 @@ class WorldBoxEconomyWorker:
                     sender, amount,
                 )
             raise _OpFailed("transfer_failed")
+
+
+def next_poll_delay(handled: int, previous: float) -> float:
+    """次のポーリングまでの間隔を決める（適応ポーリングの純粋関数）。
+
+    - バッチ上限まで処理した（pending がまだ残っている可能性が高い）
+      ときは間隔ゼロで即座に次バッチを回す。
+    - 1件以上処理したら、続けて積まれるオプ（カジノの精算オプ等）を
+      早く拾うため短間隔（POLL_BUSY_SECONDS）にする。
+    - 何も無ければ前回間隔を倍々にし、上限 POLL_SECONDS まで backoff
+      する（idle 時の読み取りコストは固定 5 秒時代と変わらない）。
+    """
+    if handled >= MAX_BATCH:
+        return 0.0
+    if handled > 0:
+        return POLL_BUSY_SECONDS
+    return min(POLL_SECONDS, max(POLL_BUSY_SECONDS, previous * 2))
+
+
+class AdaptiveEconomyLoop:
+    """poll_once を適応間隔で回し続ける自前ループ（tasks.loop の置換）。
+
+    tasks.loop は固定間隔しか持てないため、間隔を動的に変えるには
+    自前の asyncio タスクが要る。cog.py からは従来の tasks.loop と
+    同じ is_running / start / cancel で扱える（起動は cog_load、
+    停止は cog_unload、開始前の待機は before コールバック）。
+
+    poll_once は例外を吸収する設計だが、万一例外が漏れてもここで
+    吸収してログに残し、ループ自体は決して止めない（S2 の無言死
+    防止: tasks.loop は本体の例外で停止しうる）。
+    """
+
+    def __init__(
+        self,
+        worker: "WorldBoxEconomyWorker",
+        *,
+        before: Optional[Callable[[], Awaitable[None]]] = None,
+    ) -> None:
+        self._worker = worker
+        self._before = before
+        self._task: Optional[asyncio.Task] = None
+
+    def is_running(self) -> bool:
+        return self._task is not None and not self._task.done()
+
+    def start(self) -> None:
+        if self.is_running():
+            return
+        self._task = asyncio.get_running_loop().create_task(self._run())
+
+    def cancel(self) -> None:
+        if self._task is not None:
+            self._task.cancel()
+            self._task = None
+
+    async def _run(self) -> None:
+        if self._before is not None:
+            await self._before()
+        delay = POLL_BUSY_SECONDS
+        while True:
+            try:
+                handled = await self._worker.poll_once()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception(
+                    "worldbox economy: ポーリングで予期しない例外（ループは継続します）"
+                )
+                handled = 0
+            delay = next_poll_delay(handled, delay)
+            await asyncio.sleep(delay)

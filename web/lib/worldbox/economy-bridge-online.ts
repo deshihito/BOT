@@ -69,6 +69,51 @@ export async function findEconomyOp(userKey: string, opId: string): Promise<Econ
   }
 }
 
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+/**
+ * server-side wait の既定値。ワーカーは適応ポーリング（処理がある間は
+ * 0.4 秒間隔）で回るため、数秒待てば通常は done に出会える。上限を
+ * 超えたら pending のまま返し、呼び出し側は従来どおりクライアントの
+ * ポーリングに引き継ぐ（挙動は壊れない）。
+ */
+export const OP_WAIT_TIMEOUT_MS = 3_000;
+export const OP_WAIT_INTERVAL_MS = 200;
+
+export type OpWaitOptions = { timeoutMs?: number; intervalMs?: number };
+
+/**
+ * オプが終端（done / failed）になるまでその場で待つ。戻り値は最後に
+ * 読めたオプ（タイムアウト時は pending のオプ、読めなければ null）。
+ * 「次の処理が done に依存する」経路（カジノの先払い→精算、アリーナ
+ * の参加費→対戦開始など）が、クライアントの再ポーリングを待たずに
+ * 同一リクエストで最終状態まで進むための共通ヘルパー。
+ */
+export async function waitForOpDone(
+  userKey: string,
+  opId: string,
+  options: OpWaitOptions = {},
+): Promise<EconomyOp | null> {
+  const timeoutMs = Math.max(0, options.timeoutMs ?? OP_WAIT_TIMEOUT_MS);
+  const intervalMs = Math.max(10, options.intervalMs ?? OP_WAIT_INTERVAL_MS);
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const op = await findEconomyOp(userKey, opId);
+    if (op === null || op.status !== "pending") return op;
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) return op;
+    await sleep(Math.min(intervalMs, remaining));
+  }
+}
+
+/** 複数オプの done を並行して待つ（PvP の両者参加費など、所有者が違うオプの混在可）。 */
+export async function waitForOpsDone(
+  targets: readonly { userKey: string; opId: string }[],
+  options: OpWaitOptions = {},
+): Promise<(EconomyOp | null)[]> {
+  return Promise.all(targets.map((t) => waitForOpDone(t.userKey, t.opId, options)));
+}
+
 type UserBalanceRow = { balance?: unknown };
 
 /**
