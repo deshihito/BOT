@@ -57,6 +57,7 @@ import { genreById, type ShopGenreId } from "@/lib/worldbox/shops";
 import { TENT_MAX_TIER, TENT_TIERS, buildTent, tentEntryFor, tentExitFor, tentTileAt } from "@/lib/worldbox/tent";
 import {
   buildCaveLayer, buildDungeonFloor, buildRuins, dungeonHpScale, lightRadiusTiles, makeInstanceSpace, parseInstanceSpace,
+  placedLightRadiusTiles,
   type CaveLayer, type DungeonFloorData, type RuinsMap,
 } from "@/lib/worldbox/instances";
 import { EVENT_DUNGEON_ENTRANCE } from "@/lib/worldbox/events";
@@ -69,7 +70,7 @@ import type { BoardPost } from "@/lib/worldbox/board";
 import { parseSave, serializeSave, type SaveSpace } from "@/lib/worldbox/save";
 import { chooseInitialSave } from "@/lib/worldbox/save-source";
 import {
-  actionForTile, blockHpFraction, cropStage, isOverrideActive, placedBlockSolid, tileKey, tileView,
+  actionForTile, blockHpFraction, cropStage, isFlowerPotItem, isOverrideActive, isSeatItem, placedBlockSolid, tileKey, tileView,
   type TileActionKind, type TileOverridesMap,
 } from "@/lib/worldbox/tiles";
 import { CROPS, ITEMS, itemById } from "@/lib/worldbox/items";
@@ -952,6 +953,8 @@ export default function WorldBoxClient() {
   /** 開いている収納コンテナ（自分の樽・宝箱）とその中身。 */
   const [containerPanel, setContainerPanel] = useState<{ x: number; y: number; itemId: string } | null>(null);
   const [machinePanel, setMachinePanel] = useState<{ x: number; y: number } | null>(null);
+  /** 座っている家具のタイル（ベンチ・椅子・ソファ）。見た目だけの状態で、プレゼンスにも申告する。 */
+  const sitTileRef = useRef<{ x: number; y: number } | null>(null);
   const [containerSlots, setContainerSlots] = useState<ItemSlot[] | null>(null);
   /** コンテナパネルで持ち上げ中のスロット（プロフィール側も含む）。 */
   const [heldPanelSlot, setHeldPanelSlot] = useState<ContainerSlotRef | null>(null);
@@ -1567,6 +1570,7 @@ export default function WorldBoxClient() {
       const fxKind: Record<TileActionKind, FxBurstKind> = {
         chop: "chop", mine: "mine", till: "till", plant: "plant", harvest: "harvest",
         place_block: "place", mine_block: "debris",
+        plant_flower: "plant", remove_flower: "harvest",
       };
       // ブロック採掘（HP制）: 壊れたら破片（debris）、まだ残るヒットは小さな破片（mine）
       const fxForAction =
@@ -2114,6 +2118,10 @@ export default function WorldBoxClient() {
       behavior: MobBehaviorState; provokedUntil: number; lastSpeed: number;
     };
     const mobRenders = new Map<string, MobRender>();
+    /** ピアノの打鍵位置（タイルごとの音階ステップ）。 */
+    const pianoSteps = new Map<string, number>();
+    /** 設置した噴水の水しぶきを最後に出した時刻（スロットル用）。 */
+    let lastFountainFxAt = 0;
     /** パターンの予兆マーカー（地面描画）と投射物・糸跡（見た目のみ、ダメージ経路は持たない）。 */
     type MobTelegraph = { pattern: MobPatternId; x: number; y: number; tx: number; ty: number; dirX: number; dirY: number; from: number; until: number; size: number };
     const mobTelegraphs: MobTelegraph[] = [];
@@ -2298,7 +2306,7 @@ export default function WorldBoxClient() {
     const sendWsHeartbeat = () => {
       if (!rtSocket || rtSocket.readyState !== WebSocket.OPEN) return;
       try {
-        rtSocket.send(JSON.stringify({ t: "hb", x: player.x, y: player.y, vx: player.vx, vy: player.vy, face: player.face, space, party: myPartyKeyRef.current || undefined, role: invRef.current?.role ?? "free", rank: invRef.current ? masteryRankOf(invRef.current, invRef.current.role) : 1 }));
+        rtSocket.send(JSON.stringify({ t: "hb", x: player.x, y: player.y, vx: player.vx, vy: player.vy, face: player.face, space, party: myPartyKeyRef.current || undefined, role: invRef.current?.role ?? "free", rank: invRef.current ? masteryRankOf(invRef.current, invRef.current.role) : 1, sit: sitTileRef.current ? true : undefined }));
       } catch { /* noop */ }
     };
     /** 中継への接続（トークン取得→接続→受信→再接続）。失敗してもポーリングが続く。 */
@@ -2384,6 +2392,7 @@ export default function WorldBoxClient() {
         party: myPartyKeyRef.current || undefined,
         role: invRef.current?.role ?? "free",
         rank: invRef.current ? masteryRankOf(invRef.current, invRef.current.role) : 1,
+        sit: sitTileRef.current ? true : undefined,
       }),
       }).catch(() => { /* noop */ });
     };
@@ -2758,6 +2767,39 @@ export default function WorldBoxClient() {
         }
         return true;
       }
+      if (view.block && view.block.itemId === "piano") {
+        // ピアノは誰でも弾ける。タップのたびに音階を一巡する（見た目と音だけ）
+        const key = tileKey(t.x, t.y);
+        const step = pianoSteps.get(key) ?? 0;
+        pianoSteps.set(key, step + 1);
+        const scale = [0, 2, 4, 7, 9, 12, 9, 7, 4, 2];
+        playWbSe("note", { pitch: Math.pow(2, scale[step % scale.length] / 12) });
+        return true;
+      }
+      if (view.block && isSeatItem(view.block.itemId)) {
+        // ベンチ・椅子・ソファ: タップで座る/立つ。座ると家具のマスへ移動する
+        const sitting = sitTileRef.current;
+        if (sitting && sitting.x === t.x && sitting.y === t.y) {
+          sitTileRef.current = null;
+        } else {
+          sitTileRef.current = { x: t.x, y: t.y };
+          player.x = t.x + 0.5;
+          player.y = t.y + 0.5;
+          playWbSe("poof");
+        }
+        return true;
+      }
+      if (view.block && isFlowerPotItem(view.block.itemId) && view.block.mine) {
+        // 植木鉢・プランター（自分のものだけ）: 植えてあれば取り除き、
+        // 花を持ってタップしたら植える。それ以外は通常の扱いに流す
+        const ovHere = tilesRef.current[tileKey(t.x, t.y)];
+        if (ovHere?.deco || selItem?.id === "flower") {
+          swing = { startedAt: performance.now(), itemId: selItem?.id ?? null, face: player.face, whiff: false };
+          playWbSe("swing");
+          void postTileActionRef.current(ovHere?.deco ? "remove_flower" : "plant_flower", t.x, t.y);
+          return true;
+        }
+      }
       const act = actionForTile(view, {
         tool: selItem?.tool,
         seedId: selItem && selItem.category === "seed" ? selItem.id : undefined,
@@ -2932,12 +2974,13 @@ export default function WorldBoxClient() {
       nationColor: string | null = null,
       swim = false,
       plate: { roleSymbol: string; rank: number } | null = null,
+      sit = false,
     ) => {
       const size = TILE * AVATAR_TILES;
-      // 泳ぎ中は体を沈め、歩行の上下動をゆるい浮き沈みに替える
-      const sink = swim ? size * 0.34 : 0;
-      const bob = swim ? Math.sin(performance.now() / 280 + phase) * TILE * 0.02 : walkBob(phase) * TILE * 0.07 * speedRatio;
-      const squash = swim ? 1 : 1 - (1 - walkSquashY(phase)) * speedRatio;
+      // 泳ぎ中は体を沈め、歩行の上下動をゆるい浮き沈みに替える。座りは浅く沈んで静止する
+      const sink = swim ? size * 0.34 : sit ? size * 0.16 : 0;
+      const bob = swim ? Math.sin(performance.now() / 280 + phase) * TILE * 0.02 : sit ? 0 : walkBob(phase) * TILE * 0.07 * speedRatio;
+      const squash = swim ? 1 : sit ? 0.86 : 1 - (1 - walkSquashY(phase)) * speedRatio;
       const waterline = sy - size * 0.28;
       c.fillStyle = "rgba(20,30,16,0.30)";
       c.beginPath();
@@ -3475,7 +3518,13 @@ export default function WorldBoxClient() {
           kbVel = { x: 0, y: 0 };
         }
       }
-      const vel = { x: ix * moveSpeed, y: iy * moveSpeed };
+      // 座っている間は動かない。移動入力が入るか、家具のマスから外れたら立ち上がる
+      if (sitTileRef.current) {
+        if (ilen > 0.01 || Math.floor(player.x) !== sitTileRef.current.x || Math.floor(player.y) !== sitTileRef.current.y) {
+          sitTileRef.current = null;
+        }
+      }
+      const vel = sitTileRef.current ? { x: 0, y: 0 } : { x: ix * moveSpeed, y: iy * moveSpeed };
       let prevX = player.x;
       let prevY = player.y;
       const moved = stepMove(activeMap(), player, vel, dt, activeBlocked(), { swim: space === "world" });
@@ -3819,20 +3868,36 @@ export default function WorldBoxClient() {
             const img = itemIcons[ov!.block.itemId];
             const bx = Math.round(sx);
             const by = Math.round(sy);
-            const ps = popScaleFor(tileKey(tx, ty), now);
+            const isRug = ov!.block.itemId === "rug";
+            const ps = isRug ? 1 : popScaleFor(tileKey(tx, ty), now);
             ctx.save();
             if (ps !== 1) {
               ctx.translate(bx + TILE / 2, by + TILE / 2);
               ctx.scale(ps, ps);
               ctx.translate(-(bx + TILE / 2), -(by + TILE / 2));
             }
-            if (texReady(img)) ctx.drawImage(img, bx, by, TILE, TILE);
+            if (isRug) {
+              // じゅうたんは床に敷く: 平たく描く（立体アイコンのままにしない）
+              if (texReady(img)) ctx.drawImage(img, bx + 2, Math.round(by + TILE * 0.36), TILE - 4, Math.round(TILE * 0.6));
+              else {
+                ctx.fillStyle = "#8a4a56";
+                ctx.fillRect(bx + 2, Math.round(by + TILE * 0.36), TILE - 4, Math.round(TILE * 0.6));
+              }
+            } else if (texReady(img)) ctx.drawImage(img, bx, by, TILE, TILE);
             else {
               ctx.fillStyle = "#9a7b4f";
               ctx.fillRect(bx + 5, by + 5, TILE - 10, TILE - 10);
             }
             // HP制: ダメージが入ったブロックにはひび割れを重ねる
             drawBlockCracks(ctx, bx, by, tx, ty, blockHpFraction(ov!.block));
+            // 植木鉢・プランターに植えた飾り（花）を上に重ねる
+            if (ov!.deco) {
+              const decoImg = itemIcons[ov!.deco];
+              if (texReady(decoImg)) {
+                const ds = Math.round(TILE * 0.55);
+                ctx.drawImage(decoImg, Math.round(bx + (TILE - ds) / 2), Math.round(by + TILE * 0.06), ds, ds);
+              }
+            }
             ctx.restore();
           }
         }
@@ -4270,6 +4335,7 @@ export default function WorldBoxClient() {
               space !== "world" ? Math.round(lobbyOy + o.track.ry * TILE) + TILE * PLAYER_RADIUS : toScreenY(o.track.ry) + TILE * PLAYER_RADIUS,
               o.track.entry.face, o.phase, Math.min(1, Math.hypot(o.track.entry.vx, o.track.entry.vy) / WALK_SPEED), o.track.entry.name || null, nationColor, oSwim,
               { roleSymbol: roleById((o.track.entry.role ?? "free") as AdventureRoleId).symbol, rank: o.track.entry.rank ?? 1 },
+              o.track.entry.sit === true,
             ),
         });
       }
@@ -4369,6 +4435,7 @@ export default function WorldBoxClient() {
             // 足元は当たり円の底（中心 + 半径）に合わせる（中心に置くと手前で止まって見える）
             space !== "world" ? Math.round(lobbyOy + player.y * TILE) + TILE * PLAYER_RADIUS : toScreenY(player.y) + TILE * PLAYER_RADIUS,
             player.face, player.phase, speedRatio, null, null, playerSwimming,
+            null, sitTileRef.current !== null,
           ),
       });
       drawList.sort((a, b) => a.y - b.y);
@@ -4515,7 +4582,7 @@ export default function WorldBoxClient() {
           dctx.globalCompositeOperation = "destination-out";
           for (const [key, ov] of Object.entries(tilesRef.current)) {
             const itemId = ov.block?.itemId;
-            const rTiles = itemId === "lamp" ? 9 : itemId === "torch" ? 6 : itemId === "campfire" ? 5 : 0;
+            const rTiles = placedLightRadiusTiles(itemId);
             if (!rTiles) continue;
             const comma = key.indexOf(",");
             const lx = Number(key.slice(0, comma));
@@ -4828,11 +4895,60 @@ export default function WorldBoxClient() {
         }
       }
 
-      // 昼夜の薄い色づけ（共有時計。ロビーは屋内なので付けない）
+      // 設置した噴水は水しぶきを上げる（約0.5秒に1回、近くのものだけ）
+      if (space === "world" && nowMs - lastFountainFxAt > 500) {
+        lastFountainFxAt = nowMs;
+        for (const [key, ov] of Object.entries(tilesRef.current)) {
+          if (ov.block?.itemId !== "fountain") continue;
+          const comma = key.indexOf(",");
+          const fx0 = Number(key.slice(0, comma));
+          const fy0 = Number(key.slice(comma + 1));
+          if (Math.abs(fx0 + 0.5 - player.x) > 14 || Math.abs(fy0 + 0.5 - player.y) > 10) continue;
+          spawnBurst(fxSys, "splash", fx0 + 0.5, fy0 + 0.4);
+        }
+      }
+
+      // 昼夜の薄い色づけ（共有時計。ロビーは屋内なので付けない）。
+      // 夜はオフスクリーンに描いて、自分の明かりと設置した明かりの周りに
+      // 穴を開けてから重ねる（明かりが実際に周りを照らす）。
       const night = nightAmount(phaseAtTime(nowMs / 1000));
       if (space === "world" && night > 0.01) {
-        ctx.fillStyle = `rgba(9,13,42,${(night * 0.36).toFixed(3)})`;
-        ctx.fillRect(0, 0, cw, ch);
+        if (!darkCanvasRef.current) darkCanvasRef.current = document.createElement("canvas");
+        const dark = darkCanvasRef.current;
+        if (dark.width !== cw || dark.height !== ch) { dark.width = cw; dark.height = ch; }
+        const dctx = dark.getContext("2d");
+        if (dctx) {
+          dctx.setTransform(1, 0, 0, 1, 0, 0);
+          dctx.clearRect(0, 0, cw, ch);
+          dctx.fillStyle = `rgba(9,13,42,${(night * 0.36).toFixed(3)})`;
+          dctx.fillRect(0, 0, cw, ch);
+          dctx.globalCompositeOperation = "destination-out";
+          const punch = (sx: number, sy: number, rTiles: number) => {
+            const r = rTiles * TILE;
+            if (sx < -r || sy < -r || sx > cw + r || sy > ch + r) return;
+            const g = dctx.createRadialGradient(sx, sy, r * 0.4, sx, sy, r);
+            g.addColorStop(0, "rgba(0,0,0,0.95)");
+            g.addColorStop(1, "rgba(0,0,0,0)");
+            dctx.fillStyle = g;
+            dctx.beginPath();
+            dctx.arc(sx, sy, r, 0, Math.PI * 2);
+            dctx.fill();
+          };
+          punch(toScreenX(player.x), toScreenY(player.y), lightRadiusTiles(invRef.current?.items));
+          for (const [key, ov] of Object.entries(tilesRef.current)) {
+            const rTiles = placedLightRadiusTiles(ov.block?.itemId);
+            if (!rTiles) continue;
+            const comma = key.indexOf(",");
+            const lx = Number(key.slice(0, comma));
+            const ly = Number(key.slice(comma + 1));
+            punch(toScreenX(lx + 0.5), toScreenY(ly + 0.5), rTiles);
+          }
+          dctx.globalCompositeOperation = "source-over";
+          ctx.drawImage(dark, 0, 0, cw, ch);
+        } else {
+          ctx.fillStyle = `rgba(9,13,42,${(night * 0.36).toFixed(3)})`;
+          ctx.fillRect(0, 0, cw, ch);
+        }
       }
       // 光る粒（蛍・ワープの光）は夜の色づけの上に出す
       if (space === "world") drawParticles(true);
