@@ -86,6 +86,16 @@ export function pvpPrizeOpId(code: string): string {
   return `pvp-prize-${code}`;
 }
 
+/**
+ * 参加費の返金オプの決定的 ID（決闘が不成立のときに1人1件。B3）。
+ * 末尾は Discord ID の末6桁だけにする（code に両者の末6桁と開始msが
+ * 入っているため1試合・1人で一意。フル ID だと OP_ID_RE の64文字を
+ * 超えうる）。
+ */
+export function pvpFeeRefundOpId(code: string, discordId: string): string {
+  return `pvp-fee-refund-${code}-${discordId.slice(-6)}`;
+}
+
 /** 期限切れの待ちを落とす（先着順は保つ）。 */
 export function pruneQueue(queue: readonly PvpQueueEntry[], now: number): PvpQueueEntry[] {
   return queue.filter((e) => now - e.queuedAt <= PVP_QUEUE_TTL_MS);

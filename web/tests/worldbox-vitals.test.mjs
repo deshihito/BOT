@@ -351,6 +351,17 @@ test("vitals: API ルートがサーバー検証つきで配線されている",
   assert.doesNotMatch(route, /worldbox_presence/);
 });
 
+test("vitals: sync / damage / set_bed はユーザー単位ロック内で読み直す（B3）", () => {
+  const route = fs.readFileSync(path.join(rootDir, "app/api/worldbox/vitals/route.ts"), "utf8");
+  // ロック外のスナップショットで保存すると、並走する精算・被弾と
+  // 上書きし合い、PvP の死亡通知が消えてドロップが復活する。
+  assert.equal(route.match(/withUserLock\(ownerKey, async \(\) => \{/g)?.length, 3);
+  // 守護への熟練は別ユーザーの書き込みのため、攻撃者のロック外で
+  // 守護本人のロックを取る（内側に入れると相互攻撃と循環待ちになる）。
+  assert.match(route, /grantGuard = guards\[0\]\.ownerKey;/);
+  assert.match(route, /withUserLock\(guardKey, async \(\) => \{/);
+});
+
 test("vitals: クライアントが HP バー・接触ダメージ・定期精算・ベッドを配線している", () => {
   const client = fs.readFileSync(path.join(rootDir, "app/games/worldbox/WorldBoxClient.tsx"), "utf8");
   assert.match(client, /\/api\/worldbox\/vitals/);

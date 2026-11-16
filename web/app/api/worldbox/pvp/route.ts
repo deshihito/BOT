@@ -3,13 +3,13 @@ import { getRequestSession, publicOrigin, sessionOwnerKey } from "@/lib/auth";
 import { playerAttack } from "@/lib/worldbox/arena";
 import { buildEconomyOp, type EconomyOp } from "@/lib/worldbox/economy-bridge";
 import {
-  enqueueEconomyOpOnce, findEconomyOp, isEconomyEnabled, loadMyEconomyOps, readUserBalance,
-  waitForOpsDone,
+  deleteEconomyOp, enqueueEconomyOpOnce, findEconomyOp, isEconomyEnabled, loadMyEconomyOps,
+  readUserBalance, waitForOpsDone,
 } from "@/lib/worldbox/economy-bridge-online";
 import { loadProfile } from "@/lib/worldbox/profile-online";
 import {
-  PVP_FEE, PVP_PRIZE, createDuel, publicPvpView, pvpPrizeOpId, pvpStep, tryMatch,
-  type PvpDuel, type PvpMove, type PvpQueueEntry,
+  PVP_FEE, PVP_PRIZE, createDuel, publicPvpView, pvpFeeRefundOpId, pvpPrizeOpId, pvpStep, tryMatch,
+  type PvpDuel, type PvpMove, type PvpPlayer, type PvpQueueEntry,
 } from "@/lib/worldbox/pvp";
 import { clearPvpDuel, loadMyPvpDuel, loadPvpQueue, savePvpDuel, savePvpQueue } from "@/lib/worldbox/pvp-online";
 import { loadMyLobbyStation } from "@/lib/worldbox/station-online";
@@ -133,6 +133,39 @@ async function loadFeeStates(duel: PvpDuel): Promise<FeeOp[]> {
   return states;
 }
 
+/** 参加費の返金オプを決定的 ID で1件積む（再実行しても二重返金にならない）。 */
+async function refundFee(duel: PvpDuel, player: PvpPlayer): Promise<void> {
+  await enqueue(player.ownerKey, player.discordId, {
+    kind: "earn", amount: PVP_FEE, reason: "arena_pvp_fee_refund",
+    id: pvpFeeRefundOpId(duel.code, player.discordId),
+  });
+}
+
+/**
+ * 決闘が不成立になったときの参加費の精算（B3: 参加費は両方そろって
+ * 初めて確定する）。片方だけが残っている状態を放置しない:
+ * - done 済み: 返金オプ（arena_pvp_fee_refund）で返す。
+ * - pending のまま: 消してワーカーの適用を止める。消した直後に
+ *   done になっていたら（削除と適用の競合）返金に切り替える。
+ * - failed / 読めない: 金は動いていないので何もしない。
+ * 渡された状態は待機前のことがあるため、判断は直前の再読で行う。
+ * 残る競合窓（削除とワーカー適用のすれ違い）は共有ノート参照。
+ */
+async function settleVoidedFees(duel: PvpDuel, feeStates: FeeOp[]): Promise<void> {
+  for (let i = 0; i < 2; i++) {
+    const player = duel.players[i];
+    const state = (await findEconomyOp(player.ownerKey, duel.feeOpIds[i])) ?? feeStates[i];
+    if (!state || state.status === "failed") continue;
+    if (state.status === "done") {
+      await refundFee(duel, player);
+      continue;
+    }
+    await deleteEconomyOp(state.id);
+    const after = await findEconomyOp(player.ownerKey, state.id);
+    if (after?.status === "done") await refundFee(duel, player);
+  }
+}
+
 async function handlePost(request: Request, session: AuthedSession) {
   const ownerKey = sessionOwnerKey(session);
   const discordId = session.id;
@@ -179,7 +212,13 @@ async function handlePost(request: Request, session: AuthedSession) {
             kind: "spend", amount: PVP_FEE, reason: "arena_pvp_entry", id: next.feeOpIds[1],
           })
         : null;
-      if (!feeA || !feeB) break;
+      if (!feeA || !feeB) {
+        // 片方の参加費だけが積まれたら決闘は作らない（B3）: もう片方の
+        // 参加費を精算し、宙吊りの支払いを残さない。決闘が無いため
+        // 参加費はこの場でしか精算できない。
+        await settleVoidedFees(next, [feeA, null]);
+        break;
+      }
       await savePvpDuel(next);
       queue = matched.rest;
     }
@@ -198,9 +237,11 @@ async function handlePost(request: Request, session: AuthedSession) {
     if (!duel) return errorResponse("no_session", 409);
     if (duel.state === "paying") {
       // 参加費が両者とも done でなければ決着は付けない（act と同じ扱い）。
+      // 片方が失敗して不成立のときは、もう片方の参加費を返す（B3）。
       const current = duel;
       const feeStates = await loadFeeStates(current);
       if (feeStates.some((op) => op === null || op.status === "failed")) {
+        await settleVoidedFees(current, feeStates);
         await clearPvpDuel(duel);
         return errorResponse("payment_failed", 409);
       }
@@ -228,10 +269,11 @@ async function handlePost(request: Request, session: AuthedSession) {
     if (!duel) return errorResponse("no_session", 409);
     if (duel.state === "paying") {
       // 両者の参加費が done になるまで決闘は始まらない（PvE と同じ型）。
-      // どちらかが失敗していたら決闘は無効（参加費は戻らない）。
+      // どちらかが失敗していたら決闘は無効。もう片方の参加費は返す（B3）。
       const current = duel;
       const feeStates = await loadFeeStates(current);
       if (feeStates.some((op) => op === null || op.status === "failed")) {
+        await settleVoidedFees(current, feeStates);
         await clearPvpDuel(duel);
         return errorResponse("payment_failed", 409);
       }
