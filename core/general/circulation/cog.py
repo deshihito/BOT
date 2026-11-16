@@ -444,9 +444,13 @@ class CirculationCog(commands.Cog):
         # idle は最大 POLL_SECONDS まで backoff）。固定間隔の
         # tasks.loop では実現できないため自前タスクで回すが、
         # cog_load / cog_unload からは従来どおり
-        # is_running / start / cancel で扱える。
+        # is_running / start / cancel で扱える。開始前待機は実行時に
+        # 解決する（生成時に bot のメソッドへ触らない）。
+        async def _wait_until_ready() -> None:
+            await self.bot.wait_until_ready()
+
         self.worldbox_economy_loop = worldbox_economy_core.AdaptiveEconomyLoop(
-            self.worldbox_economy, before=self.bot.wait_until_ready,
+            self.worldbox_economy, before=_wait_until_ready,
         )
         # AGO WORLD BOX のユニオンチャット → Discord チャンネル連携:
         # Web が送信箱に積んだ投稿を連携先チャンネルへ流す
