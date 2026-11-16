@@ -62,6 +62,7 @@ import {
 import { EVENT_DUNGEON_ENTRANCE } from "@/lib/worldbox/events";
 import { SEASON_NAMES, seasonDaysLeft, seasonOf } from "@/lib/worldbox/seasons";
 import { biomeAt, structureById, structuresForChunk, type PlacedStructure } from "@/lib/worldbox/maplogic";
+import { nearestEntrances, type CompassTarget } from "@/lib/worldbox/compass";
 import { objectsForChunk, specialObjectById } from "@/lib/worldbox/objects";
 import { fishingSpotAt } from "@/lib/worldbox/fishing";
 import type { BoardPost } from "@/lib/worldbox/board";
@@ -143,6 +144,79 @@ const MINIMAP_PX = 256;
 const MINIMAP_TILES = 128;
 /** ミニマップ上の1タイルの大きさ（256px / 128タイル）。 */
 const MINIMAP_SCALE = MINIMAP_PX / MINIMAP_TILES;
+/** 開拓のコンパスの対象色（洞窟=橙、ダンジョン=紫）。 */
+const COMPASS_CAVE_COLOR = "#e8933a";
+const COMPASS_DUNGEON_COLOR = "#b07fe8";
+
+/**
+ * 開拓のコンパスの対象をミニマップへ描く: 範囲内なら入口の位置に
+ * マーカー、範囲外なら端に方向矢印（対象への向きに回転した三角）。
+ */
+function drawCompassOnMinimap(
+  mctx: CanvasRenderingContext2D,
+  target: CompassTarget | null,
+  color: string,
+  ox: number,
+  oy: number,
+  px: number,
+  py: number,
+): void {
+  if (!target) return;
+  const mx = (target.x - ox) * MINIMAP_SCALE;
+  const my = (target.y - oy) * MINIMAP_SCALE;
+  if (mx >= 4 && my >= 4 && mx <= MINIMAP_PX - 4 && my <= MINIMAP_PX - 4) {
+    mctx.fillStyle = color;
+    mctx.strokeStyle = "rgba(255,255,255,0.9)";
+    mctx.lineWidth = 1.5;
+    mctx.beginPath();
+    mctx.arc(mx, my, 3.4, 0, Math.PI * 2);
+    mctx.fill();
+    mctx.stroke();
+    return;
+  }
+  const dx = target.x - px;
+  const dy = target.y - py;
+  const m = Math.max(Math.abs(dx), Math.abs(dy)) || 1;
+  const ex = MINIMAP_PX / 2 + (dx / m) * (MINIMAP_PX / 2 - 11);
+  const ey = MINIMAP_PX / 2 + (dy / m) * (MINIMAP_PX / 2 - 11);
+  mctx.save();
+  mctx.translate(ex, ey);
+  mctx.rotate(Math.atan2(dy, dx));
+  mctx.fillStyle = color;
+  mctx.strokeStyle = "rgba(0,0,0,0.65)";
+  mctx.lineWidth = 1;
+  mctx.beginPath();
+  mctx.moveTo(6, 0);
+  mctx.lineTo(-4, -4);
+  mctx.lineTo(-4, 4);
+  mctx.closePath();
+  mctx.fill();
+  mctx.stroke();
+  mctx.restore();
+}
+
+/** 開拓のコンパスの HUD 1行分（矢印の回転と距離）を直接書き換える。 */
+function updateCompassHud(
+  arrowEl: HTMLSpanElement | null,
+  distEl: HTMLSpanElement | null,
+  target: CompassTarget | null,
+  px: number,
+  py: number,
+): void {
+  if (arrowEl) {
+    if (!target) {
+      arrowEl.style.opacity = "0.25";
+    } else {
+      arrowEl.style.opacity = "1";
+      const deg = (Math.atan2(target.y - py, target.x - px) * 180) / Math.PI;
+      arrowEl.style.transform = `rotate(${deg.toFixed(1)}deg)`;
+    }
+  }
+  if (distEl) {
+    distEl.textContent = target ? String(Math.round(Math.hypot(target.x - px, target.y - py))) : "—";
+  }
+}
+
 /** マップ表示モード（周辺を大きく見る）のキャンバス解像度と表示範囲。 */
 const BIGMAP_SIZE = 512;
 const BIGMAP_TILES = 256;
@@ -343,6 +417,11 @@ export default function WorldBoxClient() {
   const { prefix, embedded, identity } = useGamesNav();
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const minimapRef = useRef<HTMLCanvasElement | null>(null);
+  /** 開拓のコンパスの HUD（矢印と距離は描画ループが直接書き換える）。 */
+  const compassCaveArrowRef = useRef<HTMLSpanElement | null>(null);
+  const compassCaveDistRef = useRef<HTMLSpanElement | null>(null);
+  const compassDungeonArrowRef = useRef<HTMLSpanElement | null>(null);
+  const compassDungeonDistRef = useRef<HTMLSpanElement | null>(null);
   // ポーリングのガード（S6）: in-flight 重複を抑え、古いレスポンスが新しい
   // 状態を上書きしない。取得ごとに begin → isCurrent → end を使う。
   const chatGuardRef = useRef<PollGuard>(createPollGuard());
@@ -748,6 +827,8 @@ export default function WorldBoxClient() {
   }, []);
   const invRef = useRef<PlayerProfile | null>(null);
   invRef.current = invProfile;
+  /** 開拓のコンパスを持っているか（持っている間だけ方向表示が出る）。 */
+  const hasCompass = !!invProfile && countItem(invProfile, "explorer_compass") > 0;
   const [selSlot, setSelSlot] = useState(0);
   const selSlotRef = useRef(0);
   selSlotRef.current = selSlot;
@@ -1934,6 +2015,9 @@ export default function WorldBoxClient() {
     let lastSaved = { x: player.x, y: player.y, at: 0 };
     let lastMinimapAt = 0;
     let lastBigMapAt = 0;
+    // 開拓のコンパス: 最寄り入口の再計算はスロットルつき
+    // （計算した地点から 16 タイル以上動いたら探し直す）。
+    let compassCache: { ax: number; ay: number; cave: CompassTarget | null; dungeon: CompassTarget | null } | null = null;
 
     // ---- 保存（空間＋位置＋ワールド帰還点） ----
     const currentSave = () => serializeSave({ space, x: player.x, y: player.y, worldReturn });
@@ -4638,6 +4722,19 @@ export default function WorldBoxClient() {
           mctx.arc(toMapX(player.x), toMapY(player.y), 2.6, 0, Math.PI * 2);
           mctx.fill();
           mctx.stroke();
+          // 開拓のコンパス（所持時のみ）: 最寄り入口のマーカー/方向矢印と
+          // HUD の矢印・距離。入口の位置は決定的生成から誰でも計算できる
+          // 公開情報なので、所持判定だけ本人プロフィールで見る。
+          if (invRef.current && countItem(invRef.current, "explorer_compass") > 0) {
+            if (!compassCache || Math.hypot(player.x - compassCache.ax, player.y - compassCache.ay) >= 16) {
+              const near = nearestEntrances(MAP_SEED, player.x, player.y);
+              compassCache = { ax: player.x, ay: player.y, cave: near.cave, dungeon: near.dungeon };
+            }
+            drawCompassOnMinimap(mctx, compassCache.cave, COMPASS_CAVE_COLOR, ox, oy, player.x, player.y);
+            drawCompassOnMinimap(mctx, compassCache.dungeon, COMPASS_DUNGEON_COLOR, ox, oy, player.x, player.y);
+            updateCompassHud(compassCaveArrowRef.current, compassCaveDistRef.current, compassCache.cave, player.x, player.y);
+            updateCompassHud(compassDungeonArrowRef.current, compassDungeonDistRef.current, compassCache.dungeon, player.x, player.y);
+          }
         }
       }
 
@@ -4739,6 +4836,11 @@ export default function WorldBoxClient() {
     display: "flex", alignItems: "center", justifyContent: "center",
     color: "#fff", background: "rgba(255,255,255,0.08)",
   };
+  /** 開拓のコンパスの HUD の矢印（右向き三角。回転は描画ループが付ける）。 */
+  const compassArrow = (color: string): React.CSSProperties => ({
+    width: 9, height: 10, flexShrink: 0, background: color,
+    clipPath: "polygon(0 0, 100% 50%, 0 100%)",
+  });
   /** インベントリパネルの1枠（持ち上げ中は金枠）。 */
   const renderInvSlot = (zone: SlotRef["zone"], index: number, slot: ItemSlot) => {
     const held = heldSlot?.zone === zone && heldSlot?.index === index;
@@ -5169,6 +5271,29 @@ export default function WorldBoxClient() {
               background: "rgba(0,0,0,0.25)", pointerEvents: "none",
             }}
           />
+        )}
+        {showMap && spaceUi === "world" && hasCompass && (
+          <div
+            aria-label="開拓のコンパス"
+            style={{
+              position: "absolute", right: 10, top: 126, width: 112, boxSizing: "border-box",
+              display: "flex", flexDirection: "column", gap: 3,
+              padding: "5px 8px", borderRadius: 10, background: "rgba(0,0,0,0.6)",
+              border: "1px solid rgba(255,255,255,0.25)", pointerEvents: "none", zIndex: 4,
+              color: "#fff", fontSize: 11,
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <span ref={compassCaveArrowRef} style={compassArrow(COMPASS_CAVE_COLOR)} />
+              <span>洞窟</span>
+              <span ref={compassCaveDistRef} style={{ marginLeft: "auto" }} />
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <span ref={compassDungeonArrowRef} style={compassArrow(COMPASS_DUNGEON_COLOR)} />
+              <span>ダンジョン</span>
+              <span ref={compassDungeonDistRef} style={{ marginLeft: "auto" }} />
+            </div>
+          </div>
         )}
         {invProfile && (
           <div

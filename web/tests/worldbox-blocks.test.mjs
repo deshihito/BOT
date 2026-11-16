@@ -95,7 +95,8 @@ function assertIconFile(item) {
 
 test("アイコン: 道具は全種アイコンつき", () => {
   const tools = inv.ITEMS.filter((i) => i.category === "tool");
-  assert.equal(tools.length, 16);
+  // 作業道具16種（4種×4段）＋開拓のコンパス（種別なしの探索道具）
+  assert.equal(tools.length, 17);
   for (const item of tools) assertIconFile(item);
 });
 
