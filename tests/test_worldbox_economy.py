@@ -750,3 +750,125 @@ def test_wbstate_lines_format():
         save=None, nation_name=None, nation_role=None,
     )
     assert "未プレイ" in "\n".join(empty)
+
+
+class MatchingKV(FakeKV):
+    """load_matching / delete を持つ KV（本番の remote_only ストア相当）。"""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.matching_calls = 0
+        self.load_all_calls = 0
+        self.deleted: list[str] = []
+
+    async def load_all(self):
+        self.load_all_calls += 1
+        return await super().load_all()
+
+    async def load_matching(self, match):
+        self.matching_calls += 1
+        return {
+            k: v for k, v in self.store.items()
+            if isinstance(v, dict) and all(v.get(kk) == vv for kk, vv in match.items())
+        }
+
+    async def delete(self, key):
+        self.deleted.append(key)
+        self.store.pop(key, None)
+
+
+class CountingMetricsKV(FakeKV):
+    def __init__(self) -> None:
+        super().__init__()
+        self.set_calls = 0
+
+    async def set(self, key, value):
+        self.set_calls += 1
+        await super().set(key, value)
+
+
+class TestPendingFastPath(unittest.IsolatedAsyncioTestCase):
+    def setUp(self) -> None:
+        self.kv = MatchingKV()
+        self.wallet = FakeWallet()
+        self.wallet.balances[ME] = 100_000
+        self.store = FakeEconomyStore(pool=100_000, treasury=0)
+        self.history: list = []
+        self.metrics = CountingMetricsKV()
+
+        async def record(sender, receiver, amount, reason):
+            self.history.append((sender, receiver, amount, reason))
+
+        self.worker = wb.WorldBoxEconomyWorker(
+            kv=self.kv,
+            wallet_provider=lambda: self.wallet,
+            economy_store=self.store,
+            record_history=record,
+            insufficient_marker=FakeWallet.INSUFFICIENT,
+            new_user_balance=NEW_USER_BALANCE,
+            metrics_kv=self.metrics,
+        )
+        self._seq = 0
+
+    def add_op(self, **overrides):
+        self._seq += 1
+        op = {
+            "id": f"op-{self._seq:04d}-fast",
+            "kind": "spend",
+            "userKey": f"discord:{ME}",
+            "discordId": ME,
+            "amount": 100,
+            "reason": "build_house",
+            "status": "pending",
+            "createdAt": 1_700_000_000_000 + self._seq,
+        }
+        op.update(overrides)
+        self.kv.store[op["id"]] = op
+        return op
+
+    async def test_poll_uses_matching_not_full_scan(self):
+        op = self.add_op()
+        for i in range(50):
+            self.kv.store[f"old-{i}"] = {
+                "id": f"old-{i}", "status": "done", "appliedAt": i,
+            }
+        # 直前に全件読みが済んだ状態にして、通常回の経路を検証する
+        self.worker._last_full_scan_ms = wb._now_ms()
+        handled = await self.worker.poll_once()
+        self.assertEqual(handled, 1)
+        self.assertEqual(self.kv.matching_calls, 1)
+        self.assertEqual(self.kv.load_all_calls, 0)
+        self.assertEqual(self.kv.store[op["id"]]["status"], "done")
+        self.assertEqual(self.wallet.balances[ME], 100_000 - 100)
+
+    async def test_full_scan_prunes_terminal_ops(self):
+        keep = wb.PRUNE_KEEP_TERMINAL
+        wb.PRUNE_KEEP_TERMINAL = 2
+        try:
+            for i in range(5):
+                self.kv.store[f"term-{i}"] = {
+                    "id": f"term-{i}", "status": "done", "appliedAt": 100 + i,
+                }
+            op = self.add_op()
+            handled = await self.worker.poll_once()
+        finally:
+            wb.PRUNE_KEEP_TERMINAL = keep
+        self.assertEqual(handled, 1)
+        # 新しい2件（appliedAt 104, 103）だけ残し、古い3件を消す
+        self.assertEqual(sorted(self.kv.deleted), ["term-0", "term-1", "term-2"])
+        self.assertIn("term-3", self.kv.store)
+        self.assertIn("term-4", self.kv.store)
+        self.assertEqual(self.kv.store[op["id"]]["status"], "done")
+
+    async def test_metrics_are_batched_until_flush(self):
+        for _ in range(3):
+            self.add_op()
+        self.worker._last_full_scan_ms = wb._now_ms()
+        handled = await self.worker.poll_once()
+        self.assertEqual(handled, 3)
+        # 3件では書き出さない（20件 or 10秒のどちらかまでバッファ）
+        self.assertEqual(self.metrics.set_calls, 0)
+        await self.worker._flush_metrics(force=True)
+        self.assertEqual(self.metrics.set_calls, 1)
+        (record,) = list(self.metrics.store.values())
+        self.assertEqual(record["spend"]["build_house"], 300)

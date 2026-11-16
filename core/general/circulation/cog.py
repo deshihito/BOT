@@ -431,14 +431,14 @@ class CirculationCog(commands.Cog):
         # AGO WORLD BOX の経済ブリッジ: Web が bot_kv に積んだオプを
         # 既存の経済機構（wallet / pay_house / transfer_coins）で適用する
         self.worldbox_economy = worldbox_economy_core.WorldBoxEconomyWorker(
-            kv=worldbox_kv if worldbox_kv is not None else KVStore(worldbox_economy_core.NAMESPACE),
+            kv=worldbox_kv if worldbox_kv is not None else KVStore(worldbox_economy_core.NAMESPACE, remote_only=True),
             wallet_provider=self._wallet,
             economy_store=self.economy_store,
             record_history=self._record_history,
             insufficient_marker=lambda: wallet_module.INSUFFICIENT,
             new_user_balance=lambda: wallet_module.NEW_USER_BALANCE,
             balance_reader=self._balance,
-            metrics_kv=KVStore(worldbox_economy_core.METRICS_NAMESPACE),
+            metrics_kv=KVStore(worldbox_economy_core.METRICS_NAMESPACE, remote_only=True),
         )
         # 経済ワーカーの駆動は適応ポーリング（処理がある間は短間隔、
         # idle は最大 POLL_SECONDS まで backoff）。固定間隔の

@@ -229,5 +229,59 @@ class FallbackTest(Base):
             self.assertIn(text, sql)
 
 
+class RemoteOnlyTest(Base):
+    def store(self, client, namespace="ns"):
+        return KVStore(namespace, client=client, path=self.path, remote_only=True)
+
+    async def test_round_trip_without_local_file(self):
+        db = FakeKVSupabase()
+        store = self.store(db)
+        await store.set("k", {"a": 1})
+        self.assertEqual(db.value("ns", "k"), {"a": 1})
+        self.assertEqual(await store.load_one("k"), {"a": 1})
+        self.assertEqual(await store.load_all(), {"k": {"a": 1}})
+        await store.delete("k")
+        self.assertIsNone(await store.load_one("k"))
+        # ローカル写しを作らない（ファイル自体が存在しない）
+        self.assertFalse(os.path.exists(self.path))
+        self.assertFalse(store.has_pending)
+
+    async def test_load_matching_filters_by_value(self):
+        db = FakeKVSupabase(rows=[
+            {"namespace": "ns", "key": "a", "value": {"status": "pending", "n": 1}},
+            {"namespace": "ns", "key": "b", "value": {"status": "done", "n": 2}},
+            {"namespace": "ns", "key": "c", "value": {"status": "pending", "n": 3}},
+            {"namespace": "other", "key": "d", "value": {"status": "pending"}},
+        ])
+        store = self.store(db)
+        self.assertEqual(
+            await store.load_matching({"status": "pending"}),
+            {"a": {"status": "pending", "n": 1}, "c": {"status": "pending", "n": 3}},
+        )
+
+    async def test_load_matching_on_normal_store_filters_locally(self):
+        db = FakeKVSupabase(rows=[
+            {"namespace": "ns", "key": "a", "value": {"status": "pending"}},
+            {"namespace": "ns", "key": "b", "value": {"status": "done"}},
+            {"namespace": "ns", "key": "c", "value": "pending"},
+        ])
+        store = KVStore("ns", client=db, path=self.path)
+        self.assertEqual(
+            await store.load_matching({"status": "pending"}),
+            {"a": {"status": "pending"}},
+        )
+
+    async def test_remote_failure_raises_instead_of_falling_back(self):
+        db = FakeKVSupabase()
+        db.error = APIError("temporary unavailable")
+        store = self.store(db)
+        with self.assertRaises(APIError):
+            await store.set("k", 1)
+        with self.assertRaises(APIError):
+            await store.load_all()
+        with self.assertRaises(APIError):
+            await store.load_matching({"status": "pending"})
+
+
 if __name__ == "__main__":
     unittest.main()

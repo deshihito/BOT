@@ -100,7 +100,19 @@ REASON_MAX = 40
 #: 5 秒かかり、カジノの先払い→精算ではワーカー周期が2周分積み重なって
 #: 体感の反映が最大で十数秒になっていた。現在は AdaptiveEconomyLoop が
 #: 処理がある間は短間隔、idle が続けばこの値まで backoff する。
-POLL_SECONDS = 5.0
+#: pending だけを絞って読むようになり idle 時の読み取りが軽くなった
+#: ため、上限は 1 秒に縮めた（最初の1件の拾い遅れが体感の主因だった）。
+POLL_SECONDS = 1.0
+#: 全件読み（壊れたレコードの終端化＋終端オプの間引き）を行う間隔（ms）
+FULL_SCAN_INTERVAL_MS = 600_000
+#: 終端オプ（done/failed）を名前空間に残す上限（新しい順）。
+#: 履歴表示は直近20件/人しか読まないが、無制限に残すと relay の watch
+#: （名前空間リスト）や全件読みが件数に比例して遅くなる。
+PRUNE_KEEP_TERMINAL = 1000
+#: 計測をまとめて書き出す単位（件数 / 秒）。オプごとの読み書きは
+#: 適用本体と同じだけ往復を増やすため、メモリに貯めて一括で書く。
+METRIC_FLUSH_OPS = 20
+METRIC_FLUSH_SECONDS = 10.0
 #: 処理がある間（直前のバッチで1件以上終端化したとき）の間隔（秒）。
 #: 先払いの直後に積まれる精算オプ等を早く拾うための値。
 POLL_BUSY_SECONDS = 0.4
@@ -235,7 +247,9 @@ class WorldBoxEconomyWorker:
     """bot_kv の経済オプを適用するワーカー。
 
     seams:
-    - kv: KVStore 互換（load_all / load_one / set の async メソッド）
+    - kv: KVStore 互換（load_all / load_one / set の async メソッド。
+      load_matching があれば pending の絞り込み読みに、delete があれば
+      終端オプの間引きに使う）
     - wallet_provider: WalletCog を返す callable（None なら今回は何もしない）
     - economy_store: EconomyPoolStore 互換（pay_house / refund_house）
     - record_history: (sender_id, receiver_id, amount, reason) の async callable
@@ -268,6 +282,9 @@ class WorldBoxEconomyWorker:
         self._metrics_kv = metrics_kv
         self._remote_down = False
         self._wallet_down = False
+        self._metric_buffer: list[tuple[dict[str, Any], int]] = []
+        self._metric_last_flush = time.monotonic()
+        self._last_full_scan_ms = 0
 
     def _marker(self) -> Any:
         marker = self._insufficient_marker
@@ -281,9 +298,23 @@ class WorldBoxEconomyWorker:
         """pending オプを1バッチ適用する。適用（終端化）した件数を返す。
 
         kv の読み取りに失敗したら 0 を返して次回に回す（例外は外へ出さない）。
+
+        通常回は pending だけを絞って読む。名前空間には終端オプが貯まり
+        続けるため、全件読みは件数に比例して遅くなる。FULL_SCAN_INTERVAL_MS
+        ごとの回だけ全件読みにし、絞り込みでは拾えない壊れたレコードの
+        終端化（select_pending が候補に含める）と終端オプの間引きを行う。
         """
+        now = _now_ms()
+        full_scan = now - self._last_full_scan_ms >= FULL_SCAN_INTERVAL_MS
         try:
-            records = await self._kv.load_all()
+            if full_scan:
+                records = await self._kv.load_all()
+            else:
+                loader = getattr(self._kv, "load_matching", None)
+                if loader is not None:
+                    records = await loader({"status": "pending"})
+                else:
+                    records = await self._kv.load_all()
         except Exception:
             if not self._remote_down:
                 logger.warning("worldbox economy: bot_kv の読み取りに失敗しました（次回再試行）")
@@ -292,7 +323,11 @@ class WorldBoxEconomyWorker:
         if self._remote_down:
             logger.info("worldbox economy: bot_kv への接続が回復しました")
             self._remote_down = False
-        if not isinstance(records, dict) or not records:
+        if not isinstance(records, dict):
+            return 0
+        if not records:
+            if full_scan:
+                self._last_full_scan_ms = now
             return 0
         # wallet が未読込だと例外が飛ぶ実装もある。ここで例外を外へ出すと
         # tasks.loop ごと止まって経済処理が無言で死ぬため、kv 読み取りと
@@ -316,7 +351,44 @@ class WorldBoxEconomyWorker:
                     handled += 1
             except Exception:
                 logger.exception("worldbox economy: オプ処理で予期しない例外（key=%s）", key)
+        await self._flush_metrics(force=False)
+        if full_scan:
+            self._last_full_scan_ms = now
+            await self._prune_terminal(records)
         return handled
+
+    async def _prune_terminal(self, records: Any) -> None:
+        """終端オプを新しい順に PRUNE_KEEP_TERMINAL 件だけ残して消す。
+
+        records は処理前のスナップショットなので、この回に終端化した
+        オプは次回の全件読みで対象になる。間引きはベストエフォート。
+        """
+        delete = getattr(self._kv, "delete", None)
+        if delete is None or not isinstance(records, dict):
+            return
+        terminal: list[tuple[int, str]] = []
+        for key, raw in records.items():
+            value = raw
+            if isinstance(value, str):
+                try:
+                    value = json.loads(value)
+                except (ValueError, TypeError):
+                    continue
+            if not isinstance(value, dict) or value.get("status") not in ("done", "failed"):
+                continue
+            applied_at = value.get("appliedAt")
+            sort_key = (
+                int(applied_at)
+                if isinstance(applied_at, (int, float)) and not isinstance(applied_at, bool)
+                else 0
+            )
+            terminal.append((sort_key, key))
+        terminal.sort(reverse=True)
+        for _, key in terminal[PRUNE_KEEP_TERMINAL:]:
+            try:
+                await delete(key)
+            except Exception:
+                logger.warning("worldbox economy: 終端オプの間引きに失敗しました（key=%s）", key)
 
     async def _process_one(self, wallet: Any, key: str, raw: Any) -> bool:
         op = parse_op(raw)
@@ -357,12 +429,35 @@ class WorldBoxEconomyWorker:
         return True
 
     async def _record_metric(self, op: dict[str, Any], applied: int) -> None:
-        """日次経済集計（理由別 earn/spend + バンクロール）を記録する。
+        """日次経済集計への加算をバッファに積む（書き出しは _flush_metrics）。
 
-        計測はベストエフォート: 失敗しても経済の適用は止めない。
+        計測はベストエフォート: 失敗しても経済の適用は止めない。オプごとに
+        読み書きすると適用本体と同じだけ往復が増えるため、まとめて書く。
         """
         if self._metrics_kv is None:
             return
+        self._metric_buffer.append((op, applied))
+        await self._flush_metrics(force=False)
+
+    async def _flush_metrics(self, *, force: bool) -> None:
+        """貯まった計測を1回の読み書きで書き出す。
+
+        METRIC_FLUSH_OPS 件たまるか METRIC_FLUSH_SECONDS 秒たったら書く
+        （force=True は無条件）。書き出しに失敗した分は捨てる（計測は
+        ベストエフォートで、再送のために適用を遅らせない）。
+        """
+        if self._metrics_kv is None or not self._metric_buffer:
+            return
+        now = time.monotonic()
+        if (
+            not force
+            and len(self._metric_buffer) < METRIC_FLUSH_OPS
+            and now - self._metric_last_flush < METRIC_FLUSH_SECONDS
+        ):
+            return
+        batch = self._metric_buffer
+        self._metric_buffer = []
+        self._metric_last_flush = now
         try:
             from datetime import datetime, timezone
 
@@ -379,7 +474,9 @@ class WorldBoxEconomyWorker:
                     current = json.loads(current)
                 except (ValueError, TypeError):
                     current = None
-            await self._metrics_kv.set(date, apply_metric(current, op, applied, bankroll))
+            for op, applied in batch:
+                current = apply_metric(current, op, applied, bankroll)
+            await self._metrics_kv.set(date, current)
         except Exception:
             logger.warning("worldbox economy: 計測の記録に失敗しました（次回再試行）")
 
