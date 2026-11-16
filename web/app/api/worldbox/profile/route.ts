@@ -189,7 +189,7 @@ async function handlePost(request: Request, session: AuthedSession) {
       const myGenre = await loadMyLobbyShopGenre(ownerKey);
       const genreError = checkBuyGenre(myGenre, data.itemId);
       if (genreError) return statusError(genreError, 409);
-      // レア品（特殊・ミスリル tier4・宝石ブロック）はどの店でも売っていない
+      // ホワイトリスト外の品目はどの店でも売っていない
       const soldError = checkBuySold(data.itemId);
       if (soldError) return statusError(soldError, 409);
       // 日次ローテーション: その日の品目に無いものは買えない（価格も日次）

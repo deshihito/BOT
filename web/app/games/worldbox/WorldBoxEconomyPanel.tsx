@@ -237,15 +237,16 @@ export default function WorldBoxEconomyPanel({ space, station, genre, onClose }:
   }
 
   const owned = ITEMS.filter((item) => (profile.items[item.id] ?? 0) > 0);
-  // この店で売られている品目（ジャンル選別。レア品はどの店でも売らない）
+  // この店で売られている品目（ジャンル選別。販売はホワイトリスト86品のみ）
   // 品目と価格は日次ローテーション（サーバー側の購入検証と同じ式）
   const shopDayKey = shopDayKeyOf(Date.now());
   const shopItems = shopGenre ? dailyStockForGenre(shopGenre, shopDayKey) : ITEMS.filter((item) => !isShopExcluded(item));
   const priceOf = (item: (typeof ITEMS)[number]): number =>
     shopGenre ? dailyPriceFor(item, shopDayKey) : item.price;
   // 施設の前にいないタブを開いたままにしない（その施設へ行くと使える）
+  // 販売品目の無い店（鍛冶屋は合成・強化専用）ではショップタブ自体を出さない
   const tabAllowed = (t: Tab): boolean =>
-    t === "shop" ? atShop : t === "craft" ? atWorkbench : t === "bank" ? atBank : true;
+    t === "shop" ? atShop && shopItems.length > 0 : t === "craft" ? atWorkbench : t === "bank" ? atBank : true;
   const activeTab: Tab = tabAllowed(tab) ? tab : "bag";
   const tabBtn = (t: Tab, label: string) => (
     <button
@@ -284,7 +285,7 @@ export default function WorldBoxEconomyPanel({ space, station, genre, onClose }:
 
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12 }}>
         {tabBtn("bag", "かばん")}
-        {atShop && tabBtn("shop", shopGenre ? (genreById(shopGenre)?.name ?? "ショップ") : "ショップ")}
+        {atShop && shopItems.length > 0 && tabBtn("shop", shopGenre ? (genreById(shopGenre)?.name ?? "ショップ") : "ショップ")}
         {atWorkbench && tabBtn("craft", "合成")}
         {atBank && tabBtn("bank", "銀行")}
       </div>

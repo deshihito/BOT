@@ -1,8 +1,8 @@
 // AGO WORLD BOX ショップのジャンル分けの検証:
 // - ジャンル定義: 全アイテムカテゴリがちょうど1ジャンルに割り当たる
-// - レア品（特殊・ミスリル tier4・宝石ブロック = 26品）を除く全アイテムが
-//   どこかの店で買える（itemsForGenre の和集合 = カタログ − レア品）
-// - 購入の在庫検証（純粋関数 checkBuySold: レア品は not_sold）
+// - 販売は入口だけのホワイトリスト86品のみ（種カテゴリ全種＋明示60品）。
+//   itemsForGenre の和集合 = ホワイトリストちょうど
+// - 購入の在庫検証（純粋関数 checkBuySold: リスト外は not_sold）
 // - ロビーの全 shop オブジェクトに genre が付き、5ジャンルが揃う
 // - カウンター前のタイルから stationGenreNear で店のジャンルが引ける
 // - 購入のジャンル検証（純粋関数 checkBuyGenre: 不一致は wrong_shop）
@@ -95,37 +95,56 @@ test("shops: ジャンル定義は想定の6種（鍛冶屋含む）", () => {
   assert.equal(shops.genreById(null), null);
 });
 
-// 店で売らないレア品（ユーザー決定）: 特殊18＋ミスリル tier4 の4＋宝石ブロック4 = 26品
-const EXCLUDED_IDS = [
-  // 特殊カテゴリ全品
-  "guard_charm", "thief_mask", "star_shard", "crown",
-  "ancient_coin", "ancient_relic", "dragon_scale", "ghost_tear",
-  "golden_key", "dungeon_key", "star_map", "slime_core", "wolf_fang",
-  "scepter", "tiara", "dragon_egg", "star_crown", "world_seed", "ago_emblem",
-  // 道具 tier 4（ミスリル）
-  "mithril_axe", "mithril_pickaxe", "mithril_sword", "mithril_hoe",
-  // 宝石ブロック
-  "diamond_block", "emerald_block", "ruby_block", "sapphire_block",
+// 店で売る品目（ユーザー決定 2026-11-16、案C）: 入口だけのホワイトリスト86品
+// = 種カテゴリ全26種 ＋ ジャンル別の明示60品。鍛冶屋ジャンルは販売ゼロ。
+const STOCK_IDS = [
+  // 種（カテゴリで一括許可されるが、集合の検証用に全種挙げる）
+  "wheat_seed", "carrot_seed", "potato_seed", "cabbage_seed", "strawberry_seed",
+  "tomato_seed", "corn_seed", "rice_seed", "pumpkin_seed", "melon_seed",
+  "onion_seed", "soybean_seed", "cucumber_seed", "eggplant_seed", "sweet_potato_seed",
+  "pepper_seed", "grape_seed", "turnip_seed", "chili_seed", "lettuce_seed",
+  "radish_seed", "spinach_seed", "daikon_seed", "apple_seed", "peach_seed", "cotton_seed",
+  // 道具屋
+  "wooden_axe", "wooden_pickaxe", "wooden_sword", "wooden_hoe",
+  "stone_axe", "stone_pickaxe", "stone_sword", "stone_hoe",
+  "iron_axe", "iron_pickaxe", "iron_sword", "iron_hoe", "explorer_compass",
+  // 建築屋
+  "dirt_block", "sand_block", "snow_block", "mud_block", "grass_block",
+  "gravel_block", "moss_block", "clay_block", "packed_snow_block", "ice_block",
+  "leaves_block", "path_block", "forest_floor_block", "cactus_block", "flower_block",
+  "oak_log", "pine_log", "birch_log", "sakura_log", "dark_log",
+  "autumn_log", "dead_log", "log_block",
+  // 家具屋
+  "torch", "workbench", "furnace", "storage_chest", "chest_box", "bed",
+  // 食料屋
+  "onigiri", "energy_drink", "meal", "cake", "bento", "feast",
+  // 種・素材屋の基礎素材
+  "wood", "stone", "stick", "clay", "glass", "paper", "bamboo", "charcoal",
+  "sugar", "iron_ingot", "copper_ingot", "salt",
 ];
 
-test("shops: レア品の除外集合はちょうど27品", () => {
-  const excluded = shops.ITEMS.filter((item) => shops.isShopExcluded(item)).map((item) => item.id);
-  assert.equal(EXCLUDED_IDS.length, 27);
-  assert.deepEqual([...excluded].sort(), [...EXCLUDED_IDS].sort());
-  // 除外しないもの: 宝石の素材・鉱石ブロック・合成品の高額品・ミスリルブロック
-  for (const id of ["ruby", "sapphire", "emerald", "diamond", "pearl", "diamond_ore_block", "gem_ring", "mithril_block", "wooden_axe"]) {
+test("shops: 販売ホワイトリストはちょうど86品", () => {
+  assert.equal(STOCK_IDS.length, 86);
+  assert.equal(new Set(STOCK_IDS).size, 86, "ホワイトリストに重複がある");
+  const buyable = shops.ITEMS.filter((item) => !shops.isShopExcluded(item)).map((item) => item.id);
+  assert.deepEqual([...buyable].sort(), [...STOCK_IDS].sort());
+  // リスト外の代表例: 合成品・調理済み・作物・宝石/貴金属・鉱石ブロック・採取素材・特殊
+  for (const id of ["carving", "potion", "gem_ring", "bread", "carrot", "wheat", "ruby", "diamond", "mithril", "diamond_ore_block", "mithril_block", "herb", "cloth", "piano", "auto_harvester", "star_shard", "mithril_axe", "diamond_block"]) {
     const item = shops.ITEMS.find((i) => i.id === id);
     assert.ok(item, `${id} がカタログに無い`);
-    assert.equal(shops.isShopExcluded(item), false, `${id} が除外されている`);
+    assert.equal(shops.isShopExcluded(item), true, `${id} が販売されている`);
   }
+  // 鍛冶屋ジャンルは販売品目ゼロ（合成・強化専用の施設）
+  assert.deepEqual(shops.itemsForGenre("smith"), []);
 });
 
-test("shops: レアを除く全アイテムがどこかの店で買える", () => {
+test("shops: 買えるのはホワイトリストの品目だけ", () => {
   const buyable = shops.SHOP_GENRES.flatMap((g) => shops.itemsForGenre(g.id));
-  assert.equal(buyable.length, shops.ITEMS.length - EXCLUDED_IDS.length, "レア以外で買えないアイテムがある");
+  assert.equal(buyable.length, STOCK_IDS.length, "ホワイトリスト外の品目が買える／内の品目が買えない");
+  assert.deepEqual(buyable.map((i) => i.id).sort(), [...STOCK_IDS].sort());
   for (const item of shops.ITEMS) {
     assert.ok(shops.genreOfItem(item.id), `${item.id} のジャンルが無い`);
-    // どのジャンルの品目にもレア品は含まれない
+    // どのジャンルの品目にもリスト外は含まれない
     for (const g of shops.SHOP_GENRES) {
       assert.ok(!shops.itemsForGenre(g.id).some((i) => i.id === item.id && shops.isShopExcluded(i)), `${item.id} が ${g.id} の品目に残っている`);
     }
@@ -135,19 +154,22 @@ test("shops: レアを除く全アイテムがどこかの店で買える", () =
   assert.equal(shops.genreOfItem("wooden_axe"), "tools");
   assert.equal(shops.genreOfItem("carving"), "smith");
   assert.equal(shops.genreOfItem("no-such-item"), null);
-  // ジャンル割当て自体は不変（レア品もカテゴリ上のジャンルは持つ）
+  // ジャンル割当て自体は不変（リスト外もカテゴリ上のジャンルは持つ）
   assert.equal(shops.genreOfItem("star_shard"), "smith");
   assert.equal(shops.genreOfItem("mithril_axe"), "tools");
   assert.equal(shops.genreOfItem("diamond_block"), "blocks");
 });
 
-test("shops: checkBuySold はレア品を not_sold にする", () => {
+test("shops: checkBuySold はホワイトリスト外を not_sold にする", () => {
   assert.equal(shops.checkBuySold("star_shard"), "not_sold"); // 特殊
   assert.equal(shops.checkBuySold("mithril_sword"), "not_sold"); // tier 4
   assert.equal(shops.checkBuySold("ruby_block"), "not_sold"); // 宝石ブロック
+  assert.equal(shops.checkBuySold("ruby"), "not_sold"); // 宝石の素材も売らない
+  assert.equal(shops.checkBuySold("diamond_ore_block"), "not_sold"); // 鉱石ブロックも売らない
+  assert.equal(shops.checkBuySold("carving"), "not_sold"); // 合成品は作るもの
   assert.equal(shops.checkBuySold("wood"), null);
-  assert.equal(shops.checkBuySold("ruby"), null); // 宝石の素材は売る
-  assert.equal(shops.checkBuySold("diamond_ore_block"), null); // 鉱石ブロックは売る
+  assert.equal(shops.checkBuySold("wheat_seed"), null); // 種は全種売る
+  assert.equal(shops.checkBuySold("iron_sword"), null);
   // 未知のアイテムは buyItem 側の unknown_item に委ねる
   assert.equal(shops.checkBuySold("no-such-item"), null);
 });
