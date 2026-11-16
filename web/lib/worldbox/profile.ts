@@ -146,6 +146,17 @@ function clampInt(v: unknown, min: number, max: number, fallback: number): numbe
   return Math.max(min, Math.min(max, Math.floor(v)));
 }
 
+/**
+ * HP・空腹度用の小数保持クランプ。精算（15秒間隔）ごとに整数化すると
+ * 1回ぶんの減少（放置で約0.1）が毎回切り捨て/切り上げられて実効レートが
+ * 仕様から大きくずれる（放置でも約25分で空腹が空になった実害）。
+ * 端数は保持し、小数第3位までで丸めて保存ノイズだけ抑える。
+ */
+function clampVital(v: unknown, min: number, max: number, fallback: number): number {
+  if (typeof v !== "number" || !Number.isFinite(v)) return fallback;
+  return Math.round(Math.max(min, Math.min(max, v)) * 1000) / 1000;
+}
+
 function parseItems(raw: unknown): Record<string, number> {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
   const items: Record<string, number> = {};
@@ -258,8 +269,8 @@ export function parseProfile(raw: unknown): PlayerProfile {
   const role: AdventureRoleId = isAdventureRoleId(data.role) ? data.role : "free";
   return {
     coins: clampInt(data.coins, 0, Number.MAX_SAFE_INTEGER, DEFAULT_PROFILE.coins),
-    hunger: clampInt(data.hunger, 0, HUNGER_MAX, DEFAULT_PROFILE.hunger),
-    hp: clampInt(data.hp, 0, HP_MAX + 20, HP_MAX), // 守護の最大HPボーナス分まで許す
+    hunger: clampVital(data.hunger, 0, HUNGER_MAX, DEFAULT_PROFILE.hunger),
+    hp: clampVital(data.hp, 0, HP_MAX + 20, HP_MAX), // 守護の最大HPボーナス分まで許す
     status: parseStatus(data.status),
     vitalAt: clampInt(data.vitalAt, 0, Number.MAX_SAFE_INTEGER, 0),
     vitalX: parseVitalCoord(data.vitalX),
@@ -405,8 +416,8 @@ export function serializeProfile(profile: PlayerProfile): string {
   const inv = invOf(profile);
   return JSON.stringify({
     coins: clampInt(profile.coins, 0, Number.MAX_SAFE_INTEGER, 0),
-    hunger: clampInt(profile.hunger, 0, HUNGER_MAX, 0),
-    hp: clampInt(profile.hp, 0, HP_MAX + 20, HP_MAX),
+    hunger: clampVital(profile.hunger, 0, HUNGER_MAX, 0),
+    hp: clampVital(profile.hp, 0, HP_MAX + 20, HP_MAX),
     status: parseStatus(profile.status),
     vitalAt: clampInt(profile.vitalAt, 0, Number.MAX_SAFE_INTEGER, 0),
     // 前回精算位置は3点そろったときだけ書く（欠けた状態を保存しない）

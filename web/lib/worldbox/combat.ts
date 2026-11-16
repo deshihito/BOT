@@ -164,7 +164,12 @@ export function parseMobState(raw: unknown): MobState | null {
 export function parseMobStates(raw: unknown): Record<string, MobState> {
   if (typeof raw !== "object" || raw === null) return {};
   const out: Record<string, MobState> = {};
-  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+  // 本番の呼び出し（mobs-online の loadMobStates）は bot-api の kvList が
+  // 返す Map をそのまま渡す。Object.entries(Map) は常に [] になるため、
+  // Map は entries() で反復する（幽霊モブ実害の再発防止）。
+  const entries: Iterable<readonly [string, unknown]> =
+    raw instanceof Map ? raw.entries() : Object.entries(raw as Record<string, unknown>);
+  for (const [k, v] of entries) {
     // インスタンス内は "空間ID|mobId@x,y" の前置キーを許す
     const baseKey = k.includes("|") ? k.slice(k.lastIndexOf("|") + 1) : k;
     if (!parseMobKey(baseKey)) continue;
