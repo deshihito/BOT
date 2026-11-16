@@ -49,6 +49,21 @@ export function lightRadiusTiles(inventory: Readonly<Record<string, number>> | n
   return 2.5;
 }
 
+/** 設置物が周りを照らす半径（タイル）。0 は光らない。 */
+export const PLACED_LIGHT_RADIUS: Readonly<Record<string, number>> = {
+  lamp: 9,
+  glowstone_block: 7,
+  torch: 6,
+  lava_block: 6,
+  campfire: 5,
+  magma_block: 5,
+};
+
+export function placedLightRadiusTiles(itemId: unknown): number {
+  if (typeof itemId !== "string") return 0;
+  return PLACED_LIGHT_RADIUS[itemId] ?? 0;
+}
+
 // ---------------------------------------------------------------- 洞窟
 export const CAVE_W = 64;
 export const CAVE_H = 64;

@@ -58,6 +58,8 @@ export type Heartbeat = {
   rank?: number;
   /** パーティ ID（バッチ5、ダンジョン内の他者フィルタ用）。未所属は ""。 */
   party?: string;
+  /** 椅子・ベンチ・ソファに座っているか（見た目だけの申告）。 */
+  sit?: boolean;
 };
 
 export type PresenceEntry = Heartbeat & {
@@ -108,6 +110,7 @@ export function sanitizeHeartbeat(raw: unknown, bounds: CoordBounds): Heartbeat 
     role: typeof v.role === "string" && ["blade", "guard", "scout", "miner", "medic", "teleporter"].includes(v.role) ? v.role : "free",
     rank: typeof v.rank === "number" && Number.isFinite(v.rank) ? Math.max(1, Math.min(5, Math.floor(v.rank))) : 1,
     party: typeof v.party === "string" ? v.party.slice(0, 48) : "",
+    ...(v.sit === true ? { sit: true } : {}),
   };
 }
 

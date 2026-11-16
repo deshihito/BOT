@@ -67,7 +67,7 @@ const tilesUrl = bundleModule(
   ["worldbox/rng.ts", "worldbox/mapgen.ts", "worldbox/items.ts", "worldbox/profile.ts", "worldbox/presence.ts", "worldbox/seasons.ts", "worldbox/tiles.ts"],
   [
     "worldTileSource", "mapTileAt", "T_GRASS",
-    "applyTileAction", "applyPlaceBlock", "applyMineBlock",
+    "applyTileAction", "applyPlaceBlock", "applyMineBlock", "applyFlowerAction",
     "tileKey", "parseTileOverride", "parseTileOverrides",
     "presenceIdFor", "isOverrideActive",
   ],
@@ -97,6 +97,17 @@ test("定義: 樽は10枠・宝箱は15枠、それ以外はコンテナでな�
   assert.equal(C.isContainerItem("nope"), false);
   assert.equal(C.isContainerItem(null), false);
   assert.equal(C.containerCapacity("nope"), 0);
+});
+
+test("定義: 木箱は8枠・収納箱は20枠のコンテナ", () => {
+  assert.equal(C.CONTAINER_DEFS.crate.capacity, 8);
+  assert.equal(C.CONTAINER_DEFS.storage_chest.capacity, 20);
+  assert.equal(C.containerCapacity("crate"), 8);
+  assert.equal(C.containerCapacity("storage_chest"), 20);
+  assert.equal(C.isContainerItem("crate"), true);
+  assert.equal(C.isContainerItem("storage_chest"), true);
+  assert.equal(C.emptyContainer(ME_ID, "crate").slots.length, 8);
+  assert.equal(C.emptyContainer(ME_ID, "storage_chest").slots.length, 20);
 });
 
 test("状態: 空コンテナの生成と serialize/parse の往復", () => {
