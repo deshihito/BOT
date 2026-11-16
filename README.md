@@ -13,7 +13,7 @@ Discord ボット「AGO BOT」と公式サイト (agobot.app) のモノレポ。
 | `core/paths.py` | **パス解決の基底**。ルート / データ / アセット / フォントはここ経由で取る。新規コードで `Path(__file__).parents[N]` を書かない |
 | `core/support/data_paths.py` | データ保存先と旧保存先 (stray) の移行読み取り |
 | `api/` | Bot 用 DB API (FastAPI)。Web 側の API は `web/app/api/` で、別物 |
-| `web/` | 公式サイト + Web ゲーム (Next.js)。`web/lib/` にロジック、`web/lib/worldbox/` 等ドメイン別フォルダあり |
+| `web/` | 公式サイト + Web ゲーム (Next.js)。`web/lib/` にロジック、ドメイン別フォルダあり。WORLD BOX は別レポ分離候補として1ジャンル扱い (詳細は `docs/ARCHITECTURE.md`) |
 | `Assets/` | Python 側の画像・音声アセット (大文字が現行の正) |
 | `assets/` | 共有バイナリ (fonts / hrtf / spatial) |
 | `data/` | 実行時データの唯一の置き場 (git 管理外) |
