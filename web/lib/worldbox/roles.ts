@@ -6,6 +6,7 @@
 //   剣士: 薙ぎ払い → 旋風斬り / 守護: アイスランス → サンダーストライク
 //   斥候: ポイズンフィールド → アローレイン / 採掘者: ファイアーボール → メテオ
 //   薬師: ヒーリングゾーン（全ランク、蘇生は専門行為）
+//   テレポーター: ポーター設置（戦闘技ではなく、ダブルタップ地点への設置専用）
 import type { PlayerProfile, AdventureRoleId } from "./profile";
 import { isAdventureRoleId, ADVENTURE_ROLE_IDS } from "./profile";
 export type { AdventureRoleId } from "./profile";
@@ -15,7 +16,7 @@ import type { SkillFxKind } from "./fx";
 /** スキル演出プリセット（fx.ts の SkillFxKind と対応）。 */
 export type SkillId =
   | "sweep" | "whirlwind" | "ice_lance" | "thunder_strike" | "poison_field"
-  | "arrow_rain" | "fireball" | "meteor" | "heal_zone" | "taunt";
+  | "arrow_rain" | "fireball" | "meteor" | "heal_zone" | "taunt" | "porter";
 
 export type SkillDef = {
   id: SkillId;
@@ -41,6 +42,7 @@ export const SKILLS: Record<SkillId, SkillDef> = {
   meteor: { id: "meteor", name: "メテオ", fx: "meteor", minRank: 5, cooldownMs: 60_000, radius: 2.5, power: 2.5 },
   heal_zone: { id: "heal_zone", name: "ヒーリングゾーン", fx: "heal_zone", minRank: 1, cooldownMs: 45_000, radius: 2.25, power: 30 },
   taunt: { id: "taunt", name: "挑発", fx: "taunt", minRank: 1, cooldownMs: 20_000, radius: 3.5, power: 0 },
+  porter: { id: "porter", name: "ポーター設置", fx: "warp", minRank: 1, cooldownMs: 30_000, radius: 0, power: 0 },
 };
 
 export type AdventureRoleDef = {
@@ -61,6 +63,7 @@ export const ADVENTURE_ROLES: Record<AdventureRoleId, AdventureRoleDef> = {
   scout: { id: "scout", name: "斥候", symbol: "斥", passiveName: "移動スタミナ節約", specialtyName: "罠の探知", skills: ["poison_field", "arrow_rain"] },
   miner: { id: "miner", name: "採掘者", symbol: "採", passiveName: "鉱脈の追加ドロップ", specialtyName: "鉱脈探知", skills: ["fireball", "meteor"] },
   medic: { id: "medic", name: "薬師", symbol: "薬", passiveName: "回復アイテム強化", specialtyName: "蘇生", skills: ["heal_zone"] },
+  teleporter: { id: "teleporter", name: "テレポーター", symbol: "ポ", passiveName: "ポーター設置", specialtyName: "ポーター設置", skills: ["porter"] },
 };
 
 export function roleById(id: unknown): AdventureRoleDef {
@@ -120,6 +123,7 @@ export function activeSkillFor(profile: PlayerProfile): SkillDef | null {
   for (const id of def.skills) {
     const skill = SKILLS[id];
     if (id === "taunt") continue; // 挑発は自分のタイルへのダブルタップ専用
+    if (id === "porter") continue; // ポーター設置はダブルタップ地点への設置専用（戦闘技として返さない）
     if (rank >= skill.minRank) best = skill;
   }
   return best;
@@ -129,6 +133,33 @@ export function activeSkillFor(profile: PlayerProfile): SkillDef | null {
 export function skillCooldownLeft(profile: PlayerProfile, skillId: SkillId, now: number): number {
   const at = profile.skillAt[skillId] ?? 0;
   return Math.max(0, at + SKILLS[skillId].cooldownMs - now);
+}
+
+// ---------------------------------------------------------------- 転職コスト
+/** 転職（2回目以降の役職変更）の価格（アゴコイン、ユーザー決定 2026-11-16）。 */
+export const ROLE_CHANGE_COST = 100_000;
+/** 転職の spend オプの理由（ブリッジの spend は理由ホワイトリストを持たない）。 */
+export const ROLE_CHANGE_REASON = "role_change";
+
+/**
+ * その変更に掛かるコイン。初めての役職選択は無料、同じ役職の再選択は
+ * 無料（no-op）。一度でも選んだことがある人（rolePicked、または旧データで
+ * 既に free でない役職を持っている人）の変更は ROLE_CHANGE_COST。
+ */
+export function roleChangeCost(profile: PlayerProfile, nextRole: AdventureRoleId): number {
+  if (nextRole === profile.role) return 0;
+  const picked = profile.rolePicked === true || profile.role !== "free";
+  return picked ? ROLE_CHANGE_COST : 0;
+}
+
+/** 役職変更の遷移（コスト計算込み）。変更したら rolePicked を立てる。 */
+export function applyRoleChange(
+  profile: PlayerProfile,
+  nextRole: AdventureRoleId,
+): { profile: PlayerProfile; cost: number } {
+  const cost = roleChangeCost(profile, nextRole);
+  if (nextRole === profile.role) return { profile, cost: 0 };
+  return { profile: { ...profile, role: nextRole, rolePicked: true }, cost };
 }
 
 // ---------------------------------------------------------------- 解放ゲート

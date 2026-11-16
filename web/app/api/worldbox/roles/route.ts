@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getRequestSession, publicOrigin, sessionOwnerKey } from "@/lib/auth";
-import { MAP_SEED } from "@/lib/worldbox/mapgen";
+import { MAP_SEED, tileAt } from "@/lib/worldbox/mapgen";
 import { isProfileEnabled, loadProfile, storeProfile } from "@/lib/worldbox/profile-online";
 import { addItem, type PlayerProfile } from "@/lib/worldbox/profile";
 import { playerAttack } from "@/lib/worldbox/arena";
@@ -16,9 +16,19 @@ import { parseSave } from "@/lib/worldbox/save";
 import { loadWorldBoxSave } from "@/lib/worldbox/save-online";
 import { loadMyLobbyStation } from "@/lib/worldbox/station-online";
 import {
-  activeSkillFor, addMasteryXp, isAdventureRoleId, masteryRankOf,
-  roleById, skillCooldownLeft, SKILLS, type SkillId,
+  activeSkillFor, addMasteryXp, applyRoleChange, isAdventureRoleId, masteryRankOf,
+  roleById, ROLE_CHANGE_REASON, skillCooldownLeft, SKILLS, type SkillId,
 } from "@/lib/worldbox/roles";
+import { isNationsEnabled, loadNationsState } from "@/lib/worldbox/nations-online";
+import { porterInRange, porterTileError } from "@/lib/worldbox/warp";
+import { storePorter } from "@/lib/worldbox/warp-online";
+import { isOverrideActive } from "@/lib/worldbox/tiles";
+import { loadTileOverride } from "@/lib/worldbox/tiles-online";
+import { buildEconomyOp } from "@/lib/worldbox/economy-bridge";
+import {
+  enqueueEconomyOp, isEconomyEnabled, readUserBalance,
+} from "@/lib/worldbox/economy-bridge-online";
+import { withUserLock } from "@/lib/worldbox/user-lock";
 import { maxHpFor } from "@/lib/worldbox/profile";
 import {
   buildCaveLayer, buildDungeonFloor, dungeonHpScale, makeInstanceSpace, parseInstanceSpace,
@@ -35,8 +45,12 @@ export const runtime = "nodejs";
 
 // AGO WORLD BOX の冒険役職。
 // POST { action: "set_role", role }: ギルドボード前でのみ変更可（インスタンス内は不可）。
+//   初めての選択は無料、それ以降の変更は 100,000 コイン（spend role_change、
+//   残高不足は 409 not_enough_coins で役職は変わらない）。
 // POST { action: "skill", skill, tx, ty, space, px, py }: ダブルタップ技。
 //   役職・ランク・クールタイム・対象はすべてサーバーが再計算して検証する。
+//   テレポーターの porter は戦闘技ではなく、ダブルタップ地点への
+//   ユニオンポーター設置として分岐する（利用は /api/worldbox/warp）。
 // POST { action: "revive", space, px, py }: 薬師の蘇生（死亡地点の近く、1遠征1回）。
 // GET ?space=&x=&y=: 自分の役職情報と、近くの死亡地点（薬師用）。
 
@@ -127,7 +141,8 @@ export async function GET(request: Request) {
       .filter((d) => d.space === space && d.ownerKey !== ownerKey && Math.hypot(d.x - x, d.y - y) <= 6)
       .map((d) => ({ name: d.name, x: d.x, y: d.y, at: d.at }));
   }
-  const skill = activeSkillFor(profile);
+  // テレポーターの発動技はポーター設置（activeSkillFor は戦闘技として返さない）
+  const skill = profile.role === "teleporter" ? SKILLS.porter : activeSkillFor(profile);
   return NextResponse.json(
     {
       role: profile.role,
@@ -166,9 +181,38 @@ export async function POST(request: Request) {
     const saved = parseSave(await loadWorldBoxSave(ownerKey));
     if (saved && parseInstanceSpace(saved.space)) return err("in_instance", 409);
     if ((await loadMyLobbyStation(ownerKey)) !== "guild") return err("not_at_guild_board", 409);
-    const next = { ...profile, role: fields.role };
-    if (!(await storeProfile(ownerKey, next))) return err("store_failed", 503);
-    return NextResponse.json({ ok: true, profile: next }, { headers: NO_STORE });
+    const targetRole = fields.role;
+    // 転職は課金を伴うため、プロフィールの RMW とオプ登録をユーザー単位
+    // ロックで直列化し、ロック内で読み直してから判定する。
+    return withUserLock(ownerKey, async () => {
+      const current = await loadProfile(ownerKey);
+      if (!current) return err("roles_unavailable", 503);
+      const { profile: next, cost } = applyRoleChange(current, targetRole);
+      if (cost <= 0) {
+        if (!(await storeProfile(ownerKey, next))) return err("store_failed", 503);
+        return NextResponse.json({ ok: true, profile: next, cost: 0 }, { headers: NO_STORE });
+      }
+      // 課金: 残高を確認し、プロフィールを先に保存してから spend オプを積む。
+      // オプを積めなければプロフィールを戻す（購入フローと同じ原子性）。
+      const discordId = session.provider === "discord" ? session.id : null;
+      if (!discordId) return err("discord_required", 403);
+      if (!isEconomyEnabled()) return err("economy_unavailable", 503);
+      const balance = await readUserBalance(discordId);
+      if (balance === null) return err("economy_unavailable", 503);
+      if (balance < cost) return err("not_enough_coins", 409);
+      const op = buildEconomyOp(
+        { kind: "spend", userKey: ownerKey, discordId, amount: cost, reason: ROLE_CHANGE_REASON },
+        crypto.randomUUID(),
+        Date.now(),
+      );
+      if (!op) return err("economy_failed", 503);
+      if (!(await storeProfile(ownerKey, next))) return err("store_failed", 503);
+      if (!(await enqueueEconomyOp(op))) {
+        await storeProfile(ownerKey, current);
+        return err("economy_failed", 503);
+      }
+      return NextResponse.json({ ok: true, profile: next, cost }, { headers: NO_STORE });
+    });
   }
 
   const space = typeof fields.space === "string" ? fields.space : "world";
@@ -231,10 +275,13 @@ export async function POST(request: Request) {
     const rank = masteryRankOf(profile, profile.role);
     // 技の所有検証: その役職の技であり、ランクを満たし、現在の発動技と一致する
     // （守護の挑発だけは自分のタイル専用として別に許可する）。
+    // テレポーターのポーター設置も activeSkillFor では返さない設置専用の技。
     const active = activeSkillFor(profile);
     const isTaunt = skillId === "taunt" && profile.role === "guard";
-    if (!isTaunt && (!active || active.id !== skillId)) return err("skill_locked", 409);
+    const isPorter = skillId === "porter" && profile.role === "teleporter";
+    if (!isTaunt && !isPorter && (!active || active.id !== skillId)) return err("skill_locked", 409);
     if (isTaunt && rank < SKILLS.taunt.minRank) return err("skill_locked", 409);
+    if (isPorter && rank < SKILLS.porter.minRank) return err("skill_locked", 409);
     if (skillCooldownLeft(profile, skillId, now) > 0) return err("cooldown", 409);
 
     const tx = typeof fields.tx === "number" && Number.isFinite(fields.tx) ? fields.tx : pos.x;
@@ -273,6 +320,35 @@ export async function POST(request: Request) {
       if (!(await storeProfile(ownerKey, next))) return err("store_failed", 503);
       return NextResponse.json(
         { ok: true, skill: skillId, profile: next, results: [] },
+        { headers: NO_STORE },
+      );
+    }
+
+    if (skillId === "porter") {
+      // ポーター設置: ワールド空間・ユニオン所属が前提。設置先は自分の
+      // タイルから PORTER_PLACE_RANGE 以内で、通行できるタイルのみ。
+      // 保存はギルド ID キーで1件だけ（置き直し = 移動）。
+      if (space !== "world") return err("not_in_world", 409);
+      if (!isNationsEnabled()) return err("warp_unavailable", 503);
+      const nationsState = await loadNationsState();
+      const mine = nationsState.members[ownerKey];
+      const nation = mine ? nationsState.nations[mine.nationId] : undefined;
+      if (!mine || !nation) return err("not_in_union", 409);
+      const gx = Math.floor(tx);
+      const gy = Math.floor(ty);
+      if (!porterInRange(Math.floor(pos.x), Math.floor(pos.y), gx, gy)) {
+        return err("too_far", 409);
+      }
+      const override = await loadTileOverride(gx, gy);
+      const hasBlock = !!(override && isOverrideActive(override, now) && override.block);
+      const tileError = porterTileError(tileAt(gx, gy, MAP_SEED), hasBlock);
+      if (tileError) return err(tileError, 409);
+      const porter = { x: gx, y: gy, by: ownerKey, at: now };
+      if (!(await storePorter(nation.guildId, porter))) return err("store_failed", 503);
+      next = addMasteryXp(next, "teleporter", 2).profile;
+      if (!(await storeProfile(ownerKey, next))) return err("store_failed", 503);
+      return NextResponse.json(
+        { ok: true, skill: skillId, fx: skill.fx, cx: gx + 0.5, cy: gy + 0.5, profile: next, results: [], porter },
         { headers: NO_STORE },
       );
     }

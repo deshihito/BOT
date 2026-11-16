@@ -2,7 +2,8 @@
 // AGO WORLD BOX のギルドボードパネル（ロビー中央広場のギルドボード専用）。
 // タブは5つ: 「依頼」（ユニオン内のアイテム依頼: 投稿・納品・取消）と
 // 「役職」（国 = Discord サーバーへの建国・参加・離脱と自分の役職）と
-// 「冒険役職」（剣士/守護/斥候/採掘者/薬師の選択と熟練ランク表示）と
+// 「冒険役職」（剣士/守護/斥候/採掘者/薬師/テレポーターの選択と熟練ランク表示。
+// 初めての選択は無料、以降の変更は 100,000 コイン）と
 // 「掲示」（ユニオンチャットと Discord 連携設定）と
 // 「戦争」（レイド宣言・マーク攻防・繁栄ランキング・戦績）。
 // 役職まわりの home はここ: ≡ メニューには置かない。
@@ -12,7 +13,7 @@ import { useCallback, useEffect, useState } from "react";
 import { ITEMS, itemById } from "@/lib/worldbox/items";
 import type { NationRole, NationsResponse } from "@/lib/worldbox/nations";
 import type { PlayerProfile } from "@/lib/worldbox/profile";
-import { ADVENTURE_ROLES, masteryRankOf, type AdventureRoleId } from "@/lib/worldbox/roles";
+import { ADVENTURE_ROLES, masteryRankOf, roleChangeCost, type AdventureRoleId } from "@/lib/worldbox/roles";
 import type { GuildRequest } from "@/lib/worldbox/requests";
 
 const ROLE_LABEL: Record<NationRole, string> = { king: "王", minister: "大臣", citizen: "国民" };
@@ -476,6 +477,7 @@ export default function WorldBoxGuildBoardPanel({
           {Object.values(ADVENTURE_ROLES).map((r) => {
             const rank = profile ? masteryRankOf(profile, r.id) : 1;
             const current = profile?.role === r.id;
+            const cost = profile && !current ? roleChangeCost(profile, r.id) : 0;
             return (
               <div key={r.id} style={{ ...rowStyle, justifyContent: "space-between" }}>
                 <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -496,6 +498,10 @@ export default function WorldBoxGuildBoardPanel({
                     <span style={{ opacity: 0.3 }}>{"●".repeat(5 - rank)}</span>
                   </span>
                 </span>
+                <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  {cost > 0 && (
+                    <span style={{ fontSize: 12, opacity: 0.8 }}>{cost.toLocaleString("ja-JP")}</span>
+                  )}
                 <button
                   type="button"
                   style={{ ...btn, ...(current ? tabOn : {}) }}
@@ -514,7 +520,11 @@ export default function WorldBoxGuildBoardPanel({
                         onProfileChange(json.profile);
                         setMsg(`${r.name}になりました`);
                       } else {
-                        setMsg(json.error === "not_at_guild_board" ? "ギルドボードの前で操作してください" : "変更できませんでした");
+                        setMsg(
+                          json.error === "not_at_guild_board" ? "ギルドボードの前で操作してください"
+                          : json.error === "not_enough_coins" ? "コインが足りません"
+                          : "変更できませんでした",
+                        );
                       }
                     } catch {
                       setMsg("変更できませんでした");
@@ -525,6 +535,7 @@ export default function WorldBoxGuildBoardPanel({
                 >
                   {current ? "選択中" : "選ぶ"}
                 </button>
+                </span>
               </div>
             );
           })}
