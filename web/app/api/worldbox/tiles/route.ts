@@ -7,7 +7,7 @@ import { presenceIdFor } from "@/lib/worldbox/presence";
 import { parseSave } from "@/lib/worldbox/save";
 import { loadWorldBoxSave } from "@/lib/worldbox/save-online";
 import {
-  applyFlowerAction, applyMineBlock, applyPlaceBlock, applyTileAction, applyToggleGate, isOverrideActive, tileKey,
+  applyDisplayAction, applyDrawWater, applyFlowerAction, applyMineBlock, applyPlaceBlock, applySetSign, applyTileAction, applyToggleGate, isOverrideActive, tileKey,
   type TileActionResult, type TileOverridesMap,
 } from "@/lib/worldbox/tiles";
 import { loadNationsState } from "@/lib/worldbox/nations-online";
@@ -16,6 +16,8 @@ import { canBreakOthersBlock } from "@/lib/worldbox/war";
 import { containerIsEmpty, isContainerItem } from "@/lib/worldbox/containers";
 import { isMachineItem, machineBufferCount } from "@/lib/worldbox/machines";
 import { deleteMachine, loadMachine } from "@/lib/worldbox/machines-online";
+import { isStallItem } from "@/lib/worldbox/stalls";
+import { loadStall } from "@/lib/worldbox/stalls-online";
 import { bumpMetric, recordFirstStep } from "@/lib/worldbox/metrics-online";
 import { appendTileJournal, loadFrozen } from "@/lib/worldbox/ops-online";
 import { loadContainer, storeContainer } from "@/lib/worldbox/containers-online";
@@ -128,7 +130,7 @@ export async function POST(request: Request) {
   } catch {
     return NextResponse.json({ error: "invalid_request" }, { status: 400, headers: NO_STORE });
   }
-  const fields = (body ?? {}) as { action?: unknown; x?: unknown; y?: unknown; seedId?: unknown; itemId?: unknown };
+  const fields = (body ?? {}) as { action?: unknown; x?: unknown; y?: unknown; seedId?: unknown; itemId?: unknown; text?: unknown };
   const ownerKey = sessionOwnerKey(session);
   // 運用凍結中はタイルの書き換えを止める（荒らし対策）
   if (await loadFrozen()) {
@@ -200,6 +202,13 @@ export async function POST(request: Request) {
             }
             minedMachine = true;
           }
+          // 屋台は出品が残っている間は回収できない（預かり品の消失防止）
+          if (blockItemId && isStallItem(blockItemId)) {
+            const stallState = await loadStall(tx, ty);
+            if (stallState && stallState.count > 0) {
+              return NextResponse.json({ error: "not_empty" }, { status: 409, headers: NO_STORE });
+            }
+          }
           // 戦争中の他者ブロック破壊: 攻撃側の国民が、防衛側の首都の
           // WAR_TERRITORY_RADIUS 以内にある防衛側国民のブロックだけ掘れる。
           // ブロック所有者の国は、所属マップの所有者キーから不透明 ID を
@@ -226,6 +235,21 @@ export async function POST(request: Request) {
           }
           result = applyMineBlock(
             current, profile, map, ownerKey, fields.x, fields.y, Date.now(), { warBreakAllowed },
+          );
+        } else if (fields.action === "set_sign") {
+          // 看板テキストの設定（所有者だけ、サーバー検証）
+          result = applySetSign(
+            current, profile, map, ownerKey, fields.x, fields.y, fields.text, Date.now(),
+          );
+        } else if (fields.action === "set_display" || fields.action === "clear_display") {
+          // 棚への展示/回収（所有者だけ、サーバー検証）
+          result = applyDisplayAction(
+            current, profile, map, ownerKey, fields.x, fields.y, fields.action, fields.itemId, Date.now(),
+          );
+        } else if (fields.action === "draw_water") {
+          // 井戸で水を汲む（バケツ→水入りバケツ）
+          result = applyDrawWater(
+            current, profile, map, ownerKey, fields.x, fields.y, Date.now(),
           );
         } else if (fields.action === "plant_flower" || fields.action === "remove_flower") {
           // 植木鉢・プランターへの花の植え付け/取り除き（所有者だけ、サーバー検証）
