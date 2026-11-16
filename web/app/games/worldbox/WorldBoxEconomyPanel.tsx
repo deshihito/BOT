@@ -17,6 +17,7 @@ import type { LobbyStation } from "@/lib/worldbox/lobby";
 import { ENHANCE_BASE_COST, ENHANCE_MATERIALS, ENHANCE_MAX_LEVEL, type PlayerProfile } from "@/lib/worldbox/profile";
 import type { SaveSpace } from "@/lib/worldbox/save";
 import { playWbSe, type WbSeName } from "@/lib/worldbox/sound";
+import { ItemAnnotation, ItemIcon, ItemSlot, ItemSlotGrid } from "./ItemSlotGrid";
 
 /** 経済アクションの成功音（行為の意味で選ぶ）。 */
 const ACTION_SE: Record<string, WbSeName> = {
@@ -81,22 +82,6 @@ const row: React.CSSProperties = {
   padding: "7px 0", borderBottom: "1px solid rgba(255,255,255,0.08)",
 };
 
-/** アイテムのドット絵アイコン（無いアイテムは名前ラベルのみで出す）。 */
-function ItemIcon({ id, size = 24 }: { id: string; size?: number }) {
-  const def = itemById(id);
-  if (!def?.icon) return null;
-  return (
-    <img
-      src={def.icon}
-      alt=""
-      width={size}
-      height={size}
-      draggable={false}
-      style={{ imageRendering: "pixelated", flexShrink: 0 }}
-    />
-  );
-}
-
 export default function WorldBoxEconomyPanel({ space, station, genre, onClose }: { space: SaveSpace; station: LobbyStation | null; genre: ShopGenreId | null; onClose: () => void }) {
   // 行動の場所制約: 売買はショップの前、合成は作業台（鍛冶屋）の前、
   // 送金は銀行の前でのみ。いる場所に対応するタブだけを出す（サーバー側
@@ -117,6 +102,9 @@ export default function WorldBoxEconomyPanel({ space, station, genre, onClose }:
   const [ops, setOps] = useState<EconomyOp[]>([]);
   const [transferTo, setTransferTo] = useState("");
   const [transferAmount, setTransferAmount] = useState("");
+  // かばん/ショップのスロット選択（注釈は選択中アイテムのものだけ出す）
+  const [bagSel, setBagSel] = useState<string | null>(null);
+  const [shopSel, setShopSel] = useState<string | null>(null);
   const aliveRef = useRef(true);
 
   const refreshBridge = useCallback(async () => {
@@ -247,6 +235,9 @@ export default function WorldBoxEconomyPanel({ space, station, genre, onClose }:
   const shopItems = shopGenre ? dailyStockForGenre(shopGenre, shopDayKey) : ITEMS.filter((item) => !isShopExcluded(item));
   const priceOf = (item: (typeof ITEMS)[number]): number =>
     shopGenre ? dailyPriceFor(item, shopDayKey) : item.price;
+  // 選択中アイテム（所持/品目から消えていたら注釈を出さない）
+  const bagSelItem = owned.find((item) => item.id === bagSel) ?? null;
+  const shopSelItem = shopItems.find((item) => item.id === shopSel) ?? null;
   // 施設の前にいないタブを開いたままにしない（その施設へ行くと使える）
   // 販売品目の無い店（鍛冶屋は合成・強化専用）ではショップタブ自体を出さない
   const tabAllowed = (t: Tab): boolean =>
@@ -296,50 +287,75 @@ export default function WorldBoxEconomyPanel({ space, station, genre, onClose }:
       {activeTab === "bag" && (
         <div style={{ marginTop: 6 }}>
           {owned.length === 0 && <p className="muted">かばんは空です</p>}
-          {owned.map((item) => (
-            <div key={item.id} style={row}>
-              <ItemIcon id={item.id} />
-              <strong>{item.name}</strong>
-              <span className="muted">× {profile.items[item.id]}</span>
-              <span className="muted">{item.desc}</span>
-              <span style={{ flex: 1 }} />
-              {(item.hunger || item.heal || item.curePoison) && (
-                <button type="button" style={btn} disabled={busy}
-                  onClick={() => void act({ action: "eat", itemId: item.id }, () => `${item.name}を使った`)}>
-                  {item.heal && !item.hunger ? "使う" : "食べる"}
-                  {item.hunger ? `（空腹+${item.hunger}` : ""}
-                  {item.heal ? `${item.hunger ? "・" : "（"}HP+${item.heal}` : ""}
-                  {item.curePoison ? "・解毒" : ""}
-                  {(item.hunger || item.heal) ? "）" : ""}
-                </button>
-              )}
-              {atShop && (
-                <button type="button" style={btn} disabled={busy}
-                  onClick={() => void act({ action: "sell", itemId: item.id }, () => `${item.name}を売った（代金 ${sellPrice(item)} コインは処理中）`)}>
-                  売る（{sellPrice(item)}）
-                </button>
-              )}
-            </div>
-          ))}
+          <ItemSlotGrid>
+            {owned.map((item) => (
+              <ItemSlot
+                key={item.id}
+                itemId={item.id}
+                count={profile.items[item.id]}
+                selected={bagSel === item.id}
+                onClick={() => setBagSel(item.id)}
+              />
+            ))}
+          </ItemSlotGrid>
+          {bagSelItem && (
+            <ItemAnnotation itemId={bagSelItem.id}>
+              {(bagSelItem.hunger || bagSelItem.heal || bagSelItem.curePoison) ? (
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 6 }}>
+                  {bagSelItem.hunger ? <span className="muted">空腹+{bagSelItem.hunger}</span> : null}
+                  {bagSelItem.heal ? <span className="muted">HP+{bagSelItem.heal}</span> : null}
+                  {bagSelItem.curePoison ? <span className="muted">解毒</span> : null}
+                </div>
+              ) : null}
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
+                {(bagSelItem.hunger || bagSelItem.heal || bagSelItem.curePoison) && (
+                  <button type="button" style={btn} disabled={busy}
+                    onClick={() => void act({ action: "eat", itemId: bagSelItem.id }, () => `${bagSelItem.name}を使った`)}>
+                    {bagSelItem.heal && !bagSelItem.hunger ? "使う" : "食べる"}
+                  </button>
+                )}
+                {atShop && (
+                  <button type="button" style={btn} disabled={busy}
+                    onClick={() => void act({ action: "sell", itemId: bagSelItem.id }, () => `${bagSelItem.name}を売った（代金 ${sellPrice(bagSelItem)} コインは処理中）`)}>
+                    売る（{sellPrice(bagSelItem)}）
+                  </button>
+                )}
+              </div>
+            </ItemAnnotation>
+          )}
         </div>
       )}
 
       {activeTab === "shop" && atShop && (
         <div style={{ marginTop: 6 }}>
-          {shopItems.map((item) => (
-            <div key={item.id} style={row}>
-              <ItemIcon id={item.id} />
-              <strong>{item.name}</strong>
-              <span className="muted">{item.desc}</span>
-              {item.hunger ? <span className="muted">空腹度 +{item.hunger}</span> : null}
-              <span style={{ flex: 1 }} />
-              <span>{priceOf(item)} コイン</span>
-              <button type="button" style={btn} disabled={busy}
-                onClick={() => void act({ action: "buy", itemId: item.id }, () => `${item.name}を買った`)}>
-                買う
-              </button>
-            </div>
-          ))}
+          <ItemSlotGrid>
+            {shopItems.map((item) => (
+              <ItemSlot
+                key={item.id}
+                itemId={item.id}
+                badge={`${priceOf(item)}`}
+                selected={shopSel === item.id}
+                onClick={() => setShopSel(item.id)}
+              />
+            ))}
+          </ItemSlotGrid>
+          {shopSelItem && (
+            <ItemAnnotation itemId={shopSelItem.id}>
+              {(shopSelItem.hunger || shopSelItem.heal || shopSelItem.curePoison) ? (
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 6 }}>
+                  {shopSelItem.hunger ? <span className="muted">空腹度 +{shopSelItem.hunger}</span> : null}
+                  {shopSelItem.heal ? <span className="muted">HP+{shopSelItem.heal}</span> : null}
+                  {shopSelItem.curePoison ? <span className="muted">解毒</span> : null}
+                </div>
+              ) : null}
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
+                <button type="button" style={btn} disabled={busy}
+                  onClick={() => void act({ action: "buy", itemId: shopSelItem.id }, () => `${shopSelItem.name}を買った`)}>
+                  買う（{priceOf(shopSelItem)} コイン）
+                </button>
+              </div>
+            </ItemAnnotation>
+          )}
         </div>
       )}
 
