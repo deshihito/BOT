@@ -4,13 +4,13 @@ from types import SimpleNamespace
 
 import discord
 from core.general.user_names import fallback_name
-from core.game.game import board_image, game_panels
-from core.game.game.board_image import render_cached, render_card, render_card_hand, render_card_pile
-from core.game.game.game_v2 import GamePanelView, LobbyView, safe_delete, text_panel, GAME_MSG_NOT_YOUR_TURN, GAME_MSG_NOT_JOINED
+from core.game.hub import board_image, game_panels
+from core.game.hub.board_image import render_cached, render_card, render_card_hand, render_card_pile
+from core.game.hub.game_v2 import GamePanelView, LobbyView, safe_delete, text_panel, GAME_MSG_NOT_YOUR_TURN, GAME_MSG_NOT_JOINED
 from discord.ext import commands
 
 from core.general import action_usage
-from core.game.game import party_ranking
+from core.game.hub import party_ranking
 from core.support.usage_stats import usage_stats
 party_ranking.register("doubt")
 import asyncio
@@ -305,7 +305,7 @@ class Doubt(commands.Cog):
         await channel.send(view=text_panel("ダウト 終了", f"勝者: {winner_name}"))
         if self.games.get(channel.id) is game:
             del self.games[channel.id]
-            # サーバーごとのランキング（core/game/game/party_ranking.py）: 手札を出し切った 1 人が勝ち
+            # サーバーごとのランキング（core/game/hub/party_ranking.py）: 手札を出し切った 1 人が勝ち
             guild = getattr(channel, "guild", None)
             if guild is not None:
                 await party_ranking.shared().record_win(guild.id, winner_id, "doubt")

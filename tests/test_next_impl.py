@@ -36,7 +36,7 @@ from core.general.money_panel import daily_bonus as daily_core, starter as start
 from core.game import lottery as lottery_core
 from core.game.gambling import gambling as gambling_core
 from core.game import mining as mining_core
-from core.game.game import prison as prison_core
+from core.game.hub import prison as prison_core
 from core.general.circulation import economy_pool as economy_core
 from core.general.items import items as items_core
 from core.general.wallet.cog import compute_asset_ranking

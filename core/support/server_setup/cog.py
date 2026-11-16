@@ -130,7 +130,7 @@ def welcome_stats() -> Optional[dict]:
     """
     try:
         from core.general.action_registry import ROOT_ORDER, default_registry
-        from core.game.game.game_guides import GAME_ORDER
+        from core.game.hub.game_guides import GAME_ORDER
 
         return {
             "commands": len(ROOT_ORDER) + 1,  # 5ルート + /quick

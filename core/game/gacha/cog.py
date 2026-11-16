@@ -22,7 +22,7 @@ from discord.ext import commands, tasks
 import config
 from core.game.clan import clan as clan_core
 from core.game.gacha import gacha as gacha_core
-from core.game.game import prison as prison_core
+from core.game.hub import prison as prison_core
 from core.support.messages import COIN_UPDATE_FAILED_UNCHANGED
 from core.support.panel_v2 import as_panel_v2, edit_panel_v2, wrap_panel_view as _wrap
 from cogs import general as wallet_module

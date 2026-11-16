@@ -47,7 +47,7 @@ from core.general.money_panel import daily_bonus as daily_core
 from core.general.items import items as items_core
 from core.general.market import market as market_core
 from core.general.user_names import resolve_display_names
-from core.game.game import prison as prison_core
+from core.game.hub import prison as prison_core
 from core.general.money_panel import starter as starter_core
 from core.leaderboard_image import fetch_avatar_bytes
 from core.support.messages import ACTION_FAILED_RETRY, CLAIM_FAILED_RETRY, ITEMS_NOT_LOADED, WORKSHOP_NOT_LOADED, feature_not_loaded

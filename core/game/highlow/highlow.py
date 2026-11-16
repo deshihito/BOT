@@ -5,7 +5,7 @@
 連続正解（ストリーク）がスコア。同点（同じ数字）は外れにせず、その札を
 今のカードにして「続ける／ここでやめる」を選べる引き分け扱いにする
 （2026-11-07 仕様変更。以前は同点=外れだった）。賭け要素は無く、記録は
-core/game/game/game_records.py の highlow 区分に残す。
+core/game/hub/game_records.py の highlow 区分に残す。
 """
 from __future__ import annotations
 

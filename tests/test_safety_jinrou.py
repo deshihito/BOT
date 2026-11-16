@@ -25,7 +25,7 @@ from game_fakes import FakeBot, FakeChannel, FakeGuild, FakeInteraction, FakeMem
 
 import discord  # noqa: E402
 import core.game.jinrou.entry as jinrou
-from core.game.game import game_restore  # noqa: E402
+from core.game.hub import game_restore  # noqa: E402
 from core.game.jinrou import jinrou_snapshot
 from core.game.jinrou.game import JinrouGame  # noqa: E402
 from core.game.jinrou.ratings import surrender_winner_is_wolf  # noqa: E402

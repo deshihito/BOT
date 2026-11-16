@@ -39,7 +39,7 @@ from core.general.panel import (  # noqa: E402
 )
 from core.general.money_panel import daily_bonus as daily_core  # noqa: E402
 from core.general.money_panel import starter as starter_core  # noqa: E402
-from core.game.game import prison as prison_core  # noqa: E402
+from core.game.hub import prison as prison_core  # noqa: E402
 
 
 def _genre_select(panel):

@@ -201,17 +201,17 @@ class _MonthlyClient:
 
 class PartyRankingHealthTest(unittest.IsolatedAsyncioTestCase):
     async def test_monthly_view_failure_warns_and_falls_back_to_memory(self):
-        from core.game.game import party_ranking
+        from core.game.hub import party_ranking
 
         ranking = party_ranking.PartyRanking(client=_MonthlyClient())
         await ranking.record_win(100, 1, "uno")
-        with self.assertLogs("core.game.game.party_ranking", level="WARNING") as caught:
+        with self.assertLogs("core.game.hub.party_ranking", level="WARNING") as caught:
             rows = await ranking.monthly_top(100)
         self.assertEqual(rows, [(1, 1)])
         self.assertTrue(any("月次ビュー" in line for line in caught.output))
 
     async def test_remote_disabled_recovers_after_cooldown(self):
-        from core.game.game import party_ranking
+        from core.game.hub import party_ranking
 
         class MissingRPC:
             def rpc(self, name, params):

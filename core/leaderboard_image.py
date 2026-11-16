@@ -4,7 +4,7 @@
 EXPランキング盤面（PR #566）で確立した「盤面は画像、操作はボタンに分離」
 のパターンを、コイン/資産/RTA/ゲーム/生存確認などの各ランキングへ
 横展開するための共通基盤。描画は PIL の純関数で、再描画は
-core.game.game.board_image.render_cached の LRU で抑える（Pi 負荷対策）。
+core.game.hub.board_image.render_cached の LRU で抑える（Pi 負荷対策）。
 
 テーマ（白基調）:
 - 背景はごく薄いグレー、行は白カード＋薄い境界と影で浮かせる。
@@ -21,7 +21,7 @@ from dataclasses import dataclass
 
 from PIL import Image, ImageDraw, ImageFont
 
-from core.game.game.board_image import FONT_PATH, render_cached
+from core.game.hub.board_image import FONT_PATH, render_cached
 
 BOARD_W = 1000
 HEADER_H = 68

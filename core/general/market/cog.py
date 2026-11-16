@@ -30,7 +30,7 @@ from core.economy_image import render_market_chart_png
 from core.general.circulation import economy_pool as economy_core
 from core.general.items import items as items_core
 from core.general.market import market as market_core
-from core.game.game import prison as prison_core
+from core.game.hub import prison as prison_core
 from core.support.messages import COIN_UPDATE_FAILED_RETRY, MARKET_INVALID_AMOUNT, market_trade_failed
 from core.support.panel_v2 import as_panel_v2, edit_panel_v2, edit_panel_with_files as _edit_panel, wrap_panel_view as _wrap
 from cogs.general import INSUFFICIENT

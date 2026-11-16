@@ -13,8 +13,8 @@ import random
 import discord
 from discord.ext import commands
 
-from core.game.game import game_records
-from core.game.game.game_v2 import GamePanelView, preview_notice_line, text_panel, lobby_auto_start_text, lobby_not_enough_text
+from core.game.hub import game_records
+from core.game.hub.game_v2 import GamePanelView, preview_notice_line, text_panel, lobby_auto_start_text, lobby_not_enough_text
 from core.game.ito.ito import ROUNDS_DEFAULT, THEMES, ItoSession
 
 logger = logging.getLogger(__name__)

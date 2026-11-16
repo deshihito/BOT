@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""開発先行公開フラグ（core/game/game/game_guides.py の PREVIEW_GAMES）のテスト。
+"""開発先行公開フラグ（core/game/hub/game_guides.py の PREVIEW_GAMES）のテスト。
 
 フラグの単一の真実源・ハブ表示（セレクト/詳細/ガイド）・起動時通知・
 ゲーム内パネルの注意行が、フラグの付け外しで切り替わることを確認する。
@@ -16,13 +16,13 @@ from game_fakes import (
     FakeBot, FakeChannel, FakeGuild, FakeInteraction, FakeMember,
     fast_time, real_sleep,
 )
-from core.game.game import game_guides
-from core.game.game.game_guides import (
+from core.game.hub import game_guides
+from core.game.hub.game_guides import (
     GAME_GUIDES, GAME_ORDER, PREVIEW_GAMES, PREVIEW_LABEL, PREVIEW_NOTICE,
     guide_for_discord, is_preview_game, preview_notice_line,
 )
-from core.game.game.game_v2 import GamePanelView, LobbyView
-from core.game.game.cog import GAME_COGS, GameHub, GameSelect, detail_embed, game_select_pages, select_label
+from core.game.hub.game_v2 import GamePanelView, LobbyView
+from core.game.hub.cog import GAME_COGS, GameHub, GameSelect, detail_embed, game_select_pages, select_label
 
 EXPECTED_PREVIEW = {"wirecut", "liardice", "ito", "hanabi", "hoshi"}
 

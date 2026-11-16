@@ -2,8 +2,8 @@
 
 盤面は PIL で描く PNG、移動はX（横）→Y（縦）のセレクト（座標表記は
 X/Y 統一、レビュー対応 2026-11-06）。対人戦は
-core/game/game/party_ranking.py の勝数と core/game/game/elo.py のレートに記録し、
-対局は core/game/game/game_restore.py で再起動復旧する（オセロと同じ型）。
+core/game/hub/party_ranking.py の勝数と core/game/hub/elo.py のレートに記録し、
+対局は core/game/hub/game_restore.py で再起動復旧する（オセロと同じ型）。
 """
 import asyncio
 import io
@@ -16,9 +16,9 @@ import discord
 from discord.ext import commands
 from PIL import Image, ImageDraw, ImageFont
 
-from core.game.game import party_ranking
-from core.game.game import elo, game_panels, game_restore
-from core.game.game.game_v2 import GamePanelView, LobbyView, board_image_panel, GAME_MSG_ONLY_CURRENT_PLAYER
+from core.game.hub import party_ranking
+from core.game.hub import elo, game_panels, game_restore
+from core.game.hub.game_v2 import GamePanelView, LobbyView, board_image_panel, GAME_MSG_ONLY_CURRENT_PLAYER
 from core.game.gomoku.gomoku import BLACK, EMPTY, SIZE, WHITE, choose_ai_move, is_full, is_win_at, legal_moves, new_board, winner
 
 logger = logging.getLogger(__name__)

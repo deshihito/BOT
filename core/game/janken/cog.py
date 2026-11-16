@@ -6,7 +6,7 @@
 - 参加者が 1 人だけなら Bot が相手になる。
 - 3 種類の手がそろう／全員同じ手のときは「あいこ」で、同じ人でもう一度。
   勝った手の人だけが残り、最後の 1 人が勝ち。時間内に出さなかった人は負け。
-- 勝利数は core/game/game/party_ranking.py に記録する（人間 2 人以上の勝負のときだけ。Bot 戦は数えない）。
+- 勝利数は core/game/hub/party_ranking.py に記録する（人間 2 人以上の勝負のときだけ。Bot 戦は数えない）。
 - 放置した人の手を代わりに出す共通の仕組み（Lunancy さん担当）ができたら ``auto_hand`` を差し替えて使える。
 - 賭け金は開始時に参加者から預かり、精算までメモリ上の ``escrow`` に置かれる。
   預かりは都度 data/janken_escrow.json の台帳にも記録し、精算前に Bot が
@@ -23,14 +23,14 @@ from core.support.emojis import CROCK
 
 import discord
 from cogs.general import INSUFFICIENT
-from core.game.game import game_panels
-from core.game.game import prison as prison_core
-from core.game.game.game_v2 import GamePanelView, LobbyView, safe_delete, text_panel
+from core.game.hub import game_panels
+from core.game.hub import prison as prison_core
+from core.game.hub.game_v2 import GamePanelView, LobbyView, safe_delete, text_panel
 from core.support import data_paths
 from core.support.messages import recruit_join_prompt
 from discord.ext import commands
 
-from core.game.game import party_ranking
+from core.game.hub import party_ranking
 
 logger = logging.getLogger(__name__)
 

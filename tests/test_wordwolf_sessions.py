@@ -20,7 +20,7 @@ if str(Path(__file__).resolve().parent) not in sys.path:
 from game_fakes import FakeChannel, FakeGuild, FakeInteraction, FakeMember, fast_time, press, real_sleep  # noqa: E402
 
 import core.game.wordwolf.cog as wordwolf
-from core.game.game import party_ranking  # noqa: E402
+from core.game.hub import party_ranking  # noqa: E402
 
 
 class WordWolfSessionsTest(unittest.IsolatedAsyncioTestCase):

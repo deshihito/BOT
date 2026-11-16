@@ -10,9 +10,9 @@ from core.support.emojis import LEFT, RIGHT
 
 import discord
 from discord.ext import commands
-from core.game.game import party_ranking
-from core.game.game import elo, game_panels, game_restore
-from core.game.game.game_v2 import GamePanelView, LobbyView, board_image_panel, safe_delete, _page_starts, paginate_labels
+from core.game.hub import party_ranking
+from core.game.hub import elo, game_panels, game_restore
+from core.game.hub.game_v2 import GamePanelView, LobbyView, board_image_panel, safe_delete, _page_starts, paginate_labels
 from PIL import Image, ImageDraw, ImageFont
 
 from core.game.shogi.shogi_engine import ShogiGame, Color, PieceType, Piece
@@ -830,7 +830,7 @@ class Shogi(commands.Cog):
             await safe_delete(notice)
 
     # ------------------------------------------------------------------
-    # 再起動復旧（core/game/game/game_restore.py）
+    # 再起動復旧（core/game/hub/game_restore.py）
     # ------------------------------------------------------------------
     def _save_snapshot(self, s: ShogiSession) -> None:
         if s.phase != "playing":

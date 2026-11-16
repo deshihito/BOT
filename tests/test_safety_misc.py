@@ -400,7 +400,7 @@ class PokerPrisonTest(unittest.IsolatedAsyncioTestCase):
         return cog, wallet, table, user
 
     async def test_buy_in_and_cash_out_blocked_while_imprisoned(self):
-        from core.game.game import prison as prison_core
+        from core.game.hub import prison as prison_core
         with tempfile.TemporaryDirectory() as tmp:
             cog, wallet, table, user = self._make(tmp)
             with patch.object(prison_core, "block_message", _block_only(1)):
@@ -427,7 +427,7 @@ class JankenPrisonTest(unittest.IsolatedAsyncioTestCase):
     async def test_start_recruit_with_wager_blocked(self):
         from game_fakes import FakeChannel, FakeGuild, FakeInteraction, FakeMember
 
-        from core.game.game import prison as prison_core
+        from core.game.hub import prison as prison_core
         import core.game.janken.cog as j
 
         guild = FakeGuild(77)
@@ -443,7 +443,7 @@ class JankenPrisonTest(unittest.IsolatedAsyncioTestCase):
     async def test_join_with_wager_blocked(self):
         from game_fakes import FakeChannel, FakeGuild, FakeInteraction, FakeMember
 
-        from core.game.game import prison as prison_core
+        from core.game.hub import prison as prison_core
         import core.game.janken.cog as j
 
         guild = FakeGuild(77)
@@ -463,7 +463,7 @@ class JankenPrisonTest(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn(2, game.players)
 
     async def test_collect_wagers_precheck_blocks_all_debits(self):
-        from core.game.game import prison as prison_core
+        from core.game.hub import prison as prison_core
         import core.game.janken.cog as j
 
         wallet = types.SimpleNamespace(
@@ -681,7 +681,7 @@ class GachaCreditFailureTest(unittest.TestCase):
 # ---------------------------------------------------------------------------
 class PanelCooldownTest(unittest.IsolatedAsyncioTestCase):
     def test_pure_cooldown_helper(self):
-        from core.game.game.game_v2 import InteractionCooldown
+        from core.game.hub.game_v2 import InteractionCooldown
 
         cooldown = InteractionCooldown(window=1.0)
         self.assertTrue(cooldown.check(1, now=100.0))
@@ -691,7 +691,7 @@ class PanelCooldownTest(unittest.IsolatedAsyncioTestCase):
         self.assertAlmostEqual(cooldown.remaining(1, now=101.5), 0.5)
 
     async def test_game_panel_view_enforces_cooldown(self):
-        from core.game.game.game_v2 import GamePanelView
+        from core.game.hub.game_v2 import GamePanelView
 
         panel = GamePanelView("t", "b")
 

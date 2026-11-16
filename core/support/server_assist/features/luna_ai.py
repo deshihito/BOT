@@ -46,7 +46,7 @@ import discord
 
 from core.general import web_search
 from core.general.ai import ai_context, ai_input, ai_provider_router, logfare
-from core.game.game.game_guides import GAME_GUIDES
+from core.game.hub.game_guides import GAME_GUIDES
 from core.support.messages import ASSIST_MANAGE_REQUIRED
 from core.support.panel_v2 import as_panel_v2, edit_panel_v2
 from core.support.server_assist import Feature, get_settings, update_settings

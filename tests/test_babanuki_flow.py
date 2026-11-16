@@ -10,7 +10,7 @@ from unittest.mock import patch
 from game_fakes import FakeChannel, FakeGuild, FakeInteraction, FakeMember, fast_time, real_sleep
 import core.game.babanuki.cog as b
 from core.support import guild_settings
-from core.game.game import autoplay, party_ranking
+from core.game.hub import autoplay, party_ranking
 EMOJI = re.compile('[\U0001F000-\U0001FFFF\u2600-\u27BF\u2B00-\u2BFF\u23E9-\u23FA]')
 
 
@@ -61,7 +61,7 @@ class LogicTest(unittest.TestCase):
         self.assertIn('babanuki', party_ranking.KNOWN_GAMES)
 
     def test_guide_has_no_emoji(self):
-        from core.game.game.game_guides import GAME_GUIDES
+        from core.game.hub.game_guides import GAME_GUIDES
         self.assertIsNone(EMOJI.search(str(GAME_GUIDES['babanuki'])))
 
 

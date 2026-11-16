@@ -88,7 +88,7 @@ class RenderTest(unittest.TestCase):
 
 class GameBoardTest(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
-        from core.game.game import party_ranking
+        from core.game.hub import party_ranking
         self.party_ranking = party_ranking
         self.saved = party_ranking._shared
         party_ranking._shared = party_ranking.PartyRanking(client=None)
@@ -97,13 +97,13 @@ class GameBoardTest(unittest.IsolatedAsyncioTestCase):
         self.party_ranking._shared = self.saved
 
     async def test_monthly_board_empty(self):
-        import core.game.game.cog as game
+        import core.game.hub.cog as game
         embed, png = await game.monthly_board(1, bot=None)
         self.assertIsNone(png)
         self.assertIn("まだ記録がありません", embed.description)
 
     async def test_monthly_board_with_rows(self):
-        import core.game.game.cog as game
+        import core.game.hub.cog as game
         await self.party_ranking.shared().record_win(1, 7, "ngword")
         await self.party_ranking.shared().record_win(1, 8, "ngword")
         embed, png = await game.monthly_board(1, bot=None)

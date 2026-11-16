@@ -13,9 +13,9 @@ import logging
 import discord
 from discord.ext import commands
 
-from core.game.game import party_ranking
-from core.game.game.board_image import render_tiles
-from core.game.game.game_v2 import GamePanelView, text_panel, lobby_auto_start_text, lobby_not_enough_text
+from core.game.hub import party_ranking
+from core.game.hub.board_image import render_tiles
+from core.game.hub.game_v2 import GamePanelView, text_panel, lobby_auto_start_text, lobby_not_enough_text
 from core.game.ruins.ruins import TOTAL_ROUNDS, RuinsGame
 
 logger = logging.getLogger(__name__)

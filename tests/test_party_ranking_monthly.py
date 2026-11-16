@@ -1,8 +1,8 @@
-"""月次シーズンランキング（core/game/game/party_ranking.py の monthly）のテスト。"""
+"""月次シーズンランキング（core/game/hub/party_ranking.py の monthly）のテスト。"""
 
 import unittest
 
-from core.game.game import party_ranking
+from core.game.hub import party_ranking
 class MonthlyRankingTest(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.ranking = party_ranking.PartyRanking(client=None)

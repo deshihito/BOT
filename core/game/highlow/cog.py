@@ -4,7 +4,7 @@
 今見えているカードより、次にめくるカードが高いか低いかを当て続ける。
 同点は引き分け: その札を今のカードにしてストリークを維持したまま、
 「続ける／ここでやめる」をボタンで選べる（2026-11-07 仕様変更。
-変更前は同点=外れだった）。連続正解数が記録（core/game/game/game_records.py
+変更前は同点=外れだった）。連続正解数が記録（core/game/hub/game_records.py
 の highlow）に残る。賭け要素はない。パネルは Components V2。
 """
 import asyncio
@@ -14,9 +14,9 @@ import random
 import discord
 from discord.ext import commands
 
-from core.game.game import board_image, game_records
-from core.game.game.board_image import render_cached, render_card_hand
-from core.game.game.game_v2 import GamePanelView
+from core.game.hub import board_image, game_records
+from core.game.hub.board_image import render_cached, render_card_hand
+from core.game.hub.game_v2 import GamePanelView
 from core.game.highlow.highlow import HighLowGame, card_label, rank_label
 
 GAME_ID = "highlow"

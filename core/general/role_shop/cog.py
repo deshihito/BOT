@@ -29,7 +29,7 @@ import config
 from core.general import economy_helpers
 from core.economy_image import PanelRow, render_panel_png
 from core.support import guild_settings
-from core.game.game import prison as prison_core
+from core.game.hub import prison as prison_core
 from core.general.role_shop import role_shop as shop_core
 from core.support.messages import COIN_UPDATE_FAILED_UNCHANGED
 from core.support.panel_v2 import as_panel_v2, edit_panel_v2, wrap_panel_view as _wrap

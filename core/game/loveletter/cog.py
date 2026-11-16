@@ -13,10 +13,10 @@ import random
 import discord
 from discord.ext import commands
 
-from core.game.game import party_ranking
-from core.game.game import game_panels
-from core.game.game.board_image import render_cached, render_loveletter_cards
-from core.game.game.game_v2 import GamePanelView, LobbyView, safe_delete, text_panel
+from core.game.hub import party_ranking
+from core.game.hub import game_panels
+from core.game.hub.board_image import render_cached, render_loveletter_cards
+from core.game.hub.game_v2 import GamePanelView, LobbyView, safe_delete, text_panel
 from core.game.loveletter.loveletter import CARD_INFO, NEEDS_TARGET, LoveLetterGame, card_name
 
 logger = logging.getLogger(__name__)

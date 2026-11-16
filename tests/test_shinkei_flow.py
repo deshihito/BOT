@@ -11,7 +11,7 @@ import discord
 from game_fakes import FakeChannel, FakeGuild, FakeInteraction, FakeMember, fast_time, real_sleep
 import core.game.shinkei.cog as s
 from core.support import guild_settings
-from core.game.game import autoplay, party_ranking  # 0,1 / 2,3 / ... が同じ絵になる並び
+from core.game.hub import autoplay, party_ranking  # 0,1 / 2,3 / ... が同じ絵になる並び
 ORDERED = [sym for sym in s.SYMBOLS for _ in range(2)]
 
 
@@ -169,7 +169,7 @@ class ShinkeiFlowTest(unittest.IsolatedAsyncioTestCase):
         g.face_up = [2]
         texts = [self.cog.board_text(g, 'x')] + [b.label for b in s.BoardView(self.cog, g).walk_children()
                                                  if isinstance(b, discord.ui.Button)]
-        from core.game.game.game_guides import GAME_GUIDES
+        from core.game.hub.game_guides import GAME_GUIDES
         texts.append(str(GAME_GUIDES['shinkei']))
         self.assertFalse([t for t in texts if emoji.search(t)])
 

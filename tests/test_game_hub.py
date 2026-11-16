@@ -11,7 +11,7 @@ import core.game.babanuki.cog as babanuki
 import core.game.daifugo.cog as daifugo
 import core.game.doubt.cog as doubt
 import core.game.flash.cog as flash
-import core.game.game.cog as game
+import core.game.hub.cog as game
 import core.game.guess.cog as guess
 import core.game.janken.cog as janken
 import core.game.jinrou.entry as jinrou
@@ -21,9 +21,9 @@ import core.game.uno.cog as uno
 import core.game.wordle.cog as wordle
 import core.game.wordwolf.cog as wordwolf
 from core.support.ngword import cog as ngword
-from core.game.game import game_guides as guides
-from core.game.game import party_ranking
-from core.game.game.game_guides import GAME_GUIDES, GAME_ORDER
+from core.game.hub import game_guides as guides
+from core.game.hub import party_ranking
+from core.game.hub.game_guides import GAME_GUIDES, GAME_ORDER
 from core.support.panel_v2 import PanelLayoutView
 
 

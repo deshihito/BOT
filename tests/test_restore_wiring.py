@@ -41,7 +41,7 @@ for _name, _value in {
 from discord.ext import commands  # noqa: E402
 
 import cogs.game as game_aggregator  # noqa: E402
-from core.game.game import game_restore  # noqa: E402
+from core.game.hub import game_restore  # noqa: E402
 
 
 def _main_tree():

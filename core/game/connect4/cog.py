@@ -2,7 +2,7 @@
 
 列を選んでコマを落とし、先に縦・横・斜めのどれかで4つ並べた方が勝ち。
 盤面は PIL の PNG。対人戦は勝数と Elo レートに記録し、対局は
-core/game/game/game_restore.py で再起動復旧する（オセロ・五目と同じ型）。
+core/game/hub/game_restore.py で再起動復旧する（オセロ・五目と同じ型）。
 """
 import asyncio
 import io
@@ -15,10 +15,10 @@ import discord
 from discord.ext import commands
 from PIL import Image, ImageDraw, ImageFont
 
-from core.game.game import party_ranking
-from core.game.game import elo, game_panels, game_restore
+from core.game.hub import party_ranking
+from core.game.hub import elo, game_panels, game_restore
 from core.game.connect4.connect4 import COLS, EMPTY, RED, ROWS, YELLOW, choose_ai_move, drop, is_full, legal_moves, new_board, winner
-from core.game.game.game_v2 import GamePanelView, LobbyView, board_image_panel, GAME_MSG_ONLY_CURRENT_PLAYER
+from core.game.hub.game_v2 import GamePanelView, LobbyView, board_image_panel, GAME_MSG_ONLY_CURRENT_PLAYER
 
 logger = logging.getLogger(__name__)
 
