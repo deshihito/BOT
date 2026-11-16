@@ -125,6 +125,8 @@ const presenceRoute = await import(
       .replaceAll('"@/lib/worldbox/tent"', JSON.stringify(tentUrl))
       .replaceAll('"@/lib/worldbox/presence-online"', JSON.stringify(presenceOnlineUrl))
       .replaceAll('"@/lib/worldbox/presence"', JSON.stringify(presenceUrl))
+      .replaceAll('"@/lib/worldbox/save"', JSON.stringify(saveUrl))
+      .replaceAll('"@/lib/worldbox/save-online"', JSON.stringify(saveOnlineUrl))
       .replaceAll('"@/lib/worldbox/metrics-online"', JSON.stringify(metricsOnlineStubUrl)),
   ),
 );

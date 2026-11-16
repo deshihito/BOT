@@ -2394,6 +2394,7 @@ export default function WorldBoxClient() {
           rtLastMsgRef.current = arrivedAt;
           let msg: {
             t?: string; now?: number; p?: PresenceEntry; players?: PresenceEntry[]; id?: string;
+            x?: number; y?: number;
             kind?: string; changes?: { key: string; value: unknown }[]; value?: unknown;
             channel?: string; space?: string; guildId?: string;
             agg?: number; on?: boolean;
@@ -2410,6 +2411,9 @@ export default function WorldBoxClient() {
             rtAggOn = true;
           } else if (msg.t === "agg") {
             rtAggOn = msg.on === true;
+          } else if (msg.t === "jump" && typeof msg.x === "number" && typeof msg.y === "number" && typeof msg.space === "string") {
+            // 中継に却下された位置申告: サーバー保管の正規位置へ戻す
+            snapBackToServer(msg.x, msg.y, msg.space);
           } else if (msg.t === "snap") {
             for (const entry of msg.players ?? []) {
               if (isOtherPartyInDungeon(entry)) continue;
@@ -2509,7 +2513,33 @@ export default function WorldBoxClient() {
         rank: invRef.current ? masteryRankOf(invRef.current, invRef.current.role) : 1,
         sit: sitTileRef.current ? true : undefined,
       }),
+      }).then(async (res) => {
+        // 却下（409 position_jump）: サーバー保管の正規位置へ戻す。
+        // 応答の保管位置が現在の空間と違う場合は古い却下として無視する。
+        if (res.status !== 409) return;
+        try {
+          const body = (await res.json()) as { error?: string; x?: number; y?: number; space?: string };
+          if (body.error === "position_jump" && typeof body.x === "number" && typeof body.y === "number" && typeof body.space === "string") {
+            snapBackToServer(body.x, body.y, body.space);
+          }
+        } catch { /* noop */ }
       }).catch(() => { /* noop */ });
+    };
+    /** サーバーに却下された位置申告の復帰: 保管位置へ直接戻す。
+     * findFreeNear を通さない（着地のずれで再却下の連鎖になるため）。
+     * 次回ハートビートは保管位置と一致し、受け入れられる。 */
+    const snapBackToServer = (x: number, y: number, targetSpace: string) => {
+      if (targetSpace !== space) return;
+      player.x = x;
+      player.y = y;
+      player.vx = 0;
+      player.vy = 0;
+      cam.x = x;
+      cam.y = y;
+      lastTileKey = `${space}:${Math.floor(x)},${Math.floor(y)}`;
+      lastHeartbeatPos = { x, y };
+      saveNow();
+      sendHeartbeat();
     };
     let nearDungeonShown = false;
     // プレゼンスポーリングのガード（S6）: 1s 間隔で重ねて走らせず、古い

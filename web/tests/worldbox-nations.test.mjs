@@ -441,6 +441,8 @@ const saveRoute = await import(
       .replaceAll('"@/lib/auth"', JSON.stringify(authUrl))
       .replaceAll('"@/lib/worldbox/save"', JSON.stringify(saveUrl))
       .replaceAll('"@/lib/worldbox/save-online"', JSON.stringify(saveOnlineUrl))
+      .replaceAll('"@/lib/worldbox/presence"', JSON.stringify(presenceUrl))
+      .replaceAll('"@/lib/worldbox/presence-online"', JSON.stringify(presenceOnlineUrl))
       .replaceAll('"@/lib/worldbox/spawn"', JSON.stringify(spawnUrl)),
   ),
 );

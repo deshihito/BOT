@@ -56,6 +56,22 @@ export async function findPresenceOwnerKey(presenceId: string): Promise<string |
 }
 
 /**
+ * 保存済みプレゼンス（鮮度フィルタなし。移動連続性の基準用）。
+ * 鮮度切れでも保管時刻（ts）が残るため、RESET_MS までは基準として使える。
+ * 読み取り失敗・未送信は null。
+ */
+export async function loadStoredPresence(ownerKey: string): Promise<PresenceEntry | null> {
+  if (!isBotApiConfigured()) return null;
+  try {
+    const raw = await kvGet(WORLDBOX_PRESENCE_NAMESPACE, ownerKey);
+    if (raw === null) return null;
+    return parsePresenceEntry(presenceIdFor(ownerKey), raw);
+  } catch {
+    return null;
+  }
+}
+
+/**
  * 自分のプレゼンス（サーバー側の位置検証用）。
  * 鮮度切れ・未送信・読み取り失敗はすべて null（＝いないものとして扱う）。
  */

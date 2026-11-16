@@ -43,6 +43,22 @@ async function kvList(cfg, namespace, fetchImpl = fetch) {
   return map;
 }
 
+/** 1件読む（bot-api.ts の kvGet と同じ。無ければ null）。 */
+async function kvGet(cfg, namespace, key, fetchImpl = fetch) {
+  const rows = await kvQuery(cfg, {
+    table: "bot_kv",
+    action: "select",
+    columns: "key,value",
+    filters: [
+      { column: "namespace", op: "eq", value: namespace },
+      { column: "key", op: "eq", value: key },
+    ],
+    limit: 1,
+  }, fetchImpl);
+  if (rows.length === 0) return null;
+  return rows[0].value ?? null;
+}
+
 /** 1件書く（bot-api.ts の kvSet と同じ upsert）。 */
 async function kvSet(cfg, namespace, key, value, fetchImpl = fetch) {
   await kvQuery(cfg, {
@@ -65,4 +81,4 @@ async function kvDelete(cfg, namespace, key, fetchImpl = fetch) {
   }, fetchImpl);
 }
 
-module.exports = { botKvConfig, kvList, kvSet, kvDelete };
+module.exports = { botKvConfig, kvList, kvGet, kvSet, kvDelete };

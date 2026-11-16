@@ -25,8 +25,9 @@ test("relay: ハートビートは整形され、範囲と速度が丸められ�
   assert.equal(e.face, -1);
   assert.equal(e.id, "p1");
   assert.equal(e.ts, NOW);
-  // 上限を超えたら丸める
-  const far = core.acceptHeartbeat(room, "p1", "n", hb(2_000_000, -2_000_000), NOW);
+  // 上限を超えたら丸める（基準の無い初回なので連続性では却下されない）
+  const farRoom = core.createRoom();
+  const far = core.acceptHeartbeat(farRoom, "p1", "n", hb(2_000_000, -2_000_000), NOW);
   assert.equal(far.x, core.WORLD_COORD_LIMIT);
   assert.equal(far.y, -core.WORLD_COORD_LIMIT);
   assert.equal(core.acceptHeartbeat(room, "p1", "n", { x: "a", y: 1 }, NOW), null);
@@ -72,6 +73,56 @@ test("relay: 役職・ランク・パーティを通し、インスタンスの�
   assert.equal(r.x, 48);
   const d = core.acceptHeartbeat(room, "p4", "P", hb(100, 100, { space: "dungeon:0,0:0" }), NOW);
   assert.equal(d.x, 52);
+});
+
+test("relay: 移動連続性を満たさない申告は却下され、保管位置が返る", () => {
+  const room = core.createRoom();
+  // 部屋に前回がある場合: 1秒で 100 タイルは却下
+  core.acceptHeartbeat(room, "p1", "P", hb(0, 0), NOW);
+  const rejected = core.acceptHeartbeat(room, "p1", "P", hb(100, 0), NOW + 1000);
+  assert.deepEqual(rejected, { rejected: true, x: 0, y: 0, space: "world" });
+  // 却下された申告は保存されない（部屋の位置は 0,0 のまま）
+  assert.equal(core.snapshot(room, "world", "x", NOW + 1000).find((p) => p.id === "p1").x, 0);
+  // 正規移動（1秒で 7 タイル）は通る
+  const moved = core.acceptHeartbeat(room, "p1", "P", hb(7, 0), NOW + 1000);
+  assert.equal(moved.x, 7);
+  assert.equal(moved.rejected, undefined);
+});
+
+test("relay: 外部基準（プレゼンス/セーブ）で初回ハートビートを照合する", () => {
+  const room = core.createRoom();
+  // 外部プレゼンス基準（ts 付き）: 1秒で 100 タイルは却下
+  const base = { x: 10, y: 10, space: "world", ts: NOW };
+  assert.deepEqual(core.acceptHeartbeat(room, "p2", "P", hb(200, 10), NOW + 1000, base), { rejected: true, x: 10, y: 10, space: "world" });
+  // 空間変更は外部基準でも通る
+  const entered = core.acceptHeartbeat(room, "p2", "P", hb(5, 5, { space: "lobby" }), NOW + 1000, base);
+  assert.equal(entered.space, "lobby");
+  // 外部セーブ基準（ts 無し）: 12 タイル以内は通り、超えると却下
+  const room2 = core.createRoom();
+  const saveBase = { x: 50, y: 50, space: "world" };
+  assert.equal(core.acceptHeartbeat(room2, "p3", "P", hb(60, 50), NOW, saveBase).x, 60);
+  // 2回目は部屋の前回（60,50・ts=NOW）が基準になるため、却下の位置もそこになる
+  assert.deepEqual(core.acceptHeartbeat(room2, "p3", "P", hb(200, 50), NOW, saveBase), { rejected: true, x: 60, y: 50, space: "world" });
+  // 基準なし（初回・未保存）は受け入れる
+  const room3 = core.createRoom();
+  assert.equal(core.acceptHeartbeat(room3, "p4", "P", hb(999, 999), NOW, null).x, 999);
+  // 閾値は presence.ts と同じ値
+  assert.equal(core.MAX_MOVE_SPEED, 10);
+  assert.equal(core.MOVEMENT_RESET_MS, 30_000);
+  assert.equal(core.SAVE_FALLBACK_MAX_TILES, 12);
+});
+
+test("配線: 中継が外部基準を読み、却下を jump で返す", () => {
+  const wrapper = fs.readFileSync(path.join(rootDir, "realtime-server.js"), "utf8");
+  assert.ok(wrapper.includes("loadExternalBaseline"), "外部基準の読み取りが無い");
+  assert.ok(wrapper.includes("pendingHbs"), "基準解決前のため置きが無い");
+  assert.ok(wrapper.includes('t: "jump"'), "却下の jump 通知が無い");
+  assert.ok(wrapper.includes("handleHeartbeat"), "ハートビート処理の集約が無い");
+  const botkv = fs.readFileSync(path.join(rootDir, "realtime", "botkv.js"), "utf8");
+  assert.ok(botkv.includes("kvGet"), "kvGet が無い");
+  const client = fs.readFileSync(path.join(rootDir, "app/games/worldbox/WorldBoxClient.tsx"), "utf8");
+  assert.ok(client.includes('msg.t === "jump"'), "クライアントが jump を受けていない");
+  assert.ok(client.includes("snapBackToServer"), "保管位置への復帰が無い");
 });
 
 test("relay: スナップショットは他者だけ・新鮮なものだけ・上限まで", () => {
