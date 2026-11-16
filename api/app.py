@@ -5,6 +5,7 @@ import hmac
 import json
 import logging
 import os
+import time
 from contextlib import asynccontextmanager
 from typing import Any, Literal
 
@@ -88,9 +89,21 @@ def _unauthorized(authorization: str | None) -> None:
         raise HTTPException(status_code=401, detail={"code": "UNAUTHORIZED", "message": "Invalid API credentials"})
 
 
+# Table schemas are re-read from information_schema on every request by
+# default, which doubles the SQL per call on a small host. Cache them for a
+# short TTL instead: migrations are applied manually together with an API
+# restart, and the TTL bounds staleness even if one is not.
+_SCHEMA_TTL_SECONDS = 120.0
+_columns_cache: dict[str, tuple[float, dict[str, str]]] = {}
+_primary_key_cache: dict[str, tuple[float, list[str]]] = {}
+
+
 def _columns(conn: psycopg.Connection, table: str) -> dict[str, str]:
     if table not in TABLES:
         raise HTTPException(status_code=404, detail={"code": "TABLE_NOT_ALLOWED", "message": "Table is not available through this API"})
+    cached = _columns_cache.get(table)
+    if cached is not None and cached[0] > time.monotonic():
+        return cached[1]
     with conn.cursor() as cur:
         cur.execute(
             "SELECT column_name, udt_name FROM information_schema.columns "
@@ -100,10 +113,14 @@ def _columns(conn: psycopg.Connection, table: str) -> dict[str, str]:
         found = {row["column_name"]: row["udt_name"] for row in cur.fetchall()}
     if not found:
         raise HTTPException(status_code=404, detail={"code": "TABLE_NOT_FOUND", "message": f"Public table {table!r} does not exist"})
+    _columns_cache[table] = (time.monotonic() + _SCHEMA_TTL_SECONDS, found)
     return found
 
 
 def _primary_key(conn: psycopg.Connection, table: str) -> list[str]:
+    cached = _primary_key_cache.get(table)
+    if cached is not None and cached[0] > time.monotonic():
+        return cached[1]
     with conn.cursor() as cur:
         cur.execute(
             "SELECT kcu.column_name FROM information_schema.table_constraints tc "
@@ -116,7 +133,9 @@ def _primary_key(conn: psycopg.Connection, table: str) -> list[str]:
             "AND tc.constraint_type = 'PRIMARY KEY' ORDER BY kcu.ordinal_position",
             (table,),
         )
-        return [row["column_name"] for row in cur.fetchall()]
+        found = [row["column_name"] for row in cur.fetchall()]
+    _primary_key_cache[table] = (time.monotonic() + _SCHEMA_TTL_SECONDS, found)
+    return found
 
 
 def _identifier(name: str, columns: dict[str, str]) -> sql.Identifier:
