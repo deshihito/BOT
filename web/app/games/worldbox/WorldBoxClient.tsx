@@ -72,12 +72,12 @@ import { parseBoardPosts, type BoardPost } from "@/lib/worldbox/board";
 import { parseSave, serializeSave, type SaveSpace } from "@/lib/worldbox/save";
 import { chooseInitialSave } from "@/lib/worldbox/save-source";
 import {
-  actionForTile, blockHpFraction, cropStage, isFlowerPotItem, isOverrideActive, isSeatItem, parseTileOverride, placedBlockSolid, placedStationKinds, tileKey, tileView,
+  actionForTile, blockHpFraction, cropStage, floorSpeedMultiplier, isFloorItem, isFlowerPotItem, isGateItem, isOverrideActive, isSeatItem, parseTileOverride, placedBlockSolid, placedStationKinds, tileKey, tileView,
   type TileActionKind, type TileOverridesMap,
 } from "@/lib/worldbox/tiles";
 import { CROPS, ITEMS, itemById } from "@/lib/worldbox/items";
 import { HP_MAX, HUNGER_MAX, countItem, maxHpFor, type AdventureRoleId, type ItemSlot, type PlayerProfile, type SlotRef } from "@/lib/worldbox/profile";
-import { pvpSpaceAllowed, PVP_ATTACK_MAX_DISTANCE } from "@/lib/worldbox/vitals";
+import { hazardDamageFor, pvpSpaceAllowed, PVP_ATTACK_MAX_DISTANCE } from "@/lib/worldbox/vitals";
 import {
   containerCapacity, isContainerItem, type ContainerSlotRef,
 } from "@/lib/worldbox/containers";
@@ -1106,12 +1106,14 @@ export default function WorldBoxClient() {
   castSkillRef.current = castSkillAt;
   /** 自分の不透明 ID（プレゼンス ID）。自分のブロック判定に使う。 */
   const selfIdRef = useRef<string | null>(null);
-  /** タイル上書きから設置ブロックの固体集合を作り直す（施設は占有のみで固体にしない）。 */
+  /** タイル上書きから設置ブロックの固体集合を作り直す（施設は占有のみで固体にしない。柵は固体、門は閉じている間だけ固体、床は固体にしない）。 */
   const syncBlockBlocked = () => {
     const now = Date.now();
     const next = new Set<string>();
     for (const [key, ov] of Object.entries(tilesRef.current)) {
-      if (ov.block && placedBlockSolid(ov.block.itemId) && isOverrideActive(ov, now)) next.add(key);
+      if (!ov.block || !isOverrideActive(ov, now)) continue;
+      if (placedBlockSolid(ov.block.itemId)) next.add(key);
+      else if (isGateItem(ov.block.itemId) && ov.gateOpen !== true) next.add(key);
     }
     blockedRef.current = next;
   };
@@ -1181,6 +1183,10 @@ export default function WorldBoxClient() {
       px: playerPosRef.current.x, py: playerPosRef.current.y,
       ...(parseInstanceSpace(spaceUi) ? { space: spaceUi } : {}),
     }, true);
+  };
+  /** 環境ハザード（サボテン・マグマ）: 位置は送らない。サーバーが現在位置の足元で判定する。 */
+  const postHazard = () => {
+    void postVitals({ action: "hazard" }, true);
   };
   /** 遺跡の個人状態（宝箱・罠・扉・召喚）。サーバーが正、ここは表示用キャッシュ。 */
   const ruinsStateRef = useRef<{
@@ -1596,6 +1602,7 @@ export default function WorldBoxClient() {
         chop: "chop", mine: "mine", till: "till", plant: "plant", harvest: "harvest",
         place_block: "place", mine_block: "debris",
         plant_flower: "plant", remove_flower: "harvest",
+        toggle_gate: "place",
       };
       // ブロック採掘（HP制）: 壊れたら破片（debris）、まだ残るヒットは小さな破片（mine）
       const fxForAction =
@@ -2167,10 +2174,14 @@ export default function WorldBoxClient() {
     /** 接触中のモブ（個体キー）と、敵対ノックバックを最後に発火した時刻。 */
     let contactMobKeyNow: string | null = null;
     let contactFiredAt = 0;
+    /** 環境ハザードの最終送信時刻（サーバーの被弾クールダウンに合わせて間引く）。 */
+    let hazardFiredAt = 0;
     /** BGM 緊張レイヤーの最終判定時刻（500ms ごとに更新）。 */
     let dangerCheckedAt = 0;
     /** ノックバックの残り速度（タイル/秒）。接触で初速を与え、stepMove で滑らかに減衰させる（瞬間移動にしない）。 */
     let kbVel = { x: 0, y: 0 };
+    /** 氷の上の滑り速度（タイル/秒）。氷上では入力へ即追従せず、加速と弱い摩擦で滑る。 */
+    let slideVel = { x: 0, y: 0 };
     // スタミナとダッシュ（キーの2度押し / スティックの強い倒し）
     let stamina: StaminaState = createStamina();
     let tapTracker: TapTracker = createTapTracker();
@@ -3700,8 +3711,12 @@ export default function WorldBoxClient() {
           mobFrameBlocked = merged;
         }
       }
+      // 足元の床ブロック（小道・氷・はちみつ・スライム・橋）。橋の上では水でも泳がない。
+      const floorOv = space === "world" ? tilesRef.current[tileKey(Math.floor(player.x), Math.floor(player.y))] : undefined;
+      const floorRaw = floorOv?.block && isOverrideActive(floorOv, Date.now()) ? floorOv.block.itemId : null;
+      const onFloor = floorRaw !== null && isFloorItem(floorRaw) ? floorRaw : null;
       // ダッシュ（キーの2度押しを持ち続け / スティックの強い倒し）と泳ぎで速さと消費が変わる
-      const swimming = space === "world" && isWaterAt(worldMap, player.x, player.y);
+      const swimming = space === "world" && onFloor !== "bridge_block" && isWaterAt(worldMap, player.x, player.y);
       const wantDash =
         ilen > 0.01 && ((dashKey !== null && keys.has(dashKey)) || (joy.active && isStickDash(joy.dx, joy.dy)));
       const dashing = wantDash && canDash(stamina);
@@ -3714,6 +3729,8 @@ export default function WorldBoxClient() {
         moveSpeed = DASH_SPEED;
         staminaUse = "dash";
       }
+      // 床の速度倍率（小道は速く、はちみつは遅い。泳ぎには掛けない）
+      if (!swimming) moveSpeed *= floorSpeedMultiplier(onFloor);
       // 埋没救済: タイル読み込みの完了で固体が増えた等により、自分の円が
       // 固体へ深く重なっていたら近くの立てる場所へ出す（読み込み後に
       // 壁に埋まるケースの対策）。壁に密着しただけの浅い重なりでは
@@ -3732,7 +3749,27 @@ export default function WorldBoxClient() {
           sitTileRef.current = null;
         }
       }
-      const vel = sitTileRef.current ? { x: 0, y: 0 } : { x: ix * moveSpeed, y: iy * moveSpeed };
+      // 氷の上: 速度は入力へ即追従せず、加速（14/秒）と弱い摩擦（0.8/秒）で滑る。
+      // 氷を離れたら滑り速度を通常の速度へ同期し直す（滑りを持ち出さない）。
+      let vel: { x: number; y: number };
+      if (sitTileRef.current) {
+        vel = { x: 0, y: 0 };
+        slideVel = { x: 0, y: 0 };
+      } else if (!swimming && onFloor === "ice_block") {
+        const accel = 14 * dt;
+        slideVel = {
+          x: slideVel.x + Math.max(-accel, Math.min(accel, ix * moveSpeed - slideVel.x)),
+          y: slideVel.y + Math.max(-accel, Math.min(accel, iy * moveSpeed - slideVel.y)),
+        };
+        if (ilen <= 0.01) {
+          const fr = Math.max(0, 1 - 0.8 * dt);
+          slideVel = { x: slideVel.x * fr, y: slideVel.y * fr };
+        }
+        vel = slideVel;
+      } else {
+        vel = { x: ix * moveSpeed, y: iy * moveSpeed };
+        slideVel = vel;
+      }
       let prevX = player.x;
       let prevY = player.y;
       const moved = stepMove(activeMap(), player, vel, dt, activeBlocked(), { swim: space === "world" });
@@ -3747,8 +3784,26 @@ export default function WorldBoxClient() {
         kbVel = { x: kbVel.x * decay, y: kbVel.y * decay };
         if (Math.hypot(kbVel.x, kbVel.y) < 0.5) kbVel = { x: 0, y: 0 };
       }
+      // 環境ハザード（サボテン・マグマに触れている）: ハザードは固体なので足元ではなく
+      // 当たり円が触れる範囲のタイルで判定する。サーバーの被弾クールダウン（1秒）に
+      // 合わせて間引きながら申告し、ダメージの有無と量はサーバーが決める。
+      if (space === "world" && loggedIn && now - hazardFiredAt >= 1100) {
+        let nearHazard = false;
+        for (let hy = Math.floor(player.y - PLAYER_RADIUS); hy <= Math.floor(player.y + PLAYER_RADIUS) && !nearHazard; hy++) {
+          for (let hx = Math.floor(player.x - PLAYER_RADIUS); hx <= Math.floor(player.x + PLAYER_RADIUS); hx++) {
+            const hov = tilesRef.current[tileKey(hx, hy)];
+            if (hov?.block && hazardDamageFor(hov.block.itemId) > 0) { nearHazard = true; break; }
+          }
+        }
+        if (nearHazard) {
+          hazardFiredAt = now;
+          postHazard();
+        }
+      }
       // スタミナ増減・陸の記録・入出水の波紋・水中で力尽きたら陸へ帰還
-      const inWaterNow = space === "world" && isWaterAt(worldMap, player.x, player.y);
+      const floorOvNow = space === "world" ? tilesRef.current[tileKey(Math.floor(player.x), Math.floor(player.y))] : undefined;
+      const onBridgeNow = floorOvNow?.block?.itemId === "bridge_block" && isOverrideActive(floorOvNow, Date.now());
+      const inWaterNow = space === "world" && !onBridgeNow && isWaterAt(worldMap, player.x, player.y);
       if (space === "world" && !inWaterNow) lastLand = { x: player.x, y: player.y };
       if (inWaterNow !== wasSwimming) {
         splashes.push({ x: player.x, y: player.y, at: now });
@@ -4098,19 +4153,28 @@ export default function WorldBoxClient() {
             const bx = Math.round(sx);
             const by = Math.round(sy);
             const isRug = ov!.block.itemId === "rug";
-            const ps = isRug ? 1 : popScaleFor(tileKey(tx, ty), now);
+            // 床ブロック（橋以外）も床に敷く物として平たく描く
+            const isFlat = isRug || (isFloorItem(ov!.block.itemId) && ov!.block.itemId !== "bridge_block");
+            const ps = isFlat ? 1 : popScaleFor(tileKey(tx, ty), now);
             ctx.save();
             if (ps !== 1) {
               ctx.translate(bx + TILE / 2, by + TILE / 2);
               ctx.scale(ps, ps);
               ctx.translate(-(bx + TILE / 2), -(by + TILE / 2));
             }
-            if (isRug) {
-              // じゅうたんは床に敷く: 平たく描く（立体アイコンのままにしない）
+            if (isFlat) {
+              // じゅうたん・床は平たく描く（立体アイコンのままにしない）
               if (texReady(img)) ctx.drawImage(img, bx + 2, Math.round(by + TILE * 0.36), TILE - 4, Math.round(TILE * 0.6));
               else {
-                ctx.fillStyle = "#8a4a56";
+                ctx.fillStyle = isRug ? "#8a4a56" : "#7a6a55";
                 ctx.fillRect(bx + 2, Math.round(by + TILE * 0.36), TILE - 4, Math.round(TILE * 0.6));
+              }
+            } else if (isGateItem(ov!.block.itemId) && ov!.gateOpen === true) {
+              // 開いている門は端に寄せて細く描く（開いた扉の見た目）
+              if (texReady(img)) ctx.drawImage(img, bx, by, Math.round(TILE * 0.28), TILE);
+              else {
+                ctx.fillStyle = "#8a6a42";
+                ctx.fillRect(bx, by + 4, Math.round(TILE * 0.28), TILE - 8);
               }
             } else if (texReady(img)) ctx.drawImage(img, bx, by, TILE, TILE);
             else {
@@ -4659,6 +4723,11 @@ export default function WorldBoxClient() {
       for (const q of mobDrawQueue) {
         drawList.push({ y: q.r.wy, draw: () => drawMob(q.placed, q.r, q.hpFrac, q.showHp) });
       }
+      // スライムブロックの上では弾む（見た目だけの上下動。移動には影響しない）
+      const selfFloorOv = space === "world" ? tilesRef.current[tileKey(Math.floor(player.x), Math.floor(player.y))] : undefined;
+      const slimeBouncePx = selfFloorOv?.block?.itemId === "slime_block" && isOverrideActive(selfFloorOv, Date.now())
+        ? Math.abs(Math.sin(now / 170)) * TILE * 0.16
+        : 0;
       drawList.push({
         y: player.y + PLAYER_RADIUS,
         draw: () =>
@@ -4666,7 +4735,7 @@ export default function WorldBoxClient() {
             ctx,
             space !== "world" ? Math.round(lobbyOx + player.x * TILE) : toScreenX(player.x),
             // 足元は当たり円の底（中心 + 半径）に合わせる（中心に置くと手前で止まって見える）
-            space !== "world" ? Math.round(lobbyOy + player.y * TILE) + TILE * PLAYER_RADIUS : toScreenY(player.y) + TILE * PLAYER_RADIUS,
+            (space !== "world" ? Math.round(lobbyOy + player.y * TILE) + TILE * PLAYER_RADIUS : toScreenY(player.y) + TILE * PLAYER_RADIUS) - slimeBouncePx,
             player.face, player.phase, speedRatio, null, null, playerSwimming,
             null, sitTileRef.current !== null,
           ),
