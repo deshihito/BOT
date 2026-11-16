@@ -134,6 +134,21 @@ test("slots: ギルドショップ・装置・ギルドボードは共通スロ�
   }
 });
 
+test("menu: ≡ の「設定」の中に BGM・効果音・通報が格納されている", () => {
+  const client = read("app/games/worldbox/WorldBoxClient.tsx");
+  assert.ok(client.includes("settingsOpen"), "設定の開閉 state がある");
+  assert.ok(!client.includes('id: "report"'), "通報は menuActions 本体に残っていない");
+  const settingsIdx = client.indexOf("設定\n            </button>");
+  const bgmIdx = client.indexOf("BGMを切る");
+  const seIdx = client.indexOf("効果音を切る");
+  const reportIdx = client.indexOf("通報する");
+  assert.ok(settingsIdx > 0, "設定ボタンがある");
+  assert.ok(bgmIdx > settingsIdx && seIdx > settingsIdx && reportIdx > settingsIdx,
+    "BGM・効果音・通報は設定ボタンより後（設定の中）にある");
+  // 設定の中はインデント付きの入れ子グリッド
+  assert.ok(client.includes("paddingLeft: 14"), "設定の中身は入れ子表示になっている");
+});
+
 test("sticky: 全パネルのヘッダーが sticky で固定される", () => {
   for (const rel of [...PANELS, "app/games/worldbox/WorldBoxEconomyPanel.tsx"]) {
     assert.ok(read(rel).includes('position: "sticky"'), `${rel} のヘッダーが sticky`);
