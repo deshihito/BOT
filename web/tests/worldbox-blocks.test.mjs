@@ -213,8 +213,16 @@ test("設置→採掘: 掘った岩跡（土）にも置け、掘り戻すと土
   const placed = place(mined.override, mined.profile, ME_KEY, rockAt, "stone_block");
   assert.equal(placed.ok, true);
   assert.equal(placed.override.tile, T.T_DIRT, "下地の土は保持される");
-  const dug = mineBlock(placed.override, placed.profile, ME_KEY, rockAt);
-  assert.equal(dug.ok, true);
+  // HP制: 石ブロック（HP40）を木ツルハシ（10/ヒット）で壊れるまで掘る
+  let cur = placed.override;
+  let dug;
+  for (let i = 0; i < 10; i++) {
+    dug = mineBlock(cur, placed.profile, ME_KEY, rockAt);
+    assert.equal(dug.ok, true);
+    cur = dug.override;
+    if (!cur?.block) break;
+    assert.deepEqual(dug.gained, {}, "壊れるまでは何も得られない");
+  }
   assert.deepEqual(dug.gained, { stone_block: 1 });
   assert.equal(dug.override.tile, T.T_DIRT);
   assert.equal(dug.override.block, undefined);
@@ -236,8 +244,16 @@ test("採掘: 硬いブロック（耐久50以上）は道具が要る", () => {
   const placed = place(null, withItems({ iron_block: 1 }), ME_KEY, grassAt, "iron_block");
   assert.equal(mineBlock(placed.override, withItems({}), ME_KEY, grassAt).error, "tool_required");
   assert.equal(mineBlock(placed.override, withItems({ wooden_axe: 1 }), ME_KEY, grassAt).error, "tool_required", "斧では掘れない");
-  const dug = mineBlock(placed.override, withItems({ wooden_pickaxe: 1 }), ME_KEY, grassAt);
-  assert.equal(dug.ok, true);
+  // HP制: 鉄ブロック（HP120）を木ツルハシ（10/ヒット）で壊れるまで掘る
+  let cur = placed.override;
+  let dug;
+  for (let i = 0; i < 20; i++) {
+    dug = mineBlock(cur, withItems({ wooden_pickaxe: 1 }), ME_KEY, grassAt);
+    assert.equal(dug.ok, true);
+    cur = dug.override;
+    if (!cur?.block) break;
+    assert.deepEqual(dug.gained, {}, "壊れるまでは何も得られない");
+  }
   assert.deepEqual(dug.gained, { iron_block: 1 });
 });
 
@@ -495,8 +511,12 @@ test("施設: 家具は置けるが固体ではなく、置いたマスは占有
   }
   assert.equal(solids.size, 0);
   assert.equal(MV.canStandAt(map, grassAt.x + 0.5, grassAt.y + 0.5, solids), true, "施設のマスは立てる（通過できる）");
-  // 施設は素手で回収できる（耐久なし）
-  const dug = mineBlock(placed.override, withItems({}), ME_KEY, grassAt);
+  // 施設は素手で回収できる（耐久未定義→既定 HP10、素手6で2ヒット）
+  const hit = mineBlock(placed.override, withItems({}), ME_KEY, grassAt);
+  assert.equal(hit.ok, true);
+  assert.deepEqual(hit.gained, {}, "1ヒットでは回収できない");
+  assert.equal(hit.override.block.hp, 4);
+  const dug = mineBlock(hit.override, withItems({}), ME_KEY, grassAt);
   assert.equal(dug.ok, true);
   assert.deepEqual(dug.gained, { bench: 1 });
 });

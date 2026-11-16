@@ -33,6 +33,11 @@ export type PlacedBlock = {
   itemId: string;
   /** 設置者の不透明 ID。 */
   ownerId: string;
+  /**
+   * 残り耐久（HP制: 採掘1ヒットごとに減り、0で壊れる）。
+   * 未設定は満タン扱い（HP制より前の旧データ互換）。
+   */
+  hp?: number;
 };
 
 /**
@@ -115,8 +120,8 @@ export type TileView = {
   farmland: boolean;
   stump: boolean;
   crop: { cropId: string; stage: 0 | 1 | 2; ready: boolean } | null;
-  /** 設置されたブロック（自分のものかどうか付き）。 */
-  block: { itemId: string; mine: boolean } | null;
+  /** 設置されたブロック（自分のものかどうか・残り HP 割合つき）。 */
+  block: { itemId: string; mine: boolean; hpFrac: number } | null;
   /** 自分の作物・作業かどうか。 */
   mine: boolean;
 };
@@ -143,7 +148,11 @@ export function tileView(
       ? { cropId: crop.cropId, stage: cropStage(crop, now), ready: now >= crop.readyAt }
       : null,
     block: active?.block
-      ? { itemId: active.block.itemId, mine: selfId !== null && active.block.ownerId === selfId }
+      ? {
+          itemId: active.block.itemId,
+          mine: selfId !== null && active.block.ownerId === selfId,
+          hpFrac: blockHpFraction(active.block),
+        }
       : null,
     mine: selfId !== null && active !== null && active.ownerId === selfId,
   };
@@ -321,6 +330,50 @@ export function blockMineTool(def: ItemDef): ToolKind | null {
   return def.mineTool ?? "pickaxe";
 }
 
+/** 耐久が未定義の設置物（家具など）の最大 HP。 */
+export const DEFAULT_BLOCK_HP = 10;
+/** ブロック採掘の1ヒットのダメージ（実効ティア 0〜4 = 素手・木・石・鉄・ミスリル）。 */
+export const BLOCK_MINE_DAMAGE: readonly number[] = [6, 10, 16, 25, 40];
+
+/** 設置ブロックの最大 HP（= アイテムの耐久。未定義は既定値）。 */
+export function blockMaxHp(def: ItemDef): number {
+  return def.durability ?? DEFAULT_BLOCK_HP;
+}
+
+/** 設置ブロックの残り HP 割合（1 = 無傷）。hp 未設定の旧データは満タン。 */
+export function blockHpFraction(block: PlacedBlock): number {
+  const def = itemById(block.itemId);
+  if (!def) return 1;
+  const max = blockMaxHp(def);
+  if (max <= 0) return 1;
+  const hp = block.hp === undefined ? max : block.hp;
+  return Math.max(0, Math.min(1, hp / max));
+}
+
+/** その種類の道具の所持最高ティア（持っていなければ 0）。 */
+export function bestToolTier(profile: PlayerProfile, kind: ToolKind): number {
+  let best = 0;
+  for (const i of ITEMS) {
+    if (i.tool === kind && (i.tier ?? 0) > best && countItem(profile, i.id) > 0) {
+      best = i.tier ?? 0;
+    }
+  }
+  return best;
+}
+
+/**
+ * ブロック採掘の1ヒットのダメージ。道具を要求するブロックはその道具の
+ * 所持最高ティアで、道具不要のブロックは斧/ツルハシの高い方のティアで決まる。
+ */
+export function blockMineDamage(profile: PlayerProfile, def: ItemDef): number {
+  const tool = blockMineTool(def);
+  const tier = tool
+    ? bestToolTier(profile, tool)
+    : Math.max(bestToolTier(profile, "axe"), bestToolTier(profile, "pickaxe"));
+  const idx = Math.max(0, Math.min(BLOCK_MINE_DAMAGE.length - 1, tier));
+  return BLOCK_MINE_DAMAGE[idx];
+}
+
 /** 設置の文脈（ユニオンマークはルート側が真値を持つ）。 */
 export type PlaceBlockContext = {
   onCapital: boolean;
@@ -367,7 +420,7 @@ export function applyPlaceBlock(
   const selfId = presenceIdFor(ownerKey);
   const next: TileOverride = {
     ...(active ?? { ownerId: selfId }),
-    block: { itemId: def.id, ownerId: selfId },
+    block: { itemId: def.id, ownerId: selfId, hp: blockMaxHp(def) },
     ownerId: selfId,
   };
   const overrides: TileOverridesMap = current ? { [key]: current } : {};
@@ -385,7 +438,9 @@ export function applyPlaceBlock(
  * 防衛側の首都の WAR_TERRITORY_RADIUS 以内にある他者ブロックを掘れる
  * （ルート側が戦争状態を検証して warBreakAllowed を渡す。掘ったブロックは
  * 掘った者の所持品に入る＝略奪ルール）。硬いブロックは道具が要る。
- * 掘ったブロックはそのままアイテムに戻る。
+ * HP制: 1回 = 1ヒットで、ダメージは道具のティアで変わる。HP が残れば
+ * ブロックは残り（アイテムは得られない）、0 以下で壊れてアイテムに戻る。
+ * 戦争破壊も同じ HP 経路を通る（1ヒット即消しにはしない）。
  */
 export type MineBlockContext = {
   /** 戦争中の他者ブロック破壊がこの1回で許可されているか。 */
@@ -415,6 +470,21 @@ export function applyMineBlock(
   if (!def) return { ok: false, error: "no_block" };
   const tool = blockMineTool(def);
   if (tool && !hasTool(profile, tool)) return { ok: false, error: "tool_required" };
+  // HP制: 1ヒット分のダメージを適用する。残れば hp が減った上書きを返す
+  const maxHp = blockMaxHp(def);
+  const hpNow = Math.min(block.hp ?? maxHp, maxHp);
+  const hpNext = hpNow - blockMineDamage(profile, def);
+  if (hpNext > 0) {
+    const next: TileOverride = { ...active, block: { ...block, hp: hpNext }, ownerId: selfId };
+    const overrides: TileOverridesMap = { [key]: active };
+    return {
+      ok: true,
+      override: next,
+      profile,
+      view: viewAfter(map, overrides, key, next, x, y, now, ownerKey),
+      gained: {},
+    };
+  }
   const rest: TileOverride = { ...active, ownerId: selfId };
   delete rest.block;
   const empty =
@@ -448,7 +518,12 @@ function parsePlacedBlock(raw: unknown): PlacedBlock | null {
   const def = itemById(v.itemId);
   if (!def || (def.category !== "block" && def.facility !== true)) return null;
   if (typeof v.ownerId !== "string" || v.ownerId.length === 0) return null;
-  return { itemId: def.id, ownerId: v.ownerId };
+  const out: PlacedBlock = { itemId: def.id, ownerId: v.ownerId };
+  // hp は正の有限数だけ拾う（壊れた値は落として満タン扱いに戻す）
+  if (typeof v.hp === "number" && Number.isFinite(v.hp) && v.hp > 0) {
+    out.hp = Math.floor(v.hp);
+  }
+  return out;
 }
 
 /** bot_kv の1値から上書きを復元する。壊れていれば null。 */
