@@ -50,6 +50,7 @@ export async function GET(request: Request) {
     role: e.role ?? "free",
     rank: e.rank ?? 1,
     party: e.party ?? "",
+    ...(e.sit === true ? { sit: true } : {}),
     ts: e.ts,
   }));
   // now はクライアント側の時計ずれ補正用（エントリ ts はサーバー時刻のため）
