@@ -252,10 +252,12 @@ export async function POST(request: Request) {
           void bumpMetric("harvests", 1, Date.now());
           void recordFirstStep(ownerKey, "gather", Date.now());
         }
-        // コンテナを回収したら中身（空）の状態も消す
-        if (minedContainerItem) await storeContainer("world", tx, ty, null);
+        // コンテナ/装置の状態は、ブロックが壊れて回収されたときだけ消す
+        // （HP制のヒットではブロックが残るので状態も残す）
+        const blockBroken = fields.action === "mine_block" && !result.override?.block;
+        if (minedContainerItem && blockBroken) await storeContainer("world", tx, ty, null);
         // 装置を回収したら状態も消す
-        if (minedMachine) await deleteMachine(tx, ty);
+        if (minedMachine && blockBroken) await deleteMachine(tx, ty);
         return NextResponse.json(
           {
             ok: true,

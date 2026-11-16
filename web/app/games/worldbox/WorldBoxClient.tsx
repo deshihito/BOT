@@ -69,7 +69,7 @@ import type { BoardPost } from "@/lib/worldbox/board";
 import { parseSave, serializeSave, type SaveSpace } from "@/lib/worldbox/save";
 import { chooseInitialSave } from "@/lib/worldbox/save-source";
 import {
-  actionForTile, cropStage, isOverrideActive, placedBlockSolid, tileKey, tileView,
+  actionForTile, blockHpFraction, cropStage, isOverrideActive, placedBlockSolid, tileKey, tileView,
   type TileActionKind, type TileOverridesMap,
 } from "@/lib/worldbox/tiles";
 import { CROPS, ITEMS, itemById } from "@/lib/worldbox/items";
@@ -242,6 +242,48 @@ const MOVE_KEYS = new Set(["w", "a", "s", "d", "arrowup", "arrowdown", "arrowlef
 
 function texReady(img: HTMLImageElement | undefined): img is HTMLImageElement {
   return !!img && img.complete && img.naturalWidth > 0;
+}
+
+/** ひび割れの折れ線（タイル内 0..1 の相対座標）。段階ごとに先頭から増える。 */
+const BLOCK_CRACK_LINES: readonly (readonly (readonly [number, number])[])[] = [
+  [[0.16, 0.08], [0.34, 0.3], [0.29, 0.5], [0.47, 0.68]],
+  [[0.86, 0.18], [0.66, 0.38], [0.73, 0.56], [0.56, 0.8]],
+  [[0.18, 0.86], [0.42, 0.7], [0.6, 0.88], [0.82, 0.74]],
+];
+
+/**
+ * 設置ブロックのひび割れ描画（HP制）: 残り HP 割合が下がるほど
+ * 線の本数と濃さが増える。形はタイル座標から決定的にずらし、
+ * 毎フレーム同じ見た目にする。
+ */
+function drawBlockCracks(
+  ctx: CanvasRenderingContext2D,
+  bx: number,
+  by: number,
+  tx: number,
+  ty: number,
+  hpFrac: number,
+) {
+  const dmg = 1 - hpFrac;
+  if (dmg <= 0) return;
+  const stage = dmg < 0.34 ? 1 : dmg < 0.67 ? 2 : 3;
+  const jitter = (Math.abs(Math.sin(tx * 127.1 + ty * 311.7) * 43758.5453) % 1 - 0.5) * 0.07;
+  ctx.save();
+  ctx.strokeStyle = `rgba(14,10,8,${0.34 + 0.18 * stage})`;
+  ctx.lineWidth = 1.3;
+  ctx.lineJoin = "round";
+  for (let i = 0; i < stage; i++) {
+    const line = BLOCK_CRACK_LINES[i];
+    ctx.beginPath();
+    for (let j = 0; j < line.length; j++) {
+      const px = bx + (line[j][0] + jitter) * TILE;
+      const py = by + (line[j][1] + jitter) * TILE;
+      if (j === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
+    }
+    ctx.stroke();
+  }
+  ctx.restore();
 }
 
 
@@ -1493,7 +1535,10 @@ export default function WorldBoxClient() {
         chop: "chop", mine: "mine", till: "till", plant: "plant", harvest: "harvest",
         place_block: "place", mine_block: "debris",
       };
-      fxEventsRef.current.push({ kind: fxKind[action], x, y });
+      // ブロック採掘（HP制）: 壊れたら破片（debris）、まだ残るヒットは小さな破片（mine）
+      const fxForAction =
+        action === "mine_block" && data.override?.block ? "mine" : fxKind[action];
+      fxEventsRef.current.push({ kind: fxForAction, x, y });
       if (data.key) {
         const next = { ...tilesRef.current };
         if (data.override) next[data.key] = data.override;
@@ -3700,6 +3745,8 @@ export default function WorldBoxClient() {
               ctx.fillStyle = "#9a7b4f";
               ctx.fillRect(bx + 5, by + 5, TILE - 10, TILE - 10);
             }
+            // HP制: ダメージが入ったブロックにはひび割れを重ねる
+            drawBlockCracks(ctx, bx, by, tx, ty, blockHpFraction(ov!.block));
             ctx.restore();
           }
         }
