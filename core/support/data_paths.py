@@ -5,19 +5,23 @@ core 再編成 (#505–#514 系) で各ストアモジュールが1階層深い�
 際、`Path(__file__).resolve().parent.parent / "data" / ...` の計算がそのまま
 コピーされ、保存先が本来の ``<repo>/data/`` ではなく ``<repo>/core/data/``
 (zetamodoki_custom は ``<repo>/core/game/data/``) を指していた。その期間の
-書き込みはすべて旧パス (stray) 側に行われているため、旧パス側が最新かつ
-正のデータであり、正規パス側には再編前の古いスナップショットが残って
-いる可能性がある。
+書き込みは旧パス (stray) 側に行われている。
 
-各ストアはこのモジュールの ``load_migrated`` を初回読み込みに使い、
+移行読み取りの意味論 (2026-11-16 変更):
 
 - 書き込みは常に正規パス (``default_path``) だけに行う
-- 読み取りは旧パスを主とし、正規パスは不足分の補完にだけ使う
-- 旧パスファイルは削除しない (読み取り専用の移行元として残置する)
+- 読み取りは正規パスを正とする。stray は「正規ファイルが存在しない
+  (読めない) ときだけ」初回移行として読む
+- 正規ファイルが存在する場合は stray があっても無視し、警告ログを出す
+  (同じ stray についてプロセス内で1回だけ)。無視される stray は
+  退避・削除して構わない
 - 環境変数で保存先が指定されている場合は移行処理を働かせない
   (呼び出し側が「保存先 = 既定パス」のときだけ移行読み取りを行う)
 
-という形で移行する (PR #525 の EXP / MIQ と同じ方式)。
+旧意味論 (stray 優先・マージ) は、移行完了後も起動のたびに stray を
+読み続けるため、正規パス側で行ったリセット等の変更が凍結した stray の
+値で毎起動巻き戻される事故 (2026-11-14 の経済リセット巻き戻し) を
+起こした。そのため「初回移行のみ」に改めた (PR #525 の MIQ と同じ方式)。
 """
 from __future__ import annotations
 
@@ -69,13 +73,34 @@ def read_json(path: Path) -> Any | None:
         return None
 
 
+# 警告済み stray の集合 (プロセス内で同じ stray への警告は1回だけ)。
+_warned_strays: set[str] = set()
+
+
+def note_stray_ignored(stray: Path, canonical: Path | None = None) -> None:
+    """正規ファイルが存在するため stray を無視したことを警告する。
+
+    同じ stray についてはプロセス内で1回だけ警告する。独自の読み取り
+    実装を持つストア (lottery / usage_stats 等) からも使う共通入口。
+    """
+    key = str(Path(stray))
+    if key in _warned_strays:
+        return
+    _warned_strays.add(key)
+    logger.warning(
+        "data_paths: 旧保存先 %s にデータが残っていますが、正規保存先 %s "
+        "が存在するため無視します (stray は正規ファイルが無い場合の"
+        "初回移行にだけ使います)。旧ファイルは退避・削除できます",
+        stray, canonical,
+    )
+
+
 def fill_merge(canonical: Any, stray: Any) -> Any:
     """dict 型ストアのマージ: 旧パス (stray) を主、正規パスは補完のみ。
 
-    トップレベルはキー単位で stray 優先・不足キーを canonical から補う。
-    値が両方とも dict のキーは1階層だけ同じ規則でマージする (セクション
-    → ユーザー単位のストアで、ユーザー単位のエントリは stray 側を丸ごと
-    採用する)。dict でない値は stray 側を採用する。
+    旧意味論のマージ規則の記録として残すヘルパーで、現在の
+    ``load_migrated`` はマージを行わない (正規パスが正、stray は
+    正規ファイルが無い場合にだけ丸ごと読む)。
     """
     if not isinstance(canonical, dict) or not isinstance(stray, dict):
         return stray
@@ -92,19 +117,24 @@ def fill_merge(canonical: Any, stray: Any) -> Any:
 
 
 def load_migrated(path: Path, stray: Path, *, fill: bool) -> Any | None:
-    """正規パスと旧パスを移行読み取りし、生データ (未整形) を返す。
+    """正規パスを正として読み取り、生データ (未整形) を返す。
 
-    - 旧パスに読めるデータが無ければ、正規パスの内容をそのまま返す
-      (従来動作と同一)。
-    - ``fill=True`` (dict 型ストア): 旧パス主・正規パス補完でマージする。
-    - ``fill=False`` (スナップショット型ストア): 旧パスのファイル全体を
-      正とし、正規パスは旧パスにデータが無い場合にだけ使う。
+    - 正規パスに読めるデータがあれば、それを返す。stray にもデータが
+      ある場合は stray を無視し、警告ログを出す (1回だけ)。
+    - 正規パスに読めるデータが無く、stray に読めるデータがあれば、
+      初回移行として stray の内容を返す (次回 flush で正規パスへ
+      書き出され、以降 stray は無視される)。
     - どちらにも読めるデータが無ければ None。
+
+    ``fill`` は旧意味論 (fill=True: stray 主のマージ / fill=False:
+    stray 全体優先) の引数で、呼び出し側の互換のため残しているが、
+    現在の意味論では使わない。
     """
-    stray_raw = read_json(stray) if Path(stray) != Path(path) else None
-    if stray_raw is None:
-        return read_json(path)
     canonical_raw = read_json(path)
-    if canonical_raw is None or not fill:
-        return stray_raw
-    return fill_merge(canonical_raw, stray_raw)
+    if canonical_raw is not None:
+        if Path(stray) != Path(path) and read_json(stray) is not None:
+            note_stray_ignored(stray, path)
+        return canonical_raw
+    if Path(stray) != Path(path):
+        return read_json(stray)
+    return None
