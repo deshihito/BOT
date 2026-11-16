@@ -19,6 +19,19 @@
   (compute-* / chess-* — `scripts/build-workers.mjs` がパスで参照する
   ため平置きを維持) のみ。新規ロジックは平置きに足さず、属する
   ドメインのフォルダへ。
+- **WORLD BOX は1ジャンルとして扱う** (ユーザー決定 2026-11-16):
+  別リポジトリへ分離する可能性が高いため、Bot のジャンル軸
+  (general / game / support / vc / help) と並ぶ独立ジャンルとして
+  境界を保つ。構成要素は Web 側 `web/lib/worldbox/` +
+  `web/app/games/worldbox/` + `web/app/api/worldbox/` +
+  `web/realtime/` (relay-core.js) + `web/realtime-server.js`、
+  Python 側 `core/support/worldbox/` と
+  `core/general/circulation/worldbox_*.py` (Discord 連携ブリッジ)。
+  境界ルール: WORLD BOX から外への依存は共通基盤
+  (auth / bot-api / poll-guard 等) のみに寄せ、個別ゲームの
+  ロジックへの依存は増やさない。外から WORLD BOX 内部への
+  import もしない (2026-11-16 実測: Web 側の外→worldbox import は
+  0件で、この状態を維持する)。分離時はこの境界ごと持ち出す。
 - **データ**: 実行時データの置き場は `<repo>/data/` のみ。
   `core/data/` 等は保存先ずれ期間の旧保存先 (stray) で、移行読み取り
   専用。新規書き込みで作らない。
