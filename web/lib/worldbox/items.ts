@@ -194,6 +194,12 @@ export const ITEMS: readonly ItemDef[] = [
   { id: "mithril_pickaxe", name: "ミスリルのツルハシ", desc: "岩を掘る道具", category: "tool", price: 8500, tool: "pickaxe", tier: 4, durability: 500 },
   { id: "mithril_sword", name: "ミスリルの剣", desc: "戦う道具", category: "tool", price: 8500, tool: "sword", tier: 4, durability: 500 },
   { id: "mithril_hoe", name: "ミスリルのクワ", desc: "地面を耕す道具", category: "tool", price: 8500, tool: "hoe", tier: 4, durability: 500 },
+  // ---- 道具（特殊: 種別を持たない探索道具） ------------------------------
+  // 開拓のコンパス: 所持している間、最も近い洞窟/ダンジョン入口の方向と
+  // 距離がミニマップ付近に出る（効果は compass.ts とクライアント側）。
+  // tool 種別は持たない（伐採等の道具判定には使わない）。tier が無いので
+  // レア品の販売除外（tier 4）にも掛からず、道具屋で通常販売される。
+  { id: "explorer_compass", name: "開拓のコンパス", desc: "最も近い洞窟とダンジョンの方向を示す", category: "tool", price: 10000 },
   // ---- 素材（追加分: 金属・宝石・自然素材） ------------------------------
   { id: "copper_ore", name: "銅鉱石", desc: "金属の素材", category: "material", price: 180 },
   { id: "copper_ingot", name: "銅インゴット", desc: "精錬した銅", category: "material", price: 300 },
@@ -488,7 +494,7 @@ export const ITEM_ICON_IDS: readonly string[] = [
   "miso_soup", "tofu", "fruit_salad", "roasted_sweet_potato", "pepper_stirfry",
   "eggplant_miso", "cotton_candy", "caramel", "jam", "dried_fruit",
   "tomato_soup", "melon_bread", "deluxe_meal", "fishing_rod", "bow",
-  "arrow", "bucket", "compass", "map_item", "gold_key",
+  "arrow", "bucket", "compass", "map_item", "gold_key", "explorer_compass",
   "bomb", "dragon_charm", "ghost_lantern", "spider_silk", "turtle_shield",
   "chest_box", "market_stall", "flag_red", "flag_blue", "fountain",
   "stairs", "scepter", "tiara", "dragon_egg", "star_crown",
