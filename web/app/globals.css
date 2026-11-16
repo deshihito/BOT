@@ -25,6 +25,9 @@ header nav { display:flex; align-items:center; gap:22px; max-width:880px; min-he
 .nav-utility { display:flex; align-items:center; gap:2px; margin-left:auto; padding-left:14px; border-left:1px solid var(--line); }
 .nav-primary a,.nav-utility a { padding:4px 9px; border-radius:6px; color:var(--text); font-size:14px; white-space:nowrap; }
 .nav-utility a { color:var(--muted); }
+.nav-utility a.nav-user-icon { display:inline-flex; align-items:center; justify-content:center; padding:2px; border-radius:999px; }
+.nav-user-icon img { display:block; }
+.nav-user-fallback { display:inline-flex; align-items:center; justify-content:center; width:28px; height:28px; border-radius:50%; background:var(--accent-soft); color:var(--accent); font-weight:700; font-size:13px; }
 .nav-primary a:hover,.nav-utility a:hover { background:var(--soft); text-decoration:none; }
 .nav-primary a[aria-current],.nav-utility a[aria-current] { background:var(--accent-soft); color:var(--accent); font-weight:700; }
 @media (max-width:650px) { header { position:sticky; top:0; } header nav { flex-wrap:wrap; row-gap:6px; } .nav-primary { order:3; flex-basis:100%; overflow-x:auto; } .nav-utility { padding-left:0; border-left:0; } }
