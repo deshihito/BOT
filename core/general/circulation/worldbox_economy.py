@@ -32,6 +32,16 @@ Web は残高を直接触らない。Web が bot_kv の名前空間 ``worldbox_e
 再び拾える。失敗は status=failed + error コードとして記録し、
 ループ自体は決して落とさない。接続エラーは警告1行（traceback なし）。
 
+さらに適用台帳（bot_kv 名前空間 ``worldbox_economy_applied``、
+キー = オプID）で「財布への適用そのもの」を冪等化する。適用前に
+``applying`` を書き、適用が終わったら ``applied`` + 適用額を書く。
+結果の書き戻しが失敗して同じオプが再処理されても、台帳が
+``applied`` なら適用をスキップして結果だけ書き直す。台帳が
+``applying`` のまま（適用の成否が曖昧）なら再適用せず
+failed=apply_uncertain として安全側に倒す。残高不足等の確定失敗は
+台帳も ``failed`` で終端化し、再処理で apply_uncertain に化けない
+ようにする。台帳は終端オプの間引きのタイミングで一緒に消す。
+
 このモジュールは discord / config / economy_helpers を import しない。
 kv・wallet・原資ストア・履歴記録は CirculationCog から差し込む
 （テストはフェイクで差し替える）。
@@ -51,6 +61,10 @@ logger = logging.getLogger(__name__)
 NAMESPACE = "worldbox_economy"
 #: 計測（日次経済集計）の保存先名前空間（バッチ9a）
 METRICS_NAMESPACE = "worldbox_metrics_econ"
+#: 適用台帳の保存先名前空間（B1: 財布への適用そのものの冪等化）。
+#: キー = オプID、値 = {"status": "applying"|"applied"|"failed",
+#: "appliedAmount": int, "metricRecorded": bool, "error": str, "at": ms}
+APPLIED_NAMESPACE = "worldbox_economy_applied"
 
 
 def apply_metric(record: Any, op: dict[str, Any], applied: int, bankroll: Optional[int]) -> dict[str, Any]:
@@ -258,6 +272,9 @@ class WorldBoxEconomyWorker:
     - new_user_balance: 新規ユーザーの初期残高（値、または返す callable）
     - balance_reader: (user_id) -> 残高 の async callable（steal の
       被害者残高を読むため。CirculationCog._balance を渡す）
+    - applied_kv: 適用台帳（APPLIED_NAMESPACE）の KVStore 互換
+      （load_one / set の async メソッド。delete があれば終端オプの
+      台帳も一緒に間引く）。None なら台帳なしの従来動作。
     """
 
     def __init__(
@@ -271,6 +288,7 @@ class WorldBoxEconomyWorker:
         new_user_balance: Any,
         balance_reader: Optional[Callable[[str], Awaitable[int]]] = None,
         metrics_kv: Any = None,
+        applied_kv: Any = None,
     ) -> None:
         self._kv = kv
         self._wallet_provider = wallet_provider
@@ -280,8 +298,10 @@ class WorldBoxEconomyWorker:
         self._new_user_balance = new_user_balance
         self._balance_reader = balance_reader
         self._metrics_kv = metrics_kv
+        self._applied_kv = applied_kv
         self._remote_down = False
         self._wallet_down = False
+        self._applied_down = False
         self._metric_buffer: list[tuple[dict[str, Any], int]] = []
         self._metric_last_flush = time.monotonic()
         self._last_full_scan_ms = 0
@@ -362,10 +382,17 @@ class WorldBoxEconomyWorker:
 
         records は処理前のスナップショットなので、この回に終端化した
         オプは次回の全件読みで対象になる。間引きはベストエフォート。
+        適用台帳も同じタイミングで消す（終端オプの台帳は二度と読ま
+        れないため、全件消して台帳の肥大化を防ぐ）。
         """
         delete = getattr(self._kv, "delete", None)
         if delete is None or not isinstance(records, dict):
             return
+        applied_delete = (
+            getattr(self._applied_kv, "delete", None)
+            if self._applied_kv is not None
+            else None
+        )
         terminal: list[tuple[int, str]] = []
         for key, raw in records.items():
             value = raw
@@ -389,6 +416,61 @@ class WorldBoxEconomyWorker:
                 await delete(key)
             except Exception:
                 logger.warning("worldbox economy: 終端オプの間引きに失敗しました（key=%s）", key)
+        if applied_delete is not None:
+            for _, key in terminal:
+                try:
+                    await applied_delete(key)
+                except Exception:
+                    logger.warning("worldbox economy: 適用台帳の間引きに失敗しました（key=%s）", key)
+
+    @staticmethod
+    def _parse_applied(raw: Any) -> Optional[dict[str, Any]]:
+        """台帳エントリを解釈する。無い場合は None を返す。
+
+        壊れているエントリは applying 扱いにする（成否が曖昧＝再適用
+        せず apply_uncertain へ倒す。壊れた台帳を「無かったこと」に
+        して再適用するのが一番危ないため）。
+        """
+        if raw is None:
+            return None
+        value = raw
+        if isinstance(value, str):
+            try:
+                value = json.loads(value)
+            except (ValueError, TypeError):
+                return {"status": "applying"}
+        if not isinstance(value, dict):
+            return {"status": "applying"}
+        status = value.get("status")
+        if status not in ("applying", "applied", "failed"):
+            return {"status": "applying"}
+        entry: dict[str, Any] = {"status": status}
+        if status == "applied":
+            amount = value.get("appliedAmount")
+            entry["appliedAmount"] = (
+                amount if isinstance(amount, int) and not isinstance(amount, bool) else 0
+            )
+            entry["metricRecorded"] = value.get("metricRecorded") is True
+        if status == "failed":
+            error = value.get("error")
+            entry["error"] = error if isinstance(error, str) and error else "apply_failed"
+        return entry
+
+    async def _save_applied(self, op_id: str, entry: dict[str, Any]) -> bool:
+        """台帳へ1件書く。台帳なし（applied_kv 未設定）なら True。
+
+        書き込みに失敗したら False を返す（applying の書き込み失敗は
+        適用の抑止に使う。それ以外はベストエフォートで呼び出し側は
+        戻り値を無視してよい）。
+        """
+        if self._applied_kv is None:
+            return True
+        try:
+            await self._applied_kv.set(op_id, entry)
+        except Exception:
+            logger.warning("worldbox economy: 適用台帳の書き込みに失敗しました（id=%s）", op_id)
+            return False
+        return True
 
     async def _process_one(self, wallet: Any, key: str, raw: Any) -> bool:
         op = parse_op(raw)
@@ -415,17 +497,70 @@ class WorldBoxEconomyWorker:
             or claim.get("token") != token
         ):
             return False  # 他のワーカーが先に claim した / 状態が変わった
+        # 適用台帳: 財布への適用そのものの冪等化。台帳が読めなければ
+        # 適用に進まず False を返す（claim 失効後の再試行に回す）。
+        ledger: Optional[dict[str, Any]] = None
+        if self._applied_kv is not None:
+            try:
+                ledger = self._parse_applied(await self._applied_kv.load_one(op["id"]))
+            except Exception:
+                if not self._applied_down:
+                    logger.warning("worldbox economy: 適用台帳の読み取りに失敗しました（id=%s）", op["id"])
+                self._applied_down = True
+                return False
+            if self._applied_down:
+                logger.info("worldbox economy: 適用台帳への接続が回復しました")
+                self._applied_down = False
+        if ledger is not None:
+            status = ledger["status"]
+            if status == "applied":
+                # 適用済み: 財布は触らず、結果だけ書き直す。計測は
+                # metricRecorded が False のときだけ足す（二重加算しない）。
+                applied = int(ledger.get("appliedAmount") or 0)
+                await self._write_result(key, claimed, status="done", applied_amount=applied)
+                if not ledger.get("metricRecorded"):
+                    await self._record_metric(op, applied)
+                    await self._save_applied(
+                        op["id"],
+                        {"status": "applied", "appliedAmount": applied, "metricRecorded": True, "at": _now_ms()},
+                    )
+                return True
+            if status == "failed":
+                # 確定失敗: 再適用せず、記録済みのエラーで終端化し直す。
+                await self._write_result(key, claimed, status="failed", error=str(ledger.get("error") or "apply_failed"))
+                return True
+            # applying のみ: 適用の成否が曖昧。再適用せず安全側に倒す。
+            logger.critical(
+                "worldbox economy: 適用台帳が applying のままのオプを再処理します（id=%s）。"
+                "二重適用を避けるため failed=apply_uncertain とします",
+                op["id"],
+            )
+            await self._write_result(key, claimed, status="failed", error="apply_uncertain")
+            return True
+        # 台帳なし: applying を書いてから適用する。台帳に書けなければ
+        # 適用しない（claim 失効後に再試行し、そのとき台帳から始める）。
+        if not await self._save_applied(op["id"], {"status": "applying", "at": _now_ms()}):
+            return False
         try:
             applied = await self._apply(wallet, op)
         except _OpFailed as exc:
+            # 確定失敗は台帳も failed で終端化する（再処理で
+            # apply_uncertain に化けないようにする）。
+            await self._save_applied(op["id"], {"status": "failed", "error": exc.code, "at": _now_ms()})
             await self._write_result(key, claimed, status="failed", error=exc.code)
             return True
         except Exception:
             logger.exception("worldbox economy: オプ適用で予期しない例外（id=%s）", op["id"])
+            # 台帳は applying のまま残す（成否が曖昧）。結果の書き戻し
+            # まで失敗していたら再処理で apply_uncertain になる。
             await self._write_result(key, claimed, status="failed", error="apply_failed")
             return True
-        await self._write_result(key, claimed, status="done", applied_amount=applied)
         await self._record_metric(op, applied)
+        await self._save_applied(
+            op["id"],
+            {"status": "applied", "appliedAmount": applied, "metricRecorded": True, "at": _now_ms()},
+        )
+        await self._write_result(key, claimed, status="done", applied_amount=applied)
         return True
 
     async def _record_metric(self, op: dict[str, Any], applied: int) -> None:

@@ -21,6 +21,9 @@ class FakeKV:
     def __init__(self) -> None:
         self.store: dict[str, object] = {}
         self.fail_load = False
+        self.set_calls = 0
+        self.fail_set_call_numbers: set[int] = set()
+        self.deleted: list[str] = []
 
     async def load_all(self):
         if self.fail_load:
@@ -31,7 +34,14 @@ class FakeKV:
         return self.store.get(key)
 
     async def set(self, key, value):
+        self.set_calls += 1
+        if self.set_calls in self.fail_set_call_numbers:
+            raise ConnectionError("down")
         self.store[key] = value
+
+    async def delete(self, key):
+        self.deleted.append(key)
+        self.store.pop(key, None)
 
 
 class FakeRPCError(Exception):
@@ -111,6 +121,8 @@ class FakeEconomyStore:
 class WorkerCase(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
         self.kv = FakeKV()
+        self.applied = FakeKV()
+        self.metrics = FakeKV()
         self.wallet = FakeWallet()
         self.store = FakeEconomyStore()
         self.history: list[tuple[str, str, int, str]] = []
@@ -130,6 +142,8 @@ class WorkerCase(unittest.IsolatedAsyncioTestCase):
             insufficient_marker=FakeWallet.INSUFFICIENT,
             new_user_balance=NEW_USER_BALANCE,
             balance_reader=read_balance,
+            metrics_kv=self.metrics,
+            applied_kv=self.applied,
         )
         self._seq = 0
 
@@ -629,6 +643,229 @@ class TestQueueBehavior(WorkerCase):
         self.assertEqual(self.record(fresh["id"])["status"], "done")
 
 
+class TestAppliedLedger(unittest.IsolatedAsyncioTestCase):
+    """適用台帳（worldbox_economy_applied）の冪等化を検証する。
+
+    (a) 結果の書き戻し失敗 → 再処理で二重適用しない
+    (b) applied 済み → 結果だけ復旧する（計測も二重加算しない）
+    (c) applying のみ → apply_uncertain で安全側に倒す
+    (d) 確定失敗の台帳 → 記録済みエラーで終端化し直す
+    """
+
+    def setUp(self) -> None:
+        self.kv = FakeKV()
+        self.applied = FakeKV()
+        self.metrics = FakeKV()
+        self.wallet = FakeWallet()
+        self.store = FakeEconomyStore()
+        self.history: list[tuple[str, str, int, str]] = []
+
+        async def record(sender, receiver, amount, reason):
+            self.history.append((sender, receiver, amount, reason))
+
+        self._record = record
+
+        async def read_balance(user_id):
+            return self.wallet.balances.get(user_id, 0)
+
+        self.worker = wb.WorldBoxEconomyWorker(
+            kv=self.kv,
+            wallet_provider=lambda: self.wallet,
+            economy_store=self.store,
+            record_history=record,
+            insufficient_marker=FakeWallet.INSUFFICIENT,
+            new_user_balance=NEW_USER_BALANCE,
+            balance_reader=read_balance,
+            metrics_kv=self.metrics,
+            applied_kv=self.applied,
+        )
+        self._seq = 0
+
+    def add_op(self, **overrides):
+        self._seq += 1
+        op = {
+            "id": f"op-{self._seq:04d}-ledger",
+            "kind": "spend",
+            "userKey": f"discord:{ME}",
+            "discordId": ME,
+            "amount": 300,
+            "reason": "build_house",
+            "status": "pending",
+            "createdAt": 1_700_000_000_000 + self._seq,
+        }
+        op.update(overrides)
+        self.kv.store[op["id"]] = op
+        return op
+
+    def _age_claim(self, op_id: str) -> None:
+        record = self.kv.store[op_id]
+        record["claim"]["at"] -= int(wb.CLAIM_STALE_SECONDS * 1000) + 1000
+
+    async def test_result_write_failure_does_not_double_apply(self):
+        self.wallet.balances[ME] = 1000
+        op = self.add_op(amount=300)
+        # 経済 kv への set は claim（1回目）→ 結果の書き戻し（2回目）の順。
+        # 書き戻しだけ落とす。
+        self.kv.fail_set_call_numbers = {2}
+        self.assertEqual(await self.worker.poll_once(), 1)
+        self.assertEqual(self.wallet.balances[ME], 700)
+        self.assertEqual(self.kv.store[op["id"]]["status"], "pending")
+        self.assertEqual(self.applied.store[op["id"]]["status"], "applied")
+        self.assertEqual(self.applied.store[op["id"]]["appliedAmount"], 300)
+        self.kv.fail_set_call_numbers = set()
+        self._age_claim(op["id"])
+        self.assertEqual(await self.worker.poll_once(), 1)
+        self.assertEqual(self.wallet.balances[ME], 700, "二重適用してはいけない")
+        self.assertEqual(len(self.wallet.change_calls), 1)
+        record = self.kv.store[op["id"]]
+        self.assertEqual(record["status"], "done")
+        self.assertEqual(record["appliedAmount"], 300)
+        self.assertEqual(len(self.worker._metric_buffer), 1, "計測も二重加算しない")
+
+    async def test_applied_ledger_restores_done_without_reapplying(self):
+        self.wallet.balances[ME] = 1000
+        op = self.add_op(amount=300)
+        self.applied.store[op["id"]] = {
+            "status": "applied", "appliedAmount": 300,
+            "metricRecorded": False, "at": 1,
+        }
+        self.assertEqual(await self.worker.poll_once(), 1)
+        self.assertEqual(self.wallet.balances[ME], 1000)
+        self.assertEqual(self.wallet.change_calls, [])
+        record = self.kv.store[op["id"]]
+        self.assertEqual(record["status"], "done")
+        self.assertEqual(record["appliedAmount"], 300)
+        self.assertEqual(len(self.worker._metric_buffer), 1)
+        self.assertIs(self.applied.store[op["id"]]["metricRecorded"], True)
+
+    async def test_applied_ledger_with_metric_recorded_skips_metric(self):
+        self.wallet.balances[ME] = 1000
+        op = self.add_op(amount=300)
+        self.applied.store[op["id"]] = {
+            "status": "applied", "appliedAmount": 300,
+            "metricRecorded": True, "at": 1,
+        }
+        self.assertEqual(await self.worker.poll_once(), 1)
+        self.assertEqual(self.wallet.change_calls, [])
+        self.assertEqual(self.kv.store[op["id"]]["status"], "done")
+        self.assertEqual(len(self.worker._metric_buffer), 0)
+
+    async def test_applying_only_becomes_apply_uncertain(self):
+        self.wallet.balances[ME] = 1000
+        op = self.add_op(amount=300)
+        self.applied.store[op["id"]] = {"status": "applying", "at": 1}
+        self.assertEqual(await self.worker.poll_once(), 1)
+        self.assertEqual(self.wallet.balances[ME], 1000)
+        self.assertEqual(self.wallet.change_calls, [])
+        record = self.kv.store[op["id"]]
+        self.assertEqual(record["status"], "failed")
+        self.assertEqual(record["error"], "apply_uncertain")
+
+    async def test_failed_ledger_rewrites_failed_without_reapplying(self):
+        self.wallet.balances[ME] = 100
+        op = self.add_op(amount=300)
+        self.applied.store[op["id"]] = {
+            "status": "failed", "error": "insufficient_funds", "at": 1,
+        }
+        self.assertEqual(await self.worker.poll_once(), 1)
+        self.assertEqual(self.wallet.balances[ME], 100)
+        self.assertEqual(self.wallet.change_calls, [])
+        record = self.kv.store[op["id"]]
+        self.assertEqual(record["status"], "failed")
+        self.assertEqual(record["error"], "insufficient_funds")
+
+    async def test_normal_flow_writes_applied_ledger(self):
+        self.wallet.balances[ME] = 1000
+        op = self.add_op(amount=300)
+        self.assertEqual(await self.worker.poll_once(), 1)
+        entry = self.applied.store[op["id"]]
+        self.assertEqual(entry["status"], "applied")
+        self.assertEqual(entry["appliedAmount"], 300)
+        self.assertIs(entry["metricRecorded"], True)
+        self.assertEqual(await self.worker.poll_once(), 0)
+        self.assertEqual(self.wallet.balances[ME], 700)
+        self.assertEqual(len(self.wallet.change_calls), 1)
+
+    async def test_failed_op_writes_failed_ledger(self):
+        self.wallet.balances[ME] = 100
+        op = self.add_op(amount=300)
+        self.assertEqual(await self.worker.poll_once(), 1)
+        entry = self.applied.store[op["id"]]
+        self.assertEqual(entry["status"], "failed")
+        self.assertEqual(entry["error"], "insufficient_funds")
+        # 残高不足の判定自体は _change_balance の呼び出し1回で済んでいる
+        self.assertEqual(len(self.wallet.change_calls), 1)
+        # 結果の書き戻しが失敗して再処理されても apply_uncertain にならない
+        # （_write_result は claim を落とすので、pending に戻すだけで再処理される）
+        self.kv.store[op["id"]]["status"] = "pending"
+        self.assertEqual(await self.worker.poll_once(), 1)
+        record = self.kv.store[op["id"]]
+        self.assertEqual(record["status"], "failed")
+        self.assertEqual(record["error"], "insufficient_funds")
+        self.assertEqual(len(self.wallet.change_calls), 1, "再処理で財布に触ってはいけない")
+
+    async def test_applying_write_failure_blocks_apply(self):
+        self.wallet.balances[ME] = 1000
+        op = self.add_op(amount=300)
+        self.applied.fail_set_call_numbers = {1}
+        self.assertEqual(await self.worker.poll_once(), 0)
+        self.assertEqual(self.wallet.balances[ME], 1000)
+        self.assertEqual(self.wallet.change_calls, [])
+        self.assertEqual(self.kv.store[op["id"]]["status"], "pending")
+        self.applied.fail_set_call_numbers = set()
+        self._age_claim(op["id"])
+        self.assertEqual(await self.worker.poll_once(), 1)
+        self.assertEqual(self.wallet.balances[ME], 700)
+        self.assertEqual(self.kv.store[op["id"]]["status"], "done")
+
+    async def test_terminal_ops_prune_their_ledger(self):
+        op_id = "op-done-ledger"
+        self.kv.store[op_id] = {"id": op_id, "status": "done", "appliedAt": 100}
+        self.applied.store[op_id] = {
+            "status": "applied", "appliedAmount": 300,
+            "metricRecorded": True, "at": 1,
+        }
+        self.worker._last_full_scan_ms = 0
+        self.assertEqual(await self.worker.poll_once(), 0)
+        self.assertNotIn(op_id, self.applied.store)
+        self.assertIn(op_id, self.kv.store)
+
+    async def test_worker_without_applied_kv_keeps_old_behavior(self):
+        worker = wb.WorldBoxEconomyWorker(
+            kv=self.kv,
+            wallet_provider=lambda: self.wallet,
+            economy_store=self.store,
+            record_history=self._record,
+            insufficient_marker=FakeWallet.INSUFFICIENT,
+            new_user_balance=NEW_USER_BALANCE,
+            metrics_kv=self.metrics,
+        )
+        self.wallet.balances[ME] = 1000
+        op = self.add_op(amount=300)
+        self.assertEqual(await worker.poll_once(), 1)
+        self.assertEqual(self.wallet.balances[ME], 700)
+        self.assertEqual(self.kv.store[op["id"]]["status"], "done")
+        self.assertEqual(self.applied.store, {})
+
+
+class TestParseApplied(unittest.TestCase):
+    def test_none_is_absent(self):
+        self.assertIsNone(wb.WorldBoxEconomyWorker._parse_applied(None))
+
+    def test_applied_entry_is_normalized(self):
+        entry = wb.WorldBoxEconomyWorker._parse_applied(
+            {"status": "applied", "appliedAmount": 300, "metricRecorded": True}
+        )
+        self.assertEqual(entry, {"status": "applied", "appliedAmount": 300, "metricRecorded": True})
+
+    def test_broken_entry_is_applying(self):
+        parse = wb.WorldBoxEconomyWorker._parse_applied
+        self.assertEqual(parse("読めない値"), {"status": "applying"})
+        self.assertEqual(parse({"status": "weird"}), {"status": "applying"})
+        self.assertEqual(parse({"status": "applied", "appliedAmount": "300"}),
+                         {"status": "applied", "appliedAmount": 0, "metricRecorded": False})
+
+
 class TestNextPollDelay(unittest.TestCase):
     def test_full_batch_repolls_immediately(self):
         self.assertEqual(wb.next_poll_delay(wb.MAX_BATCH, 5.0), 0.0)
@@ -783,8 +1020,10 @@ class CountingMetricsKV(FakeKV):
         self.set_calls = 0
 
     async def set(self, key, value):
+        # super().set は set_calls も数えるため、ここでは直接書く
+        # （計測 kv の set 回数だけを数える）。
         self.set_calls += 1
-        await super().set(key, value)
+        self.store[key] = value
 
 
 class TestPendingFastPath(unittest.IsolatedAsyncioTestCase):
