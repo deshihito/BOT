@@ -112,7 +112,7 @@ function floorAt(x: number, y: number): number {
 
 // ---------- オブジェクト配置 ----------
 
-export type LobbyStation = "board" | "shop" | "bank" | "casino" | "arena" | "smith" | "guild" | "fountain" | "rest";
+export type LobbyStation = "board" | "shop" | "bank" | "casino" | "arena" | "smith" | "guild" | "fountain" | "rest" | "arcade";
 
 export type LobbyObject = {
   sprite: string;
@@ -124,6 +124,8 @@ export type LobbyObject = {
   station?: LobbyStation;
   /** 店（station "shop"）の品目ジャンル。店員ごとに扱う品目が違う（shops.ts）。 */
   genre?: ShopGenreId;
+  /** アーケード筐体（station "arcade"）のゲーム ID（ONLINE_GAMES のキー、arcade.ts）。 */
+  arcade?: string;
 };
 
 const objects: LobbyObject[] = [];
@@ -339,13 +341,31 @@ export function buildLobby(): LobbyData {
   return cached;
 }
 
+/**
+ * タイルとオブジェクトの接し方: 1 = 辺で接する（正面）, 2 = 角で接する,
+ * 0 = 接していない。判定は従来どおりチェビシェフ距離1以内。
+ * 複数の施設に接する位置では「正面」を優先する（角で接するだけの施設が
+ * 正面の施設を奪わない。例: 3F で筐体の角と休憩ソファの正面が重なる位置）。
+ */
+function stationMatchTier(o: LobbyObject, tx: number, ty: number): 0 | 1 | 2 {
+  const inX = tx >= o.x && tx < o.x + o.w;
+  const inY = ty >= o.y && ty < o.y + o.h;
+  if (inX && (ty === o.y - 1 || ty === o.y + o.h)) return 1;
+  if (inY && (tx === o.x - 1 || tx === o.x + o.w)) return 1;
+  if (tx >= o.x - 1 && tx <= o.x + o.w && ty >= o.y - 1 && ty <= o.y + o.h) return 2;
+  return 0;
+}
+
 /** プレイヤーのタイルに隣接（チェビシェフ距離1以内）するステーション。無ければ null。 */
 export function stationNear(objectsList: readonly LobbyObject[], tx: number, ty: number): LobbyStation | null {
+  let diagonal: LobbyStation | null = null;
   for (const o of objectsList) {
     if (!o.station) continue;
-    if (tx >= o.x - 1 && tx <= o.x + o.w && ty >= o.y - 1 && ty <= o.y + o.h) return o.station;
+    const tier = stationMatchTier(o, tx, ty);
+    if (tier === 1) return o.station;
+    if (tier === 2 && diagonal === null) diagonal = o.station;
   }
-  return null;
+  return diagonal;
 }
 
 /**
@@ -354,6 +374,21 @@ export function stationNear(objectsList: readonly LobbyObject[], tx: number, ty:
  * カウンターが陳列棚より先に並ぶため、両方に接する位置ではカウンターの
  * ジャンルが返る（棚のジャンルはカウンターの帯と一致させてある）。
  */
+/**
+ * プレイヤーのタイルに隣接するアーケード筐体（station "arcade"）のゲーム ID。
+ * 筐体に接していない／接した筐体がゲーム ID を持たなければ null。
+ */
+export function stationArcadeNear(objectsList: readonly LobbyObject[], tx: number, ty: number): string | null {
+  let diagonal: string | null = null;
+  for (const o of objectsList) {
+    if (o.station !== "arcade" || !o.arcade) continue;
+    const tier = stationMatchTier(o, tx, ty);
+    if (tier === 1) return o.arcade;
+    if (tier === 2 && diagonal === null) diagonal = o.arcade;
+  }
+  return diagonal;
+}
+
 export function stationGenreNear(objectsList: readonly LobbyObject[], tx: number, ty: number): ShopGenreId | null {
   for (const o of objectsList) {
     if (o.station !== "shop" || !o.genre) continue;
