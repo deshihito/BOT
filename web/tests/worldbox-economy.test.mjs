@@ -47,8 +47,8 @@ const eco = loadBundle(
   ["worldbox/items.ts", "worldbox/profile.ts", "worldbox/roles.ts", "worldbox/economy.ts"],
   [
     "ITEMS", "itemById", "RECIPES", "recipeById", "sellPrice",
-    "DEFAULT_PROFILE", "parseProfile", "countItem",
-    "buyItem", "sellItem", "eatItem", "doWork", "craftItem", "resolveSteal",
+    "DEFAULT_PROFILE", "parseProfile", "serializeProfile", "countItem",
+    "buyItem", "sellItem", "eatItem", "doWork", "craftItem", "craftFromInputs", "resolveSteal",
     "STEAL_MAX_AMOUNT", "STEAL_TARGET_MIN_COINS", "STEAL_FINE_AMOUNT",
   ],
 );
@@ -126,6 +126,83 @@ test("合成: 素材を消費して成果物が得られ、足りなければ失
   assert.equal(eco.craftItem(fresh(), "carving").error, "not_enough_items");
   const rare = eco.craftItem({ ...fresh(), items: { herb: 2, glass: 1 } }, "potion", () => 0);
   assert.equal(eco.countItem(rare.profile, "star_shard"), 1);
+});
+
+test("自由セット合成: 完全一致は成果物と hint exact、不一致は失敗作が残る", () => {
+  const exact = eco.craftFromInputs({ ...fresh(), items: { wood: 3 } }, { wood: 3 }, () => 0.99);
+  assert.equal(exact.ok, true);
+  assert.equal(exact.matched, true);
+  assert.equal(exact.hint, "exact");
+  assert.equal(exact.resultId, "carving");
+  assert.equal(exact.recipe.id, "carving");
+  assert.equal(eco.countItem(exact.profile, "carving"), 1);
+  assert.equal(eco.countItem(exact.profile, "wood"), 0);
+  const far = eco.craftFromInputs({ ...fresh(), items: { meal: 1 } }, { meal: 1 });
+  assert.equal(far.ok, true);
+  assert.equal(far.matched, false);
+  assert.equal(far.hint, "far");
+  assert.equal(far.resultId, "mystery_lump");
+  assert.equal(far.recipe, null);
+  assert.equal(far.rare, null);
+  assert.equal(eco.countItem(far.profile, "mystery_lump"), 1);
+  assert.equal(eco.countItem(far.profile, "meal"), 0);
+});
+
+test("自由セット合成: near は素材種の半分超を共有するレシピがある時", () => {
+  // potion は herb×2 + glass×1（2種）。herb×1 + glass×1 は種は一致するが数が違う
+  const near = eco.craftFromInputs({ ...fresh(), items: { herb: 1, glass: 1 } }, { herb: 1, glass: 1 });
+  assert.equal(near.ok, true);
+  assert.equal(near.matched, false);
+  assert.equal(near.hint, "near");
+  assert.equal(eco.countItem(near.profile, "mystery_lump"), 1);
+  assert.equal(eco.countItem(near.profile, "herb"), 0);
+  assert.equal(eco.countItem(near.profile, "glass"), 0);
+});
+
+test("自由セット合成: 素材不足は消費せずエラー、不正入力は弾く", () => {
+  const before = { ...fresh(), items: { herb: 1 } };
+  const lack = eco.craftFromInputs(before, { herb: 1, glass: 1 });
+  assert.equal(lack.ok, false);
+  assert.equal(lack.error, "not_enough_items");
+  assert.equal(eco.countItem(before, "herb"), 1, "失敗時に素材を消費しない");
+  // 完全一致レシピでも素材が足りなければ not_enough_items
+  assert.equal(eco.craftFromInputs({ ...fresh(), items: { wood: 2 } }, { wood: 3 }).error, "not_enough_items");
+  const rich = { ...fresh(), items: { wood: 9, stone: 9, herb: 9, glass: 9, cloth: 9 } };
+  assert.equal(eco.craftFromInputs(rich, { wood: 1, stone: 1, herb: 1, glass: 1, cloth: 1 }).error, "invalid_request", "5種は不可");
+  assert.equal(eco.craftFromInputs(rich, { wood: 7 }).error, "invalid_request", "1種7個は不可");
+  assert.equal(eco.craftFromInputs(rich, { wood: 0 }).error, "invalid_request");
+  assert.equal(eco.craftFromInputs(rich, { wood: 1.5 }).error, "invalid_request");
+  assert.equal(eco.craftFromInputs(rich, { unknown_thing: 1 }).error, "unknown_item");
+  assert.equal(eco.craftFromInputs(rich, {}).error, "invalid_request", "空は不可");
+  assert.equal(eco.craftFromInputs(rich, null).error, "invalid_request");
+  assert.equal(eco.craftFromInputs(rich, ["wood"]).error, "invalid_request");
+  // 失敗作はレシピの材料になっていない（どのレシピの inputs にも無い）
+  for (const recipe of eco.RECIPES) assert.ok(!("mystery_lump" in recipe.inputs), recipe.id);
+  const lump = eco.itemById("mystery_lump");
+  assert.equal(lump.category, "material");
+  assert.equal(lump.icon, "/img/worldbox/items/slime.png");
+});
+
+test("発見レシピはプロフィールに往復し、文字列だけが残る", () => {
+  const parsed = eco.parseProfile({ discoveredRecipes: ["carving", "potion", 42, "carving", null] });
+  assert.deepEqual(parsed.discoveredRecipes, ["carving", "potion"]);
+  const back = eco.parseProfile(eco.serializeProfile(parsed));
+  assert.deepEqual(back.discoveredRecipes, ["carving", "potion"]);
+  assert.deepEqual(eco.parseProfile({ discoveredRecipes: "carving" }).discoveredRecipes, []);
+  assert.deepEqual(fresh().discoveredRecipes, []);
+});
+
+test("合成の作り直し配線: パネルはレシピ一覧を出さず台UI、ルートは自由セット式を使う", () => {
+  const panel = fs.readFileSync(path.join(rootDir, "app/games/worldbox/WorldBoxEconomyPanel.tsx"), "utf8");
+  assert.ok(!panel.includes("RECIPES"), "旧レシピ全件リストが残っている");
+  assert.ok(!panel.includes("レア: "), "レア名の事前表示が残っている");
+  assert.match(panel, /火を入れる/);
+  assert.match(panel, /発見した組み合わせ/);
+  assert.match(panel, /discoveredRecipes/);
+  const route = fs.readFileSync(path.join(rootDir, "app/api/worldbox/profile/route.ts"), "utf8");
+  assert.match(route, /craftFromInputs/);
+  assert.match(route, /discoveredRecipes/);
+  assert.match(route, /hint/);
 });
 
 test("steal 成功: 対象の実残高の5%（上限つき）を奪い、両者に時刻が付く", () => {

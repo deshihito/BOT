@@ -372,7 +372,7 @@ function bundleModule(files, names) {
 }
 const profileEcoUrl = bundleModule(
   ["worldbox/items.ts", "worldbox/profile.ts", "worldbox/economy.ts"],
-  ["buyItem", "sellItem", "eatItem", "doWork", "craftItem", "resolveSteal"],
+  ["buyItem", "sellItem", "eatItem", "doWork", "craftItem", "craftFromInputs", "resolveSteal"],
 );
 const bridgeOnlineStubUrl = dataUrl(`
 const state = (globalThis.__wbBridge = { ops: [], balances: new Map(), failEnqueue: false });

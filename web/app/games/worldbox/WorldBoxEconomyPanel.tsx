@@ -11,7 +11,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { EconomyOp } from "@/lib/worldbox/economy-bridge";
 import { onEconomyApplied } from "@/lib/worldbox/economy-push";
-import { ITEMS, RECIPES, itemById, sellPrice } from "@/lib/worldbox/items";
+import { ITEMS, itemById, recipeById, sellPrice } from "@/lib/worldbox/items";
 import { dailyPriceFor, dailyStockForGenre, genreById, isShopExcluded, itemsForGenre, shopDayKeyOf, type ShopGenreId } from "@/lib/worldbox/shops";
 import type { LobbyStation } from "@/lib/worldbox/lobby";
 import { ENHANCE_BASE_COST, ENHANCE_MATERIALS, ENHANCE_MAX_LEVEL, type PlayerProfile } from "@/lib/worldbox/profile";
@@ -82,6 +82,33 @@ const row: React.CSSProperties = {
   padding: "7px 0", borderBottom: "1px solid rgba(255,255,255,0.08)",
 };
 
+/** 素材 id から決定的に色相を出す（同じ素材は常に同じ色。ランダムは使わない）。 */
+function hueForItem(id: string): number {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) % 360;
+  return h;
+}
+
+/** セットした素材の色を個数で重み付けして混ぜた、台の液体/煙の色。 */
+function mixColorFor(set: Record<string, number>): { liquid: string; smoke: string } {
+  const entries = Object.entries(set);
+  if (entries.length === 0) {
+    return { liquid: "rgba(120,130,150,0.5)", smoke: "rgba(160,165,175,0.35)" };
+  }
+  let x = 0;
+  let y = 0;
+  for (const [id, n] of entries) {
+    const rad = (hueForItem(id) * Math.PI) / 180;
+    x += Math.cos(rad) * n;
+    y += Math.sin(rad) * n;
+  }
+  const hue = Math.round(((Math.atan2(y, x) * 180) / Math.PI + 360) % 360);
+  return {
+    liquid: `hsla(${hue}, 65%, 50%, 0.85)`,
+    smoke: `hsla(${hue}, 45%, 65%, 0.45)`,
+  };
+}
+
 export default function WorldBoxEconomyPanel({ space, station, genre, onClose }: { space: SaveSpace; station: LobbyStation | null; genre: ShopGenreId | null; onClose: () => void }) {
   // 行動の場所制約: 売買はショップの前、合成は作業台（鍛冶屋）の前、
   // 送金は銀行の前でのみ。いる場所に対応するタブだけを出す（サーバー側
@@ -105,6 +132,15 @@ export default function WorldBoxEconomyPanel({ space, station, genre, onClose }:
   // かばん/ショップのスロット選択（注釈は選択中アイテムのものだけ出す）
   const [bagSel, setBagSel] = useState<string | null>(null);
   const [shopSel, setShopSel] = useState<string | null>(null);
+  // 合成台（PR-B）: セットした素材（id → 個数）、工程の進捗、気配、出現した成果物
+  const [craftSet, setCraftSet] = useState<Record<string, number>>({});
+  const [craftBusy, setCraftBusy] = useState(false);
+  const [craftPhase, setCraftPhase] = useState(0);
+  const [craftHint, setCraftHint] = useState<"exact" | "near" | "far" | null>(null);
+  const [craftResult, setCraftResult] = useState<string | null>(null);
+  const [craftResultKey, setCraftResultKey] = useState(0);
+  const [discSel, setDiscSel] = useState<string | null>(null);
+  const craftTimerRef = useRef<number | null>(null);
   const aliveRef = useRef(true);
 
   const refreshBridge = useCallback(async () => {
@@ -149,6 +185,8 @@ export default function WorldBoxEconomyPanel({ space, station, genre, onClose }:
     return () => {
       aliveRef.current = false;
       off();
+      if (craftTimerRef.current !== null) window.clearInterval(craftTimerRef.current);
+      craftTimerRef.current = null;
     };
   }, [refreshProfile, refreshBridge]);
 
@@ -206,6 +244,98 @@ export default function WorldBoxEconomyPanel({ space, station, genre, onClose }:
     }
   };
 
+  // ---- 合成台（PR-B） -------------------------------------------------
+  /** かばんの素材を台へ1個セットする（1種6個まで・4種まで・所持数まで）。 */
+  const addToCraft = (itemId: string) => {
+    if (craftBusy || !profile) return;
+    setCraftResult(null);
+    setCraftSet((prev) => {
+      const cur = prev[itemId] ?? 0;
+      if (cur >= 6) return prev;
+      if (!(itemId in prev) && Object.keys(prev).length >= 4) return prev;
+      if (cur + 1 > (profile.items[itemId] ?? 0)) return prev;
+      return { ...prev, [itemId]: cur + 1 };
+    });
+  };
+  /** 台の素材を1個かばんへ戻す。 */
+  const removeFromCraft = (itemId: string) => {
+    if (craftBusy) return;
+    setCraftSet((prev) => {
+      const cur = prev[itemId] ?? 0;
+      if (cur <= 0) return prev;
+      const next = { ...prev };
+      if (cur === 1) delete next[itemId];
+      else next[itemId] = cur - 1;
+      return next;
+    });
+  };
+  /** 工程が終わった瞬間に初めて結果を反映し、成果物を台の上に出現させる。 */
+  const finishCraft = (pending: { profile: PlayerProfile; craftedId: string; rareId: string | null }) => {
+    setProfile(pending.profile);
+    setCraftSet({});
+    setCraftPhase(0);
+    setCraftBusy(false);
+    setBusy(false);
+    setCraftResult(pending.craftedId);
+    setCraftResultKey((k) => k + 1);
+    const name = itemById(pending.craftedId)?.name ?? "アイテム";
+    const rareName = pending.rareId ? itemById(pending.rareId)?.name : null;
+    setMsg(rareName ? `${name}ができた（${rareName}も）` : `${name}ができた`);
+    playWbSe("success");
+    void refreshBridge();
+  };
+  /**
+   * 火を入れる: 結果は即表示しない。レスポンスの hint（気配）だけ保持し、
+   * 約2.4秒の工程（煙・揺れ・進捗）を出したあとで初めて反映する。
+   */
+  const runCraft = async () => {
+    const inputs = { ...craftSet };
+    if (Object.keys(inputs).length === 0 || craftBusy) return;
+    setCraftBusy(true);
+    setBusy(true);
+    setMsg("");
+    setCraftResult(null);
+    setCraftHint(null);
+    setCraftPhase(0);
+    playWbSe("craft");
+    try {
+      const res = await fetch("/api/worldbox/profile", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ action: "craft", inputs }),
+      });
+      const data = (await res.json().catch(() => ({}))) as Record<string, unknown> & {
+        profile?: PlayerProfile; error?: string;
+      };
+      if (!res.ok || !data.profile) {
+        setMsg(ERROR_LABEL[data.error ?? ""] ?? "できませんでした");
+        setCraftBusy(false);
+        setBusy(false);
+        return;
+      }
+      setCraftHint(data.hint === "exact" || data.hint === "near" || data.hint === "far" ? data.hint : null);
+      const pending = {
+        profile: data.profile,
+        craftedId: typeof data.craftedId === "string" ? data.craftedId : "mystery_lump",
+        rareId: typeof data.rareId === "string" ? data.rareId : null,
+      };
+      const startedAt = Date.now();
+      craftTimerRef.current = window.setInterval(() => {
+        const p = Math.min(1, (Date.now() - startedAt) / 2400);
+        setCraftPhase(p);
+        if (p >= 1) {
+          if (craftTimerRef.current !== null) window.clearInterval(craftTimerRef.current);
+          craftTimerRef.current = null;
+          if (aliveRef.current) finishCraft(pending);
+        }
+      }, 80);
+    } catch {
+      setMsg("できませんでした");
+      setCraftBusy(false);
+      setBusy(false);
+    }
+  };
+
   const closeBtn = (
     <button type="button" style={btn} onClick={onClose}>
       閉じる
@@ -238,6 +368,11 @@ export default function WorldBoxEconomyPanel({ space, station, genre, onClose }:
   // 選択中アイテム（所持/品目から消えていたら注釈を出さない）
   const bagSelItem = owned.find((item) => item.id === bagSel) ?? null;
   const shopSelItem = shopItems.find((item) => item.id === shopSel) ?? null;
+  // 発見図鑑: 自分が完全一致で作れたレシピだけ（未発見のレシピは出さない）
+  const discovered = (profile.discoveredRecipes ?? [])
+    .map((id) => recipeById(id))
+    .filter((r): r is NonNullable<typeof r> => r !== null);
+  const discRecipe = discovered.find((r) => r.id === discSel) ?? null;
   // 施設の前にいないタブを開いたままにしない（その施設へ行くと使える）
   // 販売品目の無い店（鍛冶屋は合成・強化専用）ではショップタブ自体を出さない
   const tabAllowed = (t: Tab): boolean =>
@@ -359,30 +494,137 @@ export default function WorldBoxEconomyPanel({ space, station, genre, onClose }:
         </div>
       )}
 
-      {activeTab === "craft" && (
-        <div style={{ marginTop: 6 }}>
-          {RECIPES.map((recipe) => {
-            const output = itemById(recipe.output);
-            const inputs = Object.entries(recipe.inputs)
-              .map(([id, n]) => `${itemById(id)?.name ?? id}×${n}（所持 ${profile.items[id] ?? 0}）`)
-              .join(" + ");
-            return (
-              <div key={recipe.id} style={row}>
-                <ItemIcon id={recipe.output} />
-                <strong>{output?.name ?? recipe.output}</strong>
-                <span className="muted">{inputs}</span>
-                {recipe.rareItem && <span className="muted">レア: {itemById(recipe.rareItem)?.name}</span>}
-                <span style={{ flex: 1 }} />
-                <button type="button" style={btn} disabled={busy}
-                  onClick={() => void act(
-                    { action: "craft", recipeId: recipe.id },
-                    (data) => `${output?.name ?? "アイテム"}を作った${data.rareId ? `（レア: ${itemById(data.rareId as string)?.name}も手に入れた！）` : ""}`,
-                  )}>
-                  合成する
+      {activeTab === "craft" && (() => {
+        const setEntries = Object.entries(craftSet);
+        const totalSet = setEntries.reduce((a, [, n]) => a + n, 0);
+        const mixed = mixColorFor(craftSet);
+        // 工程中の煙は気配で変える（exact=金、near=暖色、far=灰色に濁る）
+        const smokeColor = craftBusy
+          ? craftHint === "exact"
+            ? "rgba(255,210,62,0.8)"
+            : craftHint === "near"
+              ? "rgba(255,150,80,0.65)"
+              : craftHint === "far"
+                ? "rgba(125,125,130,0.6)"
+                : mixed.smoke
+          : mixed.smoke;
+        return (
+          <div style={{ marginTop: 6 }}>
+            <style>{`@keyframes wbCraftPop { 0% { opacity: 0; transform: translateX(-50%) translateY(10px) scale(0.4); } 60% { opacity: 1; transform: translateX(-50%) translateY(-4px) scale(1.15); } 100% { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); } } @keyframes wbCraftShake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-2px); } 75% { transform: translateX(2px); } }`}</style>
+            {/* 台: 煙/液体の表現エリア + 素材スロット4枠 + 成果物の出現 */}
+            <div style={{ position: "relative", border: "1px solid rgba(255,255,255,0.14)", borderRadius: 12, padding: "10px 10px 12px", background: "rgba(255,255,255,0.03)", overflow: "hidden" }}>
+              <div aria-hidden style={{ position: "relative", height: 64 }}>
+                {[0, 1, 2].map((i) => (
+                  <span
+                    key={i}
+                    style={{
+                      position: "absolute", left: `${38 + i * 12}%`, bottom: 6,
+                      width: 26 + i * 6, height: 26 + i * 6, borderRadius: "50%",
+                      background: smokeColor, filter: "blur(6px)",
+                      opacity: craftBusy ? 0.55 + craftPhase * 0.45 : totalSet > 0 ? 0.6 : 0.3,
+                      transform: `translateY(${craftBusy ? -craftPhase * 22 - i * 4 : -i * 3}px) scale(${1 + (craftBusy ? craftPhase * 0.7 : 0) + i * 0.15})`,
+                      transition: "background 0.4s, transform 0.3s, opacity 0.3s",
+                    }}
+                  />
+                ))}
+                <span
+                  style={{
+                    position: "absolute", left: "50%", bottom: 0, transform: "translateX(-50%)",
+                    width: 150, height: 16, borderRadius: "50%", background: mixed.liquid,
+                    transition: "background 0.4s",
+                  }}
+                />
+                {craftResult && (
+                  <span
+                    key={craftResultKey}
+                    style={{
+                      position: "absolute", left: "50%", bottom: 10,
+                      transform: "translateX(-50%)", animation: "wbCraftPop 0.45s ease-out",
+                    }}
+                  >
+                    <ItemIcon id={craftResult} size={34} />
+                  </span>
+                )}
+              </div>
+              <div style={{ display: "flex", gap: 8, justifyContent: "center", marginTop: 8, ...(craftBusy ? { animation: "wbCraftShake 0.3s infinite" } : {}) }}>
+                {[0, 1, 2, 3].map((i) => {
+                  const entry = setEntries[i];
+                  if (!entry) {
+                    return (
+                      <span
+                        key={i}
+                        aria-hidden
+                        style={{ width: 48, height: 48, minWidth: 48, minHeight: 48, borderRadius: 10, border: "1px dashed rgba(255,255,255,0.3)", background: "rgba(255,255,255,0.03)", display: "block", boxSizing: "border-box" }}
+                      />
+                    );
+                  }
+                  const [id, n] = entry;
+                  return (
+                    <ItemSlot key={id} itemId={id} count={n} disabled={craftBusy} onClick={() => removeFromCraft(id)} />
+                  );
+                })}
+              </div>
+              <div style={{ display: "flex", justifyContent: "center", marginTop: 10 }}>
+                <button type="button" style={btn} disabled={busy || totalSet === 0} onClick={() => void runCraft()}>
+                  火を入れる
                 </button>
               </div>
-            );
-          })}
+              {craftBusy && (
+                <div style={{ height: 6, borderRadius: 3, background: "rgba(255,255,255,0.12)", marginTop: 10, overflow: "hidden" }}>
+                  <div style={{ width: `${Math.round(craftPhase * 100)}%`, height: "100%", background: smokeColor, transition: "width 0.08s linear" }} />
+                </div>
+              )}
+            </div>
+            {/* かばんから素材をセットする（表示個数は所持数 − セット済み数） */}
+            <div style={{ marginTop: 10 }}>
+              {owned.length === 0 && <p className="muted">かばんは空です</p>}
+              <ItemSlotGrid>
+                {owned.map((item) => {
+                  const remain = (profile.items[item.id] ?? 0) - (craftSet[item.id] ?? 0);
+                  if (remain <= 0) return null;
+                  return (
+                    <ItemSlot
+                      key={item.id}
+                      itemId={item.id}
+                      count={remain}
+                      disabled={craftBusy}
+                      onClick={() => addToCraft(item.id)}
+                    />
+                  );
+                })}
+              </ItemSlotGrid>
+            </div>
+          </div>
+        );
+      })()}
+
+      {activeTab === "craft" && discovered.length > 0 && (
+        <div style={{ marginTop: 10 }}>
+          <strong style={{ fontSize: 13 }}>発見した組み合わせ</strong>
+          <div style={{ marginTop: 6 }}>
+            <ItemSlotGrid>
+              {discovered.map((recipe) => (
+                <ItemSlot
+                  key={recipe.id}
+                  itemId={recipe.output}
+                  count={recipe.outputCount > 1 ? recipe.outputCount : undefined}
+                  selected={discSel === recipe.id}
+                  onClick={() => setDiscSel(recipe.id)}
+                />
+              ))}
+            </ItemSlotGrid>
+            {discRecipe && (
+              <ItemAnnotation itemId={discRecipe.output}>
+                <div style={{ marginTop: 6 }}>
+                  <span className="muted">
+                    {Object.entries(discRecipe.inputs)
+                      .map(([id, n]) => `${itemById(id)?.name ?? id}×${n}`)
+                      .join(" + ")}
+                  </span>
+                </div>
+              </ItemAnnotation>
+            )}
+          </div>
         </div>
       )}
 

@@ -2,7 +2,7 @@ import { addMasteryXp } from "@/lib/worldbox/roles";
 import { NextResponse } from "next/server";
 import { getRequestSession, publicOrigin, sessionOwnerKey } from "@/lib/auth";
 import {
-  buyItem, craftItem, eatItem, sellItem,
+  buyItem, craftFromInputs, craftItem, eatItem, sellItem,
   type CoinMovement, type EconomyError,
 } from "@/lib/worldbox/economy";
 import { buildEconomyOp, type EconomyOp } from "@/lib/worldbox/economy-bridge";
@@ -33,7 +33,8 @@ export const runtime = "nodejs";
 //   （場所制約: ロビーの店か鍛冶屋の前にいること。サーバー側でプレゼンス検証。
 //    購入は店ごとの品目ジャンルもサーバー側で検証する）
 // POST { action: "eat", itemId }: かばんの食事を食べて空腹度を回復
-// POST { action: "craft", recipeId }: 合成
+// POST { action: "craft", inputs }: 自由セット式の合成（PR-B。レシピは
+//   サーバー側の照合表のみ。recipeId 形式も互換のため残す）
 //   （場所制約: ロビー鍛冶屋の作業台の前にいること。サーバー側で検証）
 // POST { action: "work" }: 労働は廃止（2026-11-16）。常に拒否する
 // POST { action: "steal", targetId }: steal は一旦廃止（2026-11-16）。常に拒否する
@@ -120,6 +121,7 @@ async function handlePost(request: Request, session: AuthedSession) {
   }
   const data = (body ?? {}) as {
     action?: unknown; itemId?: unknown; count?: unknown; recipeId?: unknown; targetId?: unknown;
+    inputs?: unknown;
     hotbarIndex?: unknown; storageIndex?: unknown; from?: unknown; to?: unknown;
   };
   const ownerKey = sessionOwnerKey(session);
@@ -296,10 +298,40 @@ async function handlePost(request: Request, session: AuthedSession) {
     case "craft": {
       const place = await stationGate("smith", "not_at_workbench");
       if (place) return place;
+      // 発見の記録: 完全一致で作れたレシピだけを本人の図鑑へ足す（重複なし）
+      const withDiscovery = (profile: PlayerProfile, recipeId: string): PlayerProfile => {
+        const found = profile.discoveredRecipes ?? [];
+        return found.includes(recipeId)
+          ? profile
+          : { ...profile, discoveredRecipes: [...found, recipeId] };
+      };
+      if (data.inputs !== undefined && data.inputs !== null) {
+        // 自由セット式（PR-B）: レシピ・確率・レア名は事前に返さず、
+        // 結果（craftedId）と気配（hint）だけを返す
+        const result = craftFromInputs(current, data.inputs);
+        if (!result.ok) return saveAndReturn(result);
+        const profile = result.matched && result.recipe
+          ? withDiscovery(result.profile, result.recipe.id)
+          : result.profile;
+        return saveAndReturn({ ok: true, profile }, {
+          craftedId: result.resultId,
+          rareId: result.rare?.id ?? null,
+          hint: result.hint,
+          matched: result.matched,
+        });
+      }
+      // recipeId 形式（従来呼び出しの互換）: 成功時は発見を記録し hint は exact
       const result = craftItem(current, data.recipeId);
-      return saveAndReturn(result, result.ok
-        ? { craftedId: result.recipe.output, rareId: result.rare?.id ?? null }
-        : {});
+      if (!result.ok) return saveAndReturn(result);
+      return saveAndReturn(
+        { ok: true, profile: withDiscovery(result.profile, result.recipe.id) },
+        {
+          craftedId: result.recipe.output,
+          rareId: result.rare?.id ?? null,
+          hint: "exact",
+          matched: true,
+        },
+      );
     }
     case "work": {
       // 労働は廃止（2026-11-16 ユーザー指示）。どの経路からも実行できない。
