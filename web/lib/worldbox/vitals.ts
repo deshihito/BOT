@@ -181,6 +181,33 @@ export function applyMobDamage(
 }
 
 /**
+ * 他プレイヤーの攻撃ダメージを適用する（フィールド PvP）。
+ * 対象の実在・距離の検証は API ルート側がプレゼンスで済ませ、ここは
+ * モブ接触と同じ規則（精算・スポーン保護・被弾クールダウン）だけを持つ。
+ * 毒は付けない。死亡時の処理（ドロップ・リスポーン先の決定）はルート側。
+ */
+export function applyPlayerDamage(
+  profile: PlayerProfile,
+  attack: number,
+  now: number,
+): { profile: PlayerProfile; applied: boolean; died: boolean } {
+  const settled = stepVitals(profile, now).profile;
+  // スポーン保護中はプレイヤーの攻撃も受けない（モブと同じ）
+  if ((settled.spawnProtectedUntil ?? 0) > now) {
+    return { profile: settled, applied: false, died: false };
+  }
+  if (now - settled.lastDamageAt < MOB_DAMAGE_COOLDOWN_MS || settled.hp <= 0) {
+    return { profile: settled, applied: false, died: settled.hp <= 0 };
+  }
+  const next: PlayerProfile = {
+    ...settled,
+    hp: Math.max(0, settled.hp - Math.max(0, Math.floor(attack))),
+    lastDamageAt: now,
+  };
+  return { profile: next, applied: true, died: next.hp <= 0 };
+}
+
+/**
  * 食事・薬の効果を適用する（消費はしない。消費は economy.eatItem が担い、
  * 効果の数式はここを正とする）。hunger / heal / curePoison を持つアイテム
  * が対象で、それ以外は null。
