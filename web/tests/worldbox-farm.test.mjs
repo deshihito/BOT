@@ -63,7 +63,7 @@ const tilesUrl = bundleModule(
   [
     "worldTileSource", "mapTileAt", "T_GRASS", "T_TREE", "T_ROCK", "T_DIRT", "T_SNOW", "T_SNOW_TREE",
     "parseProfile", "addItem", "countItem",
-    "applyTileAction", "applyPlaceBlock", "applyMineBlock", "tileView", "actionForTile", "tileKey",
+    "applyTileAction", "applyPlaceBlock", "applyMineBlock", "applyFlowerAction", "tileView", "actionForTile", "tileKey",
     "parseTileOverride", "parseTileOverrides", "isOverrideActive", "TREE_REGROW_MS",
   ],
 );
