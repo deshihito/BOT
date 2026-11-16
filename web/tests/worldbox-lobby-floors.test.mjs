@@ -181,7 +181,7 @@ function reachableFrom(data, sx, sy) {
   return seen;
 }
 
-test("floors: 2F 40×28・3F 32×24 で、1F（56×64）とは別サイズの本物のマップ", () => {
+test("floors: 2F 40×28・3F 32×24 で、1F（126×64）とは別サイズの本物のマップ", () => {
   const f2 = floors.buildLobby2();
   const f3 = floors.buildLobby3();
   assert.equal(f2.width, 40);
