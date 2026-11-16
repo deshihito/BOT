@@ -16,6 +16,7 @@ import random
 import time
 from datetime import datetime
 from pathlib import Path
+from core.paths import asset_path
 from core.support.emojis import B_, G_, Y_
 
 import discord
@@ -36,7 +37,7 @@ MAX_GUESSES = 6
 GAME_SECONDS = 600
 MODES = (("shared", "みんなで（チャンネルの全員で推理）"), ("solo", "ひとりで（始めた人だけ）"))
 
-DATA_DIR = Path(__file__).resolve().parents[3] / "Assets" / "wordle"
+DATA_DIR = asset_path("wordle")
 GREEN, YELLOW, GRAY = G_, Y_, B_
 
 

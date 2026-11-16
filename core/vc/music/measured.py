@@ -11,12 +11,13 @@ from __future__ import annotations
 import logging
 import math
 from pathlib import Path
+from core.paths import shared_asset_path
 
 import numpy as np
 
 logger = logging.getLogger("cogs.sio_music")
 
-_ASSETS = Path(__file__).resolve().parents[3] / "assets" / "spatial"
+_ASSETS = shared_asset_path("spatial")
 _SPEAKER_KEYS = ("studio", "theater", "pa", "small")
 
 _speaker_cache = None

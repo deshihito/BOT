@@ -19,6 +19,7 @@ import logging
 import math
 from datetime import datetime, timedelta
 from pathlib import Path
+from core.paths import data_path, font_path
 
 import discord
 from discord.ext import commands, tasks
@@ -46,9 +47,8 @@ MARKET_COLOR = 0x2ECC71
 #: discord.py の拡張ローダが集約モジュールのインスタンスを二重化し、
 #: 入口側のパッチが実装に届かない場合があるため、実装側の所有に統一した
 #: （wordle と同じ流儀。テストもこちらをパッチする）。
-CHART_PATH = Path(__file__).resolve().parents[3] / "data" / "market_chart.png"
-CHART_FONT_PATH = (Path(__file__).resolve().parents[3]
-                   / "assets" / "fonts" / "MPLUSRounded1c-Regular.ttf")
+CHART_PATH = data_path("market_chart.png")
+CHART_FONT_PATH = font_path("MPLUSRounded1c-Regular.ttf")
 
 
 def _chart_path():

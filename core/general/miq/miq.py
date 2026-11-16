@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 """MIQ（引用画像）の中核：フォント解決・絵文字フォールバック・基本描画・設定保存。元 cogs/general.py から分割。"""
 from __future__ import annotations
+
+from core.paths import repo_root as _shared_repo_root
 from core.support.emojis import AGO_TICKET, BOOK, DICE, GAME, MUSIC
 
 from ..common import *
@@ -69,18 +71,8 @@ def miq_resolve_format(prefs_or_format) -> str:
     return "quote"
 
 def _miq_repo_root() -> Path:
-    """リポジトリルートを返す。
-
-    同梱フォント (font.ttf) と assets/fonts/ の両方を持つ最下位の祖先を
-    ルートとみなす。モジュールをサブパッケージへ移しても __file__ 起点の
-    相対パスがずれないようにするための解決で、見つからなければ現在の
-    配置 (core/general/miq/ から3つ上) を前提にフォールバックする。
-    """
-    here = Path(__file__).resolve()
-    for anc in here.parents:
-        if (anc / "font.ttf").is_file() and (anc / "assets" / "fonts").is_dir():
-            return anc
-    return here.parents[3]
+    """リポジトリルートを返す (解決の正は core/paths.py)。"""
+    return _shared_repo_root()
 
 
 _MIQ_REPO_ROOT = _miq_repo_root()

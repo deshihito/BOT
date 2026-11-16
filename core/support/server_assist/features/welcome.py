@@ -5,6 +5,7 @@ import asyncio
 import io
 import logging
 from pathlib import Path
+from core.paths import repo_root as _shared_repo_root
 from typing import Any
 
 import discord
@@ -44,17 +45,8 @@ CARD_W, CARD_H = 1000, 360
 _CARD_SS = 2
 
 def _repo_root() -> Path:
-    """リポジトリルートを返す (font.ttf と assets/fonts のある最下位の祖先)。
-
-    モジュールをサブパッケージへ移しても __file__ 起点の相対パスが
-    ずれないようにするための解決。見つからなければ現在の配置
-    (core/support/server_assist/features/ から4つ上) を前提にする。
-    """
-    here = Path(__file__).resolve()
-    for anc in here.parents:
-        if (anc / "font.ttf").is_file() and (anc / "assets" / "fonts").is_dir():
-            return anc
-    return here.parents[4]
+    """リポジトリルートを返す (解決の正は core/paths.py)。"""
+    return _shared_repo_root()
 
 
 _REPO_ROOT = _repo_root()

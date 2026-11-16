@@ -4,6 +4,7 @@ import io
 import logging
 import random
 from pathlib import Path
+from core.paths import DEFAULT_FONT_PATH, asset_path
 
 import discord
 from discord.ext import commands
@@ -22,7 +23,7 @@ RECRUIT_SECONDS = 30
 TURN_SECONDS = 60
 EMPTY, BLACK, WHITE = ".", "●", "○"
 DIRECTIONS = [(dr, dc) for dr in (-1, 0, 1) for dc in (-1, 0, 1) if (dr, dc) != (0, 0)]
-ASSET_DIR = Path(__file__).resolve().parents[3] / "Assets" / "reversi"
+ASSET_DIR = asset_path("reversi")
 BOARD_SIZE = 800
 MOVE_LABELS = tuple("123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ")
 SELECT_PAGE_SIZE = 25  # Discord のセレクトメニューの選択肢上限
@@ -57,7 +58,7 @@ def render_board_image(board, moves=()):
             y = round(row * cell_size + (cell_size - piece_size) / 2)
             board_image.alpha_composite(stone, (x, y))
     draw = ImageDraw.Draw(board_image, "RGBA")
-    label_font = ImageFont.truetype(str(ASSET_DIR.parent.parent / "font.ttf"), 34)
+    label_font = ImageFont.truetype(str(DEFAULT_FONT_PATH), 34)
     for label, (row, col) in labelled_moves(moves):
         cx, cy = round((col + 0.5) * cell_size), round((row + 0.5) * cell_size)
         radius = 23

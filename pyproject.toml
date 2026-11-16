@@ -1,0 +1,13 @@
+# リポジトリ共通の Python 既定 (docs/ARCHITECTURE.md と対)。
+# 現時点では CI 必須チェックには組み込まず、編集時の物差しとして置く。
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+# ruff の既定相当 (pyflakes + pycodestyle の一部)。段階的に広げる。
+select = ["E4", "E7", "E9", "F"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
