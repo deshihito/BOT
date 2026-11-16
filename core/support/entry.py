@@ -43,6 +43,7 @@ from core.support.vc_auto_start import *  # noqa: F401,F403
 from core.support.vc_auto_start import VcAutoStartSupportMixin
 from core.support.globalchat.globalchat_panel import GlobalChatSupportMixin
 from core.support.bot_fixer import BotFixerSupportMixin
+from core.support.worldbox.link_panel import WorldBoxLinkSupportMixin
 
 # 分割前の cogs.support が持っていた内部ヘルパーも互換のため再エクスポートする
 import html as _html
@@ -151,6 +152,7 @@ class SupportCog(
     VcAutoStartSupportMixin,
     GlobalChatSupportMixin,
     BotFixerSupportMixin,
+    WorldBoxLinkSupportMixin,
     commands.Cog,
 ):
     SUPPORT_REQUIRED_PERMISSIONS = {
@@ -194,6 +196,7 @@ class SupportCog(
         "bot_fixer_rates": "manage_guild",
         "globalchat": "manage_guild",
         "globalchat_mod": "manage_guild",
+        "worldbox_link": "manage_guild",
         "tempvoice_panel": "manage_guild",
         # boardNotify 再編の新 value。水準は bumprta_command 内の
         # on/off/role 分岐が要求する manage_guild に合わせる。
@@ -582,6 +585,9 @@ class SupportCog(
 
         if selected == "globalchat":
             return await self.show_globalchat_settings(interaction)
+
+        if selected == "worldbox_link":
+            return await self.show_worldbox_link_settings(interaction)
 
         if selected == "sticky":
             return await self.show_sticky_settings(interaction)

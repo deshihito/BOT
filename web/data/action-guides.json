@@ -1,11 +1,11 @@
 {
   "version": 1,
-  "total": 255,
+  "total": 256,
   "counts": {
     "general": 75,
     "vc": 47,
     "game": 48,
-    "support": 84,
+    "support": 85,
     "help": 1
   },
   "game_count": 47,
@@ -1619,6 +1619,12 @@
               "id": "support:globalchat_mod",
               "value": "globalchat_mod",
               "title": "グローバルチャット モデレーション",
+              "description": ""
+            },
+            {
+              "id": "support:worldbox_link",
+              "value": "worldbox_link",
+              "title": "WORLD BOX連携",
               "description": ""
             },
             {

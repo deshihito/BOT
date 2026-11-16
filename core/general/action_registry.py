@@ -161,7 +161,7 @@ SUPPORT_AI_EXCLUDED_VALUES = frozenset({
     "earthquake",
     "bot_fixer_bots", "bot_fixer_rates",
     "muted_settings", "ticket_types", "ticket_transcript", "ticket_assign",
-    "auth_questions", "globalchat_mod", "tempvoice_panel",
+    "auth_questions", "globalchat_mod", "worldbox_link", "tempvoice_panel",
     "levelup_card_theme", "binjou_custom", "quest_manual",
 })
 
