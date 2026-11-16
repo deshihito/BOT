@@ -4,6 +4,7 @@
 // 試合の状態はサーバー側セッションが持つ。ここは表示と入力だけ。
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ArenaTier } from "@/lib/worldbox/arena";
+import { onEconomyApplied } from "@/lib/worldbox/economy-push";
 
 type LoadState = "loading" | "ready" | "guest" | "unavailable";
 
@@ -169,7 +170,9 @@ export default function WorldBoxArenaPanel({ onClose }: { onClose: () => void })
     void refreshPvp();
     void refreshTournament();
     const timer = window.setInterval(() => { void refresh(); void refreshPvp(); void refreshTournament(); }, 3000);
-    return () => { aliveRef.current = false; window.clearInterval(timer); };
+    // 経済オプ確定の push でも即時更新する（3秒ポーリングは fallback）
+    const off = onEconomyApplied(() => { void refresh(); void refreshPvp(); void refreshTournament(); });
+    return () => { aliveRef.current = false; window.clearInterval(timer); off(); };
   }, [refresh, refreshPvp, refreshTournament]);
 
   const post = async (payload: Record<string, unknown>) => {

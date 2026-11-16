@@ -36,6 +36,8 @@ const server = http.createServer((req, res) => {
 
 // ---- WebSocket 中継 ----
 const core = require(path.join(__dirname, "realtime", "relay-core.js"));
+const botkv = require(path.join(__dirname, "realtime", "botkv.js"));
+const watchCore = require(path.join(__dirname, "realtime", "watch-core.js"));
 const secret = process.env.DISCORD_SESSION_SECRET || process.env.DISCORD_CLIENT_SECRET || "";
 
 let wss = null;
@@ -140,6 +142,102 @@ if (wss) {
       } catch { /* noop */ }
     }
   }, 15_000);
+
+  // ---- watch: bot_kv のサーバー側一括監視と差分配信（Phase 1） ----
+  // クライアント全員が各自に叩いていた読み取りポーリング（chat/party/
+  // tiles/mobs/board/nations）を、relay が名前空間ごとに1回だけ読んで
+  // 差分を配る形に集約する。bot-api 未設定なら watch は無効で、
+  // クライアントは従来ポーリングのまま動く。
+  const kvCfg = botkv.botKvConfig();
+  if (kvCfg) {
+    const sendTo = (predicate, obj) => {
+      const text = JSON.stringify(obj);
+      for (const [ws, info] of clients) {
+        if (ws.readyState !== 1 || !predicate(info)) continue;
+        try {
+          ws.send(text);
+        } catch { /* noop */ }
+      }
+    };
+    const routeWatchChanges = (kind, changes, prev) => {
+      if (changes.length === 0) return;
+      if (kind === "tiles" || kind === "mobs") {
+        sendTo(() => true, { t: "kv", kind, changes });
+      } else if (kind === "board") {
+        for (const c of changes) {
+          if (c.key === "messages") sendTo(() => true, { t: "kv", kind: "board", value: c.value });
+        }
+      } else if (kind === "nations") {
+        sendTo(() => true, { t: "sync", kind: "nations" });
+      } else if (kind === "chat") {
+        const scopes = new Map();
+        for (const c of changes) {
+          const scope = watchCore.chatKeyScope(c.key);
+          if (scope) scopes.set(c.key, scope);
+        }
+        for (const scope of scopes.values()) {
+          sendTo(
+            (info) => info.space === scope.space,
+            { t: "sync", kind: "chat", channel: scope.channel, space: scope.space },
+          );
+        }
+      } else if (kind === "unionChat") {
+        const guilds = new Set();
+        for (const c of changes) {
+          const gid = watchCore.unionBoardGuildId(c.key);
+          if (gid) guilds.add(gid);
+        }
+        for (const guildId of guilds) {
+          sendTo(() => true, { t: "sync", kind: "chat", channel: "union", guildId });
+        }
+      } else if (kind === "party") {
+        const pids = new Set();
+        for (const c of changes) {
+          for (const pid of watchCore.partyTargetPids(c.key, c.value)) pids.add(pid);
+          if (prev && prev.has(c.key)) {
+            for (const pid of watchCore.partyTargetPids(c.key, prev.get(c.key))) pids.add(pid);
+          }
+        }
+        if (pids.size > 0) sendTo((info) => pids.has(info.pid), { t: "sync", kind: "party" });
+      } else if (kind === "economy") {
+        // 経済オプの確定は本人のみに合図する（金額・内容は載せない）
+        const pids = new Set();
+        for (const c of changes) {
+          const prevValue = prev && prev.has(c.key) ? prev.get(c.key) : null;
+          for (const pid of watchCore.economyTargetPids(prevValue, c.value)) pids.add(pid);
+        }
+        if (pids.size > 0) sendTo((info) => pids.has(info.pid), { t: "sync", kind: "economy" });
+      }
+    };
+    watchCore.WATCH_PLAN.forEach((plan, idx) => {
+      const state = { prev: null, busy: false, failed: false };
+      const run = async () => {
+        if (state.busy) return;
+        state.busy = true;
+        try {
+          const next = await botkv.kvList(kvCfg, plan.namespace);
+          const changes = watchCore.diffKv(state.prev, next);
+          routeWatchChanges(plan.kind, changes, state.prev);
+          state.prev = next;
+          state.failed = false;
+        } catch (err) {
+          if (!state.failed) {
+            state.failed = true;
+            console.error(`[realtime] watch ${plan.namespace} failed:`, err && err.message);
+          }
+        } finally {
+          state.busy = false;
+        }
+      };
+      setTimeout(() => {
+        void run();
+        setInterval(() => void run(), plan.intervalMs);
+      }, 500 + idx * 300);
+    });
+    console.log("[realtime] kv watch enabled (chat/party/tiles/mobs/board/nations)");
+  } else {
+    console.log("[realtime] kv watch disabled (bot api not configured)");
+  }
 }
 
 server.on("upgrade", (req, socket, head) => {

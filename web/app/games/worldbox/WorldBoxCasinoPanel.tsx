@@ -15,6 +15,7 @@ import {
 } from "@/lib/worldbox/casino";
 import { DICE_RANGES } from "@/lib/worldbox/casino-games";
 import { createPollGuard, type PollGuard } from "@/lib/poll-guard";
+import { onEconomyApplied } from "@/lib/worldbox/economy-push";
 import {
   confettiParticles, countUpValue, isReach, tierFx, winTier, type WinTier,
 } from "@/lib/worldbox/casino-fx";
@@ -382,10 +383,13 @@ export default function WorldBoxCasinoPanel({ onClose }: { onClose: () => void }
     void refresh();
     void refreshTournament();
     const timer = window.setInterval(() => { void refresh(); void refreshTournament(); }, 3000);
+    // 経済オプ確定の push でも即時更新する（3秒ポーリングは fallback）
+    const off = onEconomyApplied(() => { void refresh(); void refreshTournament(); });
     const timers = timersRef.current;
     return () => {
       aliveRef.current = false;
       window.clearInterval(timer);
+      off();
       for (const id of timers) window.clearTimeout(id);
     };
   }, [refresh, refreshTournament]);
