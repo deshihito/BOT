@@ -121,6 +121,6 @@ test("effects: holding the golden accessory boosts sell proceeds by 10%", () => 
   const r1 = E.sellItem(plain, "wood", 10);
   const withAcc = { ...E.parseProfile(null), items: { wood: 10, accessory: 1 } };
   const r2 = E.sellItem(withAcc, "wood", 10);
-  assert.equal(r1.coin.amount, 40); // wood sellPrice 4 × 10
-  assert.equal(r2.coin.amount, 44);
+  assert.equal(r1.coin.amount, 480); // wood sellPrice 48 × 10
+  assert.equal(r2.coin.amount, 528);
 });
