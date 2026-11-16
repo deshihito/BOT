@@ -139,6 +139,25 @@ if (wss) {
     const auth = ws._rtAuth;
     const info = { pid: auth.pid, name: auth.name, ok: auth.ok ?? null, space: null, joined: false, lastMsgAt: 0, alive: true, lastEntry: null, baseline: undefined, pendingHbs: [] };
     clients.set(ws, info);
+    // タブ世代（同一アカウントの分身防止）: 旧世代の接続は受け付けず、
+    // 世代交代時は旧世代の接続をすべて閉じる（閉じられた側は再接続しない）。
+    const admit = core.admitTab(room, auth.pid, auth.tab, auth.tabAt);
+    if (admit.verdict === "reject") {
+      clients.delete(ws);
+      try {
+        ws.close(4001, "tab_superseded");
+      } catch { /* noop */ }
+      return;
+    }
+    if (admit.evict) {
+      for (const [otherWs, otherInfo] of clients) {
+        if (otherWs !== ws && otherInfo.pid === auth.pid) {
+          try {
+            otherWs.close(4001, "tab_superseded");
+          } catch { /* noop */ }
+        }
+      }
+    }
     // 移動連続性の外部基準（B4）: 接続時に bot_kv から1回だけ読む。
     // 読み終わるまで受信ハートビートをため、解決後に受信時刻つきで順に処理する。
     if (kvCfg && info.ok) {
@@ -182,6 +201,11 @@ if (wss) {
     });
     const onGone = () => {
       if (!clients.delete(ws)) return;
+      // 同じ pid の接続がまだ残っているなら、プレイヤーは在席のまま（世代交代で
+      // 閉じられた旧タブの後始末で現行エントリや最終位置を上書きしない）。
+      for (const otherInfo of clients.values()) {
+        if (otherInfo.pid === info.pid) return;
+      }
       // 切断時は最終位置を鮮度つきで書き残す（bot_kv 側は鮮度切れで自然に
       // 消える。REST の DELETE は従来どおりクライアント側の退室処理が担う）
       if (info.lastEntry && info.ok) {
@@ -389,6 +413,11 @@ server.on("upgrade", (req, socket, head) => {
       socket.destroy();
       return;
     }
+    // タブ世代の申告（任意。無い接続は世代管理の対象外）
+    const tabParam = url.searchParams.get("tab");
+    const tabAtParam = Number(url.searchParams.get("tabAt"));
+    auth.tab = typeof tabParam === "string" && tabParam.length > 0 ? tabParam.slice(0, 64) : undefined;
+    auth.tabAt = Number.isFinite(tabAtParam) && tabAtParam > 0 ? tabAtParam : undefined;
     wss.handleUpgrade(req, socket, head, (ws) => {
       ws._rtAuth = auth;
       wss.emit("connection", ws, req);
