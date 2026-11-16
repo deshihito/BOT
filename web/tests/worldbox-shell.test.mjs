@@ -23,9 +23,10 @@ test("ステータスはステージ内のオーバーレイで出す（レイ�
   assert.match(client, /pointerEvents: "none", zIndex: 4/);
 });
 
-test("戻り導線は ≡ メニュー内の「ゲーム一覧へ」に一本化する", () => {
-  assert.match(client, /href=\{`\$\{prefix\}\/games`\}/);
-  assert.match(client, /ゲーム一覧へ/);
+test("ワールド内の ≡ メニューに「ゲーム一覧へ」は置かない（没入感優先、ユーザー指示 2026-11-16）", () => {
+  // 残る「ゲーム一覧へ」は入場ゲート画面の1件だけ（ワールドに入る前の導線）
+  assert.equal((client.match(/ゲーム一覧へ/g) ?? []).length, 1);
+  assert.equal((client.match(/href=\{`\$\{prefix\}\/games`\}/g) ?? []).length, 1);
 });
 
 test("globals.css が共通 main と Activity 埋め込みの中央カラムを打ち消す", () => {
