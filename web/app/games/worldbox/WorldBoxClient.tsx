@@ -298,6 +298,7 @@ const NATION_ERROR_LABEL: Record<string, string> = {
   guilds_scope_required: "サーバー情報の取得に再ログインが必要です",
   guilds_unavailable: "サーバー情報を取得できませんでした",
   nation_not_found: "国が見つかりません",
+  nation_private: "非公開の国です",
   not_in_nation: "国に所属していません",
   king_must_transfer_or_disband: "国民がいる間、王は離脱できません",
   not_at_guild_board: "ギルドボードの前で操作してください",
