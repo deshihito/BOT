@@ -245,7 +245,7 @@ export default function WorldBoxArenaPanel({ onClose }: { onClose: () => void })
   const session = state?.session ?? null;
 
   return (
-    <div style={wrap} role="dialog" aria-label="闘技場">
+    <div style={wrap} role="dialog" aria-label="闘技場" className="wb-panel">
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
         <strong style={{ fontSize: 16 }}>闘技場</strong>
         <button type="button" style={{ ...btn, minHeight: 32, padding: "2px 10px" }} onClick={onClose}>閉じる</button>

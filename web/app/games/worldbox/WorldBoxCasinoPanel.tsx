@@ -631,7 +631,7 @@ export default function WorldBoxCasinoPanel({ onClose }: { onClose: () => void }
   return (
     <div
       style={{ ...root, animation: rootAnim, position: "absolute", overflow: "hidden auto" }}
-      role="dialog" aria-label="カジノ" className="wb-casino-juice"
+      role="dialog" aria-label="カジノ" className="wb-casino-juice wb-panel"
     >
       <style>{JUICE_CSS}</style>
       {celebration && (

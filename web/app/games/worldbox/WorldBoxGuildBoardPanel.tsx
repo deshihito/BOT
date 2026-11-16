@@ -299,7 +299,7 @@ export default function WorldBoxGuildBoardPanel({
     (warData.me.role === "king" || warData.me.role === "minister") && myWar === null;
 
   return (
-    <div style={root} role="dialog" aria-label="ギルドボード">
+    <div style={root} role="dialog" aria-label="ギルドボード" className="wb-panel">
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <strong>ギルドボード</strong>
         <span style={{ flex: 1 }} />

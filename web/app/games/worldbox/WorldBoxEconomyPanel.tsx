@@ -220,7 +220,7 @@ export default function WorldBoxEconomyPanel({ space, station, genre, onClose }:
     </button>
   );
   const panelHead = (text: string) => (
-    <div style={panel}>
+    <div style={panel} className="wb-panel">
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
         <span>{text}</span>
         <span style={{ flex: 1 }} />
@@ -260,7 +260,7 @@ export default function WorldBoxEconomyPanel({ space, station, genre, onClose }:
   );
 
   return (
-    <div style={panel}>
+    <div style={panel} className="wb-panel">
       <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
         <strong>経済</strong>
         <span>残高 <strong>{balance === null ? "—" : balance}</strong> コイン</span>
