@@ -577,7 +577,11 @@ test("クライアント: アイコン・設置ブロック描画・固体化が
   assert.ok(client.includes("selfId"), "自分の ID を受け取っていない");
   const panel = fs.readFileSync(path.join(rootDir, "app/games/worldbox/WorldBoxEconomyPanel.tsx"), "utf8");
   assert.ok(panel.includes("ItemIcon"), "経済パネルにアイコンが無い");
-  assert.ok(panel.includes(".icon"), "経済パネルが icon を見ていない");
+  // アイコン描画は共通部品 ItemSlotGrid.tsx へ移設された（PR-A スロット共通化）:
+  // パネルはそこから import し、icon を見るのは共通部品側
+  assert.ok(panel.includes('from "./ItemSlotGrid"'), "経済パネルが共通スロット部品を使っていない");
+  const slotGrid = fs.readFileSync(path.join(rootDir, "app/games/worldbox/ItemSlotGrid.tsx"), "utf8");
+  assert.ok(slotGrid.includes(".icon"), "共通スロット部品が icon を見ていない");
 });
 
 test("家具は全種 facility で置ける（柵・生け垣も設置対象）", () => {
