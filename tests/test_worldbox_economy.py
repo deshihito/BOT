@@ -323,6 +323,16 @@ class TestEarn(WorkerCase):
         self.assertEqual(record["status"], "done")
         self.assertEqual(record["appliedAmount"], 200)
 
+    async def test_earn_arena_pvp_fee_refund_reason(self):
+        # 闘技場PvP の不成立時の返金（B3）: 片方の参加費だけが残った決闘を
+        #  void にしたとき、もう片方の参加費を返す
+        self.store.pool = 5000
+        op = self.add_op(kind="earn", amount=100, reason="arena_pvp_fee_refund")
+        await self.worker.poll_once()
+        record = self.record(op["id"])
+        self.assertEqual(record["status"], "done")
+        self.assertEqual(record["appliedAmount"], 100)
+
     async def test_earn_casino_tournament_prize_reason(self):
         # カジノ大会の賞金（バッチ7c）: 純益上位への配分
         self.store.pool = 5000

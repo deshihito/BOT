@@ -84,7 +84,7 @@ test("economy: buildEconomyOp は種類ごとの制約を守る", () => {
     "12345678-abcd-4abc-8abc-1234567890ab", 1,
   ), null);
   // earn はホワイトリストの理由だけ
-  for (const reason of ["harvest", "guild_shop_sale", "arena_prize", "shop_sale"]) {
+  for (const reason of ["harvest", "guild_shop_sale", "arena_prize", "arena_pvp_fee_refund", "shop_sale"]) {
     const op = eco.buildEconomyOp(
       { kind: "earn", userKey: MY_KEY, discordId: ME, amount: 10, reason },
       "12345678-abcd-4abc-8abc-1234567890ab", 1,

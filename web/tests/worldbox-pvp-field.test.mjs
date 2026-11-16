@@ -164,6 +164,18 @@ test("pvp: API ルートが空間・距離・所有者解決つきで配線さ�
   assert.doesNotMatch(route, /worldbox_presence/);
 });
 
+test("pvp: 被害者の書き込みは被害者本人のロックで直列化する（B3）", () => {
+  const route = fs.readFileSync(path.join(rootDir, "app/api/worldbox/vitals/route.ts"), "utf8");
+  // 鍵は被害者本人の sync / damage と同じ素の ownerKey。別鍵（旧 vitals-pvp:）
+  // だと被害者の sync が古いスナップショットで死亡通知を上書きし、
+  // ドロップした所持品が復活する。
+  assert.match(route, /withUserLock\(target\.ownerKey, async \(\) => \{/);
+  assert.doesNotMatch(route, /vitals-pvp:/);
+  // sync / damage / set_bed も同じ鍵で直列化し、ロック内で読み直す
+  assert.equal(route.match(/withUserLock\(ownerKey, async \(\) => \{/g)?.length, 3);
+  assert.match(route, /const current = await loadProfile\(ownerKey\);/);
+});
+
 test("pvp: sync が死亡通知を対で配送して消す", () => {
   const route = fs.readFileSync(path.join(rootDir, "app/api/worldbox/vitals/route.ts"), "utf8");
   assert.match(route, /profile\.lastDeath/);

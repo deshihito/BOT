@@ -6,7 +6,8 @@
 // - 保存→復元の往復（壊れた値は落とす）
 // - クライアント表示（相手の Discord ID は出さない）
 // ルート配線（待ち→参加費先払い→決着で賞金）は route 側の責務で、
-// ここでは純粋ロジックの不変条件だけを検証する。
+// ここでは純粋ロジックの不変条件に加え、B3 の不成立時精算の配線だけを
+// ソース確認で検証する。
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -84,6 +85,39 @@ test("pvp: 決闘は決定的 ID と両者の参加費オプ ID を持つ", () =
 test("pvp: 賞金オプ ID は1試合で1つに決まる", () => {
   const d = duel();
   assert.equal(P.pvpPrizeOpId(d.code), P.pvpPrizeOpId(P.pvpDuelCode(A.discordId, B.discordId, NOW)));
+});
+
+test("pvp: 参加費の返金オプ ID は1試合・1人で1つに決まる（B3）", () => {
+  const d = duel();
+  const refundA = P.pvpFeeRefundOpId(d.code, A.discordId);
+  const refundB = P.pvpFeeRefundOpId(d.code, B.discordId);
+  assert.notEqual(refundA, refundB);
+  assert.notEqual(refundA, d.feeOpIds[0]);
+  assert.notEqual(refundA, P.pvpPrizeOpId(d.code));
+  assert.equal(refundA, P.pvpFeeRefundOpId(P.pvpDuelCode(A.discordId, B.discordId, NOW), A.discordId));
+  // 経済オプ ID の形（8〜64文字の英数・ハイフン）に収まる
+  for (const id of [refundA, refundB]) {
+    assert.match(id, /^[A-Za-z0-9-]{8,64}$/);
+  }
+  // 25桁の Discord ID でも64文字に収まる（末6桁だけ使うため）
+  const long = P.pvpFeeRefundOpId(d.code, "9".repeat(25));
+  assert.match(long, /^[A-Za-z0-9-]{8,64}$/);
+});
+
+// ---------- ルート配線（不成立時の参加費精算） ----------
+
+test("pvp: ルートは不成立時に参加費を精算する（B3）", () => {
+  const route = fs.readFileSync(path.join(rootDir, "app/api/worldbox/pvp/route.ts"), "utf8");
+  // マッチ時: 片方の参加費だけ積まれたら決闘を作らず精算する
+  assert.match(route, /settleVoidedFees\(next, \[feeA, null\]\)/);
+  // paying 失敗時: act / forfeit の両方で決闘を消す前に精算する
+  assert.equal(route.match(/await settleVoidedFees\(current, feeStates\);/g)?.length, 2);
+  // done は返金、pending は削除してから再読で done なら返金
+  assert.match(route, /arena_pvp_fee_refund/);
+  assert.match(route, /pvpFeeRefundOpId\(duel\.code, player\.discordId\)/);
+  assert.match(route, /await deleteEconomyOp\(state\.id\);/);
+  // 参加費は両方そろって初めて確定する（「戻らない」は残っていない）
+  assert.doesNotMatch(route, /参加費は戻らない/);
 });
 
 // ---------- 交互ターンの決闘 ----------
