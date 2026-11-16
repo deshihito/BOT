@@ -221,7 +221,7 @@ test("売買・合成・送金は施設の前でのみ開く（クライアン�
   assert.match(panel, /space === "lobby"/);
   // タブは「ロビーにいる」だけでは出ない。対応する施設の前にいる時だけ
   assert.match(panel, /station === "shop"/);
-  assert.match(panel, /atShop && tabBtn\("shop"/);
+  assert.match(panel, /atShop && shopItems\.length > 0 && tabBtn\("shop"/);
   assert.match(panel, /station === "smith"/);
   assert.match(panel, /atWorkbench && tabBtn\("craft"/);
   assert.match(panel, /station === "bank"/);

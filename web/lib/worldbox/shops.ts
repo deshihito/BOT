@@ -45,26 +45,46 @@ export function genreOfItem(itemId: unknown): ShopGenreId | null {
 }
 
 /**
- * 店で売らないレア品（ユーザー決定）: 特殊カテゴリ全品・道具の tier 4
- * （ミスリル）・宝石ブロック4種。入手は合成・ドロップ・探索のみ。
- * 売却は従来どおり可（ジャンル不問で売れる）。
- * 宝石ブロックは「宝石名+_block」が鉱石ブロック（diamond_ore_block 等）と
- * 紛らわしいため、名前パターンでなく明示 ID 集合で判定する。
+ * 店で売る品目は入口だけのホワイトリスト（ユーザー決定 2026-11-16、案C）。
+ * 以前の「レア品だけ除外」（特殊全品・ミスリル道具・宝石ブロック）から
+ * 進めて、販売は下の SHOP_STOCK_IDS ＋ 種カテゴリ全種の計86品だけにする。
+ * それ以外（合成品・調理済み食品・作物そのもの・宝石/貴金属素材・
+ * 鉱石/金属ブロック・採取/ドロップ素材など）は店では売らず、合成・栽培・
+ * 採取・ドロップ・ギルドショップで入手する。売却は従来どおり全品可
+ * （ジャンル不問で売れる）。
+ * 種はカテゴリで一括許可する（畑の入口であり、店以外に入手経路が無い）。
+ * 種以外の品目は明示 ID 集合で判定する: 店以外に入手経路が無い基礎素材
+ * （棒・ガラス・粘土・紙・竹・木炭・砂糖・鉄/銅インゴット・塩）は
+ * 合成が詰まないよう必ず含める。鍛冶屋ジャンル（合成品・特殊）は
+ * 販売品目ゼロになり、鍛冶屋は合成・強化の施設としてのみ使う。
  */
-const GEM_BLOCK_IDS: ReadonlySet<string> = new Set([
-  "diamond_block",
-  "emerald_block",
-  "ruby_block",
-  "sapphire_block",
+const SHOP_STOCK_IDS: ReadonlySet<string> = new Set([
+  // 道具屋: 木/石/鉄の道具（ミスリルは合成のみ）と開拓のコンパス
+  "wooden_axe", "wooden_pickaxe", "wooden_sword", "wooden_hoe",
+  "stone_axe", "stone_pickaxe", "stone_sword", "stone_hoe",
+  "iron_axe", "iron_pickaxe", "iron_sword", "iron_hoe",
+  "explorer_compass",
+  // 建築屋: 基本の地形ブロックと原木だけ（鉱石/金属/加工ブロックは売らない）
+  "dirt_block", "sand_block", "snow_block", "mud_block", "grass_block",
+  "gravel_block", "moss_block", "clay_block", "packed_snow_block", "ice_block",
+  "leaves_block", "path_block", "forest_floor_block", "cactus_block", "flower_block",
+  "oak_log", "pine_log", "birch_log", "sakura_log", "dark_log",
+  "autumn_log", "dead_log", "log_block",
+  // 家具屋: 施設と最低限の家具だけ（他は合成で作る）
+  "torch", "workbench", "furnace", "storage_chest", "chest_box", "bed",
+  // 食料屋: 基本食だけ（調理済み料理と作物そのものは売らない）
+  "onigiri", "energy_drink", "meal", "cake", "bento", "feast",
+  // 種・素材屋: 基礎素材だけ（種はカテゴリで許可。採取素材は売らない）
+  "wood", "stone", "stick", "clay", "glass", "paper", "bamboo", "charcoal",
+  "sugar", "iron_ingot", "copper_ingot", "salt",
 ]);
 
 export function isShopExcluded(item: ItemDef): boolean {
-  if (item.category === "special") return true;
-  if (item.category === "tool" && item.tier === 4) return true;
-  return GEM_BLOCK_IDS.has(item.id);
+  if (item.category === "seed") return false;
+  return !SHOP_STOCK_IDS.has(item.id);
 }
 
-/** そのジャンルで売られている品目（カタログ順、レア品は除く）。 */
+/** そのジャンルで売られている品目（カタログ順、ホワイトリスト内のみ）。 */
 export function itemsForGenre(genreId: ShopGenreId): ItemDef[] {
   return ITEMS.filter((item) => genreOfItem(item.id) === genreId && !isShopExcluded(item));
 }
@@ -83,7 +103,7 @@ export function checkBuyGenre(shopGenre: ShopGenreId | null, itemId: unknown): "
 }
 
 /**
- * 購入の在庫検証: レア品（isShopExcluded）はどの店でも売っていないので
+ * 購入の在庫検証: ホワイトリスト外（isShopExcluded）はどの店でも売っていないので
  * "not_sold"。未知のアイテムはここでは弾かず、buyItem 側の
  * unknown_item に委ねる。
  */

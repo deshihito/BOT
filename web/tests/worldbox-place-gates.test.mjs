@@ -299,11 +299,13 @@ test("API(place): buy は店のジャンルと合う品目だけ買える（wron
   const ok = await profileRoute.POST(apiRequest(URL_P, "POST", { action: "buy", itemId: "wood" }));
   assert.equal(ok.status, 200);
   assert.equal((await ok.json()).profile.items.wood, 1);
-  // 鍛冶屋では合成品・特殊だけ買え、売却はジャンル不問で通る
+  // 鍛冶屋は販売品目ゼロ（案C）: ジャンルが合う合成品でも not_sold、
+  // ジャンル違いは wrong_shop が優先し、売却はジャンル不問で通る
   seedProfile({ wood: 1 });
   setPresence(AT_SMITH.x, AT_SMITH.y);
   const smithOk = await profileRoute.POST(apiRequest(URL_P, "POST", { action: "buy", itemId: "carving" }));
-  assert.equal(smithOk.status, 200);
+  assert.equal(smithOk.status, 409);
+  assert.equal((await smithOk.json()).error, "not_sold");
   const smithWrong = await profileRoute.POST(apiRequest(URL_P, "POST", { action: "buy", itemId: "wood" }));
   assert.equal(smithWrong.status, 409);
   assert.equal((await smithWrong.json()).error, "wrong_shop");
@@ -311,7 +313,7 @@ test("API(place): buy は店のジャンルと合う品目だけ買える（wron
   assert.equal(sold.status, 200);
 });
 
-test("API(place): レア品はジャンルが合っても買えない（not_sold）が、売却はできる", async () => {
+test("API(place): ホワイトリスト外はジャンルが合っても買えない（not_sold）が、売却はできる", async () => {
   globalThis.__wbGateUsers.set(ME, 5000);
   seedProfile({});
   // 鍛冶屋で特殊（ジャンルは合う）を買おうとしても not_sold
