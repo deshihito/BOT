@@ -4,6 +4,7 @@ import { playerAttack } from "@/lib/worldbox/arena";
 import { buildEconomyOp, type EconomyOp } from "@/lib/worldbox/economy-bridge";
 import {
   enqueueEconomyOpOnce, findEconomyOp, isEconomyEnabled, loadMyEconomyOps, readUserBalance,
+  waitForOpsDone,
 } from "@/lib/worldbox/economy-bridge-online";
 import { loadProfile } from "@/lib/worldbox/profile-online";
 import {
@@ -114,6 +115,24 @@ export async function POST(request: Request) {
 
 type AuthedSession = NonNullable<ReturnType<typeof pvpSession>["session"]>;
 
+type FeeOp = Awaited<ReturnType<typeof findEconomyOp>>;
+
+/**
+ * 両者の参加費オプの状態を読む。pending があれば server-side wait で
+ * done をその場で待ち（共通既定の予算）、最終状態を返す。予算を
+ * 超えても pending なら呼び出し側が従来どおり payment_pending を返す。
+ */
+async function loadFeeStates(duel: PvpDuel): Promise<FeeOp[]> {
+  const targets = duel.feeOpIds.map((id, i) => ({ userKey: duel.players[i].ownerKey, opId: id }));
+  let states = await Promise.all(targets.map((t) => findEconomyOp(t.userKey, t.opId)));
+  const blocked = states.some((op) => op === null || op.status === "failed");
+  if (!blocked && states.some((op) => op?.status === "pending")) {
+    await waitForOpsDone(targets);
+    states = await Promise.all(targets.map((t) => findEconomyOp(t.userKey, t.opId)));
+  }
+  return states;
+}
+
 async function handlePost(request: Request, session: AuthedSession) {
   const ownerKey = sessionOwnerKey(session);
   const discordId = session.id;
@@ -180,9 +199,7 @@ async function handlePost(request: Request, session: AuthedSession) {
     if (duel.state === "paying") {
       // 参加費が両者とも done でなければ決着は付けない（act と同じ扱い）。
       const current = duel;
-      const feeStates = await Promise.all(
-        current.feeOpIds.map((id, i) => findEconomyOp(current.players[i].ownerKey, id)),
-      );
+      const feeStates = await loadFeeStates(current);
       if (feeStates.some((op) => op === null || op.status === "failed")) {
         await clearPvpDuel(duel);
         return errorResponse("payment_failed", 409);
@@ -213,9 +230,7 @@ async function handlePost(request: Request, session: AuthedSession) {
       // 両者の参加費が done になるまで決闘は始まらない（PvE と同じ型）。
       // どちらかが失敗していたら決闘は無効（参加費は戻らない）。
       const current = duel;
-      const feeStates = await Promise.all(
-        current.feeOpIds.map((id, i) => findEconomyOp(current.players[i].ownerKey, id)),
-      );
+      const feeStates = await loadFeeStates(current);
       if (feeStates.some((op) => op === null || op.status === "failed")) {
         await clearPvpDuel(duel);
         return errorResponse("payment_failed", 409);

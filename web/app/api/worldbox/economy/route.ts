@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getRequestSession, publicOrigin, sessionOwnerKey } from "@/lib/auth";
 import { buildEconomyOp } from "@/lib/worldbox/economy-bridge";
-import { enqueueEconomyOp, isEconomyEnabled, loadMyEconomyOps, readUserBalance } from "@/lib/worldbox/economy-bridge-online";
+import { enqueueEconomyOp, isEconomyEnabled, loadMyEconomyOps, readUserBalance, waitForOpDone } from "@/lib/worldbox/economy-bridge-online";
 import { loadMyLobbyStation } from "@/lib/worldbox/station-online";
 
 export const runtime = "nodejs";
@@ -85,5 +85,18 @@ export async function POST(request: Request) {
   }
   const stored = await enqueueEconomyOp(op);
   if (!stored) return errorResponse("economy_failed", 500);
-  return NextResponse.json({ ok: true, op }, { headers: NO_STORE });
+  // 適用を server-side wait でその場で待ち、終端していれば最終残高も
+  // 同一レスポンスで返す。予算を超えて pending のままなら従来どおり
+  // 積んだオプを返し、状態はクライアントの次の取得で反映される。
+  const userKey = sessionOwnerKey(session);
+  const settled = await waitForOpDone(userKey, op.id);
+  const finalOp = settled ?? op;
+  if (finalOp.status !== "pending") {
+    const balance = await readUserBalance(session.id);
+    return NextResponse.json(
+      { ok: true, op: finalOp, ...(balance !== null ? { balance } : {}) },
+      { headers: NO_STORE },
+    );
+  }
+  return NextResponse.json({ ok: true, op: finalOp }, { headers: NO_STORE });
 }

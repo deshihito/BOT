@@ -7,7 +7,7 @@ import {
 } from "@/lib/worldbox/economy";
 import { buildEconomyOp, type EconomyOp } from "@/lib/worldbox/economy-bridge";
 import {
-  enqueueEconomyOp, enqueueEconomyOpOnce, isEconomyEnabled, readUserBalance,
+  enqueueEconomyOp, enqueueEconomyOpOnce, isEconomyEnabled, readUserBalance, waitForOpDone,
 } from "@/lib/worldbox/economy-bridge-online";
 import { TENT_MAX_TIER, TENT_TIERS } from "@/lib/worldbox/tent";
 import {
@@ -64,19 +64,19 @@ function discordIdOf(session: { provider: string; id: string }): string | null {
   return session.provider === "discord" ? session.id : null;
 }
 
-/** coin をブリッジのオプとして積む。積めたら true。 */
+/** coin をブリッジのオプとして積む。積めたらそのオプ、駄目なら null。 */
 async function enqueueCoin(
   ownerKey: string,
   discordId: string,
   coin: CoinMovement,
-): Promise<boolean> {
+): Promise<EconomyOp | null> {
   const op = buildEconomyOp(
     { kind: coin.kind, userKey: ownerKey, discordId, amount: coin.amount, reason: coin.reason },
     crypto.randomUUID(),
     Date.now(),
   );
-  if (!op) return false;
-  return enqueueEconomyOp(op);
+  if (!op) return null;
+  return (await enqueueEconomyOp(op)) ? op : null;
 }
 
 export async function GET(request: Request) {
@@ -152,9 +152,26 @@ async function handlePost(request: Request, session: AuthedSession) {
     if (!(await storeProfile(ownerKey, result.profile))) {
       return NextResponse.json({ error: "store_failed" }, { status: 503, headers: NO_STORE });
     }
-    if (result.coin && !(await enqueueCoin(ownerKey, discordId, result.coin))) {
-      await storeProfile(ownerKey, current);
-      return statusError("economy_failed", 503);
+    if (result.coin) {
+      const op = await enqueueCoin(ownerKey, discordId, result.coin);
+      if (!op) {
+        await storeProfile(ownerKey, current);
+        return statusError("economy_failed", 503);
+      }
+      // 適用を server-side wait でその場で待ち、終端していれば最終
+      // 残高も同一レスポンスで返す。予算を超えて pending のままなら
+      // 従来どおり（残高はクライアントの次の取得で反映される）。
+      const settled = await waitForOpDone(ownerKey, op.id);
+      if (settled && settled.status !== "pending") {
+        const balance = await readUserBalance(discordId);
+        return NextResponse.json(
+          {
+            profile: result.profile, ...extra, opStatus: settled.status,
+            ...(balance !== null ? { balance } : {}),
+          },
+          { headers: NO_STORE },
+        );
+      }
     }
     return NextResponse.json({ profile: result.profile, ...extra }, { headers: NO_STORE });
   };
