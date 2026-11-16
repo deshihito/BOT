@@ -39,7 +39,7 @@ export default function WorldBoxArcadePanel({
   const title = game?.title ?? gameId;
   const Client = arcadeClientFor(gameId);
   return (
-    <div style={wrap} role="dialog" aria-label={`${title} の筐体`}>
+    <div style={wrap} role="dialog" aria-label={`${title} の筐体`} className="wb-panel">
       <div style={header}>
         <h3 style={{ margin: 0, fontSize: 17 }}>{title}</h3>
         {game?.players && <span style={{ fontSize: 12, opacity: 0.75 }}>{game.players}</span>}

@@ -82,6 +82,7 @@ import { isMachineItem } from "@/lib/worldbox/machines";
 import { DUNGEON_TILE_SRC, FARM_SPRITE_SRC, LOBBY_SPRITE_SRC, loadDungeonTiles, loadFarmSprites, loadLobbySprites, loadMobSprites, loadTextures } from "@/lib/worldbox/textures";
 import { preloadImages, transitionAlpha, transitionDone, transitionSwapDue, SPRITE_PRELOAD_TIMEOUT_MS, TRANSITION_OVERLAY_RGB, type TransitionKind } from "@/lib/worldbox/transition";
 import { isStickTouch, stickBase, stickVector } from "@/lib/worldbox/stick";
+import { wbHudMetrics, wbLayoutMode } from "@/lib/worldbox/layout";
 import {
   AFFORDANCE_RING_RGB, DENIED_RING_RGB, deniedFeedback, isWithinAffordanceRange,
   nudgeBobPx, nudgeRingAlpha, stickKnobRadius,
@@ -478,6 +479,21 @@ export default function WorldBoxClient() {
   const [statusText, setStatusText] = useState("読み込み中…");
   const [othersCount, setOthersCount] = useState(0);
   const [showMap, setShowMap] = useState(true);
+  // スマホ向けレイアウト分岐（lib/worldbox/layout が正）。初期値は wide で
+  // PC 表示を既定にし、マウント後に実寸へ追随する。
+  const [viewport, setViewport] = useState({ w: 1280, h: 800 });
+  useEffect(() => {
+    const update = () => setViewport({ w: window.innerWidth, h: window.innerHeight });
+    update();
+    window.addEventListener("resize", update);
+    window.addEventListener("orientationchange", update);
+    return () => {
+      window.removeEventListener("resize", update);
+      window.removeEventListener("orientationchange", update);
+    };
+  }, []);
+  const layoutMode = wbLayoutMode(viewport.w, viewport.h);
+  const hud = wbHudMetrics(layoutMode);
   const showMapRef = useRef(true);
   showMapRef.current = showMap;
   // 国家レイヤー（描画ループは ref、パネルは state で同じデータを見る）
@@ -5008,7 +5024,7 @@ export default function WorldBoxClient() {
   }, [gateOk]);
 
   const btn: React.CSSProperties = {
-    minHeight: 40, padding: "6px 14px", borderRadius: 10, cursor: "pointer",
+    minHeight: hud.buttonMinHeight, padding: "6px 14px", borderRadius: 10, cursor: "pointer",
     border: "1px solid rgba(255,255,255,0.25)", background: "rgba(255,255,255,0.06)", color: "inherit",
     touchAction: "manipulation", userSelect: "none", WebkitUserSelect: "none", WebkitTouchCallout: "none",
   };
@@ -5245,7 +5261,7 @@ export default function WorldBoxClient() {
         <div
           role="status"
           style={{
-            position: "absolute", top: 10, left: "50%", transform: "translateX(-50%)",
+            position: "absolute", top: "calc(10px + env(safe-area-inset-top, 0px))", left: "50%", transform: "translateX(-50%)",
             padding: "4px 12px", borderRadius: 10, background: "rgba(0,0,0,0.55)", color: "#fff",
             fontSize: 12, lineHeight: 1.5, whiteSpace: "nowrap", pointerEvents: "none", zIndex: 4,
             maxWidth: "calc(100% - 176px)", boxSizing: "border-box",
@@ -5262,7 +5278,7 @@ export default function WorldBoxClient() {
           aria-expanded={menuOpen}
           onClick={() => { playWbSe(menuOpen ? "close" : "open"); setMenuOpen((v) => !v); }}
           style={{
-            ...btn, position: "absolute", left: 10, top: 10, minHeight: 40, minWidth: 44, zIndex: 7,
+            ...btn, position: "absolute", left: "calc(10px + env(safe-area-inset-left, 0px))", top: "calc(10px + env(safe-area-inset-top, 0px))", minHeight: hud.buttonMinHeight, minWidth: 44, zIndex: 7,
             padding: "4px 10px", fontSize: 18, lineHeight: 1, background: "rgba(0,0,0,0.55)", color: "#fff",
           }}
         >
@@ -5275,7 +5291,7 @@ export default function WorldBoxClient() {
             aria-pressed={isFullscreen}
             onClick={toggleFullscreen}
             style={{
-              ...btn, position: "absolute", right: 10, top: 10, minHeight: 40, zIndex: 5,
+              ...btn, position: "absolute", right: "calc(10px + env(safe-area-inset-right, 0px))", top: "calc(10px + env(safe-area-inset-top, 0px))", minHeight: hud.buttonMinHeight, zIndex: 5,
               padding: "4px 12px", fontSize: 12, lineHeight: 1, background: "rgba(0,0,0,0.55)", color: "#fff",
             }}
           >
@@ -5285,7 +5301,7 @@ export default function WorldBoxClient() {
         {menuOpen && (
           <div
             style={{
-              position: "absolute", left: 10, top: 58, display: "grid", gap: 6, padding: 8,
+              position: "absolute", left: "calc(10px + env(safe-area-inset-left, 0px))", top: "calc(58px + env(safe-area-inset-top, 0px))", display: "grid", gap: 6, padding: 8,
               borderRadius: 10, background: "rgba(0,0,0,0.72)", color: "#fff", zIndex: 8,
               // 項目が増えてもステージ下端からはみ出さない（収まらない分はメニュー内スクロール）
               maxHeight: "calc(100% - 68px)", maxWidth: "calc(100% - 20px)", boxSizing: "border-box",
@@ -5371,7 +5387,7 @@ export default function WorldBoxClient() {
           <div
             key={stationUi}
             style={{
-              position: "absolute", left: "50%", bottom: 10, transform: "translateX(-50%)",
+              position: "absolute", left: "50%", bottom: "calc(10px + env(safe-area-inset-bottom, 0px))", transform: "translateX(-50%)",
               display: "flex", gap: 8, alignItems: "center", padding: "6px 8px 6px 14px",
               borderRadius: 10, background: "rgba(0,0,0,0.6)", color: "#fff", fontSize: 13, whiteSpace: "nowrap",
               animation: "wb-chip-pop 240ms ease-out",
@@ -5381,7 +5397,7 @@ export default function WorldBoxClient() {
             {stationUi === "board" && (
               <button
                 type="button"
-                style={{ ...btn, minHeight: 32, padding: "2px 10px" }}
+                style={{ ...btn, minHeight: hud.buttonMinHeight, padding: "2px 10px" }}
                 onClick={() => setBoardOpen((v) => !v)}
               >
                 {boardOpen ? "閉じる" : "開く"}
@@ -5390,7 +5406,7 @@ export default function WorldBoxClient() {
             {stationUi === "casino" && (
               <button
                 type="button"
-                style={{ ...btn, minHeight: 32, padding: "2px 10px" }}
+                style={{ ...btn, minHeight: hud.buttonMinHeight, padding: "2px 10px" }}
                 onClick={() => setCasinoOpen((v) => !v)}
               >
                 {casinoOpen ? "閉じる" : "遊ぶ"}
@@ -5399,7 +5415,7 @@ export default function WorldBoxClient() {
             {stationUi === "arcade" && (
               <button
                 type="button"
-                style={{ ...btn, minHeight: 32, padding: "2px 10px" }}
+                style={{ ...btn, minHeight: hud.buttonMinHeight, padding: "2px 10px" }}
                 onClick={() => setArcadeOpen((v) => !v)}
               >
                 {arcadeOpen ? "閉じる" : "遊ぶ"}
@@ -5408,7 +5424,7 @@ export default function WorldBoxClient() {
             {stationUi === "guild" && (
               <button
                 type="button"
-                style={{ ...btn, minHeight: 32, padding: "2px 10px" }}
+                style={{ ...btn, minHeight: hud.buttonMinHeight, padding: "2px 10px" }}
                 onClick={() => setGuildBoardOpen((v) => !v)}
               >
                 {guildBoardOpen ? "閉じる" : "開く"}
@@ -5417,7 +5433,7 @@ export default function WorldBoxClient() {
             {(stationUi === "shop" || stationUi === "bank" || stationUi === "smith") && (
               <button
                 type="button"
-                style={{ ...btn, minHeight: 32, padding: "2px 10px" }}
+                style={{ ...btn, minHeight: hud.buttonMinHeight, padding: "2px 10px" }}
                 onClick={() => setShowEconomy(true)}
               >
                 開く
@@ -5426,7 +5442,7 @@ export default function WorldBoxClient() {
             {stationUi === "arena" && (
               <button
                 type="button"
-                style={{ ...btn, minHeight: 32, padding: "2px 10px" }}
+                style={{ ...btn, minHeight: hud.buttonMinHeight, padding: "2px 10px" }}
                 onClick={() => setArenaOpen((v) => !v)}
               >
                 {arenaOpen ? "閉じる" : "戦う"}
@@ -5435,7 +5451,7 @@ export default function WorldBoxClient() {
             {stationUi === "fountain" && (
               <button
                 type="button"
-                style={{ ...btn, minHeight: 32, padding: "2px 10px" }}
+                style={{ ...btn, minHeight: hud.buttonMinHeight, padding: "2px 10px" }}
                 onClick={() => void plazaAction("fountain")}
               >
                 コインを投げる（10）
@@ -5444,7 +5460,7 @@ export default function WorldBoxClient() {
             {stationUi === "rest" && (
               <button
                 type="button"
-                style={{ ...btn, minHeight: 32, padding: "2px 10px" }}
+                style={{ ...btn, minHeight: hud.buttonMinHeight, padding: "2px 10px" }}
                 onClick={() => void plazaAction("rest")}
               >
                 休む
@@ -5460,7 +5476,7 @@ export default function WorldBoxClient() {
             height={MINIMAP_PX}
             aria-label="周辺マップ"
             style={{
-              position: "absolute", right: 10, top: 10, width: 112, height: 112,
+              position: "absolute", right: "calc(10px + env(safe-area-inset-right, 0px))", top: "calc(10px + env(safe-area-inset-top, 0px))", width: hud.minimapPx, height: hud.minimapPx,
               borderRadius: 10, border: "1px solid rgba(255,255,255,0.35)",
               background: "rgba(0,0,0,0.25)", pointerEvents: "none",
             }}
@@ -5470,7 +5486,7 @@ export default function WorldBoxClient() {
           <div
             aria-label="開拓のコンパス"
             style={{
-              position: "absolute", right: 10, top: 126, width: 112, boxSizing: "border-box",
+              position: "absolute", right: "calc(10px + env(safe-area-inset-right, 0px))", top: `calc(${hud.minimapPx + 16}px + env(safe-area-inset-top, 0px))`, width: hud.minimapPx, boxSizing: "border-box",
               display: "flex", flexDirection: "column", gap: 3,
               padding: "5px 8px", borderRadius: 10, background: "rgba(0,0,0,0.6)",
               border: "1px solid rgba(255,255,255,0.25)", pointerEvents: "none", zIndex: 4,
@@ -5493,7 +5509,7 @@ export default function WorldBoxClient() {
           <div
             aria-label="HPと空腹度"
             style={{
-              position: "absolute", left: 10, top: 52, display: "flex", flexDirection: "column", gap: 4,
+              position: "absolute", left: "calc(10px + env(safe-area-inset-left, 0px))", top: "calc(52px + env(safe-area-inset-top, 0px))", display: "flex", flexDirection: "column", gap: 4,
               padding: "6px 8px", borderRadius: 10, background: "rgba(0,0,0,0.6)", zIndex: 4,
               pointerEvents: "none", minWidth: 132,
             }}
@@ -5549,7 +5565,7 @@ export default function WorldBoxClient() {
           return (
             <div
               aria-label={ready ? "技が使える" : "技チャージ中"}
-              style={{ position: "absolute", left: 10, top: 168, width: 54, height: 54, zIndex: 4, pointerEvents: "none" }}
+              style={{ position: "absolute", left: "calc(10px + env(safe-area-inset-left, 0px))", top: "calc(168px + env(safe-area-inset-top, 0px))", width: 54, height: 54, zIndex: 4, pointerEvents: "none" }}
             >
               <div
                 aria-hidden
@@ -5574,12 +5590,12 @@ export default function WorldBoxClient() {
         {spaceUi === "world" && invProfile && (
           <div
             style={{
-              position: "absolute", left: "50%", bottom: 10, transform: "translateX(-50%)",
+              position: "absolute", left: "50%", bottom: "calc(10px + env(safe-area-inset-bottom, 0px))", transform: "translateX(-50%)",
               display: "flex", gap: 4, alignItems: "stretch", padding: 4, borderRadius: 10,
               background: "rgba(0,0,0,0.6)", zIndex: 4, maxWidth: "calc(100% - 16px)",
               boxSizing: "border-box",
               // スロットは画面幅でスケーリングする（縦画面ではみ出さない）
-              ...({ "--slot": "clamp(30px, 10.5vw, 42px)" } as React.CSSProperties),
+              ...({ "--slot": hud.hotbarSlotCss } as React.CSSProperties),
             }}
           >
             {invProfile.hotbar.map((slot, i) => (
@@ -5616,7 +5632,7 @@ export default function WorldBoxClient() {
         {partyUi.invite && (
           <div
             style={{
-              position: "absolute", top: 64, left: "50%", transform: "translateX(-50%)",
+              position: "absolute", top: "calc(64px + env(safe-area-inset-top, 0px))", left: "50%", transform: "translateX(-50%)",
               display: "flex", alignItems: "center", gap: 8, padding: "6px 10px",
               borderRadius: 10, background: "rgba(10,12,24,0.88)", color: "#fff", fontSize: 13, zIndex: 5,
             }}
@@ -5641,7 +5657,7 @@ export default function WorldBoxClient() {
         {spaceUi === "world" && nearDungeonEntrance && (
           <div
             style={{
-              position: "absolute", right: 10, bottom: 120, width: 168,
+              position: "absolute", right: "calc(10px + env(safe-area-inset-right, 0px))", bottom: `calc(${hud.partyCardBottomPx}px + env(safe-area-inset-bottom, 0px))`, width: 168,
               padding: "8px 10px", borderRadius: 10, background: "rgba(10,12,24,0.88)",
               color: "#fff", fontSize: 12, zIndex: 5, display: "flex", flexDirection: "column", gap: 6,
             }}
@@ -5684,7 +5700,7 @@ export default function WorldBoxClient() {
         {parseInstanceSpace(spaceUi)?.kind === "dungeon" && partyUi.party && (
           <div
             style={{
-              position: "absolute", top: 64, right: 10, display: "flex", gap: 4,
+              position: "absolute", top: "calc(64px + env(safe-area-inset-top, 0px))", right: "calc(10px + env(safe-area-inset-right, 0px))", display: "flex", gap: 4,
               padding: "4px 6px", borderRadius: 8, background: "rgba(10,12,24,0.7)", zIndex: 5,
             }}
           >
@@ -5696,7 +5712,7 @@ export default function WorldBoxClient() {
         {playerCard && (
           <div
             style={{
-              position: "absolute", left: "50%", bottom: 108, transform: "translateX(-50%)",
+              position: "absolute", left: "50%", bottom: `calc(${hud.playerCardBottomPx}px + env(safe-area-inset-bottom, 0px))`, transform: "translateX(-50%)",
               display: "flex", alignItems: "center", gap: 8, padding: "6px 10px",
               borderRadius: 10, background: "rgba(10,12,24,0.9)", color: "#fff", fontSize: 13, zIndex: 5,
               maxWidth: "calc(100% - 16px)", boxSizing: "border-box",
@@ -5727,11 +5743,16 @@ export default function WorldBoxClient() {
         )}
         <div
           style={{
-            position: "absolute", left: 10, bottom: 10, width: "min(300px, calc(100% - 130px))",
-            display: "flex", flexDirection: "column", gap: 4, zIndex: 5,
+            position: "absolute", zIndex: 5, flexDirection: "column", gap: 4,
+            // スマホでは左下のスティック基点を避けて右下ドック（ホットバーの上）に逃がす。
+            // パーティカードが出ている間は同じドックを譲る（同時表示を減らす）。
+            display: hud.chatOnRight && nearDungeonEntrance ? "none" : "flex",
+            ...(hud.chatOnRight
+              ? { right: "calc(10px + env(safe-area-inset-right, 0px))", bottom: `calc(${hud.chatBottomPx}px + env(safe-area-inset-bottom, 0px))`, width: hud.chatWidthCss }
+              : { left: "calc(10px + env(safe-area-inset-left, 0px))", bottom: `calc(${hud.chatBottomPx}px + env(safe-area-inset-bottom, 0px))`, width: hud.chatWidthCss }),
           }}
         >
-          <div style={{ display: "flex", flexDirection: "column", gap: 2, maxHeight: 118, overflow: "hidden", justifyContent: "flex-end" }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 2, maxHeight: hud.chatMessagesPx, overflow: "hidden", justifyContent: "flex-end" }}>
             {[...chatMsgs].slice(0, 6).reverse().map((m, i) => (
               <div
                 key={`${m.at}-${i}`}
@@ -5760,7 +5781,7 @@ export default function WorldBoxClient() {
                 aria-pressed={chatChannel === ch}
                 onClick={() => setChatChannel(ch)}
                 style={{
-                  ...btn, minHeight: 30, padding: "2px 8px", fontSize: 12,
+                  ...btn, minHeight: hud.chatOnRight ? 36 : 30, padding: "2px 8px", fontSize: 12,
                   ...(chatChannel === ch ? { background: "rgba(255,215,94,0.25)", borderColor: "#ffd75e" } : {}),
                 }}
               >
@@ -5791,7 +5812,7 @@ export default function WorldBoxClient() {
             key={denyStamp}
             role="status"
             style={{
-              position: "absolute", left: "50%", bottom: 58, transform: "translateX(-50%)",
+              position: "absolute", left: "50%", bottom: "calc(58px + env(safe-area-inset-bottom, 0px))", transform: "translateX(-50%)",
               padding: "4px 12px", borderRadius: 10, background: "rgba(0,0,0,0.6)",
               color: "#fff", fontSize: 13, whiteSpace: "nowrap", zIndex: 4,
               maxWidth: "calc(100% - 16px)", boxSizing: "border-box", overflow: "hidden", textOverflow: "ellipsis",
@@ -5802,7 +5823,7 @@ export default function WorldBoxClient() {
           </div>
         )}
       {storageOpen && invProfile && (
-        <div style={{ ...panelOverlay, width: "min(330px, calc(100% - 20px))" }}>
+        <div className="wb-panel" style={{ ...panelOverlay, width: "min(330px, calc(100% - 20px))" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <strong>インベントリ</strong>
             {heldStack && (
@@ -5838,7 +5859,7 @@ export default function WorldBoxClient() {
       )}
 
       {containerPanel && invProfile && (
-        <div style={{ ...panelOverlay, width: "min(330px, calc(100% - 20px))" }}>
+        <div className="wb-panel" style={{ ...panelOverlay, width: "min(330px, calc(100% - 20px))" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <strong>{itemById(containerPanel.itemId)?.name ?? "収納"}</strong>
             {heldPanelStack && (
@@ -5899,7 +5920,7 @@ export default function WorldBoxClient() {
       )}
 
       {seedPicker && invProfile && (
-        <div style={panelOverlay}>
+        <div style={panelOverlay} className="wb-panel">
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <strong>種</strong>
             <span style={{ flex: 1 }} />
@@ -5930,7 +5951,7 @@ export default function WorldBoxClient() {
       )}
 
       {boardOpen && spaceUi === "lobby" && (
-        <div style={panelOverlay}>
+        <div style={panelOverlay} className="wb-panel">
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <strong>グローバル掲示板</strong>
             <span style={{ flex: 1 }} />
@@ -5979,7 +6000,7 @@ export default function WorldBoxClient() {
       )}
 
       {mapView && (
-        <div style={panelOverlay}>
+        <div style={panelOverlay} className="wb-panel">
           <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
             <strong>マップ</strong>
             <span className="muted">あなたの座標 X {coords.x} / Y {coords.y}</span>
@@ -6014,7 +6035,8 @@ export default function WorldBoxClient() {
               }
             }}
             style={{
-              width: "100%", height: "auto", display: "block", marginTop: 10,
+              width: layoutMode === "landscape" ? "min(100%, calc(100svh - 150px))" : "100%",
+              height: "auto", display: "block", marginTop: 10, marginInline: "auto",
               borderRadius: 10, border: "1px solid rgba(255,255,255,0.35)", background: "rgba(0,0,0,0.25)",
             }}
           />
@@ -6037,7 +6059,7 @@ export default function WorldBoxClient() {
         />
       )}
       {reportOpen && (
-        <div style={{ ...panelOverlay, width: "min(330px, calc(100% - 20px))" }}>
+        <div className="wb-panel" style={{ ...panelOverlay, width: "min(330px, calc(100% - 20px))" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <strong>通報</strong>
             <span style={{ flex: 1 }} />

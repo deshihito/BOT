@@ -29,11 +29,15 @@ test("≡ メニューはステージ下端からはみ出さない（収まら�
   assert.match(client, /overflowY: "auto", overscrollBehavior: "contain", touchAction: "pan-y"/);
 });
 
-test("ホットバーのスロットは画面幅でスケーリングする（縦画面ではみ出さない）", () => {
+test("ホットバーのスロットは画面幅でスケーリングする（縦画面ではみ出さない）", async () => {
   // スロット枠は --slot 変数に従う
   assert.match(client, /width: "var\(--slot, 42px\)"/);
-  // ホットバー側で画面幅ベースのクランプを決める
-  assert.match(client, /"--slot": "clamp\(30px, 10\.5vw, 42px\)"/);
+  // ホットバー側の寸法はレイアウトモード（lib/worldbox/layout）が決める:
+  // wide は従来の画面幅クランプ、縦持ちは 44px 級に広げる
+  assert.match(client, /"--slot": hud\.hotbarSlotCss/);
+  const layout = await readFile(new URL("../lib/worldbox/layout.ts", import.meta.url), "utf8");
+  assert.match(layout, /"clamp\(30px, 10\.5vw, 42px\)"/);
+  assert.match(layout, /"clamp\(38px, 12vw, 44px\)"/);
   // インベントリボタンは潰さず、バー全体はステージ幅に収める
   assert.match(client, /flexShrink: 0, whiteSpace: "nowrap"/);
   assert.match(client, /maxWidth: "calc\(100% - 16px\)"/);
