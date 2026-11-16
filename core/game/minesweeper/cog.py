@@ -13,7 +13,7 @@
   1タップから最大3ステップに増える（設計判断としてガイド・ログに明記）。
 - パネルは Components V2（core/game/game_v2.GamePanelView）。
 最初のクリックは必ず安全。クリアタイムのベストは
-core/game/game/game_records.py に難易度キー別で残る（従来キーは不変、
+core/game/hub/game_records.py に難易度キー別で残る（従来キーは不変、
 大盤面は新キー wide/expert）。
 """
 import asyncio
@@ -23,10 +23,10 @@ import time
 import discord
 from discord.ext import commands
 
-from core.game.game import game_records
-from core.game.game.board_image import render_cached, render_minesweeper
-from core.game.game.game_guides import GAME_GUIDES  # noqa: F401  (ガイド登録の確認用に参照される)
-from core.game.game.game_v2 import GamePanelView
+from core.game.hub import game_records
+from core.game.hub.board_image import render_cached, render_minesweeper
+from core.game.hub.game_guides import GAME_GUIDES  # noqa: F401  (ガイド登録の確認用に参照される)
+from core.game.hub.game_v2 import GamePanelView
 from core.game.minesweeper.minesweeper import COLS, ROWS, DIFFICULTIES, MinesweeperBoard
 from core.support.panel_v2 import edit_panel_v2
 

@@ -15,8 +15,8 @@ import time
 import discord
 from discord.ext import commands
 
-from core.game.game import game_panels
-from core.game.game.game_v2 import (
+from core.game.hub import game_panels
+from core.game.hub.game_v2 import (
     GamePanelView,
     lobby_not_enough_text,
     original_response_or_none,

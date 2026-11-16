@@ -47,7 +47,7 @@ from core.support.storage import KVStore
 from core.general.items import items as items_core
 from core.game import lottery as lottery_core
 from core.game import mining as mining_core
-from core.game.game import prison as prison_core
+from core.game.hub import prison as prison_core
 from core.general.circulation import steal as steal_core
 from core.support.messages import (
     ACTION_FAILED_RETRY,

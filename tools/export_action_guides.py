@@ -59,7 +59,7 @@ def _vc_genre_by_value() -> dict[str, str]:
 
 def build_action_guides() -> dict:
     """レジストリ全件を Web 描画用の階層（ルート→ジャンル→機能）にする。"""
-    from core.game.game.game_guides import GAME_GUIDES
+    from core.game.hub.game_guides import GAME_GUIDES
     from core.general.action_registry import ROOT_LABELS, ROOT_ORDER, default_registry
 
     registry = default_registry()

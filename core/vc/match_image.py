@@ -12,7 +12,7 @@ import logging
 
 from PIL import Image, ImageDraw, ImageFont
 
-from core.game.game.board_image import FONT_PATH
+from core.game.hub.board_image import FONT_PATH
 from core.leaderboard_image import board_safe_name
 
 logger = logging.getLogger("cogs.sio_saito")

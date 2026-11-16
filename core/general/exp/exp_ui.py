@@ -355,7 +355,7 @@ class ActivityBoardView(discord.ui.View):
 
     async def _game_king(self):
         try:
-            from core.game.game import party_ranking
+            from core.game.hub import party_ranking
             rows = await party_ranking.shared().monthly_top(
                 self.guild_id, limit=1) if self.guild_id else []
             if not rows:

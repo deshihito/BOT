@@ -10,7 +10,7 @@ from urllib.parse import quote
 
 import discord
 
-from core.game.game.game_v2 import text_panel
+from core.game.hub.game_v2 import text_panel
 
 # 役職ガイドのページ（TYPETA が作成中）。URL はここだけで管理する。
 ROLE_GUIDE_BASE_URL = "https://agobot.app/jinrou/roles"

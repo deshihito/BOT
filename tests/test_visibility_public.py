@@ -57,7 +57,7 @@ class GameRankingVisibilityTest(unittest.IsolatedAsyncioTestCase):
         view = GameDetailView(types.SimpleNamespace(), "ngword")
         interaction, sent = fake_interaction()
         embed = discord.Embed(title="ranking")
-        with patch("core.game.game.cog.ranking_board", new=AsyncMock(return_value=(embed, None))):
+        with patch("core.game.hub.cog.ranking_board", new=AsyncMock(return_value=(embed, None))):
             button = find_button(view, custom_id="panel:game:ranking")
             await button.callback(interaction)
         self.assertIs(sent.get("embed"), embed)
@@ -195,7 +195,7 @@ class Wave2PublicSourceTest(unittest.TestCase):
         self.assertNotIn("defer(ephemeral=True, thinking=True)", self.read("cogs/general.py"))
         # 導線最適化 M5: /game・/vc は履歴セレクトの読み込みのため defer→followup に
         # 変わったが、defer は ephemeral=False（公開）が既定で公開方針は不変。
-        for rel in ("core/game/game/cog.py", "core/vc/hub.py"):
+        for rel in ("core/game/hub/cog.py", "core/vc/hub.py"):
             src = self.read(rel)
             # ルートコマンドの defer は公開（ephemeral 指定なし）であること
             self.assertIn("await interaction.response.defer(thinking=True)", src, rel)
@@ -207,7 +207,7 @@ class Wave2PublicSourceTest(unittest.TestCase):
                 rel)
 
     def test_panels_have_owner_checks(self):
-        for rel in ("core/general/panel.py", "core/vc/hub.py", "core/game/game/cog.py", "core/help/help/cog.py"):
+        for rel in ("core/general/panel.py", "core/vc/hub.py", "core/game/hub/cog.py", "core/help/help/cog.py"):
             self.assertIn("interaction_check", self.read(rel), rel)
 
     def test_economy_panels_public_with_owner_check(self):

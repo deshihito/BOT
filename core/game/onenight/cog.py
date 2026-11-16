@@ -12,8 +12,8 @@ import discord
 from core.general.user_names import fallback_name
 from discord.ext import commands
 
-from core.game.game import game_panels, party_ranking
-from core.game.game.game_v2 import GamePanelView, LobbyView, original_response_or_none, safe_delete, text_panel, GAME_MSG_NOT_JOINED, lobby_auto_start_text
+from core.game.hub import game_panels, party_ranking
+from core.game.hub.game_v2 import GamePanelView, LobbyView, original_response_or_none, safe_delete, text_panel, GAME_MSG_NOT_JOINED, lobby_auto_start_text
 from core.game.onenight.onenight import (MAX_PLAYERS, MIN_PLAYERS, ROBBER, ROLE_INFO, SEER, VILLAGER, WOLF,
                            OneNightSession)
 

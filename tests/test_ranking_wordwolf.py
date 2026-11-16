@@ -5,7 +5,7 @@ import unittest
 
 from game_fakes import FakeChannel, FakeGuild, FakeMember
 import core.game.wordwolf.cog as wordwolf
-from core.game.game import party_ranking
+from core.game.hub import party_ranking
 class WordWolfRankingTest(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.saved = party_ranking._shared

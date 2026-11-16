@@ -7,7 +7,7 @@
 """
 import unittest
 
-from core.game.game import board_image as bi
+from core.game.hub import board_image as bi
 
 
 def _words():

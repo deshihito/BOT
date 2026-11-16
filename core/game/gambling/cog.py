@@ -43,7 +43,7 @@ from core.game.gambling import gambling as gambling_core
 from core.general.user_names import cached_display_name
 from core.leaderboard_image import fetch_avatar_bytes
 from core.general.items import items as items_core
-from core.game.game import prison as prison_core
+from core.game.hub import prison as prison_core
 from core.support.messages import (
     ACTION_FAILED_RETRY,
     COIN_UPDATE_FAILED_RETRY,

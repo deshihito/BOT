@@ -8,7 +8,7 @@
 """
 import discord
 from core.support.emojis import JINROU, LOUPE, MUSIC, SUCCESS
-from core.game.game.game_v2 import text_panel
+from core.game.hub.game_v2 import text_panel
 
 COLOR = 0xFFFFFF
 WOLF_ROLES = ("人狼", "デカ狼")

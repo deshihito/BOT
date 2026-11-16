@@ -19,7 +19,7 @@ from dataclasses import dataclass
 
 from PIL import Image, ImageDraw
 
-from core.game.game.board_image import render_cached
+from core.game.hub.board_image import render_cached
 from core.leaderboard_image import (
     BG, CARD, CARD_BORDER, INK, MUTE, TRACK, circle_avatar, draw_bar,
     fit_text, fmt_int,

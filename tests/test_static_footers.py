@@ -24,10 +24,10 @@ from discord.ext import commands  # noqa: E402
 from game_fakes import FakeBot, FakeChannel, FakeGuild, FakeInteraction, FakeMember, fast_time, press, real_sleep  # noqa: E402
 from tests.test_all_commands import USER_ID, fake_interaction  # noqa: E402
 
-import core.game.game.cog as game_module
+import core.game.hub.cog as game_module
 import core.game.uno.cog as uno
 from cogs.help import category_pages, overview_embed  # noqa: E402
-from core.game.game.game_guides import GAME_ORDER  # noqa: E402
+from core.game.hub.game_guides import GAME_ORDER  # noqa: E402
 
 BOOK_LEGEND = "はガイド（くわしい説明）があるコマンドです"
 

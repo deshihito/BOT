@@ -9,7 +9,7 @@ import os
 from core.support.api_client import APIError
 from core.support.api_retry import run_with_retry
 from core.support.messages import PAY_MIN_AMOUNT, PAY_TO_BOT, PAY_TO_SELF
-from core.game.game import prison as prison_core
+from core.game.hub import prison as prison_core
 from core.general.user_names import resolve_display_names
 from core.leaderboard_image import (
     BoardRow, fetch_avatar_bytes, fmt_int, render_leaderboard_png,

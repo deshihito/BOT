@@ -5,7 +5,7 @@ import unittest
 
 from game_fakes import FakeChannel, FakeGuild
 import core.game.jinrou.entry as jinrou
-from core.game.game import party_ranking
+from core.game.hub import party_ranking
 def player(uid):
     return types.SimpleNamespace(id=uid)
 

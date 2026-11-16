@@ -12,7 +12,7 @@ import io
 
 from PIL import Image, ImageDraw
 
-from core.game.game.board_image import render_cached
+from core.game.hub.board_image import render_cached
 from core.leaderboard_image import (
     BG, BOARD_W, HEADER_H, INK, MUTE, PODIUM_H, ROW_H, BoardRow,
     circle_avatar, draw_bar, fit_text, render_leaderboard_png,

@@ -14,9 +14,9 @@ import random
 import discord
 from discord.ext import commands
 
-from core.game.game import game_records
-from core.game.game.board_image import render_yotsuba
-from core.game.game.game_v2 import GamePanelView, text_panel, lobby_auto_start_text, lobby_not_enough_text
+from core.game.hub import game_records
+from core.game.hub.board_image import render_yotsuba
+from core.game.hub.game_v2 import GamePanelView, text_panel, lobby_auto_start_text, lobby_not_enough_text
 from core.game.yotsuba.yotsuba import EDGES, PAIR_NAMES, PAIRS, ROTATION_LABELS, WORDS, YotsubaGame, placed_words
 
 logger = logging.getLogger(__name__)
