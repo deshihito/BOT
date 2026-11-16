@@ -26,6 +26,33 @@ export const CAMERA_PRESETS: Record<"boardTilt" | "topDown" | "front" | "lowAngl
   lowAngle: { position: [0, 4.4, 6.8], lookAt: [0, 0.2, 0], fov: 44 },
 };
 
+/**
+ * カメラ調整の基準アスペクト（幅/高さ）。各ゲームのカメラ位置・画角は
+ * 横長画面（このアスペクト以上）で盤全体が収まるよう調整されている。
+ * 透視投影は縦画角が固定のため、これより縦長の画面（スマホ縦持ち等）では
+ * 水平画角が狭まり、盤や手札の左右がそのまま見切れる。
+ */
+export const FIT_REFERENCE_ASPECT = 1.4;
+
+/** 縦画角の拡大上限（広げすぎによる歪み・酔い防止）。 */
+export const FIT_MAX_FOV = 105;
+
+/**
+ * 表示エリアのアスペクトに応じた実効縦画角（度）を返す。
+ * アスペクトが基準以上なら基準画角のまま。基準未満では、水平画角が
+ * 「基準アスペクトで基準画角のとき」と等しくなるよう縦画角を広げる
+ * （横方向の見え方は画面幅によらず一定になり、見切れが起きない）。
+ * 盤サイズに合わせて自前でカメラ距離を計算するゲーム（fitCamera 系）は、
+ * 距離計算に使うアスペクトを FIT_REFERENCE_ASPECT で下限クランプし、
+ * この拡大と二重に効かせないこと。
+ */
+export function fitFovForAspect(baseFov: number, aspect: number): number {
+  if (!Number.isFinite(aspect) || aspect <= 0 || aspect >= FIT_REFERENCE_ASPECT) return baseFov;
+  const halfRad = (baseFov * Math.PI) / 360;
+  const fitted = (2 * Math.atan(Math.tan(halfRad) * (FIT_REFERENCE_ASPECT / aspect)) * 180) / Math.PI;
+  return Math.min(fitted, FIT_MAX_FOV);
+}
+
 export interface StageOptions {
   background?: number;
   camera?: CameraPreset;
@@ -85,7 +112,11 @@ export function createStage(container: HTMLElement, options: StageOptions = {}):
   if (options.background !== undefined) scene.background = new THREE.Color(options.background);
 
   const preset = options.camera ?? CAMERA_PRESETS.boardTilt;
-  const camera = new THREE.PerspectiveCamera(preset.fov, 1, 0.1, 100);
+  // 基準画角（プリセット/setCamera が指定した縦画角）。実際の投影には
+  // 表示アスペクトで補正した fitFovForAspect(baseFov, aspect) を使う。
+  let baseFov = preset.fov;
+  const fittedFov = () => fitFovForAspect(baseFov, (container.clientWidth || 1) / (container.clientHeight || 1));
+  const camera = new THREE.PerspectiveCamera(fittedFov(), 1, 0.1, 100);
   camera.position.set(...preset.position);
   camera.lookAt(...preset.lookAt);
 
@@ -167,6 +198,9 @@ export function createStage(container: HTMLElement, options: StageOptions = {}):
     if (canvas.width !== Math.floor(w * pr) || canvas.height !== Math.floor(h * pr)) {
       renderer.setSize(w, h, false);
       camera.aspect = w / h;
+      // 縦長画面では縦画角を広げて水平画角を保つ（左右の見切れ防止）。
+      // サイズ変化のたびに再計算するので回転・リサイズにも追従する。
+      camera.fov = fitFovForAspect(baseFov, w / h);
       camera.updateProjectionMatrix();
     }
     // カメラシェイク: 描画の間だけオフセットを足し、描画後に戻す
@@ -211,7 +245,8 @@ export function createStage(container: HTMLElement, options: StageOptions = {}):
     planePoint,
     setCamera: (p: CameraPreset) => {
       camera.position.set(...p.position);
-      camera.fov = p.fov;
+      baseFov = p.fov;
+      camera.fov = fittedFov();
       camera.updateProjectionMatrix();
       lookTarget.set(...p.lookAt);
       camera.lookAt(...p.lookAt);

@@ -7,6 +7,7 @@
 import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { CR_TEETH, type CrStatus } from "@/lib/games/crocodile";
+import { fitFovForAspect } from "@/lib/three-kit/stage";
 import { sfxJawSnap, sfxJingle, sfxPop, sfxSafePress } from "@/lib/sfx";
 
 interface Props {
@@ -443,6 +444,8 @@ export default function CrocodileScene3D({ pressed, status, lastPlayer, lastCpu,
       const hgt = container.clientHeight || 1;
       renderer.setSize(w, hgt, false);
       camera.aspect = w / hgt;
+      // 縦長画面では縦画角を広げ、頭部の左右の見切れを防ぐ（three-kit 共通の画角フィット）。
+      camera.fov = fitFovForAspect(46, w / hgt);
       camera.updateProjectionMatrix();
       renderer.render(scene, camera);
     };

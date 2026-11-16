@@ -14,7 +14,7 @@
 // WebGL が使えない場合は onFail で親へ知らせ、親は 2D 表示に切り替える。
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import * as THREE from "three";
-import { createStage, type Stage } from "@/lib/three-kit/stage";
+import { createStage, FIT_REFERENCE_ASPECT, type Stage } from "@/lib/three-kit/stage";
 import { attachPickPointer } from "@/lib/three-kit/pointer";
 import SceneBox from "@/lib/three-kit/SceneBox";
 import { RUSH_EXIT_ROW, RUSH_SIZE, type RushCar } from "@/lib/games/rushhour";
@@ -53,7 +53,7 @@ function carCenter(car: RushCar): [number, number] {
 function fitCamera(stage: Stage, container: HTMLElement) {
   const w = container.clientWidth || 480;
   const h = container.clientHeight || 460;
-  const aspect = w / h;
+  const aspect = Math.max(w / h, FIT_REFERENCE_ASPECT); // stage の画角フィットと二重に効かせないよう基準アスペクトで下限クランプ
   const vFov = (42 * Math.PI) / 180;
   const hFov = 2 * Math.atan(Math.tan(vFov / 2) * aspect);
   const distW = (RUSH_SIZE / 2 + 1.1) / Math.tan(hFov / 2);
