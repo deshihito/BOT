@@ -975,6 +975,8 @@ export default function WorldBoxClient() {
   const [heldPanelSlot, setHeldPanelSlot] = useState<ContainerSlotRef | null>(null);
   const [seedPicker, setSeedPicker] = useState<{ x: number; y: number } | null>(null);
   const [tileMsg, setTileMsg] = useState("");
+  /** 別のタブに同じアカウントで引き継がれた（このタブは無効化された）か。 */
+  const [tabTaken, setTabTaken] = useState(false);
   // Esc で開いているパネル/メニューを全部閉じる（パネル内に閉じ場所が無い状態への保険）
   useEffect(() => {
     const onEsc = (e: KeyboardEvent) => {
@@ -2206,6 +2208,20 @@ export default function WorldBoxClient() {
     };
     let loggedIn = false;
     let disposed = false;
+    // タブ世代（同一アカウントの分身防止）: このタブの識別子と開始時刻。
+    // サーバーは最新のタブだけを有効とし、旧タブのプレゼンス・セーブは受理しない。
+    const tabSession = {
+      tab: typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+        ? crypto.randomUUID()
+        : `tab-${Date.now().toString(36)}-${Math.floor(Math.random() * 0xffffffff).toString(36)}`,
+      tabAt: Date.now(),
+    };
+    let tabSuperseded = false;
+    const markTabSuperseded = () => {
+      if (tabSuperseded) return;
+      tabSuperseded = true;
+      setTabTaken(true);
+    };
     let lastSaved = { x: player.x, y: player.y, at: 0 };
     let lastMinimapAt = 0;
     let lastBigMapAt = 0;
@@ -2236,6 +2252,8 @@ export default function WorldBoxClient() {
     };
     const saveOnline = (keepalive = false) => {
       if (!loggedIn) return;
+      // 別のタブに引き継がれた旧タブは、セーブで現行タブの状態を上書きしない。
+      if (tabSuperseded) return;
       if (keepalive) {
         if (onlineSaveTimer !== null) {
           window.clearTimeout(onlineSaveTimer);
@@ -2339,6 +2357,7 @@ export default function WorldBoxClient() {
     let rtEverConnected = false;
     /** WS 経由のハートビート送信（中継は REST と同じ整形規則で受ける）。 */
     const sendWsHeartbeat = () => {
+      if (tabSuperseded) return;
       if (!rtSocket || rtSocket.readyState !== WebSocket.OPEN) return;
       try {
         rtSocket.send(JSON.stringify({ t: "hb", x: player.x, y: player.y, vx: player.vx, vy: player.vy, face: player.face, space, party: myPartyKeyRef.current || undefined, role: invRef.current?.role ?? "free", rank: invRef.current ? masteryRankOf(invRef.current, invRef.current.role) : 1, sit: sitTileRef.current ? true : undefined }));
@@ -2346,7 +2365,7 @@ export default function WorldBoxClient() {
     };
     /** 中継への接続（トークン取得→接続→受信→再接続）。失敗してもポーリングが続く。 */
     const connectRealtime = async () => {
-      if (disposed || !loggedIn || rtSocket) return;
+      if (disposed || !loggedIn || rtSocket || tabSuperseded) return;
       try {
         if (!rtToken || Date.now() - rtTokenAt > 8 * 60 * 1000) {
           const res = await fetch("/api/worldbox/realtime-token", { method: "POST", headers: { Accept: "application/json" } });
@@ -2358,7 +2377,7 @@ export default function WorldBoxClient() {
         }
         if (disposed) return;
         const proto = location.protocol === "https:" ? "wss:" : "ws:";
-        const ws = new WebSocket(`${proto}//${location.host}/api/worldbox/realtime?t=${encodeURIComponent(rtToken)}`);
+        const ws = new WebSocket(`${proto}//${location.host}/api/worldbox/realtime?t=${encodeURIComponent(rtToken)}&tab=${encodeURIComponent(tabSession.tab)}&tabAt=${tabSession.tabAt}`);
         rtSocket = ws;
         ws.onopen = () => {
           rtBackoffMs = 1000;
@@ -2394,7 +2413,6 @@ export default function WorldBoxClient() {
           rtLastMsgRef.current = arrivedAt;
           let msg: {
             t?: string; now?: number; p?: PresenceEntry; players?: PresenceEntry[]; id?: string;
-            x?: number; y?: number;
             kind?: string; changes?: { key: string; value: unknown }[]; value?: unknown;
             channel?: string; space?: string; guildId?: string;
             agg?: number; on?: boolean;
@@ -2411,9 +2429,6 @@ export default function WorldBoxClient() {
             rtAggOn = true;
           } else if (msg.t === "agg") {
             rtAggOn = msg.on === true;
-          } else if (msg.t === "jump" && typeof msg.x === "number" && typeof msg.y === "number" && typeof msg.space === "string") {
-            // 中継に却下された位置申告: サーバー保管の正規位置へ戻す
-            snapBackToServer(msg.x, msg.y, msg.space);
           } else if (msg.t === "snap") {
             for (const entry of msg.players ?? []) {
               if (isOtherPartyInDungeon(entry)) continue;
@@ -2494,7 +2509,15 @@ export default function WorldBoxClient() {
           rtBackoffMs = Math.min(10_000, rtBackoffMs * 2);
           rtReconnectTimer = window.setTimeout(() => void connectRealtime(), rtBackoffMs);
         };
-        ws.onclose = onGone;
+        ws.onclose = (ev) => {
+          // 4001 = 別のタブに引き継がれた。再接続せず、このタブは無効化する。
+          if (ev.code === 4001) {
+            if (rtSocket === ws) rtSocket = null;
+            markTabSuperseded();
+            return;
+          }
+          onGone();
+        };
         ws.onerror = onGone;
       } catch {
         rtRetryAt = Date.now() + rtBackoffMs;
@@ -2502,7 +2525,7 @@ export default function WorldBoxClient() {
       }
     };
     const sendHeartbeat = () => {
-      if (!loggedIn) return;
+      if (!loggedIn || tabSuperseded) return;
       fetch("/api/worldbox/presence", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
@@ -2512,34 +2535,13 @@ export default function WorldBoxClient() {
         role: invRef.current?.role ?? "free",
         rank: invRef.current ? masteryRankOf(invRef.current, invRef.current.role) : 1,
         sit: sitTileRef.current ? true : undefined,
+        tab: tabSession.tab,
+        tabAt: tabSession.tabAt,
       }),
-      }).then(async (res) => {
-        // 却下（409 position_jump）: サーバー保管の正規位置へ戻す。
-        // 応答の保管位置が現在の空間と違う場合は古い却下として無視する。
-        if (res.status !== 409) return;
-        try {
-          const body = (await res.json()) as { error?: string; x?: number; y?: number; space?: string };
-          if (body.error === "position_jump" && typeof body.x === "number" && typeof body.y === "number" && typeof body.space === "string") {
-            snapBackToServer(body.x, body.y, body.space);
-          }
-        } catch { /* noop */ }
+      }).then((res) => {
+        // 409 = 別のタブがこのアカウントで開かれている（このタブは旧世代）
+        if (res.status === 409) markTabSuperseded();
       }).catch(() => { /* noop */ });
-    };
-    /** サーバーに却下された位置申告の復帰: 保管位置へ直接戻す。
-     * findFreeNear を通さない（着地のずれで再却下の連鎖になるため）。
-     * 次回ハートビートは保管位置と一致し、受け入れられる。 */
-    const snapBackToServer = (x: number, y: number, targetSpace: string) => {
-      if (targetSpace !== space) return;
-      player.x = x;
-      player.y = y;
-      player.vx = 0;
-      player.vy = 0;
-      cam.x = x;
-      cam.y = y;
-      lastTileKey = `${space}:${Math.floor(x)},${Math.floor(y)}`;
-      lastHeartbeatPos = { x, y };
-      saveNow();
-      sendHeartbeat();
     };
     let nearDungeonShown = false;
     // プレゼンスポーリングのガード（S6）: 1s 間隔で重ねて走らせず、古い
@@ -6091,6 +6093,19 @@ export default function WorldBoxClient() {
             />
           </div>
         </div>
+        {tabTaken && (
+          <div
+            role="alert"
+            style={{
+              position: "absolute", left: "50%", bottom: "calc(58px + env(safe-area-inset-bottom, 0px))", transform: "translateX(-50%)",
+              padding: "6px 14px", borderRadius: 10, background: "rgba(120,20,20,0.85)",
+              color: "#fff", fontSize: 13, whiteSpace: "nowrap", zIndex: 5,
+              maxWidth: "calc(100% - 16px)", boxSizing: "border-box", overflow: "hidden", textOverflow: "ellipsis",
+            }}
+          >
+            別のタブで開いています（このタブは無効）
+          </div>
+        )}
         {tileMsg && (
           <div
             key={denyStamp}
