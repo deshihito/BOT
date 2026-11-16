@@ -4,7 +4,7 @@ import { rectBounds, worldBounds } from "@/lib/worldbox/mapgen";
 import { LOBBY_H, LOBBY_W } from "@/lib/worldbox/lobby";
 import { LOBBY2_H, LOBBY2_W, LOBBY3_H, LOBBY3_W } from "@/lib/worldbox/lobby-floors";
 import { TENT_MAX_H, TENT_MAX_W } from "@/lib/worldbox/tent";
-import { isPresenceEnabled, listPresence, loadStoredPresence, putPresence, removePresence } from "@/lib/worldbox/presence-online";
+import { isPresenceEnabled, listPresence, loadStoredPresence, putPresenceTabGuarded, removePresence } from "@/lib/worldbox/presence-online";
 import { parseSave } from "@/lib/worldbox/save";
 import { loadWorldBoxSave } from "@/lib/worldbox/save-online";
 import { recordFirstStep, recordPresenceMetric } from "@/lib/worldbox/metrics-online";
@@ -94,11 +94,11 @@ export async function PUT(request: Request) {
   // プレゼンス（時刻基準）、無ければサーバー保存のセーブ（固定距離）。
   // 却下されたハートビートは保存せず、保管位置は最後の正規位置のまま。
   // 応答に保管位置を載せるので、クライアントはそこへ戻れる。
-  const stored = await loadStoredPresence(ownerKey);
-  if (stored) {
-    if (!checkMovementContinuity(stored, heartbeat, now).ok) {
+  const prev = await loadStoredPresence(ownerKey);
+  if (prev) {
+    if (!checkMovementContinuity(prev, heartbeat, now).ok) {
       return NextResponse.json(
-        { error: "position_jump", x: stored.x, y: stored.y, space: stored.space },
+        { error: "position_jump", x: prev.x, y: prev.y, space: prev.space },
         { status: 409, headers: NO_STORE },
       );
     }
@@ -111,8 +111,12 @@ export async function PUT(request: Request) {
       );
     }
   }
-  const storedOk = await putPresence(ownerKey, { ...heartbeat, name }, now);
-  if (!storedOk) {
+  // タブ世代（分身防止）: 新しい世代のタブだけが保存できる。旧タブは 409。
+  const stored = await putPresenceTabGuarded(ownerKey, { ...heartbeat, name }, now);
+  if (stored === "rejected") {
+    return NextResponse.json({ error: "tab_superseded" }, { status: 409, headers: NO_STORE });
+  }
+  if (stored !== "stored") {
     return NextResponse.json({ error: "presence_failed" }, { status: 500, headers: NO_STORE });
   }
   // 計測（ベストエフォート）: DAU・同時接続ピーク・初回ステップ

@@ -109,6 +109,10 @@ export type Heartbeat = {
   party?: string;
   /** 椅子・ベンチ・ソファに座っているか（見た目だけの申告）。 */
   sit?: boolean;
+  /** 開いているタブの識別子（同一アカウントの分身防止用。同アカウントでは最新のタブだけが有効）。 */
+  tab?: string;
+  /** そのタブを開いた時刻（ミリ秒）。タブ世代の新旧判定に使う。 */
+  tabAt?: number;
 };
 
 export type PresenceEntry = Heartbeat & {
@@ -160,7 +164,32 @@ export function sanitizeHeartbeat(raw: unknown, bounds: CoordBounds): Heartbeat 
     rank: typeof v.rank === "number" && Number.isFinite(v.rank) ? Math.max(1, Math.min(5, Math.floor(v.rank))) : 1,
     party: typeof v.party === "string" ? v.party.slice(0, 48) : "",
     ...(v.sit === true ? { sit: true } : {}),
+    ...(typeof v.tab === "string" && v.tab.length > 0 ? { tab: v.tab.slice(0, 64) } : {}),
+    ...(typeof v.tabAt === "number" && Number.isFinite(v.tabAt) && v.tabAt > 0 ? { tabAt: v.tabAt } : {}),
   };
+}
+
+/**
+ * タブ世代の判定（同一アカウントの分身防止）。
+ * 保存済みエントリ（stored）と新しいハートビート（incoming）を見て、
+ * incoming を受理してよいかを返す。規則:
+ * - stored が無い/鮮度切れ、incoming にタブ申告が無い、stored にタブ記録が無い → 受理（世代は incoming で初期化/維持）
+ * - 同じタブ → 受理
+ * - incoming の開始時刻が新しい → 受理（世代交代。旧タブは以後 rejected になる）
+ * - incoming の開始時刻が古い → 拒否（旧タブからの書き込み）
+ * - 開始時刻が同値ならタブ ID の辞書順で大きい方を受理（決定的にするため）
+ */
+export function tabVerdict(
+  stored: PresenceEntry | null,
+  incoming: { tab?: string; tabAt?: number },
+  now: number,
+): "accept" | "reject" {
+  if (!incoming.tab || typeof incoming.tabAt !== "number") return "accept";
+  if (!stored || !isFreshPresence(stored, now)) return "accept";
+  if (!stored.tab || typeof stored.tabAt !== "number") return "accept";
+  if (stored.tab === incoming.tab) return "accept";
+  if (incoming.tabAt !== stored.tabAt) return incoming.tabAt > stored.tabAt ? "accept" : "reject";
+  return incoming.tab > stored.tab ? "accept" : "reject";
 }
 
 /** bot_kv に保存された1件（JSON 文字列 or オブジェクト）をエントリへ戻す。壊れていれば null。 */

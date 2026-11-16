@@ -119,9 +119,31 @@ function checkSaveFallbackContinuity(saved, next) {
   return dist <= SAVE_FALLBACK_MAX_TILES ? { ok: true } : { ok: false, reason: "position_jump" };
 }
 
-/** 部屋: 空間ごとのプレイヤー表（id → エントリ）。エントリは PresenceEntry と同じ形。 */
+/** 部屋: 空間ごとのプレイヤー表（id → エントリ）と、pid ごとの現行タブ世代。エントリは PresenceEntry と同じ形。 */
 function createRoom() {
-  return { spaces: new Map() };
+  return { spaces: new Map(), gens: new Map() };
+}
+
+/**
+ * タブ世代の接続可否（presence.ts の tabVerdict と同じ規則）。
+ * タブ申告が無い接続は常時 accept（evict なし）。
+ * 戻り値: { verdict: "accept" | "reject", evict: boolean }
+ * evict=true は「同じ pid の旧世代の接続を閉じるべき」という指示。
+ */
+function admitTab(room, pid, tab, tabAt) {
+  if (typeof tab !== "string" || tab.length === 0 || typeof tabAt !== "number" || !Number.isFinite(tabAt)) {
+    return { verdict: "accept", evict: false };
+  }
+  const cur = room.gens.get(pid);
+  if (!cur) {
+    room.gens.set(pid, { tab, tabAt });
+    return { verdict: "accept", evict: false };
+  }
+  if (cur.tab === tab) return { verdict: "accept", evict: false };
+  const newer = tabAt !== cur.tabAt ? tabAt > cur.tabAt : tab > cur.tab;
+  if (!newer) return { verdict: "reject", evict: false };
+  room.gens.set(pid, { tab, tabAt });
+  return { verdict: "accept", evict: true };
 }
 
 /** 部屋の中からそのプレイヤーの直近エントリ（空間を問わず）を探す。無ければ null。 */
@@ -177,12 +199,13 @@ function snapshot(room, space, selfId, now) {
   return out.slice(0, MAX_PLAYERS);
 }
 
-/** プレイヤーを全空間から消し、消えた空間の配列を返す。 */
+/** プレイヤーを全空間から消し、消えた空間の配列を返す。タブ世代の記録も消す。 */
 function removePlayer(room, id) {
   const removedFrom = [];
   for (const [space, table] of room.spaces) {
     if (table.delete(id)) removedFrom.push(space);
   }
+  room.gens.delete(id);
   return removedFrom;
 }
 
@@ -318,6 +341,7 @@ module.exports = {
   sanitizeSpace,
   sanitizeHeartbeat,
   createRoom,
+  admitTab,
   acceptHeartbeat,
   snapshot,
   removePlayer,
