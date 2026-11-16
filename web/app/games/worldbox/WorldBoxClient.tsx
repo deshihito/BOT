@@ -104,6 +104,7 @@ import WorldBoxMachinePanel from "./WorldBoxMachinePanel";
 import WorldBoxEconomyPanel from "./WorldBoxEconomyPanel";
 import WorldBoxGuildBoardPanel from "./WorldBoxGuildBoardPanel";
 import WorldBoxGuildShopPanel from "./WorldBoxGuildShopPanel";
+import { ItemSlot as ItemSlotView, ItemSlotGrid } from "./ItemSlotGrid";
 
 const SAVE_KEY = "ago-worldbox-save-v6";
 /** 1タイルの表示サイズ（CSS px）。 */
@@ -461,6 +462,7 @@ const STATION_LABEL: Record<LobbyStation, string> = {
   rest: "休憩",
   arcade: "アーケード",
   race: "競馬場",
+  sell: "売却専用ショップ",
 };
 
 export default function WorldBoxClient() {
@@ -648,6 +650,7 @@ export default function WorldBoxClient() {
   const spaceUiRef = useRef<SaveSpace>("world");
   spaceUiRef.current = spaceUi;
   const [menuOpen, setMenuOpen] = useState(false);
+  const [collectionSel, setCollectionSel] = useState<string | null>(null);
   const [stationUi, setStationUi] = useState<LobbyStation | null>(null);
   /** ワールドで設置した作業施設の近くにいるときの作業種別（カンマ区切り。経済パネル用）。 */
   const [worldStationKinds, setWorldStationKinds] = useState("");
@@ -5560,6 +5563,13 @@ export default function WorldBoxClient() {
     border: "1px solid rgba(255,255,255,0.22)", background: "rgba(10,12,18,0.93)", color: "#f2f2f2",
     boxShadow: "0 12px 36px rgba(0,0,0,0.5)",
   };
+  /** パネル先頭の固定ヘッダー: パネル内をスクロールしても「閉じる」が
+   * 見えなくならないよう、先頭行に重ねて常時表示する（panelOverlay 用）。 */
+  const stickyPanelHead: React.CSSProperties = {
+    position: "sticky", top: -12, zIndex: 3,
+    margin: "-12px -12px 0", padding: "12px 12px 6px",
+    background: "rgba(10,12,18,0.98)",
+  };
   /** スロット枠（中身はスプライトのみ。SlotContent と対で使う）。
    *  サイズは --slot（ホットバー側で画面幅に合わせて決める）に従い、狭い画面では縮む。 */
   const slotBox: React.CSSProperties = {
@@ -5879,19 +5889,26 @@ export default function WorldBoxClient() {
             {invProfile && (
               <div style={{ borderTop: "1px solid rgba(255,255,255,0.18)", paddingTop: 6 }}>
                 <div style={{ fontSize: 11, opacity: 0.75, marginBottom: 4 }}>コレクション</div>
-                <div style={{ display: "grid", gap: 3 }}>
+                <ItemSlotGrid>
                   {["ancient_relic", "star_map", "ancient_coin", "dragon_scale", "ghost_tear", "golden_key"].map((id) => {
-                    const def = itemById(id);
                     const count = invProfile.items[id] ?? 0;
                     return (
-                      <div key={id} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, opacity: count > 0 ? 1 : 0.38 }}>
-                        <ItemIcon id={id} size={18} />
-                        <span style={{ flex: 1 }}>{def?.name ?? id}</span>
-                        <span>{count}</span>
-                      </div>
+                      <span key={id} style={{ opacity: count > 0 ? 1 : 0.38, display: "inline-flex" }}>
+                        <ItemSlotView
+                          itemId={id}
+                          count={count}
+                          selected={collectionSel === id}
+                          onClick={() => setCollectionSel(id)}
+                        />
+                      </span>
                     );
                   })}
-                </div>
+                </ItemSlotGrid>
+                {collectionSel && (
+                  <div style={{ fontSize: 12, marginTop: 6 }}>
+                    {itemById(collectionSel)?.name ?? collectionSel} ×{invProfile.items[collectionSel] ?? 0}
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -5943,7 +5960,7 @@ export default function WorldBoxClient() {
                 {guildBoardOpen ? "閉じる" : "開く"}
               </button>
             )}
-            {(stationUi === "shop" || stationUi === "bank" || stationUi === "smith") && (
+            {(stationUi === "shop" || stationUi === "bank" || stationUi === "smith" || stationUi === "sell") && (
               <button
                 type="button"
                 style={{ ...btn, minHeight: hud.buttonMinHeight, padding: "2px 10px" }}
@@ -6350,7 +6367,7 @@ export default function WorldBoxClient() {
         )}
       {storageOpen && invProfile && (
         <div className="wb-panel" style={{ ...panelOverlay, width: "min(330px, calc(100% - 20px))" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <div style={{ ...stickyPanelHead, display: "flex", alignItems: "center", gap: 8 }}>
             <strong>インベントリ</strong>
             {heldStack && (
               <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12 }}>
@@ -6386,7 +6403,7 @@ export default function WorldBoxClient() {
 
       {containerPanel && invProfile && (
         <div className="wb-panel" style={{ ...panelOverlay, width: "min(330px, calc(100% - 20px))" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <div style={{ ...stickyPanelHead, display: "flex", alignItems: "center", gap: 8 }}>
             <strong>{itemById(containerPanel.itemId)?.name ?? "収納"}</strong>
             {heldPanelStack && (
               <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12 }}>
@@ -6567,28 +6584,27 @@ export default function WorldBoxClient() {
       )}
       {seedPicker && invProfile && (
         <div style={panelOverlay} className="wb-panel">
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{ ...stickyPanelHead, display: "flex", alignItems: "center", gap: 10 }}>
             <strong>種</strong>
             <span style={{ flex: 1 }} />
             <button type="button" style={btn} onClick={() => setSeedPicker(null)}>
               閉じる
             </button>
           </div>
-          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 10 }}>
-            {CROPS.filter((c) => countItem(invProfile, c.seedId) > 0).map((c) => (
-              <button
-                key={c.id}
-                type="button"
-                style={btn}
-                onClick={() => {
-                  void postTileAction("plant", seedPicker.x, seedPicker.y, c.seedId);
-                  setSeedPicker(null);
-                }}
-              >
-                <ItemIcon id={c.seedId} size={20} />
-                {itemById(c.seedId)?.name ?? c.seedId} ×{countItem(invProfile, c.seedId)}
-              </button>
-            ))}
+          <div style={{ marginTop: 10 }}>
+            <ItemSlotGrid>
+              {CROPS.filter((c) => countItem(invProfile, c.seedId) > 0).map((c) => (
+                <ItemSlotView
+                  key={c.id}
+                  itemId={c.seedId}
+                  count={countItem(invProfile, c.seedId)}
+                  onClick={() => {
+                    void postTileAction("plant", seedPicker.x, seedPicker.y, c.seedId);
+                    setSeedPicker(null);
+                  }}
+                />
+              ))}
+            </ItemSlotGrid>
             {CROPS.every((c) => countItem(invProfile, c.seedId) === 0) && (
               <p className="muted" style={{ margin: 0, fontSize: 13 }}>種がない</p>
             )}
@@ -6598,7 +6614,7 @@ export default function WorldBoxClient() {
 
       {boardOpen && spaceUi === "lobby" && (
         <div style={panelOverlay} className="wb-panel">
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{ ...stickyPanelHead, display: "flex", alignItems: "center", gap: 10 }}>
             <strong>グローバル掲示板</strong>
             <span style={{ flex: 1 }} />
             <button type="button" style={btn} onClick={() => setBoardOpen(false)}>
@@ -6647,7 +6663,7 @@ export default function WorldBoxClient() {
 
       {mapView && (
         <div style={panelOverlay} className="wb-panel">
-          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <div style={{ ...stickyPanelHead, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
             <strong>マップ</strong>
             <span className="muted">あなたの座標 X {coords.x} / Y {coords.y}</span>
             {porterUi && (
@@ -6706,7 +6722,7 @@ export default function WorldBoxClient() {
       )}
       {reportOpen && (
         <div className="wb-panel" style={{ ...panelOverlay, width: "min(330px, calc(100% - 20px))" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <div style={{ ...stickyPanelHead, display: "flex", alignItems: "center", gap: 8 }}>
             <strong>通報</strong>
             <span style={{ flex: 1 }} />
             <button type="button" style={btn} onClick={() => setReportOpen(false)}>閉じる</button>

@@ -567,7 +567,14 @@ export default function WorldBoxCasinoPanel({ onClose }: { onClose: () => void }
   };
 
   const header = (
-    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+    <div
+      style={{
+        display: "flex", alignItems: "center", gap: 10,
+        position: "sticky", top: -14, zIndex: 3,
+        margin: "-14px -14px 0", padding: "14px 14px 8px",
+        background: "rgba(12,10,18,0.98)",
+      }}
+    >
       <strong>カジノ</strong>
       {state?.machine && <span style={{ fontWeight: 700, color: "#ffd23e" }}>{MACHINE_LABEL[state.machine]}</span>}
       {state && <span>残高 <strong>{state.effectiveBalance}</strong></span>}
