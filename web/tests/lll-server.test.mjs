@@ -1,4 +1,4 @@
-// LLL のサーバー統合（lib/lll-server.ts）の検証。
+// LLL のサーバー統合（lib/lll/lll-server.ts）の検証。
 // balku-room.test.mjs と同じ方式: bot-api は未設定スタブ、
 // logfareApiKeys は空スタブ（= Logfare 未設定 → 決定的フォールバック経路）を差し込み、
 // メモリのみモードでセッション→鑑定→編成→対戦→報酬の全ループを通す。
@@ -59,7 +59,7 @@ function logfareApiKeys() { return []; }
 `;
 
 const server = await loadBundle(
-  ["lll-game.ts", "lll-tactics.ts", "lll-battle.ts", "lll-server.ts"],
+  ["lll/lll-game.ts", "lll/lll-tactics.ts", "lll/lll-battle.ts", "lll/lll-server.ts"],
   [
     "LllError",
     "getOrCreateProfile",
@@ -194,7 +194,7 @@ async function tableUpsert() {}
 function logfareApiKeys() { return ["test-key"]; }
 `;
   const withAi = await loadBundle(
-    ["lll-game.ts", "lll-battle.ts", "lll-server.ts"],
+    ["lll/lll-game.ts", "lll/lll-battle.ts", "lll/lll-server.ts"],
     ["getOrCreateProfile", "appraise", "appraiseWordsWithLogfare"],
     PREFIX_WITH_KEY,
   );
@@ -353,7 +353,7 @@ async function kvSet(ns, key, value) { __kv.set(ns + ":" + key, value); }
 function logfareApiKeys() { return []; }
 `;
   const db = await loadBundle(
-    ["lll-game.ts", "lll-tactics.ts", "lll-battle.ts", "lll-server.ts"],
+    ["lll/lll-game.ts", "lll/lll-tactics.ts", "lll/lll-battle.ts", "lll/lll-server.ts"],
     ["getOrCreateProfile", "getProfile", "__tables", "__kv"],
     PREFIX_DB,
   );

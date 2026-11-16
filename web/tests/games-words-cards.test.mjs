@@ -1,7 +1,7 @@
 // カード/ワード/タイピング系ゲーム3本のロジック検証（lib のみ、UI 非依存）。
-// - lib/solitaire.ts: 初期配布・移動合法判定・ストック循環・勝利判定
-// - lib/wordle.ts: 重複文字判定・辞書・勝敗・キーボード集約
-// - lib/typing.ts: WPM/正確率計算・課題生成
+// - lib/games/solitaire.ts: 初期配布・移動合法判定・ストック循環・勝利判定
+// - lib/games/wordle.ts: 重複文字判定・辞書・勝敗・キーボード集約
+// - lib/games/typing.ts: WPM/正確率計算・課題生成
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -18,9 +18,9 @@ async function loadLib(name) {
   return import("data:text/javascript;base64," + Buffer.from(js).toString("base64"));
 }
 
-const sol = await loadLib("solitaire.ts");
-const wd = await loadLib("wordle.ts");
-const ty = await loadLib("typing.ts");
+const sol = await loadLib("games/solitaire.ts");
+const wd = await loadLib("games/wordle.ts");
+const ty = await loadLib("games/typing.ts");
 
 function card(suit, rank, faceUp = true) {
   return { id: `${suit}-${rank}`, suit, rank, faceUp };

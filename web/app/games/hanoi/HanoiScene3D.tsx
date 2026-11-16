@@ -1,7 +1,7 @@
 "use client";
 // ハノイの塔の 3D シーン。円盤は「持ち上げ→横移動→降ろす」の3段階で動く。
 // 操作は柱のタップ（持ち上げ/配置、既存と同じ）と、柱から柱へのドラッグ。
-// 移動可否は lib/hanoi.ts が決め、ここは表現と入力の橋渡しだけを行う。
+// 移動可否は lib/games/hanoi.ts が決め、ここは表現と入力の橋渡しだけを行う。
 // WebGL が使えない場合は onFail で親へ知らせ、親は 2D 表示に切り替える。
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import * as THREE from "three";

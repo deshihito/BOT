@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { getRequestSession, publicOrigin, sessionOwnerKey } from "@/lib/auth";
 import {
   canDouble, createBlackjackGame, doubleDown, handValue, hit, stand, startRound,
-} from "@/lib/blackjack";
+} from "@/lib/games/blackjack";
 import {
   CASINO_REASON, CASINO_SESSION_REASONS, casinoMachineNear, isCasinoSpendReason, type CasinoMachine,
   playRoulette, playSlot, validateCasinoBet, type CasinoGame, type RoulettePick,

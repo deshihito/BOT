@@ -1,5 +1,5 @@
 // A17 新規ゲーム2本のロジック検証（lib のみ、UI 非依存）。
-// - lib/watersort.ts: 生成の可解性・注ぎ規則・完成判定・アンドゥ
+// - lib/games/watersort.ts: 生成の可解性・注ぎ規則・完成判定・アンドゥ
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -16,7 +16,7 @@ async function loadLib(name) {
   return import("data:text/javascript;base64," + Buffer.from(js).toString("base64"));
 }
 
-const ws = await loadLib("watersort.ts");
+const ws = await loadLib("games/watersort.ts");
 
 const shapeIdx = (name) => bp.BP_SHAPES.findIndex((s) => s.name === name);
 

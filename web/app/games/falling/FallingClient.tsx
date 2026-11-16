@@ -1,5 +1,5 @@
 "use client";
-// フォーリングブロック（落下パズル）。ロジックは lib/falling.ts（純粋関数）。
+// フォーリングブロック（落下パズル）。ロジックは lib/games/falling.ts（純粋関数）。
 // キーボードと盤面のスワイプ／タップの両方で操作でき、端末内で完結する（サーバー送信なし）。
 // ベストスコアは localStorage の ago-falling-best に保存する。
 import Link from "next/link";
@@ -27,7 +27,7 @@ import {
   type FallingCell,
   type FallingPieceType,
   type FallingState,
-} from "@/lib/falling";
+} from "@/lib/games/falling";
 import { sfxCorrect, sfxLose, sfxPlace, sfxTap, sfxWin } from "@/lib/sfx";
 import { tappableProps, useGesture, type GestureDirection } from "@/lib/gesture";
 import { EndScreen } from "../GameJuice";

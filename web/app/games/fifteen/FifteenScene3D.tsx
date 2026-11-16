@@ -6,7 +6,7 @@
 // アニメーションさせる（ロジック側の状態遷移は即時で、見た目だけ追従する）。
 // 入力は現行クライアントの操作語彙どおり:
 //   タップ = onTile（空白と同じ行・列のまとめてスライドも含め、判定は
-//     すべて lib/fifteen.ts の canSlide と親ハンドラが行う）
+//     すべて lib/games/fifteen.ts の canSlide と親ハンドラが行う）
 // 手数・時間・完成形の並びなどの状態は親の DOM 併記が担う。
 // WebGL が使えない場合は onFail で親へ知らせ、親は 2D 表示に切り替える。
 import { useEffect, useRef, useState, type ReactNode } from "react";
@@ -15,7 +15,7 @@ import { createStage, type Stage } from "@/lib/three-kit/stage";
 import { canvasTexture } from "@/lib/three-kit/primitives";
 import { attachPickPointer } from "@/lib/three-kit/pointer";
 import SceneBox from "@/lib/three-kit/SceneBox";
-import type { FifteenStatus } from "@/lib/fifteen";
+import type { FifteenStatus } from "@/lib/games/fifteen";
 
 interface Props {
   tiles: number[];

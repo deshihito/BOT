@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { listPublicBalkuRooms } from "@/lib/balku-server";
+import { listPublicBalkuRooms } from "@/lib/balku/balku-server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

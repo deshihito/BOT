@@ -14,7 +14,7 @@ class JinrouRolesExportTest(unittest.TestCase):
     def test_exported_file_is_up_to_date(self):
         current = exporter.OUT_TS.read_text(encoding="utf-8")
         self.assertEqual(current, exporter.render_ts(exporter.build_roles()),
-                         "web/lib/jinrou-roles.ts が古いです。python scripts/export_jinrou_roles.py を実行してください。")
+                         "web/lib/games/jinrou-roles.ts が古いです。python scripts/export_jinrou_roles.py を実行してください。")
 
     def test_matches_bot_help_roles(self):
         import core.game.jinrou.entry as jinrou

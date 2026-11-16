@@ -1,5 +1,5 @@
 "use client";
-// ライツアウト。ロジックは lib/lightsout.ts（解ける盤を逆再生で生成）。
+// ライツアウト。ロジックは lib/games/lightsout.ts（解ける盤を逆再生で生成）。
 // 押したマスと上下左右が反転する。全消灯でクリア。端末内で完結。
 import Link from "next/link";
 import dynamic from "next/dynamic";
@@ -15,7 +15,7 @@ import {
   type LightsOutDifficulty,
   type LightsOutSize,
   type LightsOutState,
-} from "@/lib/lightsout";
+} from "@/lib/games/lightsout";
 import { sfxFlip, sfxTap, sfxWin } from "@/lib/sfx";
 import { tappableProps } from "@/lib/gesture";
 import { EndScreen } from "../GameJuice";

@@ -19,7 +19,7 @@ import { createStage, type Stage } from "@/lib/three-kit/stage";
 import { createBall } from "@/lib/three-kit/primitives";
 import { attachPickPointer } from "@/lib/three-kit/pointer";
 import SceneBox from "@/lib/three-kit/SceneBox";
-import { MM_CODE_LENGTH, MM_MAX_GUESSES, type MmColor, type MmGuess } from "@/lib/mastermind";
+import { MM_CODE_LENGTH, MM_MAX_GUESSES, type MmColor, type MmGuess } from "@/lib/games/mastermind";
 
 interface Props {
   /** 判定済みの推測履歴（答えは含まない）。 */

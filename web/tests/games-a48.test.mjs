@@ -1,7 +1,7 @@
 // A48フェーズ: 内容充実3件（バンク/問題増量のみ）の検証。
-// - lib/tsume.ts: 詰将棋 12題→14題（1手詰め7・3手詰め7）。増量分も含め全問題が
+// - lib/games/tsume.ts: 詰将棋 12題→14題（1手詰め7・3手詰め7）。増量分も含め全問題が
 //   ソルバー検証を通る（初期局面で玉に王手なし・指定手数ちょうどで詰み・初手が1つだけ）
-// - lib/kanacross.ts: カナクロス 12問→14問。増量分も含め全問 isValidPuzzle が妥当
+// - lib/games/kanacross.ts: カナクロス 12問→14問。増量分も含め全問 isValidPuzzle が妥当
 // - lib/online/games/quizbattle.ts: 問題バンク 84問→98問（形式・重複なし・正解の妥当性）
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -42,8 +42,8 @@ async function loadOnline(name, exportsList) {
   return import("data:text/javascript;base64," + Buffer.from(code).toString("base64"));
 }
 
-const tsume = await loadLib("tsume.ts");
-const kana = await loadLib("kanacross.ts");
+const tsume = await loadLib("games/tsume.ts");
+const kana = await loadLib("games/kanacross.ts");
 const qb = await loadOnline("quizbattle.ts", ["QUIZ_BATTLE_QUESTIONS"]);
 
 // ------------------------------------------------------------ tsume 増量第4弾

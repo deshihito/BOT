@@ -3,7 +3,7 @@
 // One Prompter の操作UI（クライアント）。
 // やりたいこと（漠然とした一文） → 二択質問（1問ずつ） →（LLM 経路のみ）深掘り質問 → 完成プロンプト表示。
 // 質問生成とプロンプト合成は自サイトの API（/api/one-prompter、サーバー側で LLM を呼ぶ）に任せ、
-// API が使えない環境・失敗時はルールベース版（lib/one-prompter.ts）にその場で切り替える。
+// API が使えない環境・失敗時はルールベース版（lib/one-prompter/one-prompter.ts）にその場で切り替える。
 import { useMemo, useState } from "react";
 import {
   buildPrompt,
@@ -11,8 +11,8 @@ import {
   type PrompterAnswer,
   type PrompterCategory,
   type QuestionSlot,
-} from "../../lib/one-prompter";
-import { buildPromptDownload, type PromptDownloadFormat } from "../../lib/one-prompter-download";
+} from "../../lib/one-prompter/one-prompter";
+import { buildPromptDownload, type PromptDownloadFormat } from "../../lib/one-prompter/one-prompter-download";
 import {
   bothAnswerText,
   DEFERRED_ANSWER_TEXT,
@@ -24,7 +24,7 @@ import {
   pendingAnswerText,
   type LlmQuestion,
   type PromptLang,
-} from "../../lib/one-prompter-llm";
+} from "../../lib/one-prompter/one-prompter-llm";
 
 /** 出力言語モードの選択肢。変わるのは完成プロンプトの言語だけで、画面と質問は日本語のまま。 */
 const PROMPT_LANG_OPTIONS: { value: PromptLang; label: string }[] = [

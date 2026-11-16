@@ -1,6 +1,6 @@
 "use client";
 // チンチロリンの 3D シーン。丼（親用・自分用）の中でサイコロが転がる。
-// 出目は lib/chinchiro.ts が決め、ここは DiceSet で転がし演出だけを行う。
+// 出目は lib/games/chinchiro.ts が決め、ここは DiceSet で転がし演出だけを行う。
 // 丼へのタップ/フリックはそのまま「振る」操作（既存ジェスチャと同一）。
 // WebGL が使えない場合は onFail で親へ知らせ、親は 2D 表示に切り替える。
 import { useEffect, useRef, useState } from "react";
@@ -9,7 +9,7 @@ import { createStage } from "@/lib/three-kit/stage";
 import { DiceSet } from "@/lib/three-kit/dice";
 import { attachPickPointer } from "@/lib/three-kit/pointer";
 import SceneBox from "@/lib/three-kit/SceneBox";
-import type { CcDice } from "@/lib/chinchiro";
+import type { CcDice } from "@/lib/games/chinchiro";
 import type { ReactNode } from "react";
 
 interface Props {

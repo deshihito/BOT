@@ -1,5 +1,5 @@
 // 追加ゲーム第2弾の検証。
-// - lib/falling.ts: 回転（壁蹴り含む）・ライン消去・固定・ゲームオーバー
+// - lib/games/falling.ts: 回転（壁蹴り含む）・ライン消去・固定・ゲームオーバー
 // （tictactoe / checkers の検証は、2026-11-15 のカタログ削減で両タイトルを
 // 削除したため、このファイルからも外した。）
 import { test } from "node:test";
@@ -19,7 +19,7 @@ async function loadLib(name) {
   return import("data:text/javascript;base64," + Buffer.from(js).toString("base64"));
 }
 
-const falling = await loadLib("falling.ts");
+const falling = await loadLib("games/falling.ts");
 
 /* ---------------- falling ---------------- */
 

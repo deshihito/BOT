@@ -1,6 +1,6 @@
 "use client";
 // エアホッケーの 3D シーン。テーブル + パック + 両マレット。
-// 物理は lib/airhockey.ts の固定ステップが決め、ここは親の stateRef を
+// 物理は lib/games/airhockey.ts の固定ステップが決め、ここは親の stateRef を
 // 毎フレーム読み、補間追従するだけ。3D 側で衝突・ゴール判定はしない。
 // ゴール時は直近の得点変化 (state のスコア差分) を見てゴール口を発光させる
 // 演出だけを行う (判定は既存ロジック済み)。
@@ -19,7 +19,7 @@ import {
   AIR_PADDLE_R,
   AIR_PUCK_R,
   type AirHockeyState,
-} from "@/lib/airhockey";
+} from "@/lib/games/airhockey";
 
 interface Props {
   /** 親のゲームループが進める最新の状態を読む (React 再描画を介さない)。 */

@@ -7,7 +7,7 @@
 // 回答は { type: "answer", value }。得点は各問題の最初の正解者だけが
 // 100 + 残り秒数×5 点を得る。不正解はその問題だけ 3 秒ロック。
 import { useEffect, useRef, useState } from "react";
-import { playSe } from "@/lib/balku-sound";
+import { playSe } from "@/lib/balku/balku-sound";
 import OnlineShell from "../online/OnlineShell";
 import type { OnlineRoomApi, OnlineRoomView } from "../online/useOnlineRoom";
 import { useRoomJuice } from "../GameJuice";

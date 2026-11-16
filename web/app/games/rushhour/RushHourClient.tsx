@@ -1,5 +1,5 @@
 "use client";
-// ラッシュアワー。ロジックは lib/rushhour.ts（解けた配置から崩す生成で
+// ラッシュアワー。ロジックは lib/games/rushhour.ts（解けた配置から崩す生成で
 // 必ず解ける）。車を選んでスワイプ／矢印キーで1マスずつ動かす。
 // 1回のスライド（距離を問わず）を1手として数える。
 import Link from "next/link";
@@ -15,7 +15,7 @@ import {
   rushSlideOptions,
   rushSlideRange,
   type RushState,
-} from "@/lib/rushhour";
+} from "@/lib/games/rushhour";
 
 // 3D シーンは three を含むため遅延読み込み（このページ専用チャンクに閉じる）。
 const RushHourScene3D = dynamic(() => import("./RushHourScene3D"), { ssr: false });

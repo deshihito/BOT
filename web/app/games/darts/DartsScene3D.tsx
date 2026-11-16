@@ -2,7 +2,7 @@
 // ダーツの 3D シーン。同心円セグメントのボードを ShapeGeometry の扇形で
 // 立体化し、刺さったダーツはコーン＋シャフト＋フライトで表現する。
 // 最新の1投は手前から飛んで刺さるアニメーションで表示する。
-// 状態・得点判定は lib/darts.ts とクライアントの onThrow が持ち、ここは
+// 状態・得点判定は lib/games/darts.ts とクライアントの onThrow が持ち、ここは
 // 表現と入力の橋渡しだけ: ボードへのタップ位置（正規化座標）をそのまま
 // 既存 onThrow へ渡す（2D の SVG クリックと同じ座標系・同じハンドラ）。
 // 数字はボード外周に CanvasTexture で描き、スコア/ラウンドは親の DOM 併記。
@@ -13,7 +13,7 @@ import { createStage } from "@/lib/three-kit/stage";
 import { canvasTexture } from "@/lib/three-kit/primitives";
 import { attachPickPointer } from "@/lib/three-kit/pointer";
 import SceneBox from "@/lib/three-kit/SceneBox";
-import { DART_RADII, DART_SECTORS, type DartsState } from "@/lib/darts";
+import { DART_RADII, DART_SECTORS, type DartsState } from "@/lib/games/darts";
 
 interface Props {
   state: DartsState;

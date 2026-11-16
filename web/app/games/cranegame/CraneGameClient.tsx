@@ -1,5 +1,5 @@
 "use client";
-// クレーンゲーム。ロジックは lib/cranegame.ts（距離だけの決定的判定）。
+// クレーンゲーム。ロジックは lib/games/cranegame.ts（距離だけの決定的判定）。
 // クレーンの往復は requestAnimationFrame で stepCrane を進めて描く。
 // 取れた景品の累計は端末内（localStorage）にだけ保存する。
 import Link from "next/link";
@@ -14,7 +14,7 @@ import {
   stopCrane,
   CRANE_DROP_MS,
   type CraneState,
-} from "@/lib/cranegame";
+} from "@/lib/games/cranegame";
 import { sfxPlace, sfxTap, sfxWin, sfxWrong } from "@/lib/sfx";
 import { useGamesNav } from "../GamesShell";
 

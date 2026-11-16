@@ -4,7 +4,7 @@
 // 画像/GIF の受け取り → ONNX Runtime Web（WASM）で背景除去 →
 // α後処理（リマップ＋単色背景デコンタミネーション）→ 用途別エンコード →
 // プレビュー／ダウンロード／Discord への投稿、までをブラウザ内で完結させる。
-// 純粋ロジック（寸法・上限・後処理・ラダー）は lib/bgcut-core.ts に置く。
+// 純粋ロジック（寸法・上限・後処理・ラダー）は lib/bgcut/bgcut-core.ts に置く。
 
 import { useRef, useState } from "react";
 import { GIFEncoder, applyPalette, quantize } from "gifenc";
@@ -30,7 +30,7 @@ import {
   stickerStillAttempts,
   stepDurations,
   type BgCutPurpose,
-} from "@/lib/bgcut-core";
+} from "@/lib/bgcut/bgcut-core";
 
 type OrtModule = typeof import("onnxruntime-web");
 type OrtSession = Awaited<ReturnType<OrtModule["InferenceSession"]["create"]>>;

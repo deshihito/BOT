@@ -1,5 +1,5 @@
 "use client";
-// ウォーターソート。ロジックは lib/watersort.ts（完成状態からの逆操作生成で必ず解ける）。
+// ウォーターソート。ロジックは lib/games/watersort.ts（完成状態からの逆操作生成で必ず解ける）。
 // ボトルをタップして選び、別のボトルをタップして注ぐ。端末内で完結し、サーバーへ送信しない。
 import Link from "next/link";
 import dynamic from "next/dynamic";
@@ -12,7 +12,7 @@ import {
   pourWater,
   undoWaterSort,
   type WsState,
-} from "@/lib/watersort";
+} from "@/lib/games/watersort";
 import { sfxPlace, sfxSlide, sfxTap, sfxWin } from "@/lib/sfx";
 import { tappableProps, useGesture } from "@/lib/gesture";
 import { EndScreen } from "../GameJuice";

@@ -3,7 +3,7 @@
 // お金はセッション開始時に spend オプで先払いし、終了時に prepaid の
 // gamble オプ1件で精算する。精算オプは先払いオプが done になるまで作らない
 // （先払いが失敗したセッションは無効化され、配当もペナルティも発生しない）。
-import type { BjState } from "../blackjack";
+import type { BjState } from "../games/blackjack";
 import { cleanCasinoUserState, type CasinoUserState, type DoubleSessionState } from "./casino-games";
 
 export type CasinoSession =

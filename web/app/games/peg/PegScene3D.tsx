@@ -15,7 +15,7 @@ import { createStage, type Stage } from "@/lib/three-kit/stage";
 import { createStone } from "@/lib/three-kit/primitives";
 import { attachPickPointer } from "@/lib/three-kit/pointer";
 import SceneBox from "@/lib/three-kit/SceneBox";
-import { isPegHole, PEG_SIZE, type PegCell } from "@/lib/peg";
+import { isPegHole, PEG_SIZE, type PegCell } from "@/lib/games/peg";
 
 interface Props {
   cells: PegCell[];

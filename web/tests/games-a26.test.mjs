@@ -1,5 +1,5 @@
 // A26フェーズの検証。
-// - lib/cranegame.ts: 景品配置の決定性・距離ベースの掴み判定・往復と降下の進行
+// - lib/games/cranegame.ts: 景品配置の決定性・距離ベースの掴み判定・往復と降下の進行
 // - lib/online/games/musicalchairs.ts: 音楽停止→着席競争→最遅脱落・未着席の規則・退出
 // - lib/online/games/nanja.ts: 増量後のバンク件数（30種）と重複なし・山札120枚
 import { test } from "node:test";
@@ -41,7 +41,7 @@ async function loadOnline(name, exportsList) {
   return import("data:text/javascript;base64," + Buffer.from(code).toString("base64"));
 }
 
-const crane = await loadLib("cranegame.ts");
+const crane = await loadLib("games/cranegame.ts");
 const mc = await loadOnline("musicalchairs.ts", [
   "gameModule",
   "MC_REACT_LIMIT_MS",

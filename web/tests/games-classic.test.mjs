@@ -1,7 +1,7 @@
 // 追加した定番ゲーム3本のロジック検証（lib のみ、UI 非依存）。
-// - lib/minesweeper.ts: 初手安全・フラッドフィル・旗・勝敗
-// - lib/slider2048.ts: 合体・スポーン・勝敗
-// - lib/memory-match.ts: ペア構成・照合・手数・勝利
+// - lib/games/minesweeper.ts: 初手安全・フラッドフィル・旗・勝敗
+// - lib/games/slider2048.ts: 合体・スポーン・勝敗
+// - lib/games/memory-match.ts: ペア構成・照合・手数・勝利
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -18,9 +18,9 @@ async function loadLib(name) {
   return import("data:text/javascript;base64," + Buffer.from(js).toString("base64"));
 }
 
-const ms = await loadLib("minesweeper.ts");
-const slide = await loadLib("slider2048.ts");
-const mem = await loadLib("memory-match.ts");
+const ms = await loadLib("games/minesweeper.ts");
+const slide = await loadLib("games/slider2048.ts");
+const mem = await loadLib("games/memory-match.ts");
 
 test("マインスイーパー: 初手は地雷を踏まず、そのマスと周囲に地雷が無い", () => {
   let state = ms.createMsGame(9, 9, 10, 42);

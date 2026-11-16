@@ -1,7 +1,7 @@
 // A27フェーズの検証。
-// - lib/mergefruit.ts: 落下・合体・連鎖・天井ゲームオーバー・決定性
+// - lib/games/mergefruit.ts: 落下・合体・連鎖・天井ゲームオーバー・決定性
 // - lib/online/games/wordbasket.ts: 形式検証・得点式・秘匿・ロック・退出・完走
-// - lib/flagquiz.ts: 増量後のバンク（195組・重複なし・国コードは ISO alpha-2）
+// - lib/games/flagquiz.ts: 増量後のバンク（195組・重複なし・国コードは ISO alpha-2）
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -41,8 +41,8 @@ async function loadOnline(name, exportsList) {
   return import("data:text/javascript;base64," + Buffer.from(code).toString("base64"));
 }
 
-const mf = await loadLib("mergefruit.ts");
-const fq = await loadLib("flagquiz.ts");
+const mf = await loadLib("games/mergefruit.ts");
+const fq = await loadLib("games/flagquiz.ts");
 const wb = await loadOnline("wordbasket.ts", [
   "gameModule",
   "WB_PROMPTS",

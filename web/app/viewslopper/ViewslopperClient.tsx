@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import ResultView, { type ViewResult } from "./ResultView";
-import { saveHistory, toHistoryEntry } from "@/lib/viewslopper-history";
+import { saveHistory, toHistoryEntry } from "@/lib/viewslopper/viewslopper-history";
 
 export default function ViewslopperClient() {
   const [url, setUrl] = useState("");

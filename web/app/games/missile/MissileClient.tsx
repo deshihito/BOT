@@ -1,5 +1,5 @@
 "use client";
-// ミサイル防衛。ロジックは lib/missile.ts（固定ステップ・シード決定的）。
+// ミサイル防衛。ロジックは lib/games/missile.ts（固定ステップ・シード決定的）。
 // フィールドをタップした地点へ一番近い基地から迎撃弾を撃ち、爆風で敵ミサイルを壊す。
 // 端末内で完結し、サーバーへ送信しない。
 import Link from "next/link";
@@ -22,7 +22,7 @@ import {
   stepMissile,
   totalAmmo,
   type MissileState,
-} from "@/lib/missile";
+} from "@/lib/games/missile";
 import { sfxCorrect, sfxLose, sfxPop, sfxTap } from "@/lib/sfx";
 import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";

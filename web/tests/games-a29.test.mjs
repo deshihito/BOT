@@ -1,6 +1,6 @@
 // A29フェーズの新規2本＋増量のロジック検証。
-// - lib/hearts.ts: ルール（パス/2♣/フォロー/点計算/ムーン）・CPU込み全進行・決定性
-// - lib/puttgolf.ts: シミュレーション決定性・ガイド経由の自動プレイで全ホール到達
+// - lib/games/hearts.ts: ルール（パス/2♣/フォロー/点計算/ムーン）・CPU込み全進行・決定性
+// - lib/games/puttgolf.ts: シミュレーション決定性・ガイド経由の自動プレイで全ホール到達
 // - lib/online/games/majority.ts: バンク 75問・4択形式・重複なし
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -41,8 +41,8 @@ async function loadOnline(name, exportsList) {
   return import("data:text/javascript;base64," + Buffer.from(code).toString("base64"));
 }
 
-const hearts = await loadLib("hearts.ts");
-const putt = await loadLib("puttgolf.ts");
+const hearts = await loadLib("games/hearts.ts");
+const putt = await loadLib("games/puttgolf.ts");
 const mj = await loadOnline("majority.ts", ["MAJORITY_QUESTIONS"]);
 
 // ---------------------------------------------------------------- ハーツ

@@ -1,7 +1,7 @@
 // A43フェーズ: 内容充実3件（バンク/問題増量のみ）の検証。
-// - lib/tsume.ts: 詰将棋 10題→12題（1手詰め6・3手詰め6）。増量分も含め全問題が
+// - lib/games/tsume.ts: 詰将棋 10題→12題（1手詰め6・3手詰め6）。増量分も含め全問題が
 //   ソルバー検証を通る（初期局面で玉に王手なし・指定手数ちょうどで詰み・初手が1つだけ）
-// - lib/kanacross.ts: カナクロス 10問→12問。増量分も含め全問 isValidPuzzle が妥当
+// - lib/games/kanacross.ts: カナクロス 10問→12問。増量分も含め全問 isValidPuzzle が妥当
 // - lib/online/games/drawguess.ts: お題バンク 130語→150語（重複なし・
 //   正規化（カタカナ→ひらがな化）後も衝突なし）
 import { test } from "node:test";
@@ -43,8 +43,8 @@ async function loadOnline(name, exportsList) {
   return import("data:text/javascript;base64," + Buffer.from(code).toString("base64"));
 }
 
-const tsume = await loadLib("tsume.ts");
-const kana = await loadLib("kanacross.ts");
+const tsume = await loadLib("games/tsume.ts");
+const kana = await loadLib("games/kanacross.ts");
 const dg = await loadOnline("drawguess.ts", ["DG_WORDS", "normalizeGuess"]);
 
 // ------------------------------------------------------------ tsume 増量第3弾

@@ -1,6 +1,6 @@
 "use client";
 // 2x2キューブの 3D シーン。回転する立方体そのものを本体として造形する:
-// 小キューブ8個＋面ステッカー（色は lib/cube.ts のステッカー状態そのまま）。
+// 小キューブ8個＋面ステッカー（色は lib/games/cube.ts のステッカー状態そのまま）。
 // ロジック（置換・勝敗）は lib が持ち、ここは表示と入力の橋渡しだけ:
 //   面回転アニメーションは、クライアントが渡す lastMove（＝lib へ適用済みの手）を
 //   検出して該当レイヤーを 90 度回すだけ。3D 側で置換や回転可否は判定しない。
@@ -20,7 +20,7 @@ import * as THREE from "three";
 import { createStage } from "@/lib/three-kit/stage";
 import { attachPickPointer } from "@/lib/three-kit/pointer";
 import SceneBox from "@/lib/three-kit/SceneBox";
-import type { CubeColor, CubeFace, CubeMove, CubeState } from "@/lib/cube";
+import type { CubeColor, CubeFace, CubeMove, CubeState } from "@/lib/games/cube";
 
 interface Props {
   stickers: CubeState["stickers"];
@@ -41,7 +41,7 @@ const COLOR_INT: Record<CubeColor, number> = {
   red: 0xe74c3c,
 };
 
-// lib/cube.ts のステッカー定義と同じ並び（面順 U,D,F,B,L,R × [左上,右上,左下,右下]）。
+// lib/games/cube.ts のステッカー定義と同じ並び（面順 U,D,F,B,L,R × [左上,右上,左下,右下]）。
 // 位置（±1）と法線から 24 スロットを組み立て、stickers[index] の色を引くための
 // レイアウト表。回転の置換そのものは lib 側にしか置かない。
 type SlotDef = { pos: [number, number, number]; normal: [number, number, number] };

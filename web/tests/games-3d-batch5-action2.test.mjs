@@ -92,8 +92,8 @@ test("3D batch5-action2 dodge: 自機/障害物は getSnapshot へ補間追従�
   assert.match(client, /playerXRef\.current \+= dx/, "自機の追従計算は従来ループのまま");
 });
 
-test("3D batch5-action2: ロジック層（lib/dragrace.ts, lib/aim.ts）に three が混入していない", () => {
-  for (const f of ["dragrace.ts", "aim.ts"]) {
+test("3D batch5-action2: ロジック層（lib/games/dragrace.ts, lib/games/aim.ts）に three が混入していない", () => {
+  for (const f of ["games/dragrace.ts", "games/aim.ts"]) {
     assert.doesNotMatch(read("lib", f), /from "three"/, `lib/${f}`);
   }
   assert.ok(!fs.existsSync(path.join(webDir, "lib", "dodge.ts")), "dodge 専用 lib は作らない（クライアント内ロジックのまま）");

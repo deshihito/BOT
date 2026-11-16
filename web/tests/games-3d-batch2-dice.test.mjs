@@ -67,8 +67,9 @@ test("3D batch2 dicequest: 白2個＋色4個の6ダイス構成で DiceSet を�
 
 
 test("3D batch2: ロジック層（lib/*.ts 本体）に three が混入していない", () => {
-  for (const f of fs.readdirSync(path.join(webDir, "lib"))) {
+  for (const f of fs.readdirSync(path.join(webDir, "lib"), { recursive: true })) {
     if (!f.endsWith(".ts")) continue;
+    if (f.startsWith("three-kit/")) continue; // three-kit は three を扱う共通層なので対象外
     const src = read("lib", f);
     assert.doesNotMatch(src, /from "three"/, `lib/${f}`);
   }

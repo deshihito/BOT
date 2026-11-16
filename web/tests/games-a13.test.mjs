@@ -1,5 +1,5 @@
 // A13フェーズの新規4本のロジック検証。
-// - lib/laser.ts: 反射規則・光路シミュレーション・生成パズルの可解性（全探索）
+// - lib/games/laser.ts: 反射規則・光路シミュレーション・生成パズルの可解性（全探索）
 // - lib/online/games/countdown.ts: 式評価の規則・秘匿・採点（完全一致ボーナス/先着）・完走
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -40,7 +40,7 @@ async function loadOnline(name, exportsList) {
   return import("data:text/javascript;base64," + Buffer.from(code).toString("base64"));
 }
 
-const laser = await loadLib("laser.ts");
+const laser = await loadLib("games/laser.ts");
 const cd = await loadOnline("countdown.ts", [ "gameModule", "evaluateCountdown", "CD_TOTAL_ROUNDS", "CD_POINTS_EXACT", "CD_POINTS_CLOSEST", ]);
 
 function lcg(seed) {

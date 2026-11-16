@@ -10,7 +10,7 @@
 // BOT API が未設定の環境ではメモリのみで動作する（ルームはプロセス内
 // でのみ有効で、再起動で消える）。
 import { randomBytes } from "node:crypto";
-import { isBotApiConfigured, kvDelete, kvList, kvSet } from "./bot-api";
+import { isBotApiConfigured, kvDelete, kvList, kvSet } from "../bot-api";
 import {
   addLobbyPlayer,
   applyGameAction,

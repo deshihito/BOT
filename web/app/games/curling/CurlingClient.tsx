@@ -1,5 +1,5 @@
 "use client";
-// カーリング（CPU 対戦・全2エンド）。ロジックと物理は lib/curling.ts。
+// カーリング（CPU 対戦・全2エンド）。ロジックと物理は lib/games/curling.ts。
 // ベスト記録: localStorage `ago-curling-best` に通算勝利数を保存する
 // （勝つたびに +1。設計はこのコメントに明示）。端末内で完結し、サーバーへ送信しない。
 import Link from "next/link";
@@ -24,7 +24,7 @@ import {
   playerThrow,
   type CuStone,
   type CurlingState,
-} from "@/lib/curling";
+} from "@/lib/games/curling";
 import { sfxCorrect, sfxLose, sfxSlide, sfxTap, sfxWin } from "@/lib/sfx";
 import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";

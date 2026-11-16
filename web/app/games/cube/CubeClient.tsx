@@ -1,5 +1,5 @@
 "use client";
-// 2x2 ルービックキューブ。ロジックは lib/cube.ts（ステッカーモデル）。
+// 2x2 ルービックキューブ。ロジックは lib/games/cube.ts（ステッカーモデル）。
 // 本体は 3D の立方体（CubeScene3D）で、面タップ=時計回り、面スワイプ=その
 // 方向への回転、背景ドラッグ=視点回転。WebGL 不可時は展開図＋回転ボタン（2D）
 // へフォールバックする。端末内で完結する。
@@ -18,7 +18,7 @@ import {
   type CubeFace,
   type CubeMove,
   type CubeState,
-} from "@/lib/cube";
+} from "@/lib/games/cube";
 import { useGamesNav } from "../GamesShell";
 
 const BEST_KEY = "ago-cube-best";

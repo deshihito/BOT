@@ -1,5 +1,5 @@
 // A8フェーズの新規4本のロジック検証。
-// - lib/pipe.ts: 解の存在する生成・回転・水の流れ判定・クリア
+// - lib/games/pipe.ts: 解の存在する生成・回転・水の流れ判定・クリア
 // - lib/online/games/bombpass.ts: 爆発と失点・脱落と勝敗・秘匿（残り時間非表示）・退出
 // - lib/online/games/shiritori.ts: 単語バンク妥当性・接続ルール・「ン」負け・時間切れ
 import { test } from "node:test";
@@ -41,7 +41,7 @@ async function loadOnline(name, exportsList) {
   return import("data:text/javascript;base64," + Buffer.from(code).toString("base64"));
 }
 
-const pipe = await loadLib("pipe.ts");
+const pipe = await loadLib("games/pipe.ts");
 const bomb = await loadOnline("bombpass.ts", ["gameModule", "BOMB_MIN_MS", "BOMB_MAX_MS", "BOMB_LOSE_POINTS"]);
 const shi = await loadOnline("shiritori.ts", [ "gameModule", "SHIRITORI_WORDS", "normalizeShiritoriWord", "shiritoriTail", "isBankWord", "SHIRITORI_TURN_MS", ]);
 

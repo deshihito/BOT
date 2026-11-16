@@ -3,7 +3,7 @@
 // 入力の語彙は現行 2D と同じ「6ゾーン選択」: ゴール面へのタップを
 // attachPickPointer のレイキャストで受け、hit.point を正規化して
 // ゾーン番号へ変換し、既存ハンドラ onChoose（playerShoot / playerDive）へ渡す。
-// 判定は lib/penalty.ts のまま。ここは表現だけを持ち、シュート結果
+// 判定は lib/games/penalty.ts のまま。ここは表現だけを持ち、シュート結果
 // （直近キックの zone / keeperZone / outcome）へボール飛翔とキーパーの
 // ダイブをアニメーション追従させる。守備ターンも同じシーン・同じ
 // ゾーン選択で操作する（キーパーを操作する現行語彙に接続）。
@@ -15,7 +15,7 @@ import { createStage } from "@/lib/three-kit/stage";
 import { createBall, canvasTexture } from "@/lib/three-kit/primitives";
 import { attachPickPointer } from "@/lib/three-kit/pointer";
 import SceneBox from "@/lib/three-kit/SceneBox";
-import type { PenaltyState } from "@/lib/penalty";
+import type { PenaltyState } from "@/lib/games/penalty";
 
 interface Props {
   state: PenaltyState;

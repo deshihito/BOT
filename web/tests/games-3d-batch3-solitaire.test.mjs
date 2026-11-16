@@ -4,7 +4,7 @@
 // - シーンは three-kit の createCard / createStage / attachPickPointer を使う
 // - カードは差分同期（スロットキー＋カードキーの Map = entries）で管理する
 // - <button> 数が現行（solitaire 1 / spider 1 / freecell 2）から増えていないこと
-// - ロジック（lib/solitaire.ts, lib/spider.ts, lib/freecell.ts）へ three が混入していないこと
+// - ロジック（lib/games/solitaire.ts, lib/spider.ts, lib/games/freecell.ts）へ three が混入していないこと
 // - 主要ハンドラ（山札タップ・移動・ドラッグ・ダブルタップ等）へ接続していること
 import { test } from "node:test";
 import assert from "node:assert/strict";

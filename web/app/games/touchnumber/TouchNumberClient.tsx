@@ -1,5 +1,5 @@
 "use client";
-// タッチザナンバー。ロジックは lib/touchnumber.ts。
+// タッチザナンバー。ロジックは lib/games/touchnumber.ts。
 // 1から順にタップし、ミス1回につき+3秒のペナルティでタイムを競う。
 import Link from "next/link";
 import dynamic from "next/dynamic";
@@ -7,7 +7,7 @@ import { useEffect, useRef, useState } from "react";
 
 // 3D シーンは three を含むため遅延読み込み（このページ専用チャンクに閉じる）。
 const TouchNumberScene3D = dynamic(() => import("./TouchNumberScene3D"), { ssr: false });
-import { createTouchGame, isCleared, tapCell, touchColumns, type TouchState } from "@/lib/touchnumber";
+import { createTouchGame, isCleared, tapCell, touchColumns, type TouchState } from "@/lib/games/touchnumber";
 import { sfxPop, sfxTap, sfxWin, sfxWrong } from "@/lib/sfx";
 import { tappableProps } from "@/lib/gesture";
 import { EndScreen } from "../GameJuice";

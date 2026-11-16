@@ -1,5 +1,5 @@
 "use client";
-// エアホッケー。ロジックは lib/airhockey.ts（決定的な固定ステップシミュレーション）。
+// エアホッケー。ロジックは lib/games/airhockey.ts（決定的な固定ステップシミュレーション）。
 // 自分のパドルはポインタ位置へ追従する。描画は SVG で、パックとパドルの位置は
 // 毎フレーム ref 経由で直接更新し、スコア等の変化だけを React state に同期する。
 // ベストの設計: localStorage の ago-airhockey-best に「勝利回数」を保存する。
@@ -20,7 +20,7 @@ import {
   stepAirHockey,
   type AirDifficulty,
   type AirHockeyState,
-} from "@/lib/airhockey";
+} from "@/lib/games/airhockey";
 import { sfxCorrect, sfxLose, sfxWin, sfxWrong } from "@/lib/sfx";
 import { tappableProps } from "@/lib/gesture";
 import { EndScreen } from "../GameJuice";

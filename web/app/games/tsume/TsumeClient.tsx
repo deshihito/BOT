@@ -1,5 +1,5 @@
 "use client";
-// 詰将棋。王手の連続で玉を詰ませるパズル。ロジックとソルバーは lib/tsume.ts。
+// 詰将棋。王手の連続で玉を詰ませるパズル。ロジックとソルバーは lib/games/tsume.ts。
 // 玉方の応手はソルバーが自動で指す（詰みを逃れられる手があればそれを選ぶ）。
 // 端末内で完結し、サーバーへ送信しない。
 import Link from "next/link";
@@ -18,7 +18,7 @@ import {
   type TsumeBasePiece,
   type TsumeGameState,
   type TsumeMove,
-} from "@/lib/tsume";
+} from "@/lib/games/tsume";
 import { sfxCorrect, sfxLose, sfxTap, sfxWin, sfxWrong } from "@/lib/sfx";
 import { tappableProps, useGesture } from "@/lib/gesture";
 import { EndScreen } from "../GameJuice";

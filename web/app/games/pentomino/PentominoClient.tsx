@@ -1,5 +1,5 @@
 "use client";
-// ペントミノ。ロジックは lib/pentomino.ts。
+// ペントミノ。ロジックは lib/games/pentomino.ts。
 // パレットでピースを選び、回転・反転してから盤をタップして置く（タップ式）。
 // ピース未選択で配置済みのマスをタップすると、そのピースを外せる。
 // 端末内で完結し、サーバーへ送信しない。
@@ -28,7 +28,7 @@ import {
   type PentBoardKey,
   type PentId,
   type PentState,
-} from "@/lib/pentomino";
+} from "@/lib/games/pentomino";
 import { useGamesNav } from "../GamesShell";
 
 const BOARD_KEYS: PentBoardKey[] = ["6x10", "5x12"];

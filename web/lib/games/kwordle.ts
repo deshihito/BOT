@@ -1,5 +1,5 @@
 // カタカナワードル（5文字カタカナ単語推測）の純粋ロジック（UI 非依存・シード決定的）。
-// 英語版ワードル（lib/wordle.ts）と同じ作法で判定する:
+// 英語版ワードル（lib/games/wordle.ts）と同じ作法で判定する:
 // まず完全一致を確定し、残りの文字数の中で「含まれる」を割り当てるため、
 // 重複文字を出現回数ベースで正確に処理できる。
 // 推測は辞書判定をせず「カタカナ5文字」であれば受け付ける（答えバンクのみ実在語で構成）。
@@ -98,7 +98,7 @@ export function evaluateKwordleGuess(answer: string, guess: string): KanaMark[] 
   return marks;
 }
 
-/** mulberry32 系（lib/wordle.ts と同じ作法）。 */
+/** mulberry32 系（lib/games/wordle.ts と同じ作法）。 */
 function nextRandom(rng: number): { value: number; rng: number } {
   let t = (rng + 0x6d2b79f5) | 0;
   t = Math.imul(t ^ (t >>> 15), t | 1);

@@ -18,7 +18,7 @@ import path from "node:path";
 const root = path.join(import.meta.dirname, "..");
 const client = fs.readFileSync(path.join(root, "app", "games", "balku", "BalkuClient.tsx"), "utf8");
 const css = fs.readFileSync(path.join(root, "app", "globals.css"), "utf8");
-const gameLib = fs.readFileSync(path.join(root, "lib", "balku-game.ts"), "utf8");
+const gameLib = fs.readFileSync(path.join(root, "lib", "balku/balku-game.ts"), "utf8");
 
 // 対戦画面は最後の return（対戦画面コメント以降）
 const gameScreen = client.slice(client.indexOf("対戦画面 ---"));

@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 
 import Breadcrumbs from "../../Breadcrumbs";
-import { getBgcutSession } from "@/lib/bgcut";
+import { getBgcutSession } from "@/lib/bgcut/bgcut";
 import BgCutClient from "./BgCutClient";
 
 export const dynamic = "force-dynamic";

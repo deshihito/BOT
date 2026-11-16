@@ -19,7 +19,7 @@ const TOKEN_TTL_MS = 10 * 60 * 1000;
 /** 空間ごとの境界（lib/worldbox/mapgen.ts の MAP_W/MAP_H、lobby.ts の LOBBY_W/LOBBY_H）。 */
 /** ワールドは実質無制限のため、ここには有限空間の矩形だけを置く。 */
 const SPACE_BOUNDS = {
-  lobby: { width: 56, height: 64 },
+  lobby: { width: 126, height: 64 }, // 競馬場拡張で東へ拡大（lobby.ts の LOBBY_W/H）
   lobby2: { width: 40, height: 28 }, // ロビー2Fラウンジ（lobby-floors.ts の LOBBY2_W/H）
   lobby3: { width: 32, height: 24 }, // ロビー3F展望（lobby-floors.ts の LOBBY3_W/H）
   tent: { width: 22, height: 17 }, // テント拡張の最大段階（tier 2）に合わせる

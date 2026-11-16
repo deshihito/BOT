@@ -1,5 +1,5 @@
 "use client";
-// レーザーミラー。ロジックは lib/laser.ts（解の光路を先に作るため必ず解ける）。
+// レーザーミラー。ロジックは lib/games/laser.ts（解の光路を先に作るため必ず解ける）。
 // 鏡をタップすると / と \ が切り替わる。光路は毎回 traceLaser で描き直す。
 // 端末内で完結し、サーバーへ送信しない。
 import Link from "next/link";
@@ -15,7 +15,7 @@ import {
   rotateLaserMirror,
   traceLaser,
   type LaserState,
-} from "@/lib/laser";
+} from "@/lib/games/laser";
 import { useGamesNav } from "../GamesShell";
 
 const CELL = 92;

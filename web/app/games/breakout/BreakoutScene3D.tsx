@@ -1,7 +1,7 @@
 "use client";
 // ブロック崩しの 3D シーン。奥行きのある壁 + 色つき直方体のブロック段 +
 // 球のボール + パドル。物理・衝突・得点はクライアントの rAF ループ
-// (lib/breakout.ts の配置・得点定義に従う) が決め、ここは親の状態を
+// (lib/games/breakout.ts の配置・得点定義に従う) が決め、ここは親の状態を
 // getState で毎フレーム読み、指数補間で追従するだけ。3D 側で物理判定はしない。
 // ブロックは lib の BreakoutBrick (x/y/w/h/color/hp) をそのまま直方体へ写し、
 // alive の差分で消去する (破壊時は小さくフェードする破片表現)。
@@ -21,7 +21,7 @@ import {
   BREAKOUT_FIELD_H,
   BREAKOUT_FIELD_W,
   type BreakoutBrick,
-} from "@/lib/breakout";
+} from "@/lib/games/breakout";
 
 export interface BreakoutViewState {
   ball: { x: number; y: number; r: number };

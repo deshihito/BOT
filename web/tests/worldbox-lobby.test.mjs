@@ -63,6 +63,7 @@ const wb = await loadBundle(
     "LOBBY_W", "LOBBY_H", "L_VOID", "L_WALL", "L_MARBLE", "L_PLAZA", "L_RING", "L_CARPET", "L_WOOD",
     "L_SAND", "L_DARK", "L_CHECK", "LOBBY_FLOOR_SPRITE", "LOBBY_FLOOR_FALLBACK", "isSolidLobbyTile",
     "inLobbyShape", "LOBBY_OBJECTS", "LOBBY_NPCS", "LOBBY_ENTRY", "LOBBY_WARP_PAD",
+    "RACETRACK", "RACE_CORRIDOR", "RACECOURSE", "isRaceTrackTile", "isRaceInfieldTile",
     "LOBBY_STAIRS_UP", "LOBBY_STAIRS_DOWN", "LOBBY_UP_LANDING", "LOBBY_DOWN_LANDING",
     "buildLobby", "lobbyTileAt", "stationNear",
     "sanitizeHeartbeat", "sanitizePresenceSpace", "parsePresenceEntry", "selectVisiblePlayers",
@@ -76,13 +77,13 @@ const tile = (x, y) => wb.lobbyTileAt(lobby.tiles, x, y);
 
 // ---------- ロビー外形（図形の和集合） ----------
 
-test("lobby: 寸法は 56×64 で、タイル配列が一致する", () => {
-  assert.equal(wb.LOBBY_W, 56);
+test("lobby: 寸法は 126×64 で、タイル配列が一致する", () => {
+  assert.equal(wb.LOBBY_W, 126);
   assert.equal(wb.LOBBY_H, 64);
-  assert.equal(lobby.tiles.length, 56 * 64);
+  assert.equal(lobby.tiles.length, 126 * 64);
   // moveMap はタイル源（範囲外は岩＝固体）
   assert.equal(lobby.moveMap.tileAt(-1, 0), wb.T_ROCK);
-  assert.equal(lobby.moveMap.tileAt(56, 0), wb.T_ROCK);
+  assert.equal(lobby.moveMap.tileAt(126, 0), wb.T_ROCK);
 });
 
 test("lobby: 中央は大円の広場（内側は歩行可、リングが縁取る）", () => {
@@ -101,7 +102,7 @@ test("lobby: 図形の外は無効（VOID）、境界セルは壁", () => {
   assert.equal(tile(-1, 24), wb.L_VOID); // グリッド外
   assert.equal(tile(2, 24), wb.L_WALL); // ショップ翼の西端
   assert.equal(tile(28, 0), wb.L_WALL); // アプスの頂点
-  assert.equal(tile(53, 24), wb.L_WALL); // カジノ翼の東端
+  assert.equal(tile(53, 19), wb.L_WALL); // カジノ翼の東端（通路の開口の外）
   // 壁と無効は moveMap でも固体
   assert.equal(lobby.moveMap.tileAt(2, 24), wb.T_ROCK);
   assert.equal(lobby.moveMap.tileAt(0, 0), wb.T_ROCK);
@@ -228,6 +229,61 @@ test("lobby: 入場点から全ゾーンへ歩いて届く", () => {
     鍛冶屋: [28, 37],
     階段: [17, 29],
     ワープパッド: [28, 34],
+  };
+  for (const [name, [x, y]] of Object.entries(targets)) {
+    assert.ok(reach.has(`${x},${y}`), `${name} (${x},${y}) に届かない`);
+  }
+});
+
+// ---------- 競馬場（カジノ翼の東の拡張） ----------
+
+test("lobby: 競馬場エリアは 66×44 の大エリアで、通路がカジノ東壁を開ける", () => {
+  assert.equal(wb.RACECOURSE.x1 - wb.RACECOURSE.x0 + 1, 66);
+  assert.equal(wb.RACECOURSE.y1 - wb.RACECOURSE.y0 + 1, 44);
+  // カジノ翼の東壁は通路の高さ（y 22〜26）だけ開き、それ以外は壁のまま
+  for (const y of [22, 23, 24, 25, 26]) {
+    assert.notEqual(tile(53, y), wb.L_WALL, `カジノ東壁 (${53},${y}) が開いていない`);
+    assert.equal(tile(56, y), wb.L_CARPET, `通路 (${56},${y}) がカーペットでない`);
+  }
+  assert.equal(tile(54, 21), wb.L_WALL); // 通路の北側壁
+  assert.equal(tile(54, 27), wb.L_WALL); // 通路の南側壁
+  // 競馬場の外周は壁、外は無効
+  assert.equal(tile(93, 4), wb.L_WALL);
+  assert.equal(tile(125, 26), wb.L_WALL);
+  assert.equal(tile(93, 3), wb.L_VOID);
+  assert.equal(tile(126 - 1, 60), wb.L_VOID); // 競馬場の南は従来どおり無効帯
+});
+
+test("lobby: トラックは楕円の砂の帯、内側はインフィールド", () => {
+  assert.equal(tile(93, 8), wb.L_SAND); // 北直線のトラック
+  assert.equal(tile(93, 44), wb.L_SAND); // 南直線のトラック
+  assert.equal(tile(64, 26), wb.L_SAND); // 西直線のトラック
+  assert.ok(wb.isRaceTrackTile(93, 8) && wb.isRaceTrackTile(122, 26));
+  assert.equal(tile(93, 26), wb.L_PLAZA); // インフィールド中央
+  assert.ok(wb.isRaceInfieldTile(93, 26));
+  assert.ok(!wb.isRaceInfieldTile(93, 8));
+  // スタンド前のアプロンは大理石
+  assert.equal(tile(93, 45), wb.L_MARBLE);
+});
+
+test("lobby: 競馬場の station race がカウンターと掲示板で検出できる", () => {
+  assert.ok(wb.LOBBY_OBJECTS.some((o) => o.station === "race"), "race のオブジェクトが無い");
+  assert.equal(wb.stationNear(wb.LOBBY_OBJECTS, 71, 25), "race"); // 馬券カウンターの正面（西）
+  assert.equal(wb.stationNear(wb.LOBBY_OBJECTS, 71, 21), "race"); // 結果掲示板の正面（西）
+  assert.equal(wb.stationNear(wb.LOBBY_OBJECTS, 60, 21), "race"); // 入口の看板の正面
+});
+
+test("lobby: 入場点から通路を通って競馬場の各所へ歩いて届く", () => {
+  const reach = reachableFrom(28, 32);
+  const targets = {
+    通路: [56, 24],
+    競馬場の入口: [62, 24],
+    馬券カウンター前: [71, 25],
+    結果掲示板前: [71, 21],
+    インフィールド中央: [93, 26],
+    パドック: [107, 25],
+    南スタンド前: [93, 45],
+    競馬場の東端: [124, 26],
   };
   for (const [name, [x, y]] of Object.entries(targets)) {
     assert.ok(reach.has(`${x},${y}`), `${name} (${x},${y}) に届かない`);

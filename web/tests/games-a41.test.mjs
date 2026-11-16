@@ -1,7 +1,7 @@
 // A41フェーズの検証（内容充実: バンク増量のみ）。
 // - lib/online/games/wordwolf.ts: お題ペア増量（50→60組・全単語の重複なし・追加分の近接ペア）
 // - lib/online/games/nanja.ts: 生き物増量（20→26種→A46で30種・山札120枚・Client 複製との一致）
-// - lib/quiz.ts: 問題増量第2弾（120→140問→A46で160問→A49で180問・カテゴリ配分・形式・追加分の正解の妥当性）
+// - lib/games/quiz.ts: 問題増量第2弾（120→140問→A46で160問→A49で180問・カテゴリ配分・形式・追加分の正解の妥当性）
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -48,7 +48,7 @@ const nanja = await loadOnline("nanja.ts", [
   "NANJA_DEFAULT_NAMES",
   "NANJA_COPIES_PER_CREATURE",
 ]);
-const quiz = await loadLib("quiz.ts");
+const quiz = await loadLib("games/quiz.ts");
 
 function makeRng(seed) {
   let s = seed >>> 0;

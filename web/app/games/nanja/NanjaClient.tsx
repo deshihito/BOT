@@ -8,7 +8,7 @@
 // 再び出たら全員が名前を叫んで早い者勝ちで山をもらう。
 import { useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
-import { playSe } from "@/lib/balku-sound";
+import { playSe } from "@/lib/balku/balku-sound";
 
 const NanjaScene3D = dynamic(() => import("./NanjaScene3D"), { ssr: false });
 import OnlineShell from "../online/OnlineShell";

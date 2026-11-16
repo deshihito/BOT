@@ -1,5 +1,5 @@
 // A11フェーズの新規4本のロジック検証。
-// - lib/yahtzee.ts: 役の採点・振り直しと保持・カテゴリ記録・上段ボーナスと合計
+// - lib/games/yahtzee.ts: 役の採点・振り直しと保持・カテゴリ記録・上段ボーナスと合計
 // - lib/online/games/nanja.ts: めくり・命名（手動/時間切れ）・早叫びの正誤と山獲得・退出
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -40,7 +40,7 @@ async function loadOnline(name, exportsList) {
   return import("data:text/javascript;base64," + Buffer.from(code).toString("base64"));
 }
 
-const yz = await loadLib("yahtzee.ts");
+const yz = await loadLib("games/yahtzee.ts");
 const nanja = await loadOnline("nanja.ts", [ "gameModule", "NANJA_CREATURES", "NANJA_DEFAULT_NAMES", "NANJA_NAME_TIME_MS", "normalizeNanjaName", "nanjaStandings", ]);
 
 function makeRng(seed) {

@@ -1,5 +1,5 @@
 "use client";
-// クイズ。ロジックは lib/quiz.ts（シード決定的に10問出題、選択肢もシャッフル）。
+// クイズ。ロジックは lib/games/quiz.ts（シード決定的に10問出題、選択肢もシャッフル）。
 // 回答すると即フィードバック（正解の選択肢と得点）を表示し、「次の問題」へ進む。
 // 端末内で完結し、サーバーへ送信しない。
 import Link from "next/link";
@@ -15,7 +15,7 @@ import {
   quizCorrectCount,
   quizGrade,
   type QuizState,
-} from "@/lib/quiz";
+} from "@/lib/games/quiz";
 import { useGamesNav } from "../GamesShell";
 
 const choiceStyle = (bg: string, border: string): CSSProperties => ({

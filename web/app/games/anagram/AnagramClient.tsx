@@ -1,5 +1,5 @@
 "use client";
-// アナグラム。ロジックは lib/anagram.ts（カタカナ単語10問・タイル並べ替え）。
+// アナグラム。ロジックは lib/games/anagram.ts（カタカナ単語10問・タイル並べ替え）。
 // タイルをタップして並べ、揃ったら「答える」。ヒントは1文字開示で -20点。
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
@@ -17,7 +17,7 @@ import {
   useHint,
   createAnagramGame,
   type AnagramState,
-} from "@/lib/anagram";
+} from "@/lib/games/anagram";
 import { useGamesNav } from "../GamesShell";
 
 function newGame(): AnagramState {

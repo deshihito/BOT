@@ -8,7 +8,7 @@
 // 射撃は { type: "fire", index } を送る。
 import { useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
-import { playSe } from "@/lib/balku-sound";
+import { playSe } from "@/lib/balku/balku-sound";
 
 // 3D シーンは three を含むため遅延読み込み（このページ専用チャンクに閉じる）。
 const BattleshipScene3D = dynamic(() => import("./BattleshipScene3D"), { ssr: false });

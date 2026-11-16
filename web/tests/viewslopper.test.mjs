@@ -1,11 +1,11 @@
-// lib/viewslopper.ts の純粋ロジック（URL検証・本文抽出・Slop Score・診断）を確かめる
+// lib/viewslopper/viewslopper.ts の純粋ロジック（URL検証・本文抽出・Slop Score・診断）を確かめる
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import ts from "typescript";
 
-const src = fs.readFileSync(path.join(import.meta.dirname, "..", "lib", "viewslopper.ts"), "utf8");
+const src = fs.readFileSync(path.join(import.meta.dirname, "..", "lib", "viewslopper/viewslopper.ts"), "utf8");
 const js = ts.transpileModule(src, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText;
 const m = await import("data:text/javascript;base64," + Buffer.from(js).toString("base64"));
 
@@ -181,7 +181,7 @@ test("外観採点: vision応答を検証し、重み付け集計と所見化す
 });
 
 test("診断履歴: 端末保存の追加・重複URLの最新化・上限・削除が効く", async () => {
-  const hsrc = fs.readFileSync(path.join(import.meta.dirname, "..", "lib", "viewslopper-history.ts"), "utf8");
+  const hsrc = fs.readFileSync(path.join(import.meta.dirname, "..", "lib", "viewslopper/viewslopper-history.ts"), "utf8");
   const hjs = ts.transpileModule(hsrc, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText;
   const h = await import("data:text/javascript;base64," + Buffer.from(hjs).toString("base64"));
   const store = new Map();
@@ -269,7 +269,7 @@ test("LLM採点の2回平均: スコアは平均化され、根拠は平均に�
 });
 
 test("16:9カード: 寸法・ファイル名・省略が仕様通り", async () => {
-  const csrc = fs.readFileSync(path.join(import.meta.dirname, "..", "lib", "viewslopper-card.ts"), "utf8");
+  const csrc = fs.readFileSync(path.join(import.meta.dirname, "..", "lib", "viewslopper/viewslopper-card.ts"), "utf8");
   const cjs = ts.transpileModule(csrc, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText;
   const c = await import("data:text/javascript;base64," + Buffer.from(cjs).toString("base64"));
   assert.equal(c.CARD_WIDTH / c.CARD_HEIGHT, 16 / 9);

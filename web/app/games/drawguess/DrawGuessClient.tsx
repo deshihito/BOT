@@ -8,7 +8,7 @@
 // 座標は 0〜1000 に正規化して送る（canvas 内部解像度 1000x750、表示は 4:3）。
 // 描画は { type: "stroke", color, width, points }、回答は { type: "guess", text }。
 import { useEffect, useRef, useState } from "react";
-import { playSe } from "@/lib/balku-sound";
+import { playSe } from "@/lib/balku/balku-sound";
 import { tappableProps } from "@/lib/gesture";
 import OnlineShell from "../online/OnlineShell";
 import type { OnlineRoomApi, OnlineRoomView } from "../online/useOnlineRoom";

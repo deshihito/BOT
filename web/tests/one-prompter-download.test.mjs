@@ -1,4 +1,4 @@
-// lib/one-prompter-download.ts の純粋ロジック（形式→ファイル名/MIME の対応と、
+// lib/one-prompter/one-prompter-download.ts の純粋ロジック（形式→ファイル名/MIME の対応と、
 // 保存内容がテキストエリアの内容そのままであること）を確かめる
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -6,7 +6,7 @@ import fs from "node:fs";
 import path from "node:path";
 import ts from "typescript";
 
-const src = fs.readFileSync(path.join(import.meta.dirname, "..", "lib", "one-prompter-download.ts"), "utf8");
+const src = fs.readFileSync(path.join(import.meta.dirname, "..", "lib", "one-prompter/one-prompter-download.ts"), "utf8");
 const js = ts.transpileModule(src, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText;
 const m = await import("data:text/javascript;base64," + Buffer.from(js).toString("base64"));
 

@@ -56,7 +56,7 @@ class RoleIdTest(unittest.TestCase):
     def test_links_match_site_ids(self):
         import json, re
         from urllib.parse import unquote
-        text = (ROOT / "web" / "lib" / "jinrou-roles.ts").read_text(encoding="utf-8")
+        text = (ROOT / "web" / "lib" / "games" / "jinrou-roles.ts").read_text(encoding="utf-8")
         site_ids = {r["id"] for r in json.loads(re.search(r"JINROU_ROLES: JinrouRole\[\] = (\[.*\]);", text, re.S).group(1))}
         for name, *_ in jinrou.HELP_ROLES:
             self.assertIn(unquote(guide.role_id(name)), site_ids, name)
