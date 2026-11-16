@@ -72,12 +72,13 @@ import { parseBoardPosts, type BoardPost } from "@/lib/worldbox/board";
 import { parseSave, serializeSave, type SaveSpace } from "@/lib/worldbox/save";
 import { chooseInitialSave } from "@/lib/worldbox/save-source";
 import {
-  actionForTile, blockHpFraction, cropStage, floorSpeedMultiplier, isFloorItem, isFlowerPotItem, isGateItem, isOverrideActive, isSeatItem, parseTileOverride, placedBlockSolid, placedStationKinds, tileKey, tileView,
+  actionForTile, blockHpFraction, cropStage, floorSpeedMultiplier, isFloorItem, isFlowerPotItem, isGateItem, isOverrideActive, isSeatItem, isShelfItem, isSignItem, isWellItem, parseTileOverride, placedBlockSolid, placedStationKinds, tileKey, tileView,
   type TileActionKind, type TileOverridesMap,
 } from "@/lib/worldbox/tiles";
 import { CROPS, ITEMS, itemById } from "@/lib/worldbox/items";
 import { HP_MAX, HUNGER_MAX, countItem, maxHpFor, type AdventureRoleId, type ItemSlot, type PlayerProfile, type SlotRef } from "@/lib/worldbox/profile";
 import { hazardDamageFor, pvpSpaceAllowed, PVP_ATTACK_MAX_DISTANCE } from "@/lib/worldbox/vitals";
+import { isStallItem } from "@/lib/worldbox/stalls";
 import {
   containerCapacity, isContainerItem, type ContainerSlotRef,
 } from "@/lib/worldbox/containers";
@@ -976,6 +977,14 @@ export default function WorldBoxClient() {
   /** コンテナパネルで持ち上げ中のスロット（プロフィール側も含む）。 */
   const [heldPanelSlot, setHeldPanelSlot] = useState<ContainerSlotRef | null>(null);
   const [seedPicker, setSeedPicker] = useState<{ x: number; y: number } | null>(null);
+  /** 看板テキストの編集対象（自分の看板をタップしたとき）。 */
+  const [signEdit, setSignEdit] = useState<{ x: number; y: number; text: string } | null>(null);
+  /** 屋台パネル: 対象タイルと、開いた時点で選択していたアイテム（出品候補）と自分の屋台か。 */
+  const [stallPanel, setStallPanel] = useState<{ x: number; y: number; selItemId: string | null; mine: boolean } | null>(null);
+  /** 屋台の出品（サーバーが正）。undefined は読み込み中。 */
+  const [stallInfo, setStallInfo] = useState<{ itemId: string; name: string; price: number; count: number; mine: boolean } | null | undefined>(undefined);
+  const [stallPriceText, setStallPriceText] = useState("100");
+  const [stallCountText, setStallCountText] = useState("1");
   const [tileMsg, setTileMsg] = useState("");
   /** 別のタブに同じアカウントで引き継がれた（このタブは無効化された）か。 */
   const [tabTaken, setTabTaken] = useState(false);
@@ -1580,13 +1589,13 @@ export default function WorldBoxClient() {
   };
   const refreshTilesRef = useRef(refreshTiles);
   refreshTilesRef.current = refreshTiles;
-  const postTileAction = async (action: TileActionKind, x: number, y: number, seedId?: string, itemId?: string) => {
+  const postTileAction = async (action: TileActionKind, x: number, y: number, seedId?: string, itemId?: string, text?: string) => {
     setTileMsg("");
     try {
       const res = await fetch("/api/worldbox/tiles", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action, x, y, ...(seedId ? { seedId } : {}), ...(itemId ? { itemId } : {}) }),
+        body: JSON.stringify({ action, x, y, ...(seedId ? { seedId } : {}), ...(itemId ? { itemId } : {}), ...(text !== undefined ? { text } : {}) }),
       });
       const data = (await res.json().catch(() => ({}))) as {
         error?: string; key?: string; override?: TileOverridesMap[string] | null; profile?: PlayerProfile;
@@ -1603,6 +1612,7 @@ export default function WorldBoxClient() {
         place_block: "place", mine_block: "debris",
         plant_flower: "plant", remove_flower: "harvest",
         toggle_gate: "place",
+        set_sign: "place", set_display: "place", clear_display: "harvest", draw_water: "splash",
       };
       // ブロック採掘（HP制）: 壊れたら破片（debris）、まだ残るヒットは小さな破片（mine）
       const fxForAction =
@@ -1624,6 +1634,29 @@ export default function WorldBoxClient() {
   };
   const postTileActionRef = useRef(postTileAction);
   postTileActionRef.current = postTileAction;
+  /** 屋台の操作（出品・取り下げ・購入）。結果の出品とプロフィールで表示を更新する。 */
+  const postStallAction = async (action: "list_item" | "unlist" | "buy", x: number, y: number, extra?: { itemId?: string; price?: number; count?: number }) => {
+    try {
+      const res = await fetch("/api/worldbox/stalls", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, x, y, ...(extra ?? {}) }),
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        stall?: { itemId: string; name: string; price: number; count: number; mine: boolean } | null;
+        profile?: PlayerProfile;
+      };
+      if (!res.ok) {
+        setTileMsg(TILE_ERROR_LABEL[data.error ?? ""] ?? "できませんでした");
+        return;
+      }
+      setStallInfo(data.stall ?? null);
+      if (data.profile) setInvProfile(data.profile);
+    } catch {
+      setTileMsg("できませんでした");
+    }
+  };
   /** モブ個体状態（傷/死亡がある個体だけサーバーから受ける）。 */
   const mobStatesRef = useRef<Record<string, MobState>>({});
   // モブ状態の世代（S6）: 攻撃によるローカル書き込みで進み、取得開始後に
@@ -2985,6 +3018,55 @@ export default function WorldBoxClient() {
         }
         return true;
       }
+      if (view.block && isStallItem(view.block.itemId)) {
+        // 屋台: タップでパネルを開く（出品の確認・出品・取り下げ・購入）
+        setStallInfo(undefined);
+        setStallPanel({ x: t.x, y: t.y, selItemId: selItem && !selItem.tool ? selItem.id : null, mine: view.block.mine });
+        void (async () => {
+          try {
+            const res = await fetch(`/api/worldbox/stalls?x=${t.x}&y=${t.y}`, { headers: { Accept: "application/json" } });
+            const data = (await res.json().catch(() => ({}))) as { stall?: typeof stallInfo };
+            setStallInfo(res.ok ? (data.stall ?? null) : null);
+          } catch {
+            setStallInfo(null);
+          }
+        })();
+        return true;
+      }
+      if (view.block && isSignItem(view.block.itemId)) {
+        // 看板: 自分のものはタップでテキスト編集。他人の看板は文字を読むだけ（描画に出ている）
+        if (view.block.mine) {
+          const ovHere = tilesRef.current[tileKey(t.x, t.y)];
+          setSignEdit({ x: t.x, y: t.y, text: ovHere?.signText ?? "" });
+        }
+        return true;
+      }
+      if (view.block && isShelfItem(view.block.itemId)) {
+        // 棚（自分のものだけ）: 展示中なら回収、選択中のアイテムがあれば展示
+        if (!view.block.mine) {
+          setTileMsg(TILE_ERROR_LABEL.not_owner);
+          denyAtTile(t.x, t.y);
+          return true;
+        }
+        const ovHere = tilesRef.current[tileKey(t.x, t.y)];
+        if (ovHere?.display) {
+          void postTileActionRef.current("clear_display", t.x, t.y);
+        } else if (selItem && !selItem.tool) {
+          void postTileActionRef.current("set_display", t.x, t.y, undefined, selItem.id);
+        } else {
+          setTileMsg("かばんの品を選んでタップ");
+        }
+        return true;
+      }
+      if (view.block && isWellItem(view.block.itemId)) {
+        // 井戸: バケツを持ってタップすると水を汲める（誰の井戸でも可）
+        if ((invRef.current?.items.bucket ?? 0) > 0) {
+          void postTileActionRef.current("draw_water", t.x, t.y);
+        } else {
+          setTileMsg("バケツが必要");
+        }
+        return true;
+      }
       if (view.block && view.block.itemId === "piano") {
         // ピアノは誰でも弾ける。タップのたびに音階を一巡する（見た目と音だけ）
         const key = tileKey(t.x, t.y);
@@ -4190,6 +4272,26 @@ export default function WorldBoxClient() {
                 const ds = Math.round(TILE * 0.55);
                 ctx.drawImage(decoImg, Math.round(bx + (TILE - ds) / 2), Math.round(by + TILE * 0.06), ds, ds);
               }
+            }
+            // 棚の展示品を上に重ねる
+            if (ov!.display) {
+              const dispImg = itemIcons[ov!.display];
+              if (texReady(dispImg)) {
+                const ds = Math.round(TILE * 0.6);
+                ctx.drawImage(dispImg, Math.round(bx + (TILE - ds) / 2), Math.round(by + TILE * 0.02), ds, ds);
+              }
+            }
+            // 看板のテキストを板の上に描く
+            if (ov!.signText) {
+              ctx.save();
+              ctx.font = "bold 10px sans-serif";
+              ctx.textAlign = "center";
+              const tw = Math.min(TILE - 2, ctx.measureText(ov!.signText).width + 8);
+              ctx.fillStyle = "rgba(20,14,8,0.72)";
+              ctx.fillRect(Math.round(bx + (TILE - tw) / 2), Math.round(by + TILE * 0.3), Math.round(tw), 14);
+              ctx.fillStyle = "#ffe9b8";
+              ctx.fillText(ov!.signText, Math.round(bx + TILE / 2), Math.round(by + TILE * 0.3) + 10, TILE - 4);
+              ctx.restore();
             }
             ctx.restore();
           }
@@ -6343,6 +6445,126 @@ export default function WorldBoxClient() {
         </div>
       )}
 
+      {stallPanel && (
+        <div style={panelOverlay} className="wb-panel">
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <strong>屋台</strong>
+            <span style={{ flex: 1 }} />
+            <button type="button" style={btn} onClick={() => setStallPanel(null)}>
+              閉じる
+            </button>
+          </div>
+          {stallInfo === undefined ? (
+            <div style={{ marginTop: 10, fontSize: 13 }}>…</div>
+          ) : stallInfo ? (
+            <div style={{ marginTop: 10, fontSize: 13 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <ItemIcon id={stallInfo.itemId} size={20} />
+                <span>{stallInfo.name}</span>
+                <span>{stallInfo.price} コイン × {stallInfo.count}</span>
+              </div>
+              <div style={{ marginTop: 10 }}>
+                {stallInfo.mine ? (
+                  <button
+                    type="button"
+                    style={btn}
+                    onClick={() => void postStallAction("unlist", stallPanel.x, stallPanel.y)}
+                  >
+                    取り下げる
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    style={btn}
+                    onClick={() => void postStallAction("buy", stallPanel.x, stallPanel.y)}
+                  >
+                    買う
+                  </button>
+                )}
+              </div>
+            </div>
+          ) : (
+            <div style={{ marginTop: 10, fontSize: 13 }}>
+              {!stallPanel.mine ? (
+                <span>出品なし</span>
+              ) : stallPanel.selItemId ? (
+                <>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <ItemIcon id={stallPanel.selItemId} size={20} />
+                    <span>{itemById(stallPanel.selItemId)?.name ?? stallPanel.selItemId}</span>
+                  </div>
+                  <div style={{ display: "flex", gap: 6, marginTop: 8, alignItems: "center" }}>
+                    <input
+                      value={stallPriceText}
+                      inputMode="numeric"
+                      onChange={(e) => setStallPriceText(e.target.value)}
+                      style={{
+                        width: 80, padding: "6px 8px", borderRadius: 8, fontSize: 13,
+                        border: "1px solid rgba(255,255,255,0.25)", background: "rgba(8,10,16,0.7)", color: "#fff",
+                      }}
+                    />
+                    <span>コイン ×</span>
+                    <input
+                      value={stallCountText}
+                      inputMode="numeric"
+                      onChange={(e) => setStallCountText(e.target.value)}
+                      style={{
+                        width: 52, padding: "6px 8px", borderRadius: 8, fontSize: 13,
+                        border: "1px solid rgba(255,255,255,0.25)", background: "rgba(8,10,16,0.7)", color: "#fff",
+                      }}
+                    />
+                    <button
+                      type="button"
+                      style={btn}
+                      onClick={() => void postStallAction("list_item", stallPanel.x, stallPanel.y, {
+                        itemId: stallPanel.selItemId ?? undefined,
+                        price: Number(stallPriceText),
+                        count: Number(stallCountText),
+                      })}
+                    >
+                      出す
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <span>かばんの品を選んでから開くと出品できます</span>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+      {signEdit && (
+        <div style={panelOverlay} className="wb-panel">
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <strong>看板</strong>
+            <span style={{ flex: 1 }} />
+            <button type="button" style={btn} onClick={() => setSignEdit(null)}>
+              閉じる
+            </button>
+          </div>
+          <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
+            <input
+              value={signEdit.text}
+              maxLength={40}
+              onChange={(e) => setSignEdit({ ...signEdit, text: e.target.value })}
+              style={{
+                flex: 1, minWidth: 0, padding: "6px 8px", borderRadius: 8, fontSize: 13,
+                border: "1px solid rgba(255,255,255,0.25)", background: "rgba(8,10,16,0.7)", color: "#fff",
+              }}
+            />
+            <button
+              type="button"
+              style={btn}
+              onClick={() => {
+                void postTileAction("set_sign", signEdit.x, signEdit.y, undefined, undefined, signEdit.text);
+                setSignEdit(null);
+              }}
+            >
+              書く
+            </button>
+          </div>
+        </div>
+      )}
       {seedPicker && invProfile && (
         <div style={panelOverlay} className="wb-panel">
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>

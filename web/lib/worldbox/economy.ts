@@ -92,6 +92,8 @@ export function eatItem(profile: PlayerProfile, itemId: unknown, now: number = D
   }
   const removed = removeItem(profile, item.id, 1);
   if (!removed) return { ok: false, error: "not_enough_items" };
+  // 容器入りの飲食物は、飲み終えた容器が手元に戻る（水入りバケツ→バケツ）
+  const withContainer = item.containerReturn ? addItem(removed, item.containerReturn, 1) : removed;
   let status = item.curePoison && Array.isArray(removed.status) ? removed.status.filter((e) => e.kind !== "poison") : removed.status;
   if (item.buff) {
     const base = Array.isArray(status) ? status : [];
@@ -104,12 +106,12 @@ export function eatItem(profile: PlayerProfile, itemId: unknown, now: number = D
     ok: true,
     item,
     profile: {
-      ...removed,
-      hunger: Math.min(HUNGER_MAX, removed.hunger + (item.hunger ?? 0)),
+      ...withContainer,
+      hunger: Math.min(HUNGER_MAX, withContainer.hunger + (item.hunger ?? 0)),
       hp: Math.min(
-        maxHpFor(removed),
-        (typeof removed.hp === "number" ? removed.hp : HP_MAX) +
-          (item.heal ?? 0) * (removed.role === "medic" ? MEDIC_HEAL_MULT : 1),
+        maxHpFor(withContainer),
+        (typeof withContainer.hp === "number" ? withContainer.hp : HP_MAX) +
+          (item.heal ?? 0) * (withContainer.role === "medic" ? MEDIC_HEAL_MULT : 1),
       ),
       status,
     },

@@ -64,6 +64,7 @@ const tilesUrl = bundleModule(
     "worldTileSource", "mapTileAt", "T_GRASS", "T_TREE", "T_ROCK", "T_DIRT", "T_SNOW", "T_SNOW_TREE",
     "parseProfile", "addItem", "countItem",
     "applyTileAction", "applyPlaceBlock", "applyMineBlock", "applyFlowerAction", "applyToggleGate", "tileView", "actionForTile", "tileKey",
+    "applySetSign", "applyDisplayAction", "applyDrawWater",
     "parseTileOverride", "parseTileOverrides", "isOverrideActive", "TREE_REGROW_MS",
   ],
 );
@@ -434,6 +435,11 @@ const machinesOnlineStubUrl = dataUrl(`
 export async function loadMachine() { return null; }
 export async function deleteMachine() {}
 `);
+const stallsUrl = bundleModule(["worldbox/items.ts", "worldbox/stalls.ts"], ["isStallItem"]);
+const stallsOnlineStubUrl = dataUrl(`
+export async function loadStall() { return null; }
+export async function storeStall() { return true; }
+`);
 const tilesRoute = await import(
   dataUrl(
     transpile("api/worldbox/tiles/route.ts", rootDir + "/app")
@@ -451,6 +457,8 @@ const tilesRoute = await import(
       .replaceAll('"@/lib/worldbox/containers-online"', JSON.stringify(containersOnlineStubUrl))
       .replaceAll('"@/lib/worldbox/machines"', JSON.stringify(machinesUrl))
       .replaceAll('"@/lib/worldbox/machines-online"', JSON.stringify(machinesOnlineStubUrl))
+      .replaceAll('"@/lib/worldbox/stalls"', JSON.stringify(stallsUrl))
+      .replaceAll('"@/lib/worldbox/stalls-online"', JSON.stringify(stallsOnlineStubUrl))
       .replaceAll('"@/lib/worldbox/metrics-online"', JSON.stringify(metricsOnlineStubUrl))
       .replaceAll('"@/lib/worldbox/ops-online"', JSON.stringify(opsOnlineStubUrl))
       .replaceAll('"@/lib/worldbox/user-lock"', JSON.stringify(userLockUrl))
