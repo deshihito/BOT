@@ -72,7 +72,7 @@ import { parseBoardPosts, type BoardPost } from "@/lib/worldbox/board";
 import { parseSave, serializeSave, type SaveSpace } from "@/lib/worldbox/save";
 import { chooseInitialSave } from "@/lib/worldbox/save-source";
 import {
-  actionForTile, blockHpFraction, cropStage, isFlowerPotItem, isOverrideActive, isSeatItem, parseTileOverride, placedBlockSolid, tileKey, tileView,
+  actionForTile, blockHpFraction, cropStage, isFlowerPotItem, isOverrideActive, isSeatItem, parseTileOverride, placedBlockSolid, placedStationKinds, tileKey, tileView,
   type TileActionKind, type TileOverridesMap,
 } from "@/lib/worldbox/tiles";
 import { CROPS, ITEMS, itemById } from "@/lib/worldbox/items";
@@ -648,6 +648,8 @@ export default function WorldBoxClient() {
   spaceUiRef.current = spaceUi;
   const [menuOpen, setMenuOpen] = useState(false);
   const [stationUi, setStationUi] = useState<LobbyStation | null>(null);
+  /** ワールドで設置した作業施設の近くにいるときの作業種別（カンマ区切り。経済パネル用）。 */
+  const [worldStationKinds, setWorldStationKinds] = useState("");
   /** いま接している店の品目ジャンル（鍛冶屋は "smith"）。経済パネルの品目選別に使う。 */
   const [stationGenre, setStationGenre] = useState<ShopGenreId | null>(null);
   /** いま接しているアーケード筐体のゲーム ID（L4）。筐体パネルの起動に使う。 */
@@ -3335,6 +3337,7 @@ export default function WorldBoxClient() {
     let lastStation: LobbyStation | null = null;
     let lastStationGenre: ShopGenreId | null = null;
     let lastStationArcade: string | null = null;
+    let lastWorldStationKinds = "";
     const placePlayer = (x: number, y: number) => {
       const free = findFreeNear(activeMap(), x, y, activeBlocked(), { swim: space === "world" });
       player.x = free.x;
@@ -3859,6 +3862,27 @@ export default function WorldBoxClient() {
           lastStationArcade = arcade;
           setStationArcade(arcade);
         }
+      }
+      if (space === "world") {
+        // 設置した作業施設（作業台・かまど・焚き火・織り機等）の近くでは、
+        // その種別の作業ができる（サーバー側でも同じ範囲で検証される）
+        const kinds = new Set<string>();
+        const px = Math.floor(player.x);
+        const py = Math.floor(player.y);
+        for (let dy = -2; dy <= 2; dy++) {
+          for (let dx = -2; dx <= 2; dx++) {
+            const ov = tilesRef.current[tileKey(px + dx, py + dy)];
+            for (const k of placedStationKinds(ov?.block?.itemId)) kinds.add(k);
+          }
+        }
+        const key = [...kinds].sort().join(",");
+        if (key !== lastWorldStationKinds) {
+          lastWorldStationKinds = key;
+          setWorldStationKinds(key);
+        }
+      } else if (lastWorldStationKinds !== "") {
+        lastWorldStationKinds = "";
+        setWorldStationKinds("");
       }
       player.vx = (player.x - prevX) / dt;
       player.vy = (player.y - prevY) / dt;
@@ -6376,7 +6400,7 @@ export default function WorldBoxClient() {
 
       {/* パネルの開閉は左上の ≡ メニューに統合（ボタン行は置かない） */}
 
-      {showEconomy && <WorldBoxEconomyPanel space={spaceUi} station={stationUi} genre={stationGenre} onClose={() => setShowEconomy(false)} />}
+      {showEconomy && <WorldBoxEconomyPanel space={spaceUi} station={stationUi} genre={stationGenre} worldStationKinds={worldStationKinds} onClose={() => setShowEconomy(false)} />}
       {casinoOpen && spaceUi === "lobby" && (
         <WorldBoxCasinoPanel onClose={() => setCasinoOpen(false)} />
       )}
