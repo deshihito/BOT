@@ -84,6 +84,13 @@ const ERROR_LABEL: Record<string, string> = {
   economy_unavailable: "いま闘技場を使えません",
 };
 
+/** 階級の大きさの気配（敵HPの数値は出さない）。未知の id には何も付けない。 */
+const TIER_SIZE_LABEL: Record<string, string> = {
+  slime: "小さい",
+  golem: "大きい",
+  dragon: "巨大",
+};
+
 const wrap: React.CSSProperties = {
   position: "absolute", left: "50%", top: "50%", transform: "translate(-50%, -50%)",
   width: "min(430px, calc(100% - 20px))", maxHeight: "calc(100% - 24px)", overflowY: "auto",
@@ -298,16 +305,19 @@ export default function WorldBoxArenaPanel({ onClose }: { onClose: () => void })
 
           {!outcome && !session && !pvp?.duel && (
             <div style={{ display: "grid", gap: 8 }}>
-              {state.tiers.map((t) => (
-                <button
-                  key={t.id} type="button" disabled={busy}
-                  style={{ ...btn, display: "flex", justifyContent: "space-between", alignItems: "center", textAlign: "left" }}
-                  onClick={() => void post({ action: "start", tier: t.id })}
-                >
-                  <span>{t.name}（HP {t.enemyHp}）</span>
-                  <span>参加費 {t.fee} → 賞金 {t.prize}</span>
-                </button>
-              ))}
+              {state.tiers.map((t) => {
+                const sizeLabel = TIER_SIZE_LABEL[t.id];
+                return (
+                  <button
+                    key={t.id} type="button" disabled={busy}
+                    style={{ ...btn, display: "flex", justifyContent: "space-between", alignItems: "center", textAlign: "left" }}
+                    onClick={() => void post({ action: "start", tier: t.id })}
+                  >
+                    <span>{sizeLabel ? `${t.name}（${sizeLabel}）` : t.name}</span>
+                    <span>参加費 {t.fee} ・ 勝てば賞金</span>
+                  </button>
+                );
+              })}
             </div>
           )}
 
