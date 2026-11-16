@@ -153,7 +153,7 @@ export async function POST(request: Request) {
 
     if (fields.action === "register") {
       if (!myGuild || !isLeader) return err("leader_only", 403);
-      const idx = typeof fields.plotIdx === "number" ? Math.floor(fields.plotIdx) : -1;
+      const idx = typeof fields.plotIdx === "number" && Number.isFinite(fields.plotIdx) ? Math.floor(fields.plotIdx) : -1;
       if (idx < 0 || idx >= GUILD_PLOT_COUNT) return err("invalid_plot", 400);
       if (state.plots[idx]) return err("plot_taken", 409);
       if (plotOfGuild(state, myGuild)) return err("already_has_plot", 409);
@@ -198,8 +198,8 @@ export async function POST(request: Request) {
       }
       const itemId = typeof fields.itemId === "string" ? fields.itemId : "";
       const def = itemById(itemId);
-      const count = typeof fields.count === "number" ? Math.floor(fields.count) : 0;
-      const price = typeof fields.price === "number" ? Math.floor(fields.price) : 0;
+      const count = typeof fields.count === "number" && Number.isFinite(fields.count) ? Math.floor(fields.count) : 0;
+      const price = typeof fields.price === "number" && Number.isFinite(fields.price) ? Math.floor(fields.price) : 0;
       if (!def || count <= 0 || count > 999 || price <= 0 || price > 1_000_000) {
         return err("invalid_listing", 400);
       }
@@ -238,7 +238,7 @@ export async function POST(request: Request) {
     if (fields.action === "buy") {
       const found = typeof fields.listingId === "string" ? findListing(state, fields.listingId) : null;
       if (!found) return err("no_listing", 404);
-      const count = typeof fields.count === "number" ? Math.floor(fields.count) : 1;
+      const count = typeof fields.count === "number" && Number.isFinite(fields.count) ? Math.floor(fields.count) : 1;
       if (count <= 0 || count > listingAvailable(found.listing)) return err("not_enough_stock", 409);
       if (found.listing.sellerKey === ownerKey) return err("own_listing", 409);
       // 区画カウンターの近くにいること（プレゼンス/セーブで検証）

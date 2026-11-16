@@ -6,6 +6,7 @@ import {
   WORLDBOX_METRICS_USERS_NAMESPACE, loadDayMetrics, loadEconDay,
 } from "@/lib/worldbox/metrics-online";
 import { loadNationsState } from "@/lib/worldbox/nations-online";
+import { worldboxAdminIds } from "@/lib/worldbox/ops-online";
 
 export const runtime = "nodejs";
 
@@ -21,6 +22,10 @@ const DAYS = 14;
 export async function GET(request: Request) {
   const session = getRequestSession(request);
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401, headers: NO_STORE });
+  // 運営用データ（経済集計を含む）なので管理者のみ。ops ルートと同じ判定。
+  if (session.provider !== "discord" || !worldboxAdminIds().has(session.id)) {
+    return NextResponse.json({ error: "forbidden" }, { status: 403, headers: NO_STORE });
+  }
   const now = Date.now();
   const dates: string[] = [];
   for (let i = DAYS - 1; i >= 0; i--) dates.push(dayKeyOf(now - i * 86_400_000));

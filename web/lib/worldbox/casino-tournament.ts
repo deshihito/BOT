@@ -63,12 +63,12 @@ export function casinoTournamentPrizeOpId(tournamentId: string, rank: number): s
 
 /** 参加費オプの決定的 ID（1大会・1人1件）。 */
 export function casinoTournamentFeeOpId(tournamentId: string, discordId: string): string {
-  return `ct-fee-${tournamentId}-${discordId.slice(-4)}`;
+  return `ct-fee-${tournamentId}-${discordId}`;
 }
 
 /** 不成立時の返金オプの決定的 ID（1大会・1人1件）。 */
 export function casinoTournamentRefundOpId(tournamentId: string, discordId: string): string {
-  return `ct-refund-${tournamentId}-${discordId.slice(-4)}`;
+  return `ct-refund-${tournamentId}-${discordId}`;
 }
 
 /** 1人の純益（配当 - ベット）。 */

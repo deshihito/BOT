@@ -63,7 +63,8 @@ export async function payCasinoPrizesInner(t: CasinoTournament): Promise<CasinoT
   if (t.status !== "done" || t.prizesPaid) return t;
   const split = casinoPrizeSplit(t);
   if (split.length === 0) return { ...t, prizesPaid: true };
-  let out = t;
+  // prizesPaid は全順位ぶん積めたときだけ立てる（同ファイルの返金と同じ規則）。
+  let allPaid = true;
   for (const row of split) {
     const op = buildEconomyOp(
       {
@@ -73,17 +74,16 @@ export async function payCasinoPrizesInner(t: CasinoTournament): Promise<CasinoT
       casinoTournamentPrizeOpId(t.id, row.rank),
       Date.now(),
     );
-    if (!op) continue;
-    if (await enqueueEconomyOpOnce(op)) out = { ...out, prizesPaid: true };
+    if (!op || !(await enqueueEconomyOpOnce(op))) allPaid = false;
   }
-  return out;
+  return allPaid ? { ...t, prizesPaid: true } : t;
 }
 
 /** 不成立の返金を決定的 ID で積む（1大会・1人1件）。 */
 export async function payCasinoRefundsInner(t: CasinoTournament): Promise<CasinoTournament> {
   if (t.status !== "done" || t.prizesPaid || t.refundPaid) return t;
   if (t.entrants.length >= 2) return t;
-  let out = t;
+  let allPaid = true;
   for (const discordId of t.entrants) {
     const op = buildEconomyOp(
       {
@@ -93,10 +93,9 @@ export async function payCasinoRefundsInner(t: CasinoTournament): Promise<Casino
       casinoTournamentRefundOpId(t.id, discordId),
       Date.now(),
     );
-    if (!op) continue;
-    if (await enqueueEconomyOpOnce(op)) out = { ...out, refundPaid: true };
+    if (!op || !(await enqueueEconomyOpOnce(op))) allPaid = false;
   }
-  return out;
+  return allPaid ? { ...t, refundPaid: true } : t;
 }
 
 /**
