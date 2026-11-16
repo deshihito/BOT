@@ -89,18 +89,18 @@ test("レシピの参照がすべて実在し、合成品は売ると素材代�
 });
 
 test("売買: 買うと spend オプが出てかばんに入り、売ると earn オプが出る", () => {
-  const bought = eco.buyItem(fresh(), "wood", 2, 100);
+  const bought = eco.buyItem(fresh(), "wood", 2, 1000);
   assert.equal(bought.ok, true);
-  assert.deepEqual(bought.coin, { kind: "spend", amount: 16, reason: "shop_buy" });
+  assert.deepEqual(bought.coin, { kind: "spend", amount: 160, reason: "shop_buy" });
   assert.equal(eco.countItem(bought.profile, "wood"), 2);
   assert.equal(bought.profile.coins, 100, "プロフィールの coins は触らない（正はブリッジ）");
   const sold = eco.sellItem(bought.profile, "wood", 1);
-  assert.deepEqual(sold.coin, { kind: "earn", amount: 4, reason: "shop_sale" });
+  assert.deepEqual(sold.coin, { kind: "earn", amount: 48, reason: "shop_sale" });
   assert.equal(eco.countItem(sold.profile, "wood"), 1);
   assert.equal(eco.sellItem(fresh(), "wood").error, "not_enough_items");
   // 残高は引数（実残高）で検証する
-  assert.equal(eco.buyItem(fresh(), "wood", 1, 3).error, "not_enough_coins");
-  assert.equal(eco.buyItem(fresh(), "wood", 1, 8).ok, true);
+  assert.equal(eco.buyItem(fresh(), "wood", 1, 30).error, "not_enough_coins");
+  assert.equal(eco.buyItem(fresh(), "wood", 1, 80).ok, true);
 });
 
 test("食事と労働: 食べて回復し、働くと空腹度と引き換えに earn オプが出る", () => {

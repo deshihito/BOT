@@ -415,7 +415,7 @@ test("API(profile): buy は spend オプを積み、アイテムだけが増え�
   const ops = globalThis.__wbBridge.ops;
   assert.equal(ops.length, 1);
   assert.equal(ops[0].kind, "spend");
-  assert.equal(ops[0].amount, 16);
+  assert.equal(ops[0].amount, 160);
   assert.equal(ops[0].reason, "shop_buy");
   assert.equal(ops[0].discordId, ME);
   assert.equal(ops[0].status, "pending");
@@ -440,7 +440,7 @@ test("API(profile): sell は earn(shop_sale) オプを積む", async () => {
   assert.equal((await sold.json()).profile.items.wood, undefined);
   const ops = globalThis.__wbBridge.ops;
   assert.deepEqual(ops.map((op) => [op.kind, op.reason, op.amount]), [
-    ["earn", "shop_sale", 4],
+    ["earn", "shop_sale", 48],
   ]);
 });
 
