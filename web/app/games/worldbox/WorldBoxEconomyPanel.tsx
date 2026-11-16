@@ -10,6 +10,7 @@
 // （/api/worldbox/economy）が返し、移動は Bot 本体が数十秒で適用する。
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { EconomyOp } from "@/lib/worldbox/economy-bridge";
+import { onEconomyApplied } from "@/lib/worldbox/economy-push";
 import { ITEMS, RECIPES, itemById, sellPrice } from "@/lib/worldbox/items";
 import { dailyPriceFor, dailyStockForGenre, genreById, isShopExcluded, itemsForGenre, shopDayKeyOf, type ShopGenreId } from "@/lib/worldbox/shops";
 import type { LobbyStation } from "@/lib/worldbox/lobby";
@@ -155,8 +156,11 @@ export default function WorldBoxEconomyPanel({ space, station, genre, onClose }:
     aliveRef.current = true;
     void refreshProfile();
     void refreshBridge();
+    // 経済オプ確定の push で残高・履歴を即時更新する
+    const off = onEconomyApplied(() => { void refreshProfile(); void refreshBridge(); });
     return () => {
       aliveRef.current = false;
+      off();
     };
   }, [refreshProfile, refreshBridge]);
 
