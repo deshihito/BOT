@@ -12,6 +12,7 @@
 // 経済ブリッジのオプとして積む（このパネルは結果を表示するだけ）。
 import { useCallback, useEffect, useState } from "react";
 import { ITEMS, itemById } from "@/lib/worldbox/items";
+import { ItemAnnotation, ItemSlot, ItemSlotGrid } from "./ItemSlotGrid";
 import type { NationRole, NationsResponse } from "@/lib/worldbox/nations";
 import type { PlayerProfile } from "@/lib/worldbox/profile";
 import { ADVENTURE_ROLES, masteryRankOf, roleChangeCost, type AdventureRoleId } from "@/lib/worldbox/roles";
@@ -156,20 +157,7 @@ const input: React.CSSProperties = {
   background: "rgba(255,255,255,0.08)", color: "#fff", fontSize: 14,
 };
 
-function ItemIcon({ id, size = 24 }: { id: string; size?: number }) {
-  const def = itemById(id);
-  if (!def?.icon) return null;
-  return (
-    <img
-      src={def.icon}
-      alt=""
-      width={size}
-      height={size}
-      draggable={false}
-      style={{ imageRendering: "pixelated", flexShrink: 0 }}
-    />
-  );
-}
+
 
 export default function WorldBoxGuildBoardPanel({
   nations,
@@ -334,6 +322,7 @@ export default function WorldBoxGuildBoardPanel({
   const [data, setData] = useState<RequestsData | null>(null);
   const [msg, setMsg] = useState("");
   const [busy, setBusy] = useState(false);
+  const [reqSel, setReqSel] = useState<string | null>(null);
   const [formItem, setFormItem] = useState<string>(ITEMS[0]?.id ?? "");
   const [formCount, setFormCount] = useState(1);
   const [formReward, setFormReward] = useState(100);
@@ -394,7 +383,14 @@ export default function WorldBoxGuildBoardPanel({
 
   return (
     <div style={root} role="dialog" aria-label="ギルドボード" className="wb-panel">
-      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+      <div
+        style={{
+          display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap",
+          position: "sticky", top: -14, zIndex: 3,
+          margin: "-14px -14px 0", padding: "14px 14px 8px",
+          background: "rgba(10,12,20,0.98)",
+        }}
+      >
         <strong>ギルドボード</strong>
         <span style={{ flex: 1 }} />
         <button
@@ -482,15 +478,16 @@ export default function WorldBoxGuildBoardPanel({
               ) : (
                 <div style={{ marginTop: 6 }}>
                   {data.requests.map((r) => {
-                    const def = itemById(r.itemId);
                     const have = profile?.items[r.itemId] ?? 0;
                     return (
                       <div key={r.id} style={rowStyle}>
-                        <ItemIcon id={r.itemId} />
-                        <span style={{ fontSize: 14 }}>
-                          {def?.name ?? r.itemId} ×{r.count}
-                        </span>
-                        <span style={{ fontSize: 13, color: "#ffd23e" }}>{r.reward}</span>
+                        <ItemSlot
+                          itemId={r.itemId}
+                          count={r.count}
+                          badge={`${r.reward}`}
+                          selected={reqSel === r.id}
+                          onClick={() => setReqSel(r.id)}
+                        />
                         <span style={{ fontSize: 12, opacity: 0.75 }}>{r.posterName}</span>
                         <span style={{ flex: 1 }} />
                         {r.mine ? (
@@ -520,26 +517,42 @@ export default function WorldBoxGuildBoardPanel({
                       </div>
                     );
                   })}
+                  {(() => {
+                    const sel = data.requests.find((r) => r.id === reqSel);
+                    if (!sel) return null;
+                    return (
+                      <ItemAnnotation itemId={sel.itemId}>
+                        <div style={{ marginTop: 6, fontSize: 13 }}>
+                          <span className="muted">報酬 {sel.reward} ／ 所持 {profile?.items[sel.itemId] ?? 0}</span>
+                        </div>
+                      </ItemAnnotation>
+                    );
+                  })()}
                 </div>
               )}
+              <div style={{ marginTop: 12, paddingTop: 10, borderTop: "1px solid rgba(255,255,255,0.15)" }}>
+                <div style={{ maxHeight: 168, overflowY: "auto", overscrollBehavior: "contain" }}>
+                  <ItemSlotGrid>
+                    {ITEMS.map((item) => (
+                      <ItemSlot
+                        key={item.id}
+                        itemId={item.id}
+                        selected={formItem === item.id}
+                        onClick={() => setFormItem(item.id)}
+                      />
+                    ))}
+                  </ItemSlotGrid>
+                </div>
+                {formItem && (
+                  <div style={{ fontSize: 13, marginTop: 6 }}>{itemById(formItem)?.name ?? formItem}</div>
+                )}
+              </div>
               <div
                 style={{
                   display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap",
-                  marginTop: 12, paddingTop: 10, borderTop: "1px solid rgba(255,255,255,0.15)",
+                  marginTop: 8,
                 }}
               >
-                <select
-                  aria-label="アイテム"
-                  value={formItem}
-                  onChange={(e) => setFormItem(e.target.value)}
-                  style={{ ...input, maxWidth: 150 }}
-                >
-                  {ITEMS.map((item) => (
-                    <option key={item.id} value={item.id} style={{ color: "#000" }}>
-                      {item.name}
-                    </option>
-                  ))}
-                </select>
                 <input
                   aria-label="個数"
                   type="number"

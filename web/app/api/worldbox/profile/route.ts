@@ -212,10 +212,19 @@ async function handlePost(request: Request, session: AuthedSession) {
     return kinds.has(kind) ? null : statusError("not_at_workbench", 409);
   };
 
-  /** 売買の場所制約: 店（shop）か鍛冶屋（smith）の前にいなければ 409。 */
+  /** 購入の場所制約: 店（shop）か鍛冶屋（smith）の前にいなければ 409。
+   * 売却専用カウンター（sell）では買えない（売るだけの店）。 */
   const shopGate = async () => {
     const station = await loadMyLobbyStation(ownerKey);
     return station === "shop" || station === "smith" ? null : statusError("not_at_shop", 409);
+  };
+
+  /** 売却の場所制約: 店・鍛冶屋に加えて売却専用カウンター（sell）でも可。 */
+  const sellGate = async () => {
+    const station = await loadMyLobbyStation(ownerKey);
+    return station === "shop" || station === "smith" || station === "sell"
+      ? null
+      : statusError("not_at_shop", 409);
   };
 
   switch (data.action) {
@@ -281,7 +290,7 @@ async function handlePost(request: Request, session: AuthedSession) {
     case "sell": {
       const gate = coinGate();
       if ("response" in gate) return gate.response;
-      const place = await shopGate();
+      const place = await sellGate();
       if (place) return place;
       return saveWithCoin(sellItem(current, data.itemId, data.count), gate.discordId);
     }
