@@ -447,6 +447,25 @@ export default function WorldBoxClient() {
   const mapViewRef = useRef(false);
   mapViewRef.current = mapView;
   const bigMapRef = useRef<HTMLCanvasElement | null>(null);
+  // 自ユニオンのポーター（テレポーターが設置した転移点。マップに表示し、選ぶと移動）
+  const [porterUi, setPorterUi] = useState<{ x: number; y: number } | null>(null);
+  const porterRef = useRef<{ x: number; y: number } | null>(null);
+  porterRef.current = porterUi;
+  useEffect(() => {
+    if (!mapView) return;
+    let alive = true;
+    const load = async () => {
+      try {
+        const res = await fetch("/api/worldbox/warp", { headers: { Accept: "application/json" } });
+        if (!res.ok) return;
+        const data = (await res.json()) as { porter?: { x: number; y: number } | null };
+        if (alive) setPorterUi(data.porter ?? null);
+      } catch { /* 読めなくてもマップは見られる */ }
+    };
+    void load();
+    const timer = window.setInterval(load, 15000);
+    return () => { alive = false; window.clearInterval(timer); };
+  }, [mapView]);
   // フルスクリーン（ステージ全体を画面いっぱいにする。対応環境でのみボタンを出す）
   const stageRef = useRef<HTMLDivElement | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -601,6 +620,29 @@ export default function WorldBoxClient() {
       teleportActionRef.current(data.x, data.y);
     } catch {
       setNationMsg("失敗しました");
+    }
+  };
+  /** 自ユニオンのポーターへ移動: 所属と現在空間の検証はサーバー側が行う。 */
+  const teleportToPorter = async () => {
+    try {
+      const res = await fetch("/api/worldbox/warp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "teleport" }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { error?: string; x?: number; y?: number };
+      if (res.ok && typeof data.x === "number" && typeof data.y === "number") {
+        setMapView(false);
+        teleportActionRef.current(data.x, data.y);
+        return;
+      }
+      setTileMsg(
+        data.error === "no_porter" ? "ポーターなし"
+        : data.error === "not_in_union" ? "ユニオン未所属"
+        : "テレポートできない",
+      );
+    } catch {
+      setTileMsg("テレポートできない");
     }
   };
   const respawnActionRef = useRef<(point: { x: number; y: number }) => void>(() => {});
@@ -813,7 +855,10 @@ export default function WorldBoxClient() {
   const [invProfile, setInvProfile] = useState<PlayerProfile | null>(null);
   /** 技チャージゲージの表示時計（クールタイム中だけ 200ms で進める）。 */
   const [gaugeNow, setGaugeNow] = useState(() => Date.now());
-  const gaugeSkill = invProfile && invProfile.role !== "free" ? activeSkillFor(invProfile) : null;
+  // テレポーターのゲージはポーター設置（activeSkillFor は戦闘技として返さない）
+  const gaugeSkill = invProfile && invProfile.role !== "free"
+    ? invProfile.role === "teleporter" ? SKILLS.porter : activeSkillFor(invProfile)
+    : null;
   useEffect(() => {
     if (!gaugeSkill) return;
     const timer = window.setInterval(() => setGaugeNow(Date.now()), 200);
@@ -922,7 +967,10 @@ export default function WorldBoxClient() {
       }
     }
     const ownTile = Math.floor(pos.x) === t.x && Math.floor(pos.y) === t.y;
-    const skill = ownTile && profile.role === "guard" ? SKILLS.taunt : activeSkillFor(profile);
+    // テレポーターはダブルタップ地点へポーターを設置する（戦闘技ではない）
+    const skill = profile.role === "teleporter"
+      ? SKILLS.porter
+      : ownTile && profile.role === "guard" ? SKILLS.taunt : activeSkillFor(profile);
     if (!skill) return false;
     if (skillCooldownLeft(profile, skill.id, Date.now()) > 0) return false;
     // 近くのモブの現在タイルを申告する（サーバーの対象解決を画面に合わせる）
@@ -950,7 +998,7 @@ export default function WorldBoxClient() {
           },
           stage: -1,
         });
-        playWbSe(skill.id === "heal_zone" || skill.id === "taunt" ? "warp" : "hit");
+        playWbSe(skill.id === "heal_zone" || skill.id === "taunt" || skill.id === "porter" ? "warp" : "hit");
         void refreshMobsRef.current();
         return true;
       }
@@ -4589,6 +4637,19 @@ export default function WorldBoxClient() {
             ctx.beginPath();
             ctx.ellipse(sx(eff.fromX), sy(eff.fromY), (0.5 + prog * 3) * TILE, (0.5 + prog * 3) * TILE * 0.45, 0, 0, Math.PI * 2);
             ctx.stroke();
+          } else if (eff.kind === "warp") {
+            // 立ち上る光柱＋広がるリング（ポーター設置）
+            const rise = Math.min(1, prog * 1.5);
+            const colW = TILE * 0.55 * (1 - prog * 0.35);
+            ctx.globalAlpha = 0.5 * (1 - prog * 0.55);
+            ctx.fillStyle = "#ffe9a8";
+            ctx.fillRect(cxp - colW / 2, cyp - TILE * 3.4 * rise, colW, TILE * 3.4 * rise);
+            ctx.globalAlpha = 0.85 * (1 - prog);
+            ctx.strokeStyle = "#ffd23e";
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.ellipse(cxp, cyp, (0.3 + prog * 1.2) * TILE, (0.3 + prog * 1.2) * TILE * 0.45, 0, 0, Math.PI * 2);
+            ctx.stroke();
           }
           ctx.restore();
         }
@@ -4762,6 +4823,24 @@ export default function WorldBoxClient() {
             bctx.strokeStyle = "rgba(255,255,255,0.85)";
             bctx.fillRect(mx - 3, my - 3, 7, 7);
             bctx.strokeRect(mx - 3, my - 3, 7, 7);
+          }
+          // 自ユニオンのポーター（金色の菱形＋白枠。タップで移動できる）
+          const porter = porterRef.current;
+          if (porter) {
+            const mx = toMapX(porter.x + 0.5);
+            const my = toMapY(porter.y + 0.5);
+            if (mx >= -8 && my >= -8 && mx <= bm.width + 8 && my <= bm.height + 8) {
+              bctx.fillStyle = "#ffd23e";
+              bctx.strokeStyle = "rgba(255,255,255,0.9)";
+              bctx.beginPath();
+              bctx.moveTo(mx, my - 6);
+              bctx.lineTo(mx + 6, my);
+              bctx.lineTo(mx, my + 6);
+              bctx.lineTo(mx - 6, my);
+              bctx.closePath();
+              bctx.fill();
+              bctx.stroke();
+            }
           }
           // 他のプレイヤー
           bctx.fillStyle = "#ffffff";
@@ -5789,6 +5868,11 @@ export default function WorldBoxClient() {
           <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
             <strong>マップ</strong>
             <span className="muted">あなたの座標 X {coords.x} / Y {coords.y}</span>
+            {porterUi && (
+              <button type="button" style={btn} onClick={() => void teleportToPorter()}>
+                ポーター X {porterUi.x} / Y {porterUi.y}
+              </button>
+            )}
             <span style={{ flex: 1 }} />
             <button type="button" style={btn} onClick={() => setMapView(false)}>
               閉じる
@@ -5799,6 +5883,21 @@ export default function WorldBoxClient() {
             width={BIGMAP_SIZE}
             height={BIGMAP_SIZE}
             aria-label="周辺マップ（大きく表示）"
+            onClick={(e) => {
+              // ポーターのマーカー付近のタップでも移動できる
+              const porter = porterUi;
+              if (!porter) return;
+              const rect = e.currentTarget.getBoundingClientRect();
+              if (rect.width <= 0) return;
+              const px = (e.clientX - rect.left) * (BIGMAP_SIZE / rect.width);
+              const py = (e.clientY - rect.top) * (BIGMAP_SIZE / rect.width);
+              const pos = playerPosRef.current;
+              const wx = Math.floor(pos.x) - BIGMAP_TILES / 2 + px / BIGMAP_SCALE;
+              const wy = Math.floor(pos.y) - BIGMAP_TILES / 2 + py / BIGMAP_SCALE;
+              if (Math.max(Math.abs(wx - (porter.x + 0.5)), Math.abs(wy - (porter.y + 0.5))) <= 3) {
+                void teleportToPorter();
+              }
+            }}
             style={{
               width: "100%", height: "auto", display: "block", marginTop: 10,
               borderRadius: 10, border: "1px solid rgba(255,255,255,0.35)", background: "rgba(0,0,0,0.25)",

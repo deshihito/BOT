@@ -501,11 +501,12 @@ export function slashAlpha(k: number): number {
  * プレビュー9種（~/workspace/worldbox-skill-fx/）の仕様を fx.ts に preset 化したもの。
  * 描画はクライアントが SkillFxEffect の進行度から行い、粒は spawnSkillFx が
  * 段階遷移時に spawnBurst へ委譲する。予告系（thunder/meteor）は2段構成。
+ * warp はテレポーターのポーター設置用に追加したプリセット（立ち上る光柱＋リング）。
  */
 
 export type SkillFxKind =
   | "fireball" | "heal_zone" | "sweep" | "thunder_strike" | "ice_lance"
-  | "meteor" | "whirlwind" | "arrow_rain" | "poison_field" | "taunt";
+  | "meteor" | "whirlwind" | "arrow_rain" | "poison_field" | "taunt" | "warp";
 
 export type SkillFxEffect = {
   kind: SkillFxKind;
@@ -530,6 +531,7 @@ export const SKILL_FX_DURATION_MS: Record<SkillFxKind, number> = {
   arrow_rain: 1500,
   poison_field: 3000,
   taunt: 500,
+  warp: 1200,
 };
 
 /** 進行度（0..1）。終了したら 1 以上。 */
@@ -607,6 +609,10 @@ export function spawnSkillFx(sys: FxSystem, effect: SkillFxEffect, stage: number
       break;
     case "taunt":
       if (stage === 1) spawnBurst(sys, "poof", x, y);
+      break;
+    case "warp":
+      // 立ち上る光（ワープバースト）を重ねて柱らしくする
+      if (stage === 1) { spawnBurst(sys, "warp", x, y); spawnBurst(sys, "warp", x, y); }
       break;
   }
 }

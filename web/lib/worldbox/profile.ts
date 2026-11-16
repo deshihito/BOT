@@ -11,8 +11,8 @@
 // profile-online.ts / API ルート側が担い、ここは検証とインベントリ
 // 操作だけを行う。経済の状態遷移は economy.ts。
 /** 冒険役職 ID（プロフィールが所有する。規則は roles.ts）。 */
-export type AdventureRoleId = "free" | "blade" | "guard" | "scout" | "miner" | "medic";
-export const ADVENTURE_ROLE_IDS: readonly AdventureRoleId[] = ["free", "blade", "guard", "scout", "miner", "medic"];
+export type AdventureRoleId = "free" | "blade" | "guard" | "scout" | "miner" | "medic" | "teleporter";
+export const ADVENTURE_ROLE_IDS: readonly AdventureRoleId[] = ["free", "blade", "guard", "scout", "miner", "medic", "teleporter"];
 /** 守護の最大 HP ボーナス。 */
 export const GUARD_HP_BONUS = 20;
 /** 薬師の回復アイテム倍率。 */
@@ -79,8 +79,11 @@ export type PlayerProfile = {
   stealActorAt: number;
   /** 最後に steal された時刻（epoch ms）。 */
   stealTargetAt: number;
-  /** 冒険役職（自由人/剣士/守護/斥候/採掘者/薬師）。 */
+  /** 冒険役職（自由人/剣士/守護/斥候/採掘者/薬師/テレポーター）。 */
   role: AdventureRoleId;
+  /** 一度でも役職を選んだか（転職コストの初回無料判定。旧データで
+   * role が free でない人は選んだものとして読み込み時に補う）。 */
+  rolePicked: boolean;
   /** 役職ごとの熟練 XP（ランクは roles.rankForXp で導出）。 */
   mastery: Partial<Record<AdventureRoleId, { xp: number }>>;
   /** 技ごとの最終発動時刻（epoch ms）。クールタイム検証はサーバー側。 */
@@ -105,6 +108,7 @@ function emptySlots(size: number): ItemSlot[] {
 
 export const DEFAULT_PROFILE: PlayerProfile = {
   role: "free",
+  rolePicked: false,
   mastery: {},
   skillAt: {},
   tauntUntil: 0,
@@ -238,11 +242,12 @@ export function parseProfile(raw: unknown): PlayerProfile {
   }
   const inv = invOf({
     coins: 0, hunger: 0, hp: HP_MAX, status: [], vitalAt: 0, respawn: null, restPoint: null, lastDamageAt: 0, deaths: 0, stealActorAt: 0, stealTargetAt: 0,
-    role: "free", mastery: {}, skillAt: {}, tauntUntil: 0, reviveMark: null, pendingTeleport: null, tentTier: 0, enhance: {}, spawnProtectedUntil: 0,
+    role: "free", rolePicked: false, mastery: {}, skillAt: {}, tauntUntil: 0, reviveMark: null, pendingTeleport: null, tentTier: 0, enhance: {}, spawnProtectedUntil: 0,
     items: data.items as Record<string, number>,
     hotbar: data.hotbar as ItemSlot[],
     storage: data.storage as ItemSlot[],
   });
+  const role: AdventureRoleId = isAdventureRoleId(data.role) ? data.role : "free";
   return {
     coins: clampInt(data.coins, 0, Number.MAX_SAFE_INTEGER, DEFAULT_PROFILE.coins),
     hunger: clampInt(data.hunger, 0, HUNGER_MAX, DEFAULT_PROFILE.hunger),
@@ -258,7 +263,9 @@ export function parseProfile(raw: unknown): PlayerProfile {
     storage: inv.storage,
     stealActorAt: clampInt(data.stealActorAt, 0, Number.MAX_SAFE_INTEGER, 0),
     stealTargetAt: clampInt(data.stealTargetAt, 0, Number.MAX_SAFE_INTEGER, 0),
-    role: isAdventureRoleId(data.role) ? data.role : "free",
+    role,
+    // 旧データ（フラグなし）で役職を持っている人は「選んだ」ものとして扱う
+    rolePicked: data.rolePicked === true || role !== "free",
     mastery: parseMastery(data.mastery),
     skillAt: parseSkillAt(data.skillAt),
     tauntUntil: clampInt(data.tauntUntil, 0, Number.MAX_SAFE_INTEGER, 0),
@@ -372,6 +379,7 @@ export function serializeProfile(profile: PlayerProfile): string {
     stealActorAt: clampInt(profile.stealActorAt, 0, Number.MAX_SAFE_INTEGER, 0),
     stealTargetAt: clampInt(profile.stealTargetAt, 0, Number.MAX_SAFE_INTEGER, 0),
     role: isAdventureRoleId(profile.role) ? profile.role : "free",
+    rolePicked: profile.rolePicked === true || (isAdventureRoleId(profile.role) && profile.role !== "free"),
     mastery: parseMastery(profile.mastery),
     skillAt: parseSkillAt(profile.skillAt),
     tauntUntil: clampInt(profile.tauntUntil, 0, Number.MAX_SAFE_INTEGER, 0),
