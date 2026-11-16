@@ -64,7 +64,7 @@ export default function MergeFruitScene3D({ board, current, next, hoverCol, stat
     let detach: (() => void) | null = null;
     const stage = createStage(container, {
       background: 0x20262e,
-      camera: { position: [0, 4.9, 9.8], lookAt: [0, 4.15, 0], fov: 42 },
+      camera: { position: [0, 5.23, 14.13], lookAt: [0, 4.15, 0], fov: 42 },
       onFrame: (dt) => {
         const rt = rtRef.current;
         if (!rt) return;

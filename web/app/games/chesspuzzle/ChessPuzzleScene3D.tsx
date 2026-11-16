@@ -159,7 +159,7 @@ export default function ChessPuzzleScene3D({
     let detach: (() => void) | null = null;
     const stage = createStage(container, {
       background: 0x5b4632,
-      camera: { position: [0, 7.4, 5.6], lookAt: [0, 0, 0.3], fov: 40 },
+      camera: { position: [0, 9.36, 7.0], lookAt: [0, 0, 0.3], fov: 40 },
       onFrame: (dt) => {
         const rt = rtRef.current;
         if (!rt) return;

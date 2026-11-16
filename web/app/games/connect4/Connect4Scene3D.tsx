@@ -60,7 +60,7 @@ export default function Connect4Scene3D({ cells, winCells, lastMove, myTurn, onD
     let detach: (() => void) | null = null;
     const stage = createStage(container, {
       background: 0x24425f,
-      camera: { position: [0, 4.3, 9.6], lookAt: [0, 3.4, 0], fov: 40 },
+      camera: { position: [0, 4.5, 11.69], lookAt: [0, 3.4, 0], fov: 40 },
       onFrame: (_dt, t) => {
         const rt = rtRef.current;
         if (!rt) return;

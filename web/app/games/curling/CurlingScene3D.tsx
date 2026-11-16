@@ -89,7 +89,7 @@ export default function CurlingScene3D({ stones, waiting, canThrow, onAim, onThr
     let detach: (() => void) | null = null;
     const stage = createStage(container, {
       background: 0xb9d6e6,
-      camera: { position: [0, 9.2, 4.2], lookAt: [0, 0, -0.2], fov: 46 },
+      camera: { position: [0, 10.15, 4.65], lookAt: [0, 0, -0.2], fov: 46 },
       onFrame: (dt) => {
         const rt = rtRef.current;
         if (!rt) return;

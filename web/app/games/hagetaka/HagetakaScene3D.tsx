@@ -199,10 +199,12 @@ export default function HagetakaScene3D({ phase, table, hand, canBid, yourCard, 
 
     if (phase === "bidding") {
       // 奥: 場の得点カード。
+      // 同点キャリーで枚数が増えたときは間隔を詰めて列の全体幅を画面内に収める。
+      const prizeSpacing = table.length > 1 ? Math.min(0.95, 6.6 / (table.length - 1)) : 0.95;
       table.forEach((v, i) => {
         const offset = i - (table.length - 1) / 2;
         addCard(`prize-${i}`, `prize-${v}`, prizeCardMesh(v), true,
-          new THREE.Vector3(offset * 0.95, 0.05, -1.85), offset * 0.04);
+          new THREE.Vector3(offset * prizeSpacing, 0.05, -1.85), offset * 0.04);
       });
 
       // 中: 前ラウンドの公開済み入札（獲得者は金縁＋持ち上げ）。
