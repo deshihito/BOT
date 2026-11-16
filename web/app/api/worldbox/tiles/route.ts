@@ -135,17 +135,20 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "world_frozen" }, { status: 423, headers: NO_STORE });
   }
 
-  // 隣接検証（本人の位置がサーバー側で分かる場合だけ）
+  // 隣接検証。位置がサーバー側で分からない場合は検証を素通りさせず
+  // 拒否する（釣り・マシンと同じ規則）。素通しだと、セーブの空間を
+  // world 以外にしておくだけで距離検証が消え、遠隔で掘る/置けた。
   if (typeof fields.x === "number" && typeof fields.y === "number") {
     const pos = await actorWorldPosition(ownerKey);
-    if (pos) {
-      const dist = Math.max(
-        Math.abs(Math.floor(pos.x) - Math.floor(fields.x)),
-        Math.abs(Math.floor(pos.y) - Math.floor(fields.y)),
-      );
-      if (dist > MAX_ACTION_DISTANCE) {
-        return NextResponse.json({ error: "too_far" }, { status: 409, headers: NO_STORE });
-      }
+    if (!pos) {
+      return NextResponse.json({ error: "position_unknown" }, { status: 409, headers: NO_STORE });
+    }
+    const dist = Math.max(
+      Math.abs(Math.floor(pos.x) - Math.floor(fields.x)),
+      Math.abs(Math.floor(pos.y) - Math.floor(fields.y)),
+    );
+    if (dist > MAX_ACTION_DISTANCE) {
+      return NextResponse.json({ error: "too_far" }, { status: 409, headers: NO_STORE });
     }
   }
 

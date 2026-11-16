@@ -5,6 +5,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ArenaTier } from "@/lib/worldbox/arena";
 import { onEconomyApplied } from "@/lib/worldbox/economy-push";
+import { createPollGuard, type PollGuard } from "@/lib/poll-guard";
 
 type LoadState = "loading" | "ready" | "guest" | "unavailable";
 
@@ -125,42 +126,59 @@ export default function WorldBoxArenaPanel({ onClose }: { onClose: () => void })
   const [tournament, setTournament] = useState<TournamentView | null>(null);
   const [tournamentMsg, setTournamentMsg] = useState("");
   const aliveRef = useRef(true);
+  // ポーリングガード（S6）: 3本の取得を重ねて走らせず、古いレスポンスで
+  // 対戦・大会の状態を巻き戻さない（カジノパネルと同じ規則）。
+  const arenaGuardRef = useRef<PollGuard>(createPollGuard());
+  const pvpGuardRef = useRef<PollGuard>(createPollGuard());
+  const tournamentGuardRef = useRef<PollGuard>(createPollGuard());
 
   const refresh = useCallback(async () => {
+    const ticket = arenaGuardRef.current.begin();
+    if (ticket === null) return;
     try {
       const res = await fetch("/api/worldbox/arena", { headers: { Accept: "application/json" } });
       if (res.status === 401 || res.status === 403) { if (aliveRef.current) setLoad("guest"); return; }
       if (!res.ok) { if (aliveRef.current) setLoad("unavailable"); return; }
       const data = (await res.json()) as ArenaState;
-      if (!aliveRef.current) return;
+      if (!aliveRef.current || !arenaGuardRef.current.isCurrent(ticket)) return;
       setState(data);
       setLoad("ready");
     } catch {
       if (aliveRef.current) setLoad("unavailable");
+    } finally {
+      arenaGuardRef.current.end(ticket);
     }
   }, []);
 
   const refreshPvp = useCallback(async () => {
+    const ticket = pvpGuardRef.current.begin();
+    if (ticket === null) return;
     try {
       const res = await fetch("/api/worldbox/pvp", { headers: { Accept: "application/json" } });
       if (!res.ok) return;
       const data = (await res.json()) as PvpState;
-      if (!aliveRef.current) return;
+      if (!aliveRef.current || !pvpGuardRef.current.isCurrent(ticket)) return;
       setPvp(data);
     } catch {
       // 対人戦の取得失敗は PvE の表示を壊さない（次の更新で取り直す）
+    } finally {
+      pvpGuardRef.current.end(ticket);
     }
   }, []);
 
   const refreshTournament = useCallback(async () => {
+    const ticket = tournamentGuardRef.current.begin();
+    if (ticket === null) return;
     try {
       const res = await fetch("/api/worldbox/tournament", { headers: { Accept: "application/json" } });
       if (!res.ok) return;
       const data = (await res.json()) as TournamentState;
-      if (!aliveRef.current) return;
+      if (!aliveRef.current || !tournamentGuardRef.current.isCurrent(ticket)) return;
       setTournament(data.tournament);
     } catch {
       // 大会の取得失敗は闘技場の表示を壊さない（次の更新で取り直す）
+    } finally {
+      tournamentGuardRef.current.end(ticket);
     }
   }, []);
 

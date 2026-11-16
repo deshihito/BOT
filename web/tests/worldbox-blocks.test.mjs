@@ -432,7 +432,12 @@ function resetStores() {
   globalThis.__wbBlockTiles.clear();
   globalThis.__wbBlockProfiles.clear();
   globalThis.__wbBlockContainers?.clear();
-  globalThis.__wbBlockPresence = [];
+  // 位置ゲート（位置不明は拒否）が前提にする「本人がそのタイルに立っている」
+  // プレゼンス。旧仕様の素通しに依存していた往復テストのための種。
+  globalThis.__wbBlockPresence = [
+    { id: T.presenceIdFor(MY_KEY), space: "world", x: grassAt.x, y: grassAt.y, ts: Date.now() },
+    { id: T.presenceIdFor(OTHER_KEY2), space: "world", x: grassAt.x, y: grassAt.y, ts: Date.now() },
+  ];
   globalThis.__wbBlockNations = { nations: {} };
 }
 
@@ -485,6 +490,9 @@ test("API(blocks): 首都タイルは 409 で保護され、旧スポーン地�
   assert.equal((await cap.json()).error, "on_capital");
   globalThis.__wbBlockNations = { nations: {} };
   // 固定のスポーン広場は無い（旧マップ中央の草タイルにも置ける）
+  globalThis.__wbBlockPresence = [
+    { id: T.presenceIdFor(MY_KEY), space: "world", x: 512, y: 512, ts: Date.now() },
+  ];
   const center = await tilesRoute.POST(apiRequest(URL_T, "POST", cookie, { action: "place_block", x: 512, y: 512, itemId: "dirt_block" }));
   assert.equal(center.status, 200);
 });

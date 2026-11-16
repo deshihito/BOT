@@ -446,7 +446,12 @@ function resetStores() {
   globalThis.__wbContainerTiles?.clear();
   globalThis.__wbContainerProfiles?.clear();
   globalThis.__wbContainers?.clear();
-  globalThis.__wbContainerPresence = [];
+  // 位置ゲート前提のプレゼンス（本人が樽の前に立っている）。遠方テストは
+  // この後に上書きする。
+  globalThis.__wbContainerPresence = [
+    { id: MY_ID, space: "world", x: GRASS.x, y: GRASS.y, ts: Date.now() },
+    { id: T.presenceIdFor(OTHER_KEY), space: "world", x: GRASS.x, y: GRASS.y, ts: Date.now() },
+  ];
 }
 function seedBarrel(ownerId) {
   const ov = { block: { itemId: "barrel", ownerId }, ownerId };

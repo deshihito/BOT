@@ -206,13 +206,16 @@ async function settleSlot7(ctx: Ctx, session: Extract<CasinoSession, { kind: "sl
     kind: "gamble",
     amount: prepayTotal,
     reason: CASINO_SESSION_REASONS.slot7Settle,
-    payout: Math.max(0, netReturn),
+    // 超JACKPOT（ベット×100000）では配当が GAMBLE_PAYOUT_MAX を超えて
+    // オプが作れず、精算が永遠に失敗してセッションが固着する。
+    // 上限で丸めてでも精算を通し、セッションを必ず終わらせる。
+    payout: Math.min(Math.max(0, netReturn), GAMBLE_PAYOUT_MAX),
     prepaid: true,
   });
   if (!settle) return false;
   if (netReturn < 0) {
     await enqueueSettleOnce(ctx, `penalty-${session.prepayOpId}`, {
-      kind: "spend", amount: -netReturn, reason: CASINO_SESSION_REASONS.slot7Penalty,
+      kind: "spend", amount: Math.min(-netReturn, ECONOMY_AMOUNT_MAX), reason: CASINO_SESSION_REASONS.slot7Penalty,
     });
   }
   await clearCasinoSession(ctx.userKey);
@@ -229,7 +232,8 @@ async function settleDouble(
     kind: "gamble",
     amount: session.bet,
     reason: CASINO_SESSION_REASONS.doubleSettle,
-    payout,
+    // 連勝で配当が上限を超えても精算オプが作れるよう丸める（slot7 と同じ）。
+    payout: Math.min(payout, GAMBLE_PAYOUT_MAX),
     prepaid: true,
   });
   if (!ok) return false;
@@ -620,6 +624,10 @@ async function handlePost(request: Request, session: AuthedSession) {
       return errorResponse("bet_failed", 409);
     }
     if (bjs.bet > effectiveBalance) return errorResponse("not_enough_coins", 409);
+    // ダブル後の総ベットが ECONOMY_AMOUNT_MAX を超えると精算オプも
+    // 返金オプも作れずセッションが固着する。総ベットが上限に収まる
+    // ときだけダブルを許可する。
+    if (bjs.bet * 2 > ECONOMY_AMOUNT_MAX) return errorResponse("bet_too_large_to_double", 409);
     const second = await enqueue(ctx.userKey, ctx.discordId, {
       kind: "spend", amount: bjs.bet, reason: CASINO_SESSION_REASONS.blackjackBet,
     });

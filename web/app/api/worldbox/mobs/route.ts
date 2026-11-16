@@ -277,7 +277,10 @@ export async function POST(request: Request) {
         return reported;
       })()
     : await actorWorldPosition(ownerKey, reported);
-  if (pos) {
+  if (!pos) {
+    return NextResponse.json({ error: "position_unknown" }, { status: 409, headers: NO_STORE });
+  }
+  {
     // 距離はアンカーでなく「画面で見えている現在タイル」で測る。モブの
     // 見た目はアンカーから最大で LEASH_DISTANCE ほど離れて追跡してくる
     // ため、アンカー基準だと足元のモブにも too_far になってしまう。
