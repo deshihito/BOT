@@ -194,3 +194,61 @@ def test_handle_message_no_link():
     board = {f"union:{GID}": json.dumps([])}
     worker, kvs = make_worker(board=board)
     assert asyncio.run(worker.handle_message(snapshot())) is False
+
+
+# --- ディレクトリ公開の失敗吸収（#7 ループ無言死の防止） ---
+
+def test_publish_directory_survives_provider_failure():
+    """チャンネル一覧の取得に失敗しても例外は外へ漏らさず 0 を返す。"""
+    nations = {"nations": json.dumps({"v": 1, "nations": {GID: {"guildId": GID}}})}
+    kvs = {
+        "directory": FakeKV({}),
+        "nations": FakeKV(nations),
+        "settings": FakeKV({}),
+        "board": FakeKV({}),
+    }
+
+    def boom():
+        raise RuntimeError("discord down")
+
+    worker = wd.WorldBoxDiscordWorker(
+        directory_kv=kvs["directory"],
+        nations_kv=kvs["nations"],
+        settings_kv=kvs["settings"],
+        board_kv=kvs["board"],
+        guild_channels_provider=boom,
+        global_channel_ids_provider=lambda: set(),
+    )
+    assert asyncio.run(worker.publish_directory_once()) == 0
+
+
+def test_publish_directory_survives_write_failure():
+    """1ギルドの書き込み失敗は吸収し、他のギルドは公開し続ける。"""
+    nations = {"nations": json.dumps({"v": 1, "nations": {GID: {"guildId": GID}, CID2: {"guildId": CID2}}})}
+    guild_channels = [
+        (GID, [{"id": CID, "name": "general"}]),
+        (CID2, [{"id": CID2, "name": "other"}]),
+    ]
+
+    class FlakyDirectoryKV(FakeKV):
+        async def set(self, key, value):
+            if key == GID:
+                raise RuntimeError("kv down")
+            await super().set(key, value)
+
+    kvs = {
+        "directory": FlakyDirectoryKV({}),
+        "nations": FakeKV(nations),
+        "settings": FakeKV({}),
+        "board": FakeKV({}),
+    }
+    worker = wd.WorldBoxDiscordWorker(
+        directory_kv=kvs["directory"],
+        nations_kv=kvs["nations"],
+        settings_kv=kvs["settings"],
+        board_kv=kvs["board"],
+        guild_channels_provider=lambda: guild_channels,
+        global_channel_ids_provider=lambda: set(),
+    )
+    assert asyncio.run(worker.publish_directory_once()) == 1
+    assert CID2 in kvs["directory"].records

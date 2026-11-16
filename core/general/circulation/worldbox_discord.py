@@ -256,9 +256,16 @@ class WorldBoxDiscordWorker:
             global_ids = self._global_channel_ids_provider()
         except Exception:
             global_ids = set()
+        try:
+            guild_channels = self._guild_channels_provider()
+        except Exception:
+            # 巡回本体の失敗で tasks.loop ごと止まる（無言死）とディレクトリ
+            # 公開全体が死ぬ。ここで吸収し、次周期に再試行する。
+            logger.exception("worldbox discord: チャンネル一覧の取得に失敗しました（次回再試行）")
+            return 0
         now_ms = _now_ms()
         published = 0
-        for guild_id, channels in self._guild_channels_provider():
+        for guild_id, channels in guild_channels:
             if guild_id not in guild_ids:
                 continue
             entry = build_directory_entry(channels, global_ids, now_ms)
