@@ -439,6 +439,7 @@ class CirculationCog(commands.Cog):
             new_user_balance=lambda: wallet_module.NEW_USER_BALANCE,
             balance_reader=self._balance,
             metrics_kv=KVStore(worldbox_economy_core.METRICS_NAMESPACE, remote_only=True),
+            applied_kv=KVStore(worldbox_economy_core.APPLIED_NAMESPACE, remote_only=True),
         )
         # 経済ワーカーの駆動は適応ポーリング（処理がある間は短間隔、
         # idle は最大 POLL_SECONDS まで backoff）。固定間隔の
