@@ -1,9 +1,9 @@
 // A47フェーズ: 内容充実第3弾の機械検証（lib のみ、UI 非依存）。
-// - lib/chesspuzzle.ts: 全15題（1手詰め7・2手詰め8）が verifyProblem を通り、
+// - lib/games/chesspuzzle.ts: 全15題（1手詰め7・2手詰め8）が verifyProblem を通り、
 //   増量2題（cp14/cp15）がヒント手順でクリアできる
-// - lib/river.ts: 全12題が BFS で解け、増量2題（pasture/foxhole）の最短手数は7回で、
+// - lib/games/river.ts: 全12題が BFS で解け、増量2題（pasture/foxhole）の最短手数は7回で、
 //   最短手順で実際に勝利でき、危険な残し方で失敗する
-// - lib/kwordle.ts: 答えバンクは90語・全て実在の5文字カタカナ語形式で重複なし、
+// - lib/games/kwordle.ts: 答えバンクは90語・全て実在の5文字カタカナ語形式で重複なし、
 //   増量30語のいずれも答えとして勝てる
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -22,9 +22,9 @@ async function loadLib(name) {
   return import("data:text/javascript;base64," + Buffer.from(js).toString("base64"));
 }
 
-const cp = await loadLib("chesspuzzle.ts");
-const rv = await loadLib("river.ts");
-const kw = await loadLib("kwordle.ts");
+const cp = await loadLib("games/chesspuzzle.ts");
+const rv = await loadLib("games/river.ts");
+const kw = await loadLib("games/kwordle.ts");
 
 // ------------------------------------------------------------ chesspuzzle
 

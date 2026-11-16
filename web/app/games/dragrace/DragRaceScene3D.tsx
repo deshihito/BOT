@@ -1,6 +1,6 @@
 "use client";
 // ドラッグレースの 3D シーン。直線コース + 車2台（プリミティブ造形）。
-// 勝敗・進行度は lib/dragrace.ts とクライアントが決め、ここは親の進行度
+// 勝敗・進行度は lib/games/dragrace.ts とクライアントが決め、ここは親の進行度
 // （playerProg / cpuProg）へ補間追従するだけ。3D 側で判定はしない。
 // 入力: コース/車へのタップ・フリック = 既存の onAction（発進/シフトと同一）。
 // ライト（赤/緑）と RPM バー（自車上）も親状態に追従して表示する。
@@ -12,7 +12,7 @@ import { createStage } from "@/lib/three-kit/stage";
 import { canvasTexture } from "@/lib/three-kit/primitives";
 import { attachPickPointer } from "@/lib/three-kit/pointer";
 import SceneBox from "@/lib/three-kit/SceneBox";
-import type { DragPhase } from "@/lib/dragrace";
+import type { DragPhase } from "@/lib/games/dragrace";
 
 interface Props {
   /** プレイヤー車の進行度 0〜1（lib の playerProgress）。 */

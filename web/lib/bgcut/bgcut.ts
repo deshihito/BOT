@@ -4,8 +4,8 @@
 // 期待する契約に合わせる。Bot は bgcut_results 名前空間をポーリングして
 // 発行元チャンネルへ公開投稿し、投稿後にキーを削除する。
 
-import { kvGet, kvSet } from "./bot-api";
-import { intToken } from "./dashboard-core";
+import { kvGet, kvSet } from "../bot-api";
+import { intToken } from "../dashboard-core";
 import { purposeBudget, type BgCutPurpose } from "./bgcut-core";
 import {
   verifyBgcutToken,

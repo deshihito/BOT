@@ -1,6 +1,6 @@
 // A10フェーズの新規4本のロジック検証。
-// - lib/dicequest.ts: 候補・方向ルール・最後の数字の条件・失敗と集計
-// - lib/pentomino.ts: 向き集合・回転/反転・配置検証・ソルバによる可解性
+// - lib/games/dicequest.ts: 候補・方向ルール・最後の数字の条件・失敗と集計
+// - lib/games/pentomino.ts: 向き集合・回転/反転・配置検証・ソルバによる可解性
 // - lib/online/games/texas.ts: 7枚役判定・秘匿ビュー・チップ増減・5ハンド完走
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -41,8 +41,8 @@ async function loadOnline(name, exportsList) {
   return import("data:text/javascript;base64," + Buffer.from(code).toString("base64"));
 }
 
-const dq = await loadLib("dicequest.ts");
-const pent = await loadLib("pentomino.ts");
+const dq = await loadLib("games/dicequest.ts");
+const pent = await loadLib("games/pentomino.ts");
 const texas = await loadOnline("texas.ts", [ "gameModule", "evaluateTexasHand", "compareTexasScores", "TX_START_CHIPS", "TX_ANTE", "TX_BET", "TX_TOTAL_HANDS", "TX_HAND_END_MS", ]);
 
 const rngStub = () => 0.42;

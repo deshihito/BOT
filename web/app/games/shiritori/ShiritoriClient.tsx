@@ -6,7 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import OnlineShell from "../online/OnlineShell";
 import type { OnlineRoomApi, OnlineRoomView } from "../online/useOnlineRoom";
 import { useRoomJuice } from "../GameJuice";
-import { playSe } from "@/lib/balku-sound";
+import { playSe } from "@/lib/balku/balku-sound";
 
 type ShiritoriEvent =
   | { kind: "word"; seat: number; word: string }

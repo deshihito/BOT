@@ -456,6 +456,7 @@ const STATION_LABEL: Record<LobbyStation, string> = {
   fountain: "噴水",
   rest: "休憩",
   arcade: "アーケード",
+  race: "競馬場",
 };
 
 export default function WorldBoxClient() {

@@ -5,7 +5,7 @@
 デイリー（日付シードで全員同じ問題・ふつう相当）。入力は
 X（横）セレクト→Y（縦）セレクト→数字セレクト（座標表記は X/Y 統一、
 レビュー対応 2026-11-06）。初期マスは変更できない。
-クリアタイムは core/game/game/game_records.py の sudoku に難易度別で残る。
+クリアタイムは core/game/hub/game_records.py の sudoku に難易度別で残る。
 
 盤面画像化タスク（2026-11-06）: 盤面表示をテキストから PIL 画像
 （core/game/board_image.render_sudoku）に差し替え、パネルは
@@ -21,9 +21,9 @@ from datetime import datetime
 import discord
 from discord.ext import commands
 
-from core.game.game import game_records
-from core.game.game.board_image import render_cached, render_sudoku
-from core.game.game.game_v2 import GamePanelView
+from core.game.hub import game_records
+from core.game.hub.board_image import render_cached, render_sudoku
+from core.game.hub.game_v2 import GamePanelView
 from core.game.sudoku.sudoku import DIFFICULTIES, board_text, daily_puzzle, generate, is_complete_and_valid
 from core.support.panel_v2 import edit_panel_v2
 

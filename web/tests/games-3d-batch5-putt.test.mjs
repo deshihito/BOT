@@ -5,8 +5,8 @@
 // - WebGL 失敗時は onFail / webglFailed で既存 2D へフォールバックする
 // - <button> 数が現行（puttgolf 1）以下
 // - 入力が既存ハンドラ（doShoot / onCourseTap / スライダー値）へ接続される
-// - 打球の物理・判定は lib/puttgolf.ts のまま（軌跡再生はクライアント側）
-// - ロジック（lib/puttgolf.ts）へ three が混入していないこと
+// - 打球の物理・判定は lib/games/puttgolf.ts のまま（軌跡再生はクライアント側）
+// - ロジック（lib/games/puttgolf.ts）へ three が混入していないこと
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -84,8 +84,8 @@ test("3D batch5 puttgolf: ドラッグが既存の角度・強さへ接続され
   assert.match(client, /powerRef/, "強さは ref でも保持する");
 });
 
-test("3D batch5 puttgolf: ロジック層（lib/puttgolf.ts）に three が混入していない", () => {
-  assert.doesNotMatch(read("lib", "puttgolf.ts"), /from "three"/, "lib/puttgolf.ts");
+test("3D batch5 puttgolf: ロジック層（lib/games/puttgolf.ts）に three が混入していない", () => {
+  assert.doesNotMatch(read("lib", "games/puttgolf.ts"), /from "three"/, "lib/games/puttgolf.ts");
 });
 
 test("3D batch5 puttgolf: シーンに絵文字UIがない（色と造形で表現）", () => {

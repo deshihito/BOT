@@ -1,6 +1,6 @@
 "use client";
 // ボウリング（3D）。レーンと物理は BowlingScene3D（three.js、動的 import）、
-// スコア進行は lib/bowling.ts の throwPins（物理で決まった倒ピンを受け取る）。
+// スコア進行は lib/games/bowling.ts の throwPins（物理で決まった倒ピンを受け取る）。
 // 操作: ドラッグでボールの位置を決め、上へフリックすると速さ・方向・回転が決まる。
 // キーボードでも狙える（←→で狙い、スペース / Enter で投げる）。
 // ベスト記録: localStorage `ago-bowling-best` に最高スコアを保存する。
@@ -15,7 +15,7 @@ import {
   standingCount,
   throwPins,
   type BowlingState,
-} from "@/lib/bowling";
+} from "@/lib/games/bowling";
 import { isSfxMuted, setSfxMuted } from "@/lib/sfx";
 import { tappableProps } from "@/lib/gesture";
 import { useGamesNav } from "../GamesShell";

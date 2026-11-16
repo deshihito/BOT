@@ -116,12 +116,13 @@ test("3D batch3 cranegame: 筐体・レール・爪・景品造形とタップ=�
 });
 
 test("3D batch3: ロジック層（lib/*.ts 本体）に three が混入していない", () => {
-  for (const f of fs.readdirSync(path.join(webDir, "lib"))) {
+  for (const f of fs.readdirSync(path.join(webDir, "lib"), { recursive: true })) {
     if (!f.endsWith(".ts")) continue;
+    if (f.startsWith("three-kit/")) continue; // three-kit は three を扱う共通層なので対象外
     const src = read("lib", f);
     assert.doesNotMatch(src, /from "three"/, `lib/${f}`);
   }
-  for (const name of ["stacker.ts", "balancestack.ts", "mergefruit.ts", "cranegame.ts"]) {
+  for (const name of ["games/stacker.ts", "games/balancestack.ts", "games/mergefruit.ts", "games/cranegame.ts"]) {
     assert.doesNotMatch(read("lib", name), /three/, `lib/${name}`);
   }
 });

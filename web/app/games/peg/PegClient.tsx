@@ -1,5 +1,5 @@
 "use client";
-// ペグソリティア（英式33穴）。ロジックは lib/peg.ts。
+// ペグソリティア（英式33穴）。ロジックは lib/games/peg.ts。
 // ペグを選ぶと移動できる空き穴が光るので、そこを押して飛び越える。端末内で完結。
 import Link from "next/link";
 import dynamic from "next/dynamic";
@@ -16,7 +16,7 @@ import {
   pegRating,
   PEG_SIZE,
   type PegState,
-} from "@/lib/peg";
+} from "@/lib/games/peg";
 import { sfxLose, sfxPlace, sfxSlide, sfxTap, sfxWin } from "@/lib/sfx";
 import { useGesture } from "@/lib/gesture";
 import { EndScreen } from "../GameJuice";

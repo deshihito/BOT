@@ -13,7 +13,7 @@ import * as THREE from "three";
 import { createStage, type Stage } from "@/lib/three-kit/stage";
 import { attachPickPointer } from "@/lib/three-kit/pointer";
 import SceneBox from "@/lib/three-kit/SceneBox";
-import type { LaserDir, LaserState, LaserTrace } from "@/lib/laser";
+import type { LaserDir, LaserState, LaserTrace } from "@/lib/games/laser";
 
 interface Props {
   state: LaserState;

@@ -44,7 +44,7 @@ async def send_as_response(interaction, channel, key: str, view):
 
     応答メッセージを取得できない環境では通常の replace 送信に落とす。
     """
-    from core.game.game.game_v2 import original_response_or_none
+    from core.game.hub.game_v2 import original_response_or_none
 
     await interaction.response.send_message(view=view)
     message = await original_response_or_none(interaction)

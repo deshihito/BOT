@@ -1,4 +1,4 @@
-"""ソロゲーム記録（core/game/game/game_records.py）のテスト。
+"""ソロゲーム記録（core/game/hub/game_records.py）のテスト。
 
 フラッシュ暗算の設定別ベストと、数字当ての通算成績の集計・永続化、
 および各 cog の結果表示への接続を確かめる。
@@ -20,7 +20,7 @@ from game_fakes import FakeChannel, FakeGuild, FakeInteraction, FakeMember  # no
 
 import core.game.flash.cog as flash_module
 import core.game.guess.cog as guess_module
-from core.game.game import game_records  # noqa: E402
+from core.game.hub import game_records  # noqa: E402
 
 
 class StoreTestCase(unittest.TestCase):

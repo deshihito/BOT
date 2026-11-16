@@ -1,5 +1,5 @@
 "use client";
-// あみだくじ。ロジックは lib/amida.ts（横線生成・到達先計算・経路トレース）。
+// あみだくじ。ロジックは lib/games/amida.ts（横線生成・到達先計算・経路トレース）。
 // 参加者名と景品ラベルはその場で編集でき、経路はアニメーションでたどる。
 // 端末内で完結し、サーバーへ送信しない。
 import Link from "next/link";
@@ -16,7 +16,7 @@ import {
   createAmida,
   tracePath,
   type AmidaState,
-} from "@/lib/amida";
+} from "@/lib/games/amida";
 import { useGamesNav } from "../GamesShell";
 
 const X_STEP = 72;

@@ -4,11 +4,13 @@
 // 上=半円のアプス（闘技場）、下=小円+矩形（鍛冶屋）。床グリッドはこれらの
 // 図形の和集合で、和集合の境界セルが壁になる。ショップ翼の2階（ギルド
 // ショップ）は同じグリッド内の別領域（サブエリア）として持ち、階段タイルで
-// 往復する。全てマス目管理: 配置・占有・判定はタイル単位。
+// 往復する。カジノ翼の東には通路の先に競馬場（大きな矩形＋楕円トラック）を
+// 拡張してある（ロビーのまま歩いて行ける一続きの空間）。全てマス目管理:
+// 配置・占有・判定はタイル単位。
 import { T_GRASS, T_ROCK, tilesSource, type TopDownMap } from "./mapgen";
 import type { ShopGenreId } from "./shops";
 
-export const LOBBY_W = 56;
+export const LOBBY_W = 126;
 export const LOBBY_H = 64;
 
 /** ロビーの床タイル種。将来の床追加はここに足す（描画側は sprite / 色で対応）。 */
@@ -59,6 +61,32 @@ const PLAZA = { cx: 28, cy: 24, r: 11 };
 const APSE = { cx: 28, cy: 10, r: 10 };
 const SMITH_CIRCLE = { cx: 28, cy: 39, r: 4 };
 
+/** 競馬場のトラック楕円（外周と内周。間の帯がコース、内側がインフィールド）。 */
+export const RACETRACK = { cx: 93, cy: 26, rx: 29, ry: 18, innerRx: 24, innerRy: 13 };
+/** カジノ翼から競馬場への通路（外形に含まれる矩形）。 */
+export const RACE_CORRIDOR = { x0: 54, y0: 21, x1: 59, y1: 27 };
+/** 競馬場エリア（外形に含まれる矩形）。 */
+export const RACECOURSE = { x0: 60, y0: 4, x1: 125, y1: 47 };
+
+function ellipseRatio(cx: number, cy: number, rx: number, ry: number, x: number, y: number): number {
+  const dx = (x - cx) / rx;
+  const dy = (y - cy) / ry;
+  return dx * dx + dy * dy;
+}
+
+/** そのセルが競馬場のトラック（楕円の帯）の上か。 */
+export function isRaceTrackTile(x: number, y: number): boolean {
+  return (
+    ellipseRatio(RACETRACK.cx, RACETRACK.cy, RACETRACK.rx, RACETRACK.ry, x, y) <= 1 &&
+    ellipseRatio(RACETRACK.cx, RACETRACK.cy, RACETRACK.innerRx, RACETRACK.innerRy, x, y) >= 1
+  );
+}
+
+/** そのセルがトラック内側のインフィールドか。 */
+export function isRaceInfieldTile(x: number, y: number): boolean {
+  return ellipseRatio(RACETRACK.cx, RACETRACK.cy, RACETRACK.innerRx, RACETRACK.innerRy, x, y) < 1;
+}
+
 function inCircle(cx: number, cy: number, r: number, x: number, y: number): boolean {
   const dx = x - cx;
   const dy = y - cy;
@@ -83,6 +111,9 @@ export function inLobbyShape(x: number, y: number): boolean {
   // 下: 鍛冶屋（矩形＋小円）
   if (inRect(24, 34, 32, 41, x, y)) return true;
   if (inCircle(SMITH_CIRCLE.cx, SMITH_CIRCLE.cy, SMITH_CIRCLE.r, x, y)) return true;
+  // 東: カジノ翼から競馬場への通路と、競馬場エリア
+  if (inRect(RACE_CORRIDOR.x0, RACE_CORRIDOR.y0, RACE_CORRIDOR.x1, RACE_CORRIDOR.y1, x, y)) return true;
+  if (inRect(RACECOURSE.x0, RACECOURSE.y0, RACECOURSE.x1, RACECOURSE.y1, x, y)) return true;
   // ショップ翼2階: ギルドショップ（別領域のサブエリア）
   if (inRect(2, 48, 19, 63, x, y)) return true;
   return false;
@@ -104,6 +135,13 @@ function floorAt(x: number, y: number): number {
   if (inRect(2, 18, 19, 30, x, y)) floor = L_WOOD;
   if (inRect(24, 34, 32, 41, x, y) || inCircle(SMITH_CIRCLE.cx, SMITH_CIRCLE.cy, SMITH_CIRCLE.r, x, y)) floor = L_DARK;
   if (inRect(2, 48, 19, 63, x, y)) floor = L_CHECK;
+  // 競馬場への通路はカジノのカーペットを引き、場内はトラック=砂、内側=広場床
+  if (inRect(RACE_CORRIDOR.x0, RACE_CORRIDOR.y0, RACE_CORRIDOR.x1, RACE_CORRIDOR.y1, x, y)) floor = L_CARPET;
+  if (inRect(RACECOURSE.x0, RACECOURSE.y0, RACECOURSE.x1, RACECOURSE.y1, x, y)) {
+    floor = L_MARBLE;
+    if (isRaceInfieldTile(x, y)) floor = L_PLAZA;
+    else if (isRaceTrackTile(x, y)) floor = L_SAND;
+  }
   if (inCircle(PLAZA.cx, PLAZA.cy, PLAZA.r, x, y)) {
     floor = dist2(PLAZA.cx, PLAZA.cy, x, y) <= 100 ? L_PLAZA : L_RING;
   }
@@ -112,7 +150,7 @@ function floorAt(x: number, y: number): number {
 
 // ---------- オブジェクト配置 ----------
 
-export type LobbyStation = "board" | "shop" | "bank" | "casino" | "arena" | "smith" | "guild" | "fountain" | "rest" | "arcade";
+export type LobbyStation = "board" | "shop" | "bank" | "casino" | "arena" | "smith" | "guild" | "fountain" | "rest" | "arcade" | "race";
 
 export type LobbyObject = {
   sprite: string;
@@ -217,6 +255,26 @@ put("lamp", 38, 19);
 put("lamp", 52, 29);
 put("tapestry", 52, 22, { solid: false });
 
+// --- 競馬場（東・カジノ翼の通路の先）: 楕円トラック＋インフィールドの施設 ---
+// 馬券カウンターと結果掲示板はインフィールド西側（通路を抜けて最初に着く側）。
+row("shop_counter", 72, 77, 25, { station: "race" }); // 馬券カウンター
+row("bulletin_board", 72, 75, 21, { station: "race" }); // 着順・結果の掲示板
+put("sign_board", 61, 21, { station: "race" }); // 通路を抜けた先の入口の看板
+col("arena_gate", 65, 23, 28); // 西直線のスタートゲート（ランドマーク、固体）
+row("bench", 84, 102, 5); // 北側スタンド
+row("bench", 84, 102, 46); // 南側スタンド
+// パドック（インフィールド東の柵囲い、西側が開口）
+row("fence_wood", 104, 111, 22);
+row("fence_wood", 104, 111, 30);
+col("fence_wood", 111, 23, 29);
+put("planter", 107, 26);
+put("hedge", 84, 34);
+put("hedge", 102, 34);
+put("lamp", 61, 5);
+put("lamp", 124, 5);
+put("lamp", 61, 46);
+put("lamp", 124, 46);
+
 // --- 闘技場（上・半円アプス）: 砂の土俵を柵の弧で囲む ---
 for (let y = 0; y <= 9; y++) {
   for (let x = 0; x < LOBBY_W; x++) {
@@ -267,6 +325,7 @@ export const LOBBY_OBJECTS: readonly LobbyObject[] = objects;
 export const LOBBY_NPCS: readonly { x: number; y: number }[] = [
   { x: 5, y: 19 }, { x: 9, y: 19 }, { x: 13, y: 19 }, // 北カウンターの店員レーン
   { x: 5, y: 28 }, { x: 13, y: 28 }, // 南カウンターの店員レーン
+  { x: 74, y: 24 }, // 競馬場の馬券カウンターの係員レーン
 ];
 
 /** ロビー入場地点（ワープパッドの北、広場側）。 */

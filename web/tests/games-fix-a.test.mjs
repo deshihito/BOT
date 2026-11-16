@@ -26,11 +26,11 @@ async function loadLib(name) {
   return import("data:text/javascript;base64," + Buffer.from(js).toString("base64"));
 }
 
-const kana = await loadLib("kanacross.ts");
-const bj = await loadLib("blackjack.ts");
-const air = await loadLib("airhockey.ts");
-const nm = await loadLib("numbermemory.ts");
-const drag = await loadLib("dragrace.ts");
+const kana = await loadLib("games/kanacross.ts");
+const bj = await loadLib("games/blackjack.ts");
+const air = await loadLib("games/airhockey.ts");
+const nm = await loadLib("games/numbermemory.ts");
+const drag = await loadLib("games/dragrace.ts");
 
 // ------------------------------------------------------------ kanacross
 

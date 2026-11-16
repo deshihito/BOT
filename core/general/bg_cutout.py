@@ -105,7 +105,7 @@ def create_bgcut_token(*, user_id: int, purpose: str, guild_id: int,
     """発行情報を署名付きトークンに包み (token, expires_at) を返す。
 
     BOT_API_KEY 未設定なら None（発行基盤が未設定）。Web 側
-    （web/lib/bgcut-token.ts）が同じ鍵・同じ形式で検証する。
+    （web/lib/bgcut/bgcut-token.ts）が同じ鍵・同じ形式で検証する。
     """
     key = _bgcut_signing_key()
     if key is None:

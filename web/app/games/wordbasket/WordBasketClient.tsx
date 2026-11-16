@@ -7,7 +7,7 @@
 // 検証は形式ルールのみで、意味の正しさは判定しない。送信は { type: "submit", word }。
 // 形式違いはそのラウンドだけ少し待つ必要があり、理由は you.notice に届く。
 import { useEffect, useRef, useState } from "react";
-import { playSe } from "@/lib/balku-sound";
+import { playSe } from "@/lib/balku/balku-sound";
 import OnlineShell from "../online/OnlineShell";
 import type { OnlineRoomApi, OnlineRoomView } from "../online/useOnlineRoom";
 import { useRoomJuice } from "../GameJuice";

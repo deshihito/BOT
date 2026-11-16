@@ -83,7 +83,7 @@ class GameCopyTest(unittest.TestCase):
             self.assertNotIn("、", description)
 
     def test_game_command_description_matches_panel_style(self):
-        source = open(os.path.join(ROOT, "core", "game", "game", "cog.py"), encoding="utf-8").read()
+        source = open(os.path.join(ROOT, "core", "game", "hub", "cog.py"), encoding="utf-8").read()
         self.assertIn('description="ゲームの操作パネルを表示します"', source)
 
 

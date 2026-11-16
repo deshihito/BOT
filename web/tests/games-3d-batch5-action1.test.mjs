@@ -78,8 +78,8 @@ test("3D batch5-action1 missile: 空タップが既存 fireAt 座標系へ接続
   assert.match(client, /stepMissile\(s\)/, "固定ステップは lib の stepMissile のまま");
 });
 
-test("3D batch5-action1: ロジック層（lib/penalty.ts, lib/missile.ts）に three が混入していない", () => {
-  for (const f of ["penalty.ts", "missile.ts"]) {
+test("3D batch5-action1: ロジック層（lib/games/penalty.ts, lib/games/missile.ts）に three が混入していない", () => {
+  for (const f of ["games/penalty.ts", "games/missile.ts"]) {
     assert.doesNotMatch(read("lib", f), /from "three"/, `lib/${f}`);
   }
 });

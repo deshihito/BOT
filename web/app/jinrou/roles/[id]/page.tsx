@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { JINROU_ROLES } from "@/lib/jinrou-roles";
+import { JINROU_ROLES } from "@/lib/games/jinrou-roles";
 import Breadcrumbs from "../../../Breadcrumbs";
 
 export const dynamicParams = false;

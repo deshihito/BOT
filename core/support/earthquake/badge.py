@@ -12,7 +12,7 @@ import io
 
 from PIL import Image, ImageDraw, ImageFont
 
-from core.game.game.board_image import FONT_PATH
+from core.game.hub.board_image import FONT_PATH
 from core.support.earthquake import feed
 
 _BOARD_FONT_PATH = (FONT_PATH.parent / "assets" / "fonts"

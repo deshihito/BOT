@@ -25,7 +25,7 @@ const countButtons = (dir) => {
 };
 
 const BATCH = [
-  { dir: "river", client: "RiverClient.tsx", scene: "RiverScene3D.tsx", buttons: 1, lib: "river.ts" },
+  { dir: "river", client: "RiverClient.tsx", scene: "RiverScene3D.tsx", buttons: 1, lib: "games/river.ts" },
 ];
 
 for (const g of BATCH) {

@@ -1,6 +1,6 @@
 // A40フェーズの検証（内容充実: バンク増量のみ、ロジック変更なし）。
 // - lib/online/games/quizbattle.ts: 問題バンク 70問→84問（形式・重複なし・正解の妥当性）
-// - lib/anagram.ts: 単語バンク 100語→120語（形式・重複なし・シャッフル保証）
+// - lib/games/anagram.ts: 単語バンク 100語→120語（形式・重複なし・シャッフル保証）
 // - lib/online/games/shiritori.ts: 辞書 1200語→1400語→A49で1600語（形式・重複なし・既存作法）
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -42,7 +42,7 @@ async function loadOnline(name, exportsList) {
 }
 
 const qb = await loadOnline("quizbattle.ts", ["QUIZ_BATTLE_QUESTIONS"]);
-const an = await loadLib("anagram.ts");
+const an = await loadLib("games/anagram.ts");
 const shi = await loadOnline("shiritori.ts", [
   "SHIRITORI_WORDS",
   "isValidWordForm",

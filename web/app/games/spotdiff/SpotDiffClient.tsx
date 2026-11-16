@@ -1,5 +1,5 @@
 "use client";
-// 間違い探し。ロジックは lib/spotdiff.ts。
+// 間違い探し。ロジックは lib/games/spotdiff.ts。
 // 左のお手本と右の盤を見比べ、右盤で違っているマスをタップする。端末内で完結する。
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
@@ -9,7 +9,7 @@ import {
   tapSpotDiff,
   type SpotDiffLevelKey,
   type SpotDiffState,
-} from "@/lib/spotdiff";
+} from "@/lib/games/spotdiff";
 import { sfxCorrect, sfxWin, sfxWrong } from "@/lib/sfx";
 import { tappableProps } from "@/lib/gesture";
 import { EndScreen } from "../GameJuice";

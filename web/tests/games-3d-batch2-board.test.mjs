@@ -60,7 +60,7 @@ assert.match(client, /onBearOff=\{bearOff\}/, "上がりは既存処理へ接続
 
 
 test("3D batch2: ロジック層（backgammon）に three が混入していない", () => {
-for (const f of ["backgammon.ts"]) {
+for (const f of ["games/backgammon.ts"]) {
 assert.doesNotMatch(read("lib", f), /from "three"/, `lib/${f}`);
 assert.doesNotMatch(read("lib", f), /three-kit/, `lib/${f}`);
 }

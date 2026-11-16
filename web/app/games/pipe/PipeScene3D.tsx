@@ -13,7 +13,7 @@ import * as THREE from "three";
 import { createStage, type Stage } from "@/lib/three-kit/stage";
 import { attachPickPointer } from "@/lib/three-kit/pointer";
 import SceneBox from "@/lib/three-kit/SceneBox";
-import { pipeOpenings, type PipeCell, type PipeState } from "@/lib/pipe";
+import { pipeOpenings, type PipeCell, type PipeState } from "@/lib/games/pipe";
 
 interface Props {
   state: PipeState;

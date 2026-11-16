@@ -1,5 +1,5 @@
 "use client";
-// カナクロス。ロジックは lib/kanacross.ts（内蔵問題・単語判定・完成判定）。
+// カナクロス。ロジックは lib/games/kanacross.ts（内蔵問題・単語判定・完成判定）。
 // マスを選んでカナパレット（またはキーボード）で入力する。端末内で完結する。
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -16,7 +16,7 @@ import {
   type KanaDirection,
   type KanaState,
   type KanaWord,
-} from "@/lib/kanacross";
+} from "@/lib/games/kanacross";
 import { sfxCorrect, sfxPlace, sfxTap, sfxWin, sfxWrong } from "@/lib/sfx";
 import { tappableProps, useGesture } from "@/lib/gesture";
 import { EndScreen } from "../GameJuice";

@@ -4,7 +4,7 @@
 // 回転・反転は現行どおり親の DOM が担い、ここは盤面だけを持つ。
 // 入力は現行クライアントの操作語彙どおり:
 //   盤タップ = onCell（ピース選択中は配置、未選択で配置済みマスは取り外し。
-//     判定はすべて親ハンドラと lib/pentomino.ts が行う）
+//     判定はすべて親ハンドラと lib/games/pentomino.ts が行う）
 //   ホバー = 配置プレビュー（現行 DOM の onMouseEnter と同じ hover 状態）
 // ドラッグ配置は現行に無いため追加しない（タップ式が正）。
 // WebGL が使えない場合は onFail で親へ知らせ、親は 2D 表示に切り替える。
@@ -13,7 +13,7 @@ import * as THREE from "three";
 import { createStage, type Stage } from "@/lib/three-kit/stage";
 import { attachPickPointer } from "@/lib/three-kit/pointer";
 import SceneBox from "@/lib/three-kit/SceneBox";
-import { pentPieceDef, type PentId, type PentState } from "@/lib/pentomino";
+import { pentPieceDef, type PentId, type PentState } from "@/lib/games/pentomino";
 
 interface Props {
   state: PentState;

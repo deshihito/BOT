@@ -4,7 +4,7 @@
 // -1=seat1 も許容）。着手は { type: "drop", col }。
 import { useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
-import { playSe } from "@/lib/balku-sound";
+import { playSe } from "@/lib/balku/balku-sound";
 
 // 3D シーンは three を含むため遅延読み込み（このページ専用チャンクに閉じる）。
 const Connect4Scene3D = dynamic(() => import("./Connect4Scene3D"), { ssr: false });

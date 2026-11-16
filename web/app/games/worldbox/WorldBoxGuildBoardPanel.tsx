@@ -265,10 +265,15 @@ export default function WorldBoxGuildBoardPanel({
     }
   };
   // ユニオン掲示（チャット）と Discord 連携設定
-  const [unionMsgs, setUnionMsgs] = useState<{ name: string; text: string; at: number }[]>([]);
+  const [unionMsgs, setUnionMsgs] = useState<{ name: string; text: string; at: number; source?: string }[]>([]);
   const [unionRole, setUnionRole] = useState<string>("");
-  const [unionChannelId, setUnionChannelId] = useState("");
-  const [unionChannelInput, setUnionChannelInput] = useState("");
+  const [unionMode, setUnionMode] = useState<"global" | "channel" | "none">("none");
+  const [unionLinkChannelId, setUnionLinkChannelId] = useState<string | null>(null);
+  const [unionDirectory, setUnionDirectory] = useState<{
+    channels: { id: string; name: string }[];
+    globalChatChannelId: string | null;
+  } | null>(null);
+  const [unionPicking, setUnionPicking] = useState(false);
   const refreshUnion = useCallback(async () => {
     try {
       const [chatRes, setRes] = await Promise.all([
@@ -276,34 +281,49 @@ export default function WorldBoxGuildBoardPanel({
         fetch("/api/worldbox/union-settings", { headers: { Accept: "application/json" } }),
       ]);
       if (chatRes.ok) {
-        const data = (await chatRes.json()) as { messages?: { name: string; text: string; at: number }[] };
+        const data = (await chatRes.json()) as { messages?: { name: string; text: string; at: number; source?: string }[] };
         setUnionMsgs(data.messages ?? []);
       }
       if (setRes.ok) {
-        const data = (await setRes.json()) as { role?: string; chatChannelId?: string };
+        const data = (await setRes.json()) as {
+          role?: string;
+          settings?: { mode?: "global" | "channel" | "none"; channelId?: string | null };
+          directory?: { channels: { id: string; name: string }[]; globalChatChannelId: string | null } | null;
+        };
         setUnionRole(data.role ?? "");
-        setUnionChannelId(data.chatChannelId ?? "");
-        setUnionChannelInput(data.chatChannelId ?? "");
+        setUnionMode(data.settings?.mode ?? "none");
+        setUnionLinkChannelId(data.settings?.channelId ?? null);
+        setUnionDirectory(data.directory ?? null);
       }
     } catch { /* 読めなくてもパネルは開いたままにする */ }
   }, []);
   useEffect(() => {
     if (tab === "board") void refreshUnion();
   }, [tab, refreshUnion]);
-  const saveUnionChannel = async () => {
+  const saveUnionLink = async (mode: "global" | "channel" | "none", channelId: string | null) => {
     setBusy(true);
     try {
       const res = await fetch("/api/worldbox/union-settings", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ channelId: unionChannelInput.trim() }),
+        body: JSON.stringify({ mode, channelId }),
       });
-      const json = (await res.json().catch(() => ({}))) as { chatChannelId?: string; error?: string };
+      const json = (await res.json().catch(() => ({}))) as {
+        settings?: { mode?: "global" | "channel" | "none"; channelId?: string | null };
+        error?: string;
+      };
       if (res.ok) {
-        setUnionChannelId(json.chatChannelId ?? "");
+        setUnionMode(json.settings?.mode ?? mode);
+        setUnionLinkChannelId(json.settings?.channelId ?? null);
+        setUnionPicking(false);
         setMsg("保存した");
       } else {
-        setMsg(json.error === "invalid_channel_id" ? "チャンネルIDが不正" : "保存できない");
+        setMsg(
+          json.error === "directory_unavailable" ? "Discord側の準備待ちです"
+          : json.error === "global_not_available" ? "グローバルチャットがありません"
+          : json.error === "channel_not_listed" ? "そのチャンネルは選べません"
+          : "保存できない",
+        );
       }
     } catch {
       setMsg("保存できない");
@@ -634,6 +654,11 @@ export default function WorldBoxGuildBoardPanel({
               [...unionMsgs].reverse().map((m, i) => (
                 <div key={i} style={{ fontSize: 13 }}>
                   <strong>{m.name}</strong>
+                  {m.source === "discord" && (
+                    <span style={{ marginLeft: 6, fontSize: 10, padding: "1px 5px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.35)" }}>
+                      Discord
+                    </span>
+                  )}
                   <span style={{ opacity: 0.6, marginLeft: 6, fontSize: 11 }}>
                     {new Date(m.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                   </span>
@@ -642,22 +667,70 @@ export default function WorldBoxGuildBoardPanel({
               ))
             )}
           </div>
-          {(unionRole === "king" || unionRole === "minister") && (
-            <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 10, flexWrap: "wrap" }}>
+          <div style={{ marginTop: 10 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
               <span style={{ fontSize: 12, opacity: 0.8 }}>Discord連携</span>
-              <input
-                value={unionChannelInput}
-                onChange={(e) => setUnionChannelInput(e.target.value)}
-                placeholder="チャンネルID"
-                inputMode="numeric"
-                style={{ flex: 1, minWidth: 140, padding: "6px 8px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.25)", background: "rgba(255,255,255,0.06)", color: "#fff", fontSize: 13 }}
-              />
-              <button type="button" style={btn} disabled={busy} onClick={() => { void saveUnionChannel(); }}>
-                保存
-              </button>
-              {unionChannelId && <span style={{ fontSize: 12, opacity: 0.75 }}>連携中</span>}
+              {unionDirectory === null ? (
+                <span style={{ fontSize: 12, opacity: 0.75 }}>Discord側の準備待ち</span>
+              ) : (
+                <>
+                  <span style={{ fontSize: 12, opacity: 0.75 }}>
+                    {unionMode === "global"
+                      ? "グローバルチャット"
+                      : unionMode === "channel"
+                        ? (unionDirectory.channels.find((c) => c.id === unionLinkChannelId)?.name ?? "専用チャンネル")
+                        : "連携なし"}
+                  </span>
+                  {(unionRole === "king" || unionRole === "minister") && (
+                    <>
+                      <button
+                        type="button"
+                        style={{ ...tabBtn, ...(unionMode === "global" ? tabOn : {}) }}
+                        disabled={busy || !unionDirectory.globalChatChannelId}
+                        aria-pressed={unionMode === "global"}
+                        onClick={() => { void saveUnionLink("global", null); }}
+                      >
+                        グローバルチャット
+                      </button>
+                      <button
+                        type="button"
+                        style={{ ...tabBtn, ...(unionMode === "channel" ? tabOn : {}) }}
+                        disabled={busy}
+                        aria-pressed={unionMode === "channel"}
+                        onClick={() => setUnionPicking((v) => !v)}
+                      >
+                        専用チャンネル
+                      </button>
+                      <button
+                        type="button"
+                        style={{ ...tabBtn, ...(unionMode === "none" ? tabOn : {}) }}
+                        disabled={busy}
+                        aria-pressed={unionMode === "none"}
+                        onClick={() => { void saveUnionLink("none", null); }}
+                      >
+                        連携なし
+                      </button>
+                    </>
+                  )}
+                </>
+              )}
             </div>
-          )}
+            {unionDirectory !== null && unionPicking && (unionRole === "king" || unionRole === "minister") && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 6, maxHeight: 160, overflowY: "auto" }}>
+                {unionDirectory.channels.map((c) => (
+                  <button
+                    key={c.id}
+                    type="button"
+                    style={{ ...btn, textAlign: "left", ...(unionLinkChannelId === c.id && unionMode === "channel" ? tabOn : {}) }}
+                    disabled={busy}
+                    onClick={() => { void saveUnionLink("channel", c.id); }}
+                  >
+                    #{c.name}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
           {msg && <div style={{ fontSize: 13, marginTop: 6 }}>{msg}</div>}
         </div>
       )}

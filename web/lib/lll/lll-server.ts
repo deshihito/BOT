@@ -10,8 +10,8 @@
 // 対戦は単独プレイヤー対 CPU で秘匿情報がないため、BattleState は
 // そのままクライアントへ返す（snapshotFor 相当の秘匿は不要）。
 import { createHash, randomBytes } from "node:crypto";
-import { isBotApiConfigured, kvGet, tableSelect, tableUpsert } from "./bot-api";
-import { logfareApiKeys } from "./one-prompter-server";
+import { isBotApiConfigured, kvGet, tableSelect, tableUpsert } from "../bot-api";
+import { logfareApiKeys } from "../one-prompter/one-prompter-server";
 import {
   COLLECTION_CAP,
   DUPLICATE_SHARDS,

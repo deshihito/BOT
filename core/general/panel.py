@@ -182,7 +182,7 @@ def general_action_pages(genre: str, *, shortcut_mode: bool = False) -> list:
     """ジャンルのアクションをセレクト上限（25件）ごとのページに分ける。
 
     導線最適化ラウンド4: マネージャンルが28件になり上限を超えたため、
-    ゲームハブ（core/game/game/cog.py の game_select_pages）と同じ
+    ゲームハブ（core/game/hub/cog.py の game_select_pages）と同じ
     「セレクトは1つに固定し、ページをボタンでめくる」方式にした。
     導線最適化 U1: 通常モードのマネージャンルは6カテゴリ入口に
     統合され、実ジャンルは全て1ページに収まる（機構は残す）。

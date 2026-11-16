@@ -11,9 +11,9 @@ import discord
 from discord.ext import commands
 from PIL import Image, ImageDraw, ImageFont
 
-from core.game.game import party_ranking
-from core.game.game import elo, game_panels, game_restore
-from core.game.game.game_v2 import GamePanelView, LobbyView, board_image_panel, safe_delete, paginate_labels
+from core.game.hub import party_ranking
+from core.game.hub import elo, game_panels, game_restore
+from core.game.hub.game_v2 import GamePanelView, LobbyView, board_image_panel, safe_delete, paginate_labels
 
 logger = logging.getLogger(__name__)
 
@@ -631,7 +631,7 @@ class Chess(commands.Cog):
         await channel.send("チェスを終了しました。")
 
     # ------------------------------------------------------------------
-    # 再起動復旧（core/game/game/game_restore.py）
+    # 再起動復旧（core/game/hub/game_restore.py）
     # ------------------------------------------------------------------
     def _save_snapshot(self, g):
         if g.phase != "playing":

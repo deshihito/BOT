@@ -1,5 +1,5 @@
 "use client";
-// フリーセル。ロジックは lib/freecell.ts（移動検証・自動送り込み）。
+// フリーセル。ロジックは lib/games/freecell.ts（移動検証・自動送り込み）。
 // ドラッグではなくタップ選択式：カード（の山）をタップして選び、置き先をタップする。
 // 端末内で完結し、サーバーへ送信しない。
 import Link from "next/link";
@@ -23,7 +23,7 @@ import {
   type FcSource,
   type FcState,
   type FcTarget,
-} from "@/lib/freecell";
+} from "@/lib/games/freecell";
 import { sfxFlip, sfxPlace, sfxSlide, sfxTap, sfxWin, sfxWrong } from "@/lib/sfx";
 import { tappableProps, useGesture } from "@/lib/gesture";
 import { EndScreen } from "../GameJuice";

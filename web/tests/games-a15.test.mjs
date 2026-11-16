@@ -1,5 +1,5 @@
 // A15フェーズ新規4本のロジック検証。
-// - lib/rushhour.ts: 生成の決定性・可解性（solution の再生）・スライド検証
+// - lib/games/rushhour.ts: 生成の決定性・可解性（solution の再生）・スライド検証
 // - lib/online/games/cheat.ts: 配布・秘匿ビュー・宣言とチャレンジ決着・
 //   上がり候補の確定・退出
 import { test } from "node:test";
@@ -51,7 +51,7 @@ function makeRng(seed) {
 
 const seats = (n) => Array.from({ length: n }, (_, i) => ({ seat: i, name: `P${i + 1}` }));
 
-const rush = await loadLib("rushhour.ts");
+const rush = await loadLib("games/rushhour.ts");
 const cheat = await loadOnline("cheat.ts", ["gameModule", "cheatRankOf", "cheatSortHand"]);
 
 // ---------------------------------------------------------------- ラッシュアワー

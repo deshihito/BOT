@@ -8,7 +8,7 @@
 // 直前の宣言にチャレンジしたい場合は、カードを出す前に押す。
 import dynamic from "next/dynamic";
 import { useEffect, useRef, useState } from "react";
-import { playSe } from "@/lib/balku-sound";
+import { playSe } from "@/lib/balku/balku-sound";
 
 // 3D シーンは three を含むため遅延読み込み（このページ専用チャンクに閉じる）。
 const CheatScene3D = dynamic(() => import("./CheatScene3D"), { ssr: false });

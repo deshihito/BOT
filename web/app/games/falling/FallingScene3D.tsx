@@ -3,7 +3,7 @@
 // 立方体（上面に明るいキャップを重ねた造形）で表し、色は現行 2D の
 // FALLING_PIECE_COLORS と一致させる（絵文字は使わない）。ゴーストは
 // 半透明の立方体で落下先を示す（現行 2D の枠線ゴーストに相当）。
-// 落下・固定・ライン消去・勝敗は親のループと lib/falling.ts が決め、
+// 落下・固定・ライン消去・勝敗は親のループと lib/games/falling.ts が決め、
 // ここは親の状態を getState で毎フレーム読み、落下中ピースだけを
 // 補間追従させる（snake と同じ getState 補間方式）。固定ブロックは
 // 差分同期し、新しく固定されたセルはポップで着地を表す。消去は
@@ -27,7 +27,7 @@ import {
   type FallingCell,
   type FallingPieceType,
   type FallingStatus,
-} from "@/lib/falling";
+} from "@/lib/games/falling";
 import type { GestureDirection } from "@/lib/gesture";
 
 export interface FallingViewState {

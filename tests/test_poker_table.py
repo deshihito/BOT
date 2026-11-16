@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 import game_fakes  # noqa: F401
-from core.game.game import party_ranking
+from core.game.hub import party_ranking
 import core.game.poker.cog as poker
 from cogs.game import BettingRound, PokerTable, distribute_pot, settle_hand
 from cogs.general import INSUFFICIENT, NEW_USER_BALANCE

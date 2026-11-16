@@ -7,7 +7,7 @@ import unittest
 
 from game_fakes import FakeChannel, FakeGuild, FakeInteraction, FakeMember, fast_time, press, real_sleep
 import core.game.janken.cog as j
-from core.game.game import party_ranking
+from core.game.hub import party_ranking
 class JudgeTest(unittest.TestCase):
     def test_two_players(self):
         self.assertEqual(j.judge({1: 'rock', 2: 'scissors'}), [1])

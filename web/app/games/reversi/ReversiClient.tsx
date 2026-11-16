@@ -5,7 +5,7 @@
 // 着手は { type: "place", index }、パスは { type: "pass" }。
 import { useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
-import { playSe } from "@/lib/balku-sound";
+import { playSe } from "@/lib/balku/balku-sound";
 import { sfxHit } from "@/lib/sfx";
 import { juiceFlash, juiceHitstop, type JuiceIntensity } from "@/lib/juice";
 import { JuiceHit } from "../GameJuice";

@@ -13,8 +13,8 @@ import discord
 from core.general.user_names import cached_display_name
 from discord.ext import commands
 
-from core.game.game import party_ranking
-from core.game.game.game_v2 import GamePanelView, text_panel, lobby_auto_start_text, lobby_not_enough_text
+from core.game.hub import party_ranking
+from core.game.hub.game_v2 import GamePanelView, text_panel, lobby_auto_start_text, lobby_not_enough_text
 from core.game.liequiz.liequiz import QUESTIONS, ROUNDS_DEFAULT, LieQuizSession
 
 logger = logging.getLogger(__name__)

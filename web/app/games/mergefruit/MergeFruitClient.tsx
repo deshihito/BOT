@@ -1,5 +1,5 @@
 "use client";
-// フルーツマージ。ロジックは lib/mergefruit.ts（グリッド版マージ）。
+// フルーツマージ。ロジックは lib/games/mergefruit.ts（グリッド版マージ）。
 // 列を選んでフルーツを落とし、同じ段階が2個以上くっつくと合体して大きくなる。
 // 端末内で完結し、サーバーへ送信しない。
 import Link from "next/link";
@@ -17,7 +17,7 @@ import {
   landingRow,
   MERGE_COLS,
   type MergeFruitState,
-} from "@/lib/mergefruit";
+} from "@/lib/games/mergefruit";
 import { useGamesNav } from "../GamesShell";
 
 function newGame(): MergeFruitState {

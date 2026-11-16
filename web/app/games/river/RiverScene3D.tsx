@@ -1,13 +1,13 @@
 "use client";
 // 川渡りの 3D シーン。両岸（草の台）＋川（青い面）＋ボート（木の船体）を置き、
-// 農夫と荷物は色つきトークンで表す。トークンの前面には lib/river.ts の
+// 農夫と荷物は色つきトークンで表す。トークンの前面には lib/games/river.ts の
 // RiverItemDef が持つ漢字1字を大きなプレートで出す（現行 2D の漢字チップと
 // 同じ情報で、絵文字は使わない）。色も def の color をそのまま使う。
 // 状態同期は差分同期＋補間追従（第4期の盤駒差分同期と同じ考え方）:
 //   親から locations / farmerSide を受け取り、各トークンとボートの目標位置
 //   だけを更新し、毎フレーム指数補間で滑らかに寄せる。渡河中もボートと
 //   船上のトークンは同じ補間で一緒に動くので、荷物が船からずれない。
-// 危険ペア・勝敗の判定は lib/river.ts と親が持ち、3D 側では再実装しない。
+// 危険ペア・勝敗の判定は lib/games/river.ts と親が持ち、3D 側では再実装しない。
 // 入力は現行クライアントの操作語彙どおり:
 //   荷物タップ = onItem（ボートへの乗せ降ろし = 既存 toggleRiverItem 経路）
 //   農夫タップ / ボートタップ = onCross（渡河）
@@ -20,7 +20,7 @@ import { createStage, type Stage } from "@/lib/three-kit/stage";
 import { canvasTexture } from "@/lib/three-kit/primitives";
 import { attachPickPointer } from "@/lib/three-kit/pointer";
 import SceneBox from "@/lib/three-kit/SceneBox";
-import type { RiverItemDef, RiverLoc, RiverSide, RiverStatus } from "@/lib/river";
+import type { RiverItemDef, RiverLoc, RiverSide, RiverStatus } from "@/lib/games/river";
 
 interface Props {
   items: RiverItemDef[];

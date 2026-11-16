@@ -3,7 +3,7 @@
 import random
 import unittest
 
-from core.game.game import game_records
+from core.game.hub import game_records
 from core.game.minesweeper.minesweeper import COLS, ROWS, MinesweeperBoard
 
 

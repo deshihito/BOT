@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { LllError, parseBattleStartBody, startBattle } from "@/lib/lll-server";
+import { LllError, parseBattleStartBody, startBattle } from "@/lib/lll/lll-server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

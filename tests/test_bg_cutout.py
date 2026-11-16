@@ -98,7 +98,7 @@ class TokenTest(unittest.TestCase):
             self.assertIsNone(verify_bgcut_token("v1.x.y"))
 
     def test_signature_matches_fast_html_scheme(self):
-        # Web 側 (web/lib/bgcut-token.ts) と同じ規則: 署名対象は "v1.<payload>"
+        # Web 側 (web/lib/bgcut/bgcut-token.ts) と同じ規則: 署名対象は "v1.<payload>"
         import hashlib
         import hmac as hmac_mod
 

@@ -1,5 +1,5 @@
 "use client";
-// エイム（的あて）。スケジュール/判定/得点は lib/aim.ts。
+// エイム（的あて）。スケジュール/判定/得点は lib/games/aim.ts。
 // 30秒間、エリア内に現れては消える的をクリック/タップする。小さい的ほど高得点。
 import Link from "next/link";
 import dynamic from "next/dynamic";
@@ -14,7 +14,7 @@ import {
   hitTest,
   pointsForHit,
   type AimTarget,
-} from "@/lib/aim";
+} from "@/lib/games/aim";
 import { sfxLose, sfxTap, sfxWin } from "@/lib/sfx";
 import { EndScreen, ScorePop } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";

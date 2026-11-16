@@ -29,7 +29,7 @@ from core.economy_image import PanelRow, render_panel_png
 from core.game.clan import clan as clan_core
 from core.general.workshop import craft as craft_core
 from core.general.items import items as items_core
-from core.game.game import prison as prison_core
+from core.game.hub import prison as prison_core
 from core.general.workshop import workshop as workshop_core
 from core.support.messages import (
     COIN_UPDATE_FAILED_RETRY,

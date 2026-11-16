@@ -43,7 +43,7 @@ class MigratedModulesTest(unittest.TestCase):
         self.assertEqual(data_paths.data_path("x.json"), paths.data_path("x.json"))
 
     def test_board_and_uno_fonts(self):
-        from core.game.game import board_image
+        from core.game.hub import board_image
         from core.game.uno import board as uno_board
         self.assertEqual(board_image.FONT_PATH, paths.DEFAULT_FONT_PATH)
         self.assertEqual(uno_board._FONT_PATH, paths.DEFAULT_FONT_PATH)

@@ -3,7 +3,7 @@
 
 4×4 の盤を方向ボタンでスライドさせ、同じ数字を合体させる。
 2048 に到達しても続けられ、動けなくなったら終了。スコアと最大タイルは
-core/game/game/game_records.py の g2048 に残る。
+core/game/hub/game_records.py の g2048 に残る。
 
 盤面画像化タスク（2026-11-06）: 盤面はテキストではなく PIL 画像
 （core/game/board_image.render_2048）で表示し、パネルは Components V2
@@ -16,10 +16,10 @@ import io
 import discord
 from discord.ext import commands
 
-from core.game.game import game_records
-from core.game.game.board_image import render_2048, render_cached
+from core.game.hub import game_records
+from core.game.hub.board_image import render_2048, render_cached
 from core.game.game2048.game2048 import Game2048
-from core.game.game.game_v2 import GamePanelView
+from core.game.hub.game_v2 import GamePanelView
 from core.support.panel_v2 import edit_panel_v2
 
 GAME_ID = "game2048"

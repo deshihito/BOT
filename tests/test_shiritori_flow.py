@@ -7,7 +7,7 @@ import unittest
 
 from game_fakes import FakeChannel, FakeGuild, FakeInteraction, FakeMember, fast_time, press, real_sleep
 import core.game.shiritori.cog as s
-from core.game.game import party_ranking
+from core.game.hub import party_ranking
 def msg(author, channel, content):
     return types.SimpleNamespace(author=author, channel=channel, content=content)
 

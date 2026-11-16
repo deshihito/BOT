@@ -1,6 +1,6 @@
 // A28フェーズの検証。
 // - lib/online/games/typerace.ts: 申告の検証（範囲・単調増加）・完走順の得点・締切・退出
-// - lib/quiz.ts: 増量後のバンク（180問・カテゴリ配分・形式・正解の一貫性）
+// - lib/games/quiz.ts: 増量後のバンク（180問・カテゴリ配分・形式・正解の一貫性）
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -40,7 +40,7 @@ async function loadOnline(name, exportsList) {
   return import("data:text/javascript;base64," + Buffer.from(code).toString("base64"));
 }
 
-const quiz = await loadLib("quiz.ts");
+const quiz = await loadLib("games/quiz.ts");
 const tr = await loadOnline("typerace.ts", [ "gameModule", "TR_TEXTS", "TR_TOTAL_ROUNDS", "TR_TIME_LIMIT_MS", "TR_RANK_POINTS", ]);
 
 function makeRng(seed) {

@@ -1,7 +1,7 @@
 // A38フェーズの検証（内容充実: バンク増量のみ）。
-// - lib/flagquiz.ts: 増量後のバンク（120→150組・重複なし・旗は regional indicator ペア・追加分の ISO 一致）
+// - lib/games/flagquiz.ts: 増量後のバンク（120→150組・重複なし・旗は regional indicator ペア・追加分の ISO 一致）
 // - lib/online/games/wordwolf.ts: お題ペア増量（40→50組→A41で60組・全単語の重複なし・追加分の近接ペア）
-// - lib/quiz.ts: 問題増量（100→120問→A41で140問→A46で160問→A49で180問・カテゴリ配分・形式・追加分の正解の妥当性）
+// - lib/games/quiz.ts: 問題増量（100→120問→A41で140問→A46で160問→A49で180問・カテゴリ配分・形式・追加分の正解の妥当性）
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -41,8 +41,8 @@ async function loadOnline(name, exportsList) {
   return import("data:text/javascript;base64," + Buffer.from(code).toString("base64"));
 }
 
-const fq = await loadLib("flagquiz.ts");
-const quiz = await loadLib("quiz.ts");
+const fq = await loadLib("games/flagquiz.ts");
+const quiz = await loadLib("games/quiz.ts");
 const wordwolf = await loadOnline("wordwolf.ts", ["gameModule", "WORDWOLF_PAIRS"]);
 
 // ---------------------------------------------------------------- フラッグクイズ増量

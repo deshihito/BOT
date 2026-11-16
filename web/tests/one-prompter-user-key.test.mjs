@@ -1,6 +1,6 @@
 // One Prompter の自前 API キー（暗号化保存・形式チェック・所有者分離）と
 // キー管理ルート／生成ルートへの配線を、ネットワークなしで確かめる。
-// lib/one-prompter-user-key.ts は "./bot-api"（→ "./dashboard-core"）を import
+// lib/one-prompter/one-prompter-user-key.ts は "../bot-api"（→ "./dashboard-core"）を import
 // するので、transpile 後に specifier を data URL へ差し替えて読み込む。
 // bot_kv への実アクセスは行わない（暗号・検証などの純粋部分とソース配線を見る）。
 import { test } from "node:test";
@@ -25,7 +25,7 @@ const read = (rel) => fs.readFileSync(path.join(import.meta.dirname, "..", rel),
 const coreUrl = dataUrl(transpile("lib/dashboard-core.ts"));
 const botApiUrl = dataUrl(transpile("lib/bot-api.ts").replaceAll('"./dashboard-core"', JSON.stringify(coreUrl)));
 const userKey = await import(
-  dataUrl(transpile("lib/one-prompter-user-key.ts").replaceAll('"./bot-api"', JSON.stringify(botApiUrl)))
+  dataUrl(transpile("lib/one-prompter/one-prompter-user-key.ts").replaceAll('"../bot-api"', JSON.stringify(botApiUrl)))
 );
 
 test("validateUserApiKey は形式が正しいキーだけを通す", () => {

@@ -3,7 +3,7 @@
 
 お題を5題出し、各題20秒間ボタンで投票する。全員が投票でき、結果は
 割合と少数派とあわせて表示される。勝敗はなく、参加記録だけが
-core/game/game/game_records.py の twochoice に残る。
+core/game/hub/game_records.py の twochoice に残る。
 """
 import asyncio
 import io
@@ -12,9 +12,9 @@ import random
 import discord
 from discord.ext import commands
 
-from core.game.game import game_panels, game_records
-from core.game.game.board_image import render_bars, render_cached
-from core.game.game.game_v2 import GamePanelView, text_panel
+from core.game.hub import game_panels, game_records
+from core.game.hub.board_image import render_bars, render_cached
+from core.game.hub.game_v2 import GamePanelView, text_panel
 from core.game.twochoice.twochoice import QUESTIONS_PER_SESSION, minority_side, pick_questions, tally
 
 GAME_ID = "twochoice"

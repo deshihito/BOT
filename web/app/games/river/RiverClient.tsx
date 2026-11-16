@@ -1,5 +1,5 @@
 "use client";
-// 川渡りパズル。ロジックと最短手数は lib/river.ts（全状態 BFS で計算）。
+// 川渡りパズル。ロジックと最短手数は lib/games/river.ts（全状態 BFS で計算）。
 // 荷物をタップでボートに乗せ、ボートを対岸へスワイプして渡る。端末内で完結し、
 // 問題ごとの最少渡河回数は localStorage の ago-river-best-<problemId> に保存する。
 import Link from "next/link";
@@ -17,7 +17,7 @@ import {
   RIVER_PROBLEMS,
   type RiverSide,
   type RiverState,
-} from "@/lib/river";
+} from "@/lib/games/river";
 import { sfxLose, sfxPlace, sfxSlide, sfxTap, sfxWin } from "@/lib/sfx";
 import { tappableProps, useGesture } from "@/lib/gesture";
 import { EndScreen } from "../GameJuice";

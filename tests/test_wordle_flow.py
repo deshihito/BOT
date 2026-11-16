@@ -10,7 +10,7 @@ from unittest.mock import patch
 from game_fakes import FakeChannel, FakeGuild, FakeInteraction, FakeMember, _view_texts, press, real_sleep
 import core.game.wordle.cog as w
 from core.game.wordle import cog as wordle_impl
-from core.game.game import party_ranking
+from core.game.hub import party_ranking
 G, Y, X = w.GREEN, w.YELLOW, w.GRAY
 
 
