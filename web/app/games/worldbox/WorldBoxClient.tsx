@@ -5761,14 +5761,14 @@ export default function WorldBoxClient() {
               <span style={{ flex: 1, height: 8, borderRadius: 4, background: "rgba(255,255,255,0.18)", overflow: "hidden" }}>
                 <span style={{ display: "block", width: `${Math.max(0, Math.min(100, (invProfile.hp / maxHpFor(invProfile)) * 100))}%`, height: "100%", background: invProfile.hp <= 25 ? "#e2483a" : "#7ed957" }} />
               </span>
-              <strong style={{ color: "#fff", fontSize: 11 }}>{invProfile.hp}</strong>
+              <strong style={{ color: "#fff", fontSize: 11 }}>{Math.floor(invProfile.hp)}</strong>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
               <span style={{ color: "#ffd23e", fontSize: 11, width: 28 }}>空腹</span>
               <span style={{ flex: 1, height: 8, borderRadius: 4, background: "rgba(255,255,255,0.18)", overflow: "hidden" }}>
                 <span style={{ display: "block", width: `${Math.max(0, Math.min(100, (invProfile.hunger / HUNGER_MAX) * 100))}%`, height: "100%", background: invProfile.hunger <= 20 ? "#ff7a59" : "#ffd23e" }} />
               </span>
-              <strong style={{ color: "#fff", fontSize: 11 }}>{invProfile.hunger}</strong>
+              <strong style={{ color: "#fff", fontSize: 11 }}>{Math.floor(invProfile.hunger)}</strong>
             </div>
             {invProfile.status.some((e) => e.kind === "poison") && (
               <span style={{ color: "#b6f26d", fontSize: 11 }}>毒</span>
