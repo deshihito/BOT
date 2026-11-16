@@ -10,7 +10,7 @@
 // - 秘匿情報をシーンへ渡していないこと:
 //   memory は裏向きカードの絵柄、janken は公開前の相手の手、
 //   bombpass は爆発タイマー、hagetaka は他人の未公開入札
-// - ロジック層（lib/memory-match.ts, lib/online/games/*.ts）へ three が混入していないこと
+// - ロジック層（lib/games/memory-match.ts, lib/online/games/*.ts）へ three が混入していないこと
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -153,8 +153,8 @@ test("3D batch8-cards hagetaka: 他人の未公開入札をシーンへ渡さな
   assert.match(scene, /submitted: boolean/, "シーンは提出状況だけを受け取る型を持つ");
 });
 
-test("3D batch8-cards: ロジック層（lib/memory-match.ts, lib/online/games/*.ts）に three が混入していない", () => {
-  assert.doesNotMatch(read("lib", "memory-match.ts"), /from "three"/, "lib/memory-match.ts");
+test("3D batch8-cards: ロジック層（lib/games/memory-match.ts, lib/online/games/*.ts）に three が混入していない", () => {
+  assert.doesNotMatch(read("lib", "games/memory-match.ts"), /from "three"/, "lib/games/memory-match.ts");
   for (const f of ["bombpass.ts", "hagetaka.ts"]) {
     assert.doesNotMatch(read("lib", "online", "games", f), /from "three"/, `lib/online/games/${f}`);
     assert.doesNotMatch(read("lib", "online", "games", f), /three-kit/, `lib/online/games/${f}`);

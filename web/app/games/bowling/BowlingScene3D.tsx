@@ -2,10 +2,10 @@
 // ボウリングの 3D レーン（three.js）。このファイルはクライアント側で
 // next/dynamic 経由でのみ読み込まれ、three はこのページ専用チャンクになる。
 // 物理は自前の簡易 2D 円衝突（ボール×ピン、ピン×ピンの連鎖）で、
-// 静止した時点で「倒れたピン」を親へ返し、スコア進行は lib/bowling.ts が担う。
+// 静止した時点で「倒れたピン」を親へ返し、スコア進行は lib/games/bowling.ts が担う。
 import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
-import { PIN_POSITIONS } from "@/lib/bowling";
+import { PIN_POSITIONS } from "@/lib/games/bowling";
 import { sfxGutter, sfxPinHit, sfxPinsDown, sfxRollStart } from "@/lib/sfx";
 
 export interface BowlingSceneApi {

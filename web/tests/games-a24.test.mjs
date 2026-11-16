@@ -1,5 +1,5 @@
 // A24フェーズ新規3本のロジック検証（lib のみ、UI 非依存）。
-// - lib/river.ts: 最短手数（BFS）・最短手順での勝利・失敗判定・積み下ろし規則
+// - lib/games/river.ts: 最短手数（BFS）・最短手順での勝利・失敗判定・積み下ろし規則
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -39,7 +39,7 @@ async function loadOnline(name, exportsList) {
   return new Function(body)();
 }
 
-const rv = await loadLib("river.ts");
+const rv = await loadLib("games/river.ts");
 
 function makeRng(seed) {
   let s = seed | 0;

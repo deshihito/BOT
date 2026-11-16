@@ -1,4 +1,4 @@
-import { getBgcutSession, saveBgcutResult } from "@/lib/bgcut";
+import { getBgcutSession, saveBgcutResult } from "@/lib/bgcut/bgcut";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

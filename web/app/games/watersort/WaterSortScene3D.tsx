@@ -1,6 +1,6 @@
 "use client";
 // ウォーターソートの 3D シーン。試験管を半透明の円柱（ガラス）＋色円柱の
-// 層（液体）で立体化する。状態・注ぎ可否は lib/watersort.ts とクライアント
+// 層（液体）で立体化する。状態・注ぎ可否は lib/games/watersort.ts とクライアント
 // の既存 onBottle が持ち、ここは表現と入力の橋渡しだけ:
 //   管のタップ = 既存 onBottle（選択→注ぐ の2タップフローそのまま）
 // 注ぎが起きたことは状態差分（どの管が減り、どの管が増えたか）で検出し、
@@ -13,7 +13,7 @@ import * as THREE from "three";
 import { createStage } from "@/lib/three-kit/stage";
 import { attachPickPointer } from "@/lib/three-kit/pointer";
 import SceneBox from "@/lib/three-kit/SceneBox";
-import type { WsState } from "@/lib/watersort";
+import type { WsState } from "@/lib/games/watersort";
 
 interface Props {
   state: WsState;

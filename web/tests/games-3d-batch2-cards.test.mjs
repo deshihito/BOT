@@ -68,8 +68,8 @@ test("3D cards: createCard の複合ラベルは文字数に応じてフォン�
 });
 
 
-test("3D cards: ロジック層（lib/blackjack.ts）に three が混入していない", () => {
-  for (const f of ["blackjack.ts"]) {
+test("3D cards: ロジック層（lib/games/blackjack.ts）に three が混入していない", () => {
+  for (const f of ["games/blackjack.ts"]) {
     assert.doesNotMatch(read("lib", f), /from "three"/, `lib/${f}`);
     assert.doesNotMatch(read("lib", f), /three-kit/, `lib/${f}`);
   }

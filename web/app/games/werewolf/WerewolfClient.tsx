@@ -20,7 +20,7 @@ import { useEffect, useRef, useState } from "react";
 import OnlineShell, { useOnlineCreateOptions } from "../online/OnlineShell";
 import type { OnlineRoomApi, OnlineRoomView } from "../online/useOnlineRoom";
 import { useRoomJuice } from "../GameJuice";
-import { playSe } from "@/lib/balku-sound";
+import { playSe } from "@/lib/balku/balku-sound";
 
 /* --- 人狼のゲーム別ビュー（モジュール担当との契約） --- */
 type Role = "wolf" | "seer" | "hunter" | "villager";

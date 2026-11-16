@@ -56,13 +56,13 @@ function makeRng(seed) {
   };
 }
 
-const sudoku = await loadLib("sudoku.ts");
-const ms = await loadLib("minesweeper.ts");
-const sol = await loadLib("solitaire.ts");
-const soko = await loadLib("sokoban.ts");
-const nono = await loadLib("nonogram.ts");
-const slide = await loadLib("slider2048.ts");
-const wordle = await loadLib("wordle.ts");
+const sudoku = await loadLib("games/sudoku.ts");
+const ms = await loadLib("games/minesweeper.ts");
+const sol = await loadLib("games/solitaire.ts");
+const soko = await loadLib("games/sokoban.ts");
+const nono = await loadLib("games/nonogram.ts");
+const slide = await loadLib("games/slider2048.ts");
+const wordle = await loadLib("games/wordle.ts");
 const df = await loadGame("daifugo.ts", "daifugo");
 const dg = await loadGame("drawguess.ts", "drawguess");
 

@@ -6,7 +6,7 @@
 // - <button> 数が現行（sudoku 1 / kenken 1 / kakuro 1 / binairo 2）以下
 // - 入力が既存ハンドラ（選択・ヒント・チェック・循環）へ接続される
 // - 判定・合法性を 3D 側で再実装していないこと
-// - ロジック（lib/sudoku.ts 等）へ three が混入していないこと
+// - ロジック（lib/games/sudoku.ts 等）へ three が混入していないこと
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -23,7 +23,7 @@ const countButtons = (dir) => {
 };
 
 const BATCH = [
-  { dir: "sudoku", client: "SudokuClient.tsx", scene: "SudokuScene3D.tsx", buttons: 1, lib: "sudoku.ts" },
+  { dir: "sudoku", client: "SudokuClient.tsx", scene: "SudokuScene3D.tsx", buttons: 1, lib: "games/sudoku.ts" },
 ];
 
 for (const g of BATCH) {

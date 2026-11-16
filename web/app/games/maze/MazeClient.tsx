@@ -1,5 +1,5 @@
 "use client";
-// めいろ。ロジックは lib/maze.ts（完全迷路を生成し、最短路も lib で求める）。
+// めいろ。ロジックは lib/games/maze.ts（完全迷路を生成し、最短路も lib で求める）。
 // 矢印キー／WASD／盤面スワイプで移動。ヒントで最短路のマスをうっすら光らせる。端末内で完結。
 import Link from "next/link";
 import dynamic from "next/dynamic";
@@ -14,7 +14,7 @@ import {
   type MazeDir,
   type MazeSizeKey,
   type MazeState,
-} from "@/lib/maze";
+} from "@/lib/games/maze";
 import { sfxSlide, sfxWin } from "@/lib/sfx";
 import { tappableProps, useGesture } from "@/lib/gesture";
 import { EndScreen } from "../GameJuice";

@@ -2,7 +2,7 @@
 // ソリティア（クロンダイク）の 3D シーン（カード系の型・ソリティア系拡張）。
 // 場札7列・山札・捨て札・組札4枠を createCard で立体化する。重なりは
 // 伏せ札を詰め、表札を広く取り、列が長い場合は間隔を圧縮して盤内に収める。
-// 状態・合法判定は lib/solitaire.ts とクライアントの既存ハンドラが持ち、
+// 状態・合法判定は lib/games/solitaire.ts とクライアントの既存ハンドラが持ち、
 // ここは表現と入力の橋渡しだけを行う:
 //   タップ = 既存の選択→移動（山札タップ=めくる、組札タップ等も同じ）
 //   ダブルタップ（捨て札/場札の先頭）= 組札へ自動移動（2D のダブルクリック）
@@ -17,7 +17,7 @@ import { createStage } from "@/lib/three-kit/stage";
 import { createCard } from "@/lib/three-kit/primitives";
 import { attachPickPointer } from "@/lib/three-kit/pointer";
 import SceneBox from "@/lib/three-kit/SceneBox";
-import { isRedSuit, rankLabel, suitSymbol, type SolCard, type SolState } from "@/lib/solitaire";
+import { isRedSuit, rankLabel, suitSymbol, type SolCard, type SolState } from "@/lib/games/solitaire";
 
 export type SolSelection =
   | { kind: "waste" }

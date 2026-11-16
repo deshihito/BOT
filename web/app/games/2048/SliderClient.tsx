@@ -1,5 +1,5 @@
 "use client";
-// 2048 方式のスライドパズル。ロジックは lib/slider2048.ts。
+// 2048 方式のスライドパズル。ロジックは lib/games/slider2048.ts。
 // 矢印キー・盤面スワイプで操作する。盤面ダブルタップで1手もどす（U キーでも可）。
 // タイルは絶対配置し、lib の moveSlideDetailed が返す移動情報で
 // transform を遷移させてスライドアニメーションする（最終状態は lib の盤面と一致）。
@@ -16,7 +16,7 @@ import {
   SLIDE_SIZE,
   type SlideDir,
   type SlideState,
-} from "@/lib/slider2048";
+} from "@/lib/games/slider2048";
 import { sfxLose, sfxSlide, sfxSpawn, sfxWin } from "@/lib/sfx";
 import { tappableProps, useGesture } from "@/lib/gesture";
 import { EndScreen, GoalBand } from "../GameJuice";

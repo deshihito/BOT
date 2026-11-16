@@ -1,5 +1,5 @@
 // A4フェーズの新規4本のロジック検証。
-// - lib/quiz.ts: 出題決定性・選択肢シャッフルの正解追跡・採点と連続ボーナス
+// - lib/games/quiz.ts: 出題決定性・選択肢シャッフルの正解追跡・採点と連続ボーナス
 // - lib/online/games/quizbattle.ts: 得点計算・秘匿ビュー・tick 締切・退出処理
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -40,7 +40,7 @@ async function loadQuizBattle() {
   return import("data:text/javascript;base64," + Buffer.from(code).toString("base64"));
 }
 
-const quiz = await loadLib("quiz.ts");
+const quiz = await loadLib("games/quiz.ts");
 const qb = await loadQuizBattle();
 
 // 決定的 rng（LCG）。オンライン基盤の Rng は () => number。

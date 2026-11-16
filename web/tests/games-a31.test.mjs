@@ -1,6 +1,6 @@
 // A31フェーズの検証。
-// - lib/airhockey.ts: シミュレーション決定性・ゴール判定・勝敗・パドル制限
-// - lib/penalty.ts: 進行・早期決着・サドンデス・セーブ判定
+// - lib/games/airhockey.ts: シミュレーション決定性・ゴール判定・勝敗・パドル制限
+// - lib/games/penalty.ts: 進行・早期決着・サドンデス・セーブ判定
 // - lib/online/games/quizbattle.ts: 問題バンク増量分（84問・形式・重複なし）
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -41,8 +41,8 @@ async function loadQuizBattle() {
   return import("data:text/javascript;base64," + Buffer.from(code).toString("base64"));
 }
 
-const air = await loadLib("airhockey.ts");
-const pen = await loadLib("penalty.ts");
+const air = await loadLib("games/airhockey.ts");
+const pen = await loadLib("games/penalty.ts");
 const qb = await loadQuizBattle();
 
 // ---------------------------------------------------------------- airhockey

@@ -1,5 +1,5 @@
 // A19フェーズの新規2本＋増量のロジック検証。
-// - lib/mahjong.ts: フリー判定・ペア除去・可解性・詰み判定
+// - lib/games/mahjong.ts: フリー判定・ペア除去・可解性・詰み判定
 // - lib/online/games/shiritori.ts: 単語バンク増量後の妥当性（件数・重複なし・形式）
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -40,7 +40,7 @@ async function loadOnline(name, exportsList) {
   return new Function(body)();
 }
 
-const mj = await loadLib("mahjong.ts");
+const mj = await loadLib("games/mahjong.ts");
 const shi = await loadOnline("shiritori.ts", [ "SHIRITORI_WORDS", "isValidWordForm", "isBankWord", "shiritoriTail", ]);
 
 // ---- 麻雀ソリティア ----

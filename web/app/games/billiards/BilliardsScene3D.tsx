@@ -1,6 +1,6 @@
 "use client";
 // ビリヤードの 3D シーン。フェルト＋クッション＋ポケットのテーブルと球。
-// 物理と勝敗は lib/billiards.ts が決め、ここは displayBalls（親がフレーム列を
+// 物理と勝敗は lib/games/billiards.ts が決め、ここは displayBalls（親がフレーム列を
 // 再生した位置）へ補間追従するだけ。3D 側で当たり判定・勝敗判定はしない。
 // 入力: テーブル上のドラッグ = 狙い（角度）と強さ（手球からの距離）、
 //       速いドラッグ終了 / フリック = 打つ。スライダー＋「打つ」も従来どおり使える。
@@ -19,7 +19,7 @@ import {
   BL_POCKET_RADIUS,
   BL_WIDTH,
   type BlBall,
-} from "@/lib/billiards";
+} from "@/lib/games/billiards";
 
 interface Props {
   balls: BlBall[];

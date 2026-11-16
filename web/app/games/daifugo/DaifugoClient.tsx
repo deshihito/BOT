@@ -13,7 +13,7 @@ import OnlineShell, { useOnlineCreateOptions } from "../online/OnlineShell";
 const DaifugoScene3D = dynamic(() => import("./DaifugoScene3D"), { ssr: false });
 import type { OnlineRoomApi, OnlineRoomView } from "../online/useOnlineRoom";
 import { useRoomJuice } from "../GameJuice";
-import { playSe } from "@/lib/balku-sound";
+import { playSe } from "@/lib/balku/balku-sound";
 
 /* --- 大富豪のゲーム別ビュー（モジュール担当との契約） --- */
 type DaifugoOther = { seat: number; name: string; count: number; finished: number | null };

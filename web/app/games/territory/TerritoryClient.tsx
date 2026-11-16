@@ -11,7 +11,7 @@ import OnlineShell from "../online/OnlineShell";
 const TerritoryScene3D = dynamic(() => import("./TerritoryScene3D"), { ssr: false });
 import type { OnlineRoomApi, OnlineRoomView } from "../online/useOnlineRoom";
 import { useRoomJuice } from "../GameJuice";
-import { playSe } from "@/lib/balku-sound";
+import { playSe } from "@/lib/balku/balku-sound";
 import { tappableProps, useGesture } from "@/lib/gesture";
 import {
   TERRITORY_PIECES,

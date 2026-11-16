@@ -1,4 +1,4 @@
-// BALKU（lib/balku-game.ts / lib/games-catalog.ts）の検証。
+// BALKU（lib/balku/balku-game.ts / lib/games-catalog.ts）の検証。
 // 元の server/balkuGame.test.ts を土台に、games.test.mjs と同じ
 // loadBundle 方式で TS を読み込む。
 import { test } from "node:test";
@@ -42,7 +42,7 @@ async function loadLib(name) {
 }
 
 const balku = await loadBundle(
-  ["balku-game.ts"],
+  ["balku/balku-game.ts"],
   [
     "createLobbyState",
     "addLobbyPlayer",

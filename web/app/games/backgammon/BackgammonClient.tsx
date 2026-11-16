@@ -1,5 +1,5 @@
 "use client";
-// バックギャモン（対CPU）。ロジックは lib/backgammon.ts。
+// バックギャモン（対CPU）。ロジックは lib/games/backgammon.ts。
 // 自分のコマ（白）をタップして選び、光った移動先をタップする。
 // 端末内で完結し、サーバーへ送信しない。
 import Link from "next/link";
@@ -21,7 +21,7 @@ import {
   type BgFrom,
   type BgMove,
   type BgState,
-} from "@/lib/backgammon";
+} from "@/lib/games/backgammon";
 import { useGamesNav } from "../GamesShell";
 import { tappableProps, useGesture } from "@/lib/gesture";
 

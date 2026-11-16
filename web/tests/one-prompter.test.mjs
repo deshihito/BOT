@@ -1,11 +1,11 @@
-// lib/one-prompter.ts の純粋ロジック（カテゴリ判定・二択質問生成・プロンプト合成）を確かめる
+// lib/one-prompter/one-prompter.ts の純粋ロジック（カテゴリ判定・二択質問生成・プロンプト合成）を確かめる
 import { test} from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import ts from "typescript";
 
-const src = fs.readFileSync(path.join(import.meta.dirname, "..", "lib", "one-prompter.ts"), "utf8");
+const src = fs.readFileSync(path.join(import.meta.dirname, "..", "lib", "one-prompter/one-prompter.ts"), "utf8");
 const js = ts.transpileModule(src, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022}}).outputText;
 const m = await import("data:text/javascript;base64," + Buffer.from(js).toString("base64"));
 

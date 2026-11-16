@@ -1,5 +1,5 @@
 // A21フェーズ新規3本のロジック検証（lib のみ、UI 非依存）。
-// - lib/cube.ts: 回転の性質（4回で戻る・逆回転）・完成判定・スクランブルの可解性
+// - lib/games/cube.ts: 回転の性質（4回で戻る・逆回転）・完成判定・スクランブルの可解性
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -39,7 +39,7 @@ async function loadOnline(name, exportsList) {
   return new Function(body)();
 }
 
-const cube = await loadLib("cube.ts");
+const cube = await loadLib("games/cube.ts");
 
 function makeRng(seed) {
   let s = seed | 0;

@@ -3,7 +3,7 @@
 //   壁 = 立体ブロック（共有壁は重複させず InstancedMesh で軽量化）
 //   床 = 平板 / プレイヤー = 青い球トークン（補間移動）
 //   ゴール = 発光する円盤＋旗の造形 / ヒント = 最短路マスの淡い発光タイル
-// 移動判定は lib/maze.ts と親ハンドラが決め、ここは
+// 移動判定は lib/games/maze.ts と親ハンドラが決め、ここは
 // 表現と入力の橋渡しだけを行う。
 // 入力は現行の操作語彙どおり: 盤面スワイプ = onFlick を親の移動
 // ハンドラ（doMove）へ接続する。矢印キー／WASD は親の window
@@ -16,7 +16,7 @@ import { createStage, type Stage } from "@/lib/three-kit/stage";
 import { createBall } from "@/lib/three-kit/primitives";
 import { attachPickPointer } from "@/lib/three-kit/pointer";
 import SceneBox from "@/lib/three-kit/SceneBox";
-import type { MazeDir } from "@/lib/maze";
+import type { MazeDir } from "@/lib/games/maze";
 
 interface Props {
   /** 各マスの壁ビットマスク（1=北 2=東 4=南 8=西、row-major）。 */

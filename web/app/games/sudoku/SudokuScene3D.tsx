@@ -10,7 +10,7 @@
 // 入力は現行クライアントの操作語彙どおり:
 //   タップ = onCell（選択。数字入力は親の DOM パッドが担う）
 //   上フリック = onHint（現行の盤面スワイプ＝ヒントを維持する）
-// 判定・合法性はすべて lib/sudoku.ts と親ハンドラが決め、ここは表現と
+// 判定・合法性はすべて lib/games/sudoku.ts と親ハンドラが決め、ここは表現と
 // 入力の橋渡しだけを行う。
 // WebGL が使えない場合は onFail で親へ知らせ、親は 2D 表示に切り替える。
 import { useEffect, useRef, useState, type ReactNode } from "react";

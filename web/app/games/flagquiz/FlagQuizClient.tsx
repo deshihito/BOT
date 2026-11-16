@@ -1,5 +1,5 @@
 "use client";
-// フラッグクイズ。ロジックは lib/flagquiz.ts。
+// フラッグクイズ。ロジックは lib/games/flagquiz.ts。
 // 旗→国名／国名→旗の4択を10問。答えるとその場で正解が分かり、最後に復習リストが出る。
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
@@ -13,7 +13,7 @@ import {
   nextFlagQuestion,
   FLAG_PAIRS,
   type FlagQuizState,
-} from "@/lib/flagquiz";
+} from "@/lib/games/flagquiz";
 import { useGamesNav } from "../GamesShell";
 
 function newGame(): FlagQuizState {

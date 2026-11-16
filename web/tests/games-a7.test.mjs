@@ -1,6 +1,6 @@
 // A7フェーズの新規4本のロジック検証。
-// - lib/sokoban.ts: 箱押し・クリア判定・アンドゥ・全6面の可解性
-// - lib/anagram.ts: シャッフル保証・タイル操作・ヒントと採点
+// - lib/games/sokoban.ts: 箱押し・クリア判定・アンドゥ・全6面の可解性
+// - lib/games/anagram.ts: シャッフル保証・タイル操作・ヒントと採点
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -32,8 +32,8 @@ function stripModuleSyntax(code) {
 }
 
 
-const sk = await loadLib("sokoban.ts");
-const an = await loadLib("anagram.ts");
+const sk = await loadLib("games/sokoban.ts");
+const an = await loadLib("games/anagram.ts");
 
 // ---------------------------------------------------------------- 倉庫番
 

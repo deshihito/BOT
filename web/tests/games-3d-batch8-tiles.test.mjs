@@ -22,7 +22,7 @@ const countButtons = (dir) => {
 };
 
 const BATCH = [
-  { dir: "touchnumber", client: "TouchNumberClient.tsx", scene: "TouchNumberScene3D.tsx", buttons: 3, lib: "touchnumber.ts" },
+  { dir: "touchnumber", client: "TouchNumberClient.tsx", scene: "TouchNumberScene3D.tsx", buttons: 3, lib: "games/touchnumber.ts" },
 ];
 
 for (const g of BATCH) {

@@ -1,5 +1,5 @@
 "use client";
-// モグラたたき。スケジュール/得点は lib/mole.ts。
+// モグラたたき。スケジュール/得点は lib/games/mole.ts。
 // 3x3 の穴、30秒制限、通常/金モグラ、コンボ表示、ベストスコア保存。
 import Link from "next/link";
 import dynamic from "next/dynamic";
@@ -13,7 +13,7 @@ import {
   createMoleSchedule,
   type MoleKind,
   type ScheduledMole,
-} from "@/lib/mole";
+} from "@/lib/games/mole";
 import { sfxCorrect, sfxLose, sfxPlace, sfxWin, sfxWrong } from "@/lib/sfx";
 import { EndScreen, GoalBand, ScorePop } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";

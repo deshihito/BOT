@@ -1,7 +1,7 @@
 // A33 で追加したゲーム3件のロジック検証（lib のみ、UI 非依存）。
-// - lib/billiards.ts: 決定性・ポケット・スクラッチ・全消し
-// - lib/curling.ts: 得点計算・シミュレーション決定性・ホッグアウト・全試合完走
-// - lib/anagram.ts: 増量後のバンク（120語・重複なし・カタカナ・シャッフル保証）
+// - lib/games/billiards.ts: 決定性・ポケット・スクラッチ・全消し
+// - lib/games/curling.ts: 得点計算・シミュレーション決定性・ホッグアウト・全試合完走
+// - lib/games/anagram.ts: 増量後のバンク（120語・重複なし・カタカナ・シャッフル保証）
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -18,9 +18,9 @@ async function loadLib(name) {
   return import("data:text/javascript;base64," + Buffer.from(js).toString("base64"));
 }
 
-const bl = await loadLib("billiards.ts");
-const cu = await loadLib("curling.ts");
-const an = await loadLib("anagram.ts");
+const bl = await loadLib("games/billiards.ts");
+const cu = await loadLib("games/curling.ts");
+const an = await loadLib("games/anagram.ts");
 
 // ---------------------------------------------------------------- ビリヤード
 

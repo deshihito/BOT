@@ -1,5 +1,5 @@
 "use client";
-// チンチロリン。ロジックは lib/chinchiro.ts（点数制・全10ラウンド・シード決定的）。
+// チンチロリン。ロジックは lib/games/chinchiro.ts（点数制・全10ラウンド・シード決定的）。
 // ベスト記録の設計: localStorage `ago-chinchiro-best` に「最終スコアの最高値」を保存する。
 // 端末内で完結し、サーバーへ送信しない。
 import Link from "next/link";
@@ -19,7 +19,7 @@ import {
   type CcDice,
   type CcHand,
   type CcState,
-} from "@/lib/chinchiro";
+} from "@/lib/games/chinchiro";
 import { useGamesNav } from "../GamesShell";
 import { useGesture } from "@/lib/gesture";
 import { sfxCorrect, sfxDice, sfxLose, sfxPlace, sfxTap, sfxWin, sfxWrong } from "@/lib/sfx";

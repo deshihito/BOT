@@ -2,7 +2,7 @@
 // ダイスクエストの 3D シーン。白ダイス2個＋色ダイス4個を DiceSet で振る。
 // 白ダイスは1セット、色ダイスは色ごとに1個セット（DiceSet は色が一律の
 // ため）とし、色はダイス下の円盤と淡いボディ色で示す（目は DOM 併記）。
-// 出目とフェーズは lib/dicequest.ts が決め、ここは転がし演出だけを行う。
+// 出目とフェーズは lib/games/dicequest.ts が決め、ここは転がし演出だけを行う。
 // ダイス置き場へのタップ/フリックは既存ジェスチャと同一（振る/次へ）。
 // WebGL が使えない場合は onFail で親へ知らせ、親は 2D 表示に切り替える。
 import { useEffect, useRef, useState, type ReactNode } from "react";
@@ -12,7 +12,7 @@ import { DiceSet } from "@/lib/three-kit/dice";
 import { attachPickPointer } from "@/lib/three-kit/pointer";
 import { createDisc } from "@/lib/three-kit/primitives";
 import SceneBox from "@/lib/three-kit/SceneBox";
-import { DQ_COLORS, type DqDice } from "@/lib/dicequest";
+import { DQ_COLORS, type DqDice } from "@/lib/games/dicequest";
 
 interface Props {
   dice: DqDice | null;

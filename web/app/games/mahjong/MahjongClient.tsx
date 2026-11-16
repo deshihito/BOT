@@ -1,5 +1,5 @@
 "use client";
-// 麻雀ソリティア。ロジックは lib/mahjong.ts（解ける割り当てを生成で保証）。
+// 麻雀ソリティア。ロジックは lib/games/mahjong.ts（解ける割り当てを生成で保証）。
 // フリーな牌（上に牌が無く、左右どちらかが空いている）を選んで、
 // 同じ種類のペアを取り除いていく。端末内で完結し、サーバーへ送信しない。
 import Link from "next/link";
@@ -19,7 +19,7 @@ import {
   remainingCount,
   removePair,
   type MjState,
-} from "@/lib/mahjong";
+} from "@/lib/games/mahjong";
 import { sfxLose, sfxPlace, sfxTap, sfxWin } from "@/lib/sfx";
 import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";

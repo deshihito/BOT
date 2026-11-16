@@ -1,5 +1,5 @@
 "use client";
-// 詰めチェス。王手をかけ続けて指定手数で詰ませるパズル。ロジックとソルバーは lib/chesspuzzle.ts。
+// 詰めチェス。王手をかけ続けて指定手数で詰ませるパズル。ロジックとソルバーは lib/games/chesspuzzle.ts。
 // 黒の応手は「最も粘る手」が自動で指される。端末内で完結し、サーバーへ送信しない。
 import Link from "next/link";
 import dynamic from "next/dynamic";
@@ -19,7 +19,7 @@ import {
   type CpGameState,
   type CpMove,
   type CpPieceType,
-} from "@/lib/chesspuzzle";
+} from "@/lib/games/chesspuzzle";
 import { sfxPlace, sfxSlide, sfxTap, sfxWin, sfxWrong } from "@/lib/sfx";
 import { tappableProps, useGesture } from "@/lib/gesture";
 import { EndScreen } from "../GameJuice";

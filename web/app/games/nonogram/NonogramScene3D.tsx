@@ -9,7 +9,7 @@
 // 入力は現行クライアントの操作語彙どおり:
 //   押下（タップ／ドラッグ開始）= onPaintStart（現行 startPaint）
 //   ドラッグ中の移動 = onPaintContinue（現行 continuePaint、planePoint→セル変換）
-// 印の決定・完成判定はすべて lib/nonogram.ts と親ハンドラが決め、
+// 印の決定・完成判定はすべて lib/games/nonogram.ts と親ハンドラが決め、
 // ここは表現と入力の橋渡しだけを行う。
 // WebGL が使えない場合は onFail で親へ知らせ、親は 2D 表示に切り替える。
 import { useEffect, useRef, useState, type ReactNode } from "react";
@@ -18,7 +18,7 @@ import { createStage, type Stage } from "@/lib/three-kit/stage";
 import { canvasTexture } from "@/lib/three-kit/primitives";
 import { attachPickPointer } from "@/lib/three-kit/pointer";
 import SceneBox from "@/lib/three-kit/SceneBox";
-import type { NonoMark } from "@/lib/nonogram";
+import type { NonoMark } from "@/lib/games/nonogram";
 
 interface Props {
   marks: NonoMark[];

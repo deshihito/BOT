@@ -1,4 +1,4 @@
-import { BalkuRoomError, parsePlayerToken, parseRoomCode, subscribeBalkuRoom, touchBalkuRoom } from "@/lib/balku-server";
+import { BalkuRoomError, parsePlayerToken, parseRoomCode, subscribeBalkuRoom, touchBalkuRoom } from "@/lib/balku/balku-server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

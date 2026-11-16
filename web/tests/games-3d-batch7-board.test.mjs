@@ -111,8 +111,8 @@ test("3D batch7-board snake: スワイプ=方向転換、タップ=開始/ポー
 
 test("3D batch7-board: ロジック層に three が混入していない", () => {
   for (const p of [
-    ["lib", "maze.ts"],
-    ["lib", "snake.ts"],
+    ["lib", "games/maze.ts"],
+    ["lib", "games/snake.ts"],
   ]) {
     assert.doesNotMatch(read(...p), /from "three"/, p.join("/"));
     assert.doesNotMatch(read(...p), /three-kit/, p.join("/"));

@@ -2,11 +2,11 @@
 // ワニワニの 3D シーン（three.js）。このファイルはクライアント側で
 // next/dynamic 経由でのみ読み込まれ、three はこのページ専用チャンクになる。
 // 頭部はプリミティブの組み合わせで造形し、歯はレイキャストでタップする。
-// 進行・勝敗は lib/crocodile.ts が担い、ここでは押下アニメーション
+// 進行・勝敗は lib/games/crocodile.ts が担い、ここでは押下アニメーション
 // （指/棒で歯を沈める→当たりなら顎が高速で閉じる）を再生する。
 import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
-import { CR_TEETH, type CrStatus } from "@/lib/crocodile";
+import { CR_TEETH, type CrStatus } from "@/lib/games/crocodile";
 import { sfxJawSnap, sfxJingle, sfxPop, sfxSafePress } from "@/lib/sfx";
 
 interface Props {

@@ -12,10 +12,10 @@ import {
   startBgm as startBgmRaw,
   stopBgm as stopBgmRaw,
   unlockAudio,
-} from "@/lib/lll-sound";
+} from "@/lib/lll/lll-sound";
 import LllCard, { TIER_LABEL, type LllCardView } from "./LllCard";
-import { buildPlaybackSteps, stepDurationMs, type PlaybackStep } from "@/lib/lll-playback";
-import { TACTIC_CARD_BY_ID, TACTIC_DECKS } from "@/lib/lll-tactics";
+import { buildPlaybackSteps, stepDurationMs, type PlaybackStep } from "@/lib/lll/lll-playback";
+import { TACTIC_CARD_BY_ID, TACTIC_DECKS } from "@/lib/lll/lll-tactics";
 
 /* --- サウンド（公開関数の型は並行実装側に合わせ、ここでは薄く包む） --- */
 type SoundSettings = { bgm: boolean; se: boolean };

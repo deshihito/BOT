@@ -9,7 +9,7 @@
 // - 経路・反射・接続判定を 3D 側で再実装していないこと
 //   （amida: tracePath / computeResults、pipe: flowIndices / isPipeSolved /
 //     rotatePipe、laser: traceLaser / rotateLaserMirror / reflect を呼ばない）
-// - ロジック（lib/amida.ts 等）へ three が混入していないこと
+// - ロジック（lib/games/amida.ts 等）へ three が混入していないこと
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -26,9 +26,9 @@ const countButtons = (dir) => {
 };
 
 const BATCH = [
-  { dir: "amida", client: "AmidaClient.tsx", scene: "AmidaScene3D.tsx", buttons: 3, lib: "amida.ts" },
-  { dir: "pipe", client: "PipeClient.tsx", scene: "PipeScene3D.tsx", buttons: 2, lib: "pipe.ts" },
-  { dir: "laser", client: "LaserClient.tsx", scene: "LaserScene3D.tsx", buttons: 1, lib: "laser.ts" },
+  { dir: "amida", client: "AmidaClient.tsx", scene: "AmidaScene3D.tsx", buttons: 3, lib: "games/amida.ts" },
+  { dir: "pipe", client: "PipeClient.tsx", scene: "PipeScene3D.tsx", buttons: 2, lib: "games/pipe.ts" },
+  { dir: "laser", client: "LaserClient.tsx", scene: "LaserScene3D.tsx", buttons: 1, lib: "games/laser.ts" },
 ];
 
 for (const g of BATCH) {

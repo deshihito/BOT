@@ -1,5 +1,5 @@
 // A14フェーズ新規4本のロジック検証。
-// - lib/backgammon.ts: 合法手・ブロック・ヒット・バー復帰・ベアオフ・勝敗・全対局シミュレーション
+// - lib/games/backgammon.ts: 合法手・ブロック・ヒット・バー復帰・ベアオフ・勝敗・全対局シミュレーション
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -49,7 +49,7 @@ function makeRng(seed) {
 
 const seats = (n) => Array.from({ length: n }, (_, i) => ({ seat: i, name: `P${i + 1}` }));
 
-const bg = await loadLib("backgammon.ts");
+const bg = await loadLib("games/backgammon.ts");
 
 // ---------------------------------------------------------------- バックギャモン
 

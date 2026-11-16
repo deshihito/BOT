@@ -1,6 +1,6 @@
 "use client";
 // フルーツマージの 3D シーン。箱（6列×10行）とフルーツ球を 3D 化する。
-// 落下・合体・連鎖の判定は lib/mergefruit.ts が決め、ここは盤面スナップ
+// 落下・合体・連鎖の判定は lib/games/mergefruit.ts が決め、ここは盤面スナップ
 // ショットへ補間追従するだけ（3D 側で合体判定はしない）。フルーツは
 // 絵文字テクスチャを使わず、段階ごとの色つき球体＋大きさで表現する。
 // 入力: ポインタの x で列を選び（planePoint で追従）、タップでその列へ落とす
@@ -12,7 +12,7 @@ import { createStage } from "@/lib/three-kit/stage";
 import { createBall } from "@/lib/three-kit/primitives";
 import { attachPickPointer } from "@/lib/three-kit/pointer";
 import SceneBox from "@/lib/three-kit/SceneBox";
-import { FRUIT_KINDS, landingRow, MERGE_COLS, MERGE_ROWS } from "@/lib/mergefruit";
+import { FRUIT_KINDS, landingRow, MERGE_COLS, MERGE_ROWS } from "@/lib/games/mergefruit";
 
 interface Props {
   board: (number | null)[];

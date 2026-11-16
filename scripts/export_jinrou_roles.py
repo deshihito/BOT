@@ -1,4 +1,4 @@
-"""core/game/jinrou/common.py の HELP_ROLES から、サイトの役職図鑑用データ web/lib/jinrou-roles.ts を作る。
+"""core/game/jinrou/common.py の HELP_ROLES から、サイトの役職図鑑用データ web/lib/games/jinrou-roles.ts を作る。
 
 使い方: python scripts/export_jinrou_roles.py        # 書き出す
         python scripts/export_jinrou_roles.py --check # 差分があれば終了コード 1
@@ -22,7 +22,7 @@ from core.game.jinrou import jinrou_guide  # noqa: E402
 ROOT = Path(__file__).resolve().parent.parent
 COG = ROOT / "core" / "game" / "jinrou" / "common.py"
 ASSETS = ROOT / "Assets"
-OUT_TS = ROOT / "web" / "lib" / "jinrou-roles.ts"
+OUT_TS = ROOT / "web" / "lib" / "games" / "jinrou-roles.ts"
 IMG_DIR = ROOT / "web" / "public" / "img" / "jinrou"
 
 TEAMS = {"村人陣営": "village", "人狼陣営": "wolf", "第三者陣営": "third"}
@@ -104,7 +104,7 @@ def main(argv: list[str]) -> int:
     if "--check" in argv:
         current = OUT_TS.read_text(encoding="utf-8") if OUT_TS.exists() else ""
         if current != ts:
-            print("web/lib/jinrou-roles.ts が古いです。scripts/export_jinrou_roles.py を実行してください。")
+            print("web/lib/games/jinrou-roles.ts が古いです。scripts/export_jinrou_roles.py を実行してください。")
             return 1
         return 0
     IMG_DIR.mkdir(parents=True, exist_ok=True)

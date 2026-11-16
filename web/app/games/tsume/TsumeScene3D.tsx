@@ -7,7 +7,7 @@
 // 立体配置し、タップで既存の持ち駒選択フローへ接続する。
 // 入力はレイキャストのタップ = 既存ハンドラ（onCell / onHand）へそのまま
 // 渡し、左フリックは既存の左スワイプ（1手戻す）と同じ経路へ渡す。
-// 着手可否・成り選択はすべて親クライアントと lib/tsume.ts が決め、
+// 着手可否・成り選択はすべて親クライアントと lib/games/tsume.ts が決め、
 // ここは表現と入力の橋渡しだけを行う。状態・手数・手順は親の DOM 併記が担う。
 // WebGL が使えない場合は onFail で親へ知らせ、親は 2D 表示に切り替える。
 import { useEffect, useRef, useState, type ReactNode } from "react";
@@ -21,7 +21,7 @@ import {
   type TsumeBasePiece,
   type TsumeCell,
   type TsumePiece,
-} from "@/lib/tsume";
+} from "@/lib/games/tsume";
 
 interface Props {
   board: (TsumeCell | null)[];

@@ -1,6 +1,6 @@
 // A6フェーズの新規4本のロジック検証。
-// - lib/spotdiff.ts: 差分の生成・判定・ミスタップ・勝利
-// - lib/flagquiz.ts: 出題決定性・両モード・採点と連続ボーナス・復習記録
+// - lib/games/spotdiff.ts: 差分の生成・判定・ミスタップ・勝利
+// - lib/games/flagquiz.ts: 出題決定性・両モード・採点と連続ボーナス・復習記録
 // - lib/online/games/drawguess.ts: 秘匿ビュー・正規化一致・得点・ストローク上限・tick・退出
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -43,8 +43,8 @@ async function loadDrawGuess() {
   return import("data:text/javascript;base64," + Buffer.from(code).toString("base64"));
 }
 
-const sd = await loadLib("spotdiff.ts");
-const fq = await loadLib("flagquiz.ts");
+const sd = await loadLib("games/spotdiff.ts");
+const fq = await loadLib("games/flagquiz.ts");
 const dg = await loadDrawGuess();
 
 // 決定的 rng（LCG）。オンライン基盤の Rng は () => number。

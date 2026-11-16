@@ -1,8 +1,8 @@
 // A37フェーズ: 新規1本＋内容充実2件の検証（lib のみ、UI 非依存）。
-// - lib/kwordle.ts: 判定（重複文字の出現回数ベース処理）・バンク形式・勝敗遷移
-// - lib/tsume.ts: 増量後の全12題がソルバー検証を通る（初期局面で玉に王手なし・
+// - lib/games/kwordle.ts: 判定（重複文字の出現回数ベース処理）・バンク形式・勝敗遷移
+// - lib/games/tsume.ts: 増量後の全12題がソルバー検証を通る（初期局面で玉に王手なし・
 //   指定手数ちょうどで詰み・初手が1つだけ）
-// - lib/kanacross.ts: 増量後の全12問が isValidPuzzle を通り、完成入力で completed になる
+// - lib/games/kanacross.ts: 増量後の全12問が isValidPuzzle を通り、完成入力で completed になる
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -19,9 +19,9 @@ async function loadLib(name) {
   return import("data:text/javascript;base64," + Buffer.from(js).toString("base64"));
 }
 
-const kw = await loadLib("kwordle.ts");
-const tsume = await loadLib("tsume.ts");
-const kana = await loadLib("kanacross.ts");
+const kw = await loadLib("games/kwordle.ts");
+const tsume = await loadLib("games/tsume.ts");
+const kana = await loadLib("games/kanacross.ts");
 
 // ------------------------------------------------------------ kwordle
 

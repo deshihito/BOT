@@ -5,7 +5,7 @@
 // （ボードオフ）も盤の中央バーと右側トレイに表現する。
 // 入力は既存操作（駒/移動先のタップ）をレイキャストでクライアントの
 // onPoint へ渡す。上がりはトレイのタップでも行える（盤面スワイプと併存）。
-// 着手可否は lib/backgammon.ts とクライアント状態が決め、ここは表現と
+// 着手可否は lib/games/backgammon.ts とクライアント状態が決め、ここは表現と
 // 入力の橋渡しだけを行う。
 // WebGL が使えない場合は onFail で親へ知らせ、親は 2D 盤に切り替える。
 import { useEffect, useRef, useState, type ReactNode } from "react";
@@ -15,7 +15,7 @@ import { createDisc } from "@/lib/three-kit/primitives";
 import { attachPickPointer } from "@/lib/three-kit/pointer";
 import { DiceSet } from "@/lib/three-kit/dice";
 import SceneBox from "@/lib/three-kit/SceneBox";
-import type { BgFrom } from "@/lib/backgammon";
+import type { BgFrom } from "@/lib/games/backgammon";
 
 interface Props {
   points: number[];

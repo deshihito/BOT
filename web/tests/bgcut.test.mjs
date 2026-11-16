@@ -1,6 +1,6 @@
 // 背景透過（Web 一時リンク版）の純粋ロジックとトークン検証を確かめる。
-// lib/bgcut-core.ts（寸法・上限・α後処理・単色検出・ラダー）と
-// lib/bgcut-token.ts（Bot が署名したトークンの検証。ID の精度が要）を、
+// lib/bgcut/bgcut-core.ts（寸法・上限・α後処理・単色検出・ラダー）と
+// lib/bgcut/bgcut-token.ts（Bot が署名したトークンの検証。ID の精度が要）を、
 // 既存テストと同じ流儀で TS のまま読み込んで検証する。
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -17,8 +17,8 @@ async function loadTs(rel) {
   return import("data:text/javascript;base64," + Buffer.from(js).toString("base64"));
 }
 
-const core = await loadTs("lib/bgcut-core.ts");
-const tokenLib = await loadTs("lib/bgcut-token.ts");
+const core = await loadTs("lib/bgcut/bgcut-core.ts");
+const tokenLib = await loadTs("lib/bgcut/bgcut-token.ts");
 
 // ----------------------------------------------------------- core: 寸法と上限
 

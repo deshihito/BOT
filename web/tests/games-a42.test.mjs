@@ -1,8 +1,8 @@
 // A42フェーズ: 内容充実第2弾の機械検証（lib のみ、UI 非依存）。
-// - lib/flagquiz.ts: バンク 195組（重複なし・国コードは ISO alpha-2・追加20組の ISO 照合・出題成立）
-// - lib/chesspuzzle.ts: 全15題（1手詰め7・2手詰め8）が verifyProblem を通り、
+// - lib/games/flagquiz.ts: バンク 195組（重複なし・国コードは ISO alpha-2・追加20組の ISO 照合・出題成立）
+// - lib/games/chesspuzzle.ts: 全15題（1手詰め7・2手詰め8）が verifyProblem を通り、
 //   増量3題（cp11/cp12/cp13）がヒント手順でクリアできる
-// - lib/river.ts: 全12題が BFS で解け、増量2題（doublechain/herd）の最短手数は7回
+// - lib/games/river.ts: 全12題が BFS で解け、増量2題（doublechain/herd）の最短手数は7回
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -20,9 +20,9 @@ async function loadLib(name) {
   return import("data:text/javascript;base64," + Buffer.from(js).toString("base64"));
 }
 
-const fq = await loadLib("flagquiz.ts");
-const cp = await loadLib("chesspuzzle.ts");
-const rv = await loadLib("river.ts");
+const fq = await loadLib("games/flagquiz.ts");
+const cp = await loadLib("games/chesspuzzle.ts");
+const rv = await loadLib("games/river.ts");
 
 // ------------------------------------------------------------ flagquiz
 
