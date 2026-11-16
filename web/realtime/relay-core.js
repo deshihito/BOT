@@ -80,7 +80,7 @@ function sanitizeHeartbeat(raw) {
     role: typeof raw.role === "string" && ROLE_IDS.includes(raw.role) ? raw.role : "free",
     rank: typeof raw.rank === "number" && Number.isFinite(raw.rank) ? Math.max(1, Math.min(5, Math.floor(raw.rank))) : 1,
     party: typeof raw.party === "string" ? raw.party.slice(0, 48) : "",
-    // 座り（sit）も presence.ts と同じ規則で通す（落とすと他者に座り姿勢が伝わらない）。
+    // 座り（sit）も presence.ts と同じ規則で通す（落とすと他者に座り姿勢が伝わらず、bot_kv 集約書き込みでも欠落する）。
     ...(raw.sit === true ? { sit: true } : {}),
   };
 }
@@ -175,7 +175,76 @@ function verifyToken(token, secret, now) {
   }
   if (!payload || typeof payload.pid !== "string" || typeof payload.exp !== "number") return null;
   if (now > payload.exp) return null;
-  return { pid: payload.pid, name: typeof payload.name === "string" ? payload.name : "" };
+  return {
+    pid: payload.pid,
+    name: typeof payload.name === "string" ? payload.name : "",
+    // 所有者キー（Phase 2 の集約書き込み用）。旧トークンには無いため任意。
+    ok: typeof payload.ok === "string" && payload.ok.length > 0 ? payload.ok : null,
+  };
+}
+
+/**
+ * bot_kv プレゼンスへ書く値（presence-online.ts の putPresence と完全互換）。
+ * putPresence は kvSet(namespace, ownerKey, JSON.stringify({ ...heartbeat, ts }))
+ * で、heartbeat は presence.ts の sanitizeHeartbeat の形（name を含む）。
+ */
+function presenceKvValue(entry) {
+  const hb = {
+    name: entry.name,
+    x: entry.x,
+    y: entry.y,
+    vx: entry.vx,
+    vy: entry.vy,
+    face: entry.face,
+    space: entry.space,
+    role: entry.role ?? "free",
+    rank: entry.rank ?? 1,
+    party: entry.party ?? "",
+    ...(entry.sit === true ? { sit: true } : {}),
+  };
+  return JSON.stringify({ ...hb, ts: entry.ts });
+}
+
+// ---- プレゼンス集約書き込みのスロットル（Phase 2） ----
+// relay が WS で受けた位置を bot_kv へ書く頻度の純粋判定。検証側が読む
+// 鮮度の目安: 移動中は最大1秒、静止時は2秒（従来の REST 併送と同じ）。
+// 空間遷移・大きなジャンプ・初回は即時。
+const AGG_MOVING_WRITE_MS = 1_000;
+const AGG_IDLE_WRITE_MS = 2_000;
+const AGG_JUMP_DISTANCE = 4;
+
+function createAggregator() {
+  return { players: new Map() };
+}
+
+/**
+ * このエントリを今 bot_kv へ書くべきか。書く場合は内部状態も更新する
+ * （書き込みの予約）。force は切断時の最終書き込み用。
+ */
+function planPresenceWrite(agg, pid, entry, now, force = false) {
+  const st = agg.players.get(pid);
+  if (force) {
+    agg.players.set(pid, { at: now, x: entry.x, y: entry.y, space: entry.space });
+    return true;
+  }
+  if (!st) {
+    agg.players.set(pid, { at: now, x: entry.x, y: entry.y, space: entry.space });
+    return true;
+  }
+  const dist = Math.hypot(entry.x - st.x, entry.y - st.y);
+  const immediate = entry.space !== st.space || dist > AGG_JUMP_DISTANCE;
+  const moving = dist > 0.05 || entry.vx !== 0 || entry.vy !== 0;
+  const interval = moving ? AGG_MOVING_WRITE_MS : AGG_IDLE_WRITE_MS;
+  if (immediate || now - st.at >= interval) {
+    agg.players.set(pid, { at: now, x: entry.x, y: entry.y, space: entry.space });
+    return true;
+  }
+  return false;
+}
+
+/** プレイヤーの集約状態を消す（切断時）。 */
+function forgetPresenceWrite(agg, pid) {
+  agg.players.delete(pid);
 }
 
 module.exports = {
@@ -194,4 +263,10 @@ module.exports = {
   pruneRoom,
   signToken,
   verifyToken,
+  presenceKvValue,
+  AGG_MOVING_WRITE_MS,
+  AGG_IDLE_WRITE_MS,
+  createAggregator,
+  planPresenceWrite,
+  forgetPresenceWrite,
 };

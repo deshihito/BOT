@@ -65,8 +65,15 @@ function broadcast(space, exceptWs, obj) {
 if (wss) {
   wss.on("connection", (ws) => {
     const auth = ws._rtAuth;
-    const info = { pid: auth.pid, name: auth.name, space: null, joined: false, lastMsgAt: 0, alive: true };
+    const info = { pid: auth.pid, name: auth.name, ok: auth.ok ?? null, space: null, joined: false, lastMsgAt: 0, alive: true, lastEntry: null };
     clients.set(ws, info);
+    // プレゼンス集約の合図（Phase 2）: 集約が有効で所有者キーがある
+    // 接続にだけ送る。これを受けたクライアントは REST ハートビートを止める。
+    if (aggState.on && info.ok) {
+      try {
+        ws.send(JSON.stringify({ t: "hello", now: Date.now(), agg: 1 }));
+      } catch { /* noop */ }
+    }
     ws.on("pong", () => {
       info.alive = true;
     });
@@ -83,6 +90,8 @@ if (wss) {
       if (!msg || msg.t !== "hb") return;
       const entry = core.acceptHeartbeat(room, info.pid, info.name, msg, now);
       if (!entry) return;
+      info.lastEntry = entry;
+      writePresenceKv(info, entry, false);
       const prevSpace = info.space;
       info.space = entry.space;
       if (prevSpace && prevSpace !== entry.space) {
@@ -98,6 +107,12 @@ if (wss) {
     });
     const onGone = () => {
       if (!clients.delete(ws)) return;
+      // 切断時は最終位置を鮮度つきで書き残す（bot_kv 側は鮮度切れで自然に
+      // 消える。REST の DELETE は従来どおりクライアント側の退室処理が担う）
+      if (info.lastEntry && info.ok) {
+        writePresenceKv(info, { ...info.lastEntry, ts: Date.now() }, true);
+      }
+      core.forgetPresenceWrite(aggregator, info.pid);
       for (const space of core.removePlayer(room, info.pid)) {
         broadcast(space, ws, { t: "bye", id: info.pid });
       }
@@ -149,6 +164,53 @@ if (wss) {
   // 差分を配る形に集約する。bot-api 未設定なら watch は無効で、
   // クライアントは従来ポーリングのまま動く。
   const kvCfg = botkv.botKvConfig();
+
+  // ---- プレゼンス集約書き込み（Phase 2） ----
+  // WS で受けた位置を relay が bot_kv（worldbox_presence）へスロットル
+  // 書き込みし、クライアントの REST ハートビートを置き換える。bot_kv が
+  // サーバー検証の正である点は従来どおり（書く者が relay に移るだけ）。
+  // 集約が有効なのは bot-api 設定済み + トークンに所有者キーがある場合
+  // のみで、接続時に { t: "hello", agg: 1 } で合図する。書き込み失敗が
+  // 続いたら { t: "agg", on: false } で知らせ、クライアントは REST へ戻る。
+  const aggregator = core.createAggregator();
+  const aggState = { on: Boolean(kvCfg), failStreak: 0 };
+  const broadcastAggState = () => {
+    const text = JSON.stringify({ t: "agg", on: aggState.on });
+    for (const [ws] of clients) {
+      if (ws.readyState !== 1) continue;
+      try {
+        ws.send(text);
+      } catch { /* noop */ }
+    }
+  };
+  const writePresenceKv = (info, entry, force) => {
+    if (!kvCfg || !info.ok) return;
+    if (!core.planPresenceWrite(aggregator, info.pid, entry, Date.now(), force)) return;
+    botkv.kvSet(kvCfg, "worldbox_presence", info.ok, core.presenceKvValue(entry)).then(
+      () => {
+        // 失敗が続いて集約を止めた後の復旧（書き込み自体は止めずに試し続け、
+        // 成功が戻ったらクライアントへ再開を知らせる）
+        if (aggState.failStreak >= 3) {
+          aggState.failStreak = 0;
+          aggState.on = true;
+          broadcastAggState();
+        } else {
+          aggState.failStreak = 0;
+        }
+      },
+      (err) => {
+        aggState.failStreak += 1;
+        if (aggState.failStreak === 1) {
+          console.error("[realtime] presence kv write failed:", err && err.message);
+        }
+        if (aggState.failStreak >= 3 && aggState.on) {
+          aggState.on = false;
+          broadcastAggState();
+        }
+      },
+    ).catch(() => { /* noop */ });
+  };
+
   if (kvCfg) {
     const sendTo = (predicate, obj) => {
       const text = JSON.stringify(obj);
