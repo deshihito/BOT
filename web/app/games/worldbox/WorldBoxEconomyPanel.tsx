@@ -1,6 +1,8 @@
 "use client";
 // AGO WORLD BOX の経済パネル（かばん・ショップ・合成・銀行）。
 // 売買・合成・送金は場所制約つき: それぞれの施設の前にいる間だけタブが出る。
+// 売却は売却専用カウンター（station "sell"）の売却タブに一本化した:
+// かばんには売却ボタンを置かない（ショップでかばんを開く手順をなくす）。
 // Discord ボット側の経済機能（items / workshop craft）の規則をそのまま使い、
 // かばん・空腹度は /api/worldbox/profile が正とする。
 // steal は一旦廃止（2026-11-16）: タブ・ルート・オプ生成・ワーカー適用の
@@ -29,7 +31,7 @@ const ACTION_SE: Record<string, WbSeName> = {
   enhance: "success",
 };
 
-type Tab = "bag" | "shop" | "craft" | "bank";
+type Tab = "bag" | "shop" | "sell" | "craft" | "bank";
 type LoadState = "loading" | "ready" | "guest" | "unavailable";
 
 const ERROR_LABEL: Record<string, string> = {
@@ -120,6 +122,9 @@ export default function WorldBoxEconomyPanel({ space, station, genre, worldStati
   // （鍛冶屋はジャンル "smith"）。ジャンルが無い店は全品目。
   const shopGenre: ShopGenreId | null = station === "smith" ? "smith" : genre;
   const atShop = inLobby && (station === "shop" || station === "smith");
+  // 売却専用カウンター（買取）: 売るだけの店。開いたら売却タブが既定で、
+  // かばんを開く手順は挟まない（売却はここに一本化し、かばんからは外した）
+  const atSellShop = inLobby && station === "sell";
   // ロビーの鍛冶屋は全種別可。ワールドでは設置した作業施設の種別だけ可
   const atLobbySmith = space !== "world" && station === "smith";
   const worldKinds = new Set((worldStationKinds ?? "").split(",").filter(Boolean));
@@ -138,6 +143,7 @@ export default function WorldBoxEconomyPanel({ space, station, genre, worldStati
   // かばん/ショップのスロット選択（注釈は選択中アイテムのものだけ出す）
   const [bagSel, setBagSel] = useState<string | null>(null);
   const [shopSel, setShopSel] = useState<string | null>(null);
+  const [sellSel, setSellSel] = useState<string | null>(null);
   // 強化のスロット選択と成功フラッシュ（金色背景 → 透明へ transition）
   const [enhanceSel, setEnhanceSel] = useState<string | null>(null);
   const [enhanceFlashId, setEnhanceFlashId] = useState<string | null>(null);
@@ -153,6 +159,11 @@ export default function WorldBoxEconomyPanel({ space, station, genre, worldStati
   const [discSel, setDiscSel] = useState<string | null>(null);
   const craftTimerRef = useRef<number | null>(null);
   const aliveRef = useRef(true);
+
+  // 売却専用カウンターの前にいる間は売却タブを既定にする
+  useEffect(() => {
+    if (atSellShop) setTab("sell");
+  }, [atSellShop]);
 
   const refreshBridge = useCallback(async () => {
     try {
@@ -397,6 +408,7 @@ export default function WorldBoxEconomyPanel({ space, station, genre, worldStati
   // 選択中アイテム（所持/品目から消えていたら注釈を出さない）
   const bagSelItem = owned.find((item) => item.id === bagSel) ?? null;
   const shopSelItem = shopItems.find((item) => item.id === shopSel) ?? null;
+  const sellSelItem = owned.find((item) => item.id === sellSel) ?? null;
   // 強化対象: 所持している道具だけ（従来の row リストと同じ対象）
   const enhanceTools = ITEMS.filter((item) => (profile.items[item.id] ?? 0) > 0 && item.tool);
   const enhanceSelItem = enhanceTools.find((item) => item.id === enhanceSel) ?? null;
@@ -408,7 +420,7 @@ export default function WorldBoxEconomyPanel({ space, station, genre, worldStati
   // 施設の前にいないタブを開いたままにしない（その施設へ行くと使える）
   // 販売品目の無い店（鍛冶屋は合成・強化専用）ではショップタブ自体を出さない
   const tabAllowed = (t: Tab): boolean =>
-    t === "shop" ? atShop && shopItems.length > 0 : t === "craft" ? atWorkbench : t === "bank" ? atBank : true;
+    t === "shop" ? atShop && shopItems.length > 0 : t === "sell" ? atSellShop : t === "craft" ? atWorkbench : t === "bank" ? atBank : true;
   const activeTab: Tab = tabAllowed(tab) ? tab : "bag";
   const tabBtn = (t: Tab, label: string) => (
     <button
@@ -423,33 +435,30 @@ export default function WorldBoxEconomyPanel({ space, station, genre, worldStati
 
   return (
     <div style={panel} className="wb-panel">
-      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-        <strong>経済</strong>
-        <span>残高 <strong>{balance === null ? "—" : balance}</strong> コイン</span>
-        <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-          空腹度
-          <span style={{ width: 90, height: 10, borderRadius: 5, background: "rgba(255,255,255,0.12)", overflow: "hidden", display: "inline-block" }}>
-            <span style={{ display: "block", width: `${profile.hunger}%`, height: "100%", background: profile.hunger <= 20 ? "#ff7a59" : "#ffd23e" }} />
-          </span>
-          <strong>{Math.floor(profile.hunger)}</strong>
-        </span>
-        <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-          HP
-          <span style={{ width: 90, height: 10, borderRadius: 5, background: "rgba(255,255,255,0.12)", overflow: "hidden", display: "inline-block" }}>
-            <span style={{ display: "block", width: `${profile.hp}%`, height: "100%", background: profile.hp <= 25 ? "#e2483a" : "#7ed957" }} />
-          </span>
-          <strong>{Math.floor(profile.hp)}</strong>
-        </span>
-        {profile.status.some((e) => e.kind === "poison") && <span style={{ color: "#b6f26d" }}>毒</span>}
-        <span style={{ flex: 1 }} />
-        {closeBtn}
-      </div>
+      {/* ヘッダー（残高・タブ・閉じる）はスクロールに追随させず常時表示する。
+          空腹度・HP はステージ左上の常時バーが正で、このパネルには出さない
+          （ショップ利用中に要らない表示としてユーザー指示で撤去）。 */}
+      <div
+        style={{
+          position: "sticky", top: -12, zIndex: 3,
+          margin: "-12px -12px 0", padding: "12px 12px 8px",
+          background: "rgba(10,12,18,0.98)",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <strong>経済</strong>
+          <span>残高 <strong>{balance === null ? "—" : balance}</strong> コイン</span>
+          <span style={{ flex: 1 }} />
+          {closeBtn}
+        </div>
 
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12 }}>
-        {tabBtn("bag", "かばん")}
-        {atShop && shopItems.length > 0 && tabBtn("shop", shopGenre ? (genreById(shopGenre)?.name ?? "ショップ") : "ショップ")}
-        {atWorkbench && tabBtn("craft", "合成")}
-        {atBank && tabBtn("bank", "銀行")}
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12 }}>
+          {tabBtn("bag", "かばん")}
+          {atShop && shopItems.length > 0 && tabBtn("shop", shopGenre ? (genreById(shopGenre)?.name ?? "ショップ") : "ショップ")}
+          {atSellShop && tabBtn("sell", "売却")}
+          {atWorkbench && tabBtn("craft", "合成")}
+          {atBank && tabBtn("bank", "銀行")}
+        </div>
       </div>
       {activeTab === "bag" && (
         <div style={{ marginTop: 6 }}>
@@ -474,20 +483,14 @@ export default function WorldBoxEconomyPanel({ space, station, genre, worldStati
                   {bagSelItem.curePoison ? <span className="muted">解毒</span> : null}
                 </div>
               ) : null}
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
-                {(bagSelItem.hunger || bagSelItem.heal || bagSelItem.curePoison) && (
+              {(bagSelItem.hunger || bagSelItem.heal || bagSelItem.curePoison) && (
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
                   <button type="button" style={btn} disabled={busy}
                     onClick={() => void act({ action: "eat", itemId: bagSelItem.id }, () => `${bagSelItem.name}を使った`)}>
                     {bagSelItem.heal && !bagSelItem.hunger ? "使う" : "食べる"}
                   </button>
-                )}
-                {atShop && (
-                  <button type="button" style={btn} disabled={busy}
-                    onClick={() => void act({ action: "sell", itemId: bagSelItem.id }, () => `${bagSelItem.name}を売った（代金 ${sellPrice(bagSelItem)} コインは処理中）`)}>
-                    売る（{sellPrice(bagSelItem)}）
-                  </button>
-                )}
-              </div>
+                </div>
+              )}
             </ItemAnnotation>
           )}
         </div>
@@ -519,6 +522,34 @@ export default function WorldBoxEconomyPanel({ space, station, genre, worldStati
                 <button type="button" style={btn} disabled={busy}
                   onClick={() => void act({ action: "buy", itemId: shopSelItem.id }, () => `${shopSelItem.name}を買った`)}>
                   買う（{priceOf(shopSelItem)} コイン）
+                </button>
+              </div>
+            </ItemAnnotation>
+          )}
+        </div>
+      )}
+
+      {activeTab === "sell" && atSellShop && (
+        <div style={{ marginTop: 6 }}>
+          {owned.length === 0 && <p className="muted">売れるものがありません</p>}
+          <ItemSlotGrid>
+            {owned.map((item) => (
+              <ItemSlot
+                key={item.id}
+                itemId={item.id}
+                count={profile.items[item.id]}
+                badge={`${sellPrice(item)}`}
+                selected={sellSel === item.id}
+                onClick={() => setSellSel(item.id)}
+              />
+            ))}
+          </ItemSlotGrid>
+          {sellSelItem && (
+            <ItemAnnotation itemId={sellSelItem.id}>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
+                <button type="button" style={btn} disabled={busy}
+                  onClick={() => void act({ action: "sell", itemId: sellSelItem.id }, () => `${sellSelItem.name}を売った（代金 ${sellPrice(sellSelItem)} コインは処理中）`)}>
+                  売る（{sellPrice(sellSelItem)}）
                 </button>
               </div>
             </ItemAnnotation>

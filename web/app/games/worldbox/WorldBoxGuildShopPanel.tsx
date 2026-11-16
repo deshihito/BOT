@@ -4,8 +4,8 @@
 // ロビー2階の屋台区画（6つ）をユニオンが借り、所属員が出品し誰でも買える。
 // 状態の正はサーバー（/api/worldbox/guild-shop）。購入は区画の近くでのみ。
 import { useCallback, useEffect, useState } from "react";
-import { itemById } from "@/lib/worldbox/items";
 import type { PlayerProfile } from "@/lib/worldbox/profile";
+import { ItemAnnotation, ItemSlot, ItemSlotGrid } from "./ItemSlotGrid";
 
 const panelStyle: React.CSSProperties = {
   position: "absolute", left: "50%", top: "50%", transform: "translate(-50%, -50%)",
@@ -46,6 +46,7 @@ export default function WorldBoxGuildShopPanel({
   const [sellItemId, setSellItemId] = useState("");
   const [sellCount, setSellCount] = useState(1);
   const [sellPrice, setSellPrice] = useState(100);
+  const [listSel, setListSel] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -97,7 +98,14 @@ export default function WorldBoxGuildShopPanel({
 
   return (
     <div style={panelStyle} role="dialog" aria-label="ギルドショップ" className="wb-panel">
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+      <div
+        style={{
+          display: "flex", alignItems: "center", gap: 8,
+          position: "sticky", top: -12, zIndex: 3,
+          margin: "-12px -14px 0", padding: "12px 14px 8px",
+          background: "rgba(16,20,18,0.98)",
+        }}
+      >
         <strong style={{ fontSize: 15 }}>ギルドショップ</strong>
         <span style={{ flex: 1 }} />
         <button type="button" style={btn} onClick={onClose}>閉じる</button>
@@ -132,38 +140,60 @@ export default function WorldBoxGuildShopPanel({
                 {plot && plot.listings.filter((l) => l.available > 0).length === 0 && (
                   <div style={{ fontSize: 12, opacity: 0.65, marginTop: 4 }}>出品なし</div>
                 )}
-                {plot?.listings.filter((l) => l.available > 0).map((l) => (
-                  <div key={l.id} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, marginTop: 4 }}>
-                    {itemById(l.itemId)?.icon && (
-                      <img src={itemById(l.itemId)?.icon} alt="" width={20} height={20} draggable={false} style={{ imageRendering: "pixelated" }} />
-                    )}
-                    <span style={{ flex: 1 }}>{l.name} ×{l.available}</span>
-                    <span>{l.price}</span>
-                    <button type="button" style={btn} onClick={() => { void post({ action: "buy", listingId: l.id, count: 1 }); }}>
-                      買う
-                    </button>
-                    {(shop.myGuildId === plot.guildId && (isLeader || true)) && (
-                      <button type="button" style={btn} onClick={() => { void post({ action: "unlist", listingId: l.id }); }}>
-                        下げる
-                      </button>
-                    )}
+                {plot && plot.listings.filter((l) => l.available > 0).length > 0 && (
+                  <div style={{ marginTop: 6 }}>
+                    <ItemSlotGrid>
+                      {plot.listings.filter((l) => l.available > 0).map((l) => (
+                        <ItemSlot
+                          key={l.id}
+                          itemId={l.itemId}
+                          count={l.available}
+                          badge={`${l.price}`}
+                          selected={listSel === l.id}
+                          onClick={() => setListSel(l.id)}
+                        />
+                      ))}
+                    </ItemSlotGrid>
+                    {(() => {
+                      const sel = plot.listings.find((l) => l.id === listSel && l.available > 0);
+                      if (!sel) return null;
+                      return (
+                        <ItemAnnotation itemId={sel.itemId}>
+                          <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
+                            <button type="button" style={btn} onClick={() => { void post({ action: "buy", listingId: sel.id, count: 1 }); }}>
+                              買う（{sel.price}）
+                            </button>
+                            {shop.myGuildId === plot.guildId && (
+                              <button type="button" style={btn} onClick={() => { void post({ action: "unlist", listingId: sel.id }); }}>
+                                下げる
+                              </button>
+                            )}
+                          </div>
+                        </ItemAnnotation>
+                      );
+                    })()}
                   </div>
-                ))}
+                )}
               </div>
             ))}
           </div>
           {myPlot && (
             <div style={{ borderTop: "1px solid rgba(255,255,255,0.14)", marginTop: 10, paddingTop: 8 }}>
               <strong style={{ fontSize: 13 }}>出品する</strong>
-              <div style={{ display: "flex", gap: 6, marginTop: 6, flexWrap: "wrap" }}>
-                <select value={sellItemId} onChange={(e) => setSellItemId(e.target.value)} style={input} aria-label="アイテム">
-                  <option value="">持ち物…</option>
+              <div style={{ marginTop: 6 }}>
+                <ItemSlotGrid>
                   {myItems.map(([itemId, n]) => (
-                    <option key={itemId} value={itemId}>
-                      {itemById(itemId)?.name ?? itemId}（{n}）
-                    </option>
+                    <ItemSlot
+                      key={itemId}
+                      itemId={itemId}
+                      count={n}
+                      selected={sellItemId === itemId}
+                      onClick={() => setSellItemId(itemId)}
+                    />
                   ))}
-                </select>
+                </ItemSlotGrid>
+              </div>
+              <div style={{ display: "flex", gap: 6, marginTop: 6, flexWrap: "wrap" }}>
                 <input type="number" min={1} max={999} value={sellCount} onChange={(e) => setSellCount(Number(e.target.value))} style={{ ...input, width: 64 }} aria-label="個数" />
                 <input type="number" min={1} value={sellPrice} onChange={(e) => setSellPrice(Number(e.target.value))} style={{ ...input, width: 84 }} aria-label="価格" />
                 <button

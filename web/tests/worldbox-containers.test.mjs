@@ -68,6 +68,7 @@ const tilesUrl = bundleModule(
   [
     "worldTileSource", "mapTileAt", "T_GRASS",
     "applyTileAction", "applyPlaceBlock", "applyMineBlock", "applyFlowerAction", "applyToggleGate",
+    "applySetSign", "applyDisplayAction", "applyDrawWater",
     "tileKey", "parseTileOverride", "parseTileOverrides",
     "presenceIdFor", "isOverrideActive",
   ],
@@ -383,6 +384,11 @@ const machinesOnlineStubUrl = dataUrl(`
 export async function loadMachine() { return null; }
 export async function deleteMachine() {}
 `);
+const stallsUrl = bundleModule(["worldbox/items.ts", "worldbox/stalls.ts"], ["isStallItem"]);
+const stallsOnlineStubUrl = dataUrl(`
+export async function loadStall() { return null; }
+export async function storeStall() { return true; }
+`);
 const tilesRoute = await routeImport("api/worldbox/tiles/route.ts", [
   ['"next/server"', nextServerStubUrl],
   ['"@/lib/auth"', authUrl],
@@ -401,6 +407,8 @@ const tilesRoute = await routeImport("api/worldbox/tiles/route.ts", [
   ['"@/lib/worldbox/containers-online"', containersOnlineStubUrl],
   ['"@/lib/worldbox/machines"', machinesUrl],
   ['"@/lib/worldbox/machines-online"', machinesOnlineStubUrl],
+  ['"@/lib/worldbox/stalls"', stallsUrl],
+  ['"@/lib/worldbox/stalls-online"', stallsOnlineStubUrl],
   ['"@/lib/worldbox/metrics-online"', metricsOnlineStubUrl],
   ['"@/lib/worldbox/ops-online"', opsOnlineStubUrl],
   ['"@/lib/worldbox/user-lock"', userLockUrl],

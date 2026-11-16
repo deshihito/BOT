@@ -4,8 +4,8 @@
 // バッファの回収、プログラム（有効/間隔/プリセット）の変更、共有コードの
 // 書き出し・取り込みを行う。状態の正はサーバー（/api/worldbox/machines）。
 import { useCallback, useEffect, useState } from "react";
-import { itemById } from "@/lib/worldbox/items";
 import type { PlayerProfile } from "@/lib/worldbox/profile";
+import { ItemAnnotation, ItemSlot, ItemSlotGrid } from "./ItemSlotGrid";
 import {
   DEVICE_INTERVAL_CHOICES, DEVICE_PRESETS, type DeviceProgram,
 } from "@/lib/worldbox/machines";
@@ -50,6 +50,7 @@ export default function WorldBoxMachinePanel({
   const [machine, setMachine] = useState<MachineView | null>(null);
   const [codeIn, setCodeIn] = useState("");
   const [msg, setMsg] = useState("");
+  const [bufferSel, setBufferSel] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -94,7 +95,14 @@ export default function WorldBoxMachinePanel({
 
   return (
     <div style={panelStyle} role="dialog" aria-label="自動収穫機" className="wb-panel">
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+      <div
+        style={{
+          display: "flex", alignItems: "center", gap: 8,
+          position: "sticky", top: -10, zIndex: 3,
+          margin: "-10px -12px 0", padding: "10px 12px 6px",
+          background: "rgba(16,20,18,0.98)",
+        }}
+      >
         <strong style={{ fontSize: 14 }}>自動収穫機</strong>
         <span style={{ flex: 1 }} />
         <button type="button" style={btn} onClick={onClose}>閉じる</button>
@@ -107,21 +115,26 @@ export default function WorldBoxMachinePanel({
             {machine.buffered <= 0 ? (
               <span style={{ opacity: 0.75 }}>バッファは空</span>
             ) : (
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
-                {Object.entries(machine.buffer).map(([itemId, count]) => {
-                  const def = itemById(itemId);
-                  return (
-                    <span key={itemId} style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-                      {def?.icon && (
-                        <img src={def.icon} alt="" width={20} height={20} draggable={false} style={{ imageRendering: "pixelated" }} />
-                      )}
-                      {def?.name ?? itemId} ×{count}
-                    </span>
-                  );
-                })}
-                <button type="button" style={btn} onClick={() => { void post({ action: "collect" }); }}>
-                  回収
-                </button>
+              <div>
+                <ItemSlotGrid>
+                  {Object.entries(machine.buffer).map(([itemId, count]) => (
+                    <ItemSlot
+                      key={itemId}
+                      itemId={itemId}
+                      count={count}
+                      selected={bufferSel === itemId}
+                      onClick={() => setBufferSel(itemId)}
+                    />
+                  ))}
+                </ItemSlotGrid>
+                {bufferSel && machine.buffer[bufferSel] && (
+                  <ItemAnnotation itemId={bufferSel} />
+                )}
+                <div style={{ marginTop: 8 }}>
+                  <button type="button" style={btn} onClick={() => { void post({ action: "collect" }); }}>
+                    回収
+                  </button>
+                </div>
               </div>
             )}
           </div>
