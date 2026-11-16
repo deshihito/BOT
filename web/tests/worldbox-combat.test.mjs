@@ -89,6 +89,16 @@ test("状態パース: 不正値は捨てる、deadUntil は保持する", () =>
   assert.equal(combat.parseMobState("not json"), null);
   const states = combat.parseMobStates({ "slime@1,2": { hp: 3 }, "bad": { hp: 1 }, "wolf@5,5": "xx" });
   assert.deepEqual(Object.keys(states), ["slime@1,2"]);
+  // 本番形: kvList は Map を返す。Map でも同じく読めなければモブ状態が
+  // 常時空になり、倒したモブが復活して見える（幽霊モブ）。
+  const fromMap = combat.parseMobStates(new Map([
+    ["slime@1,2", JSON.stringify({ hp: 3 })],
+    ["cave:0,0:0|wolf@5,5", { hp: 0, deadUntil: 999 }],
+  ]));
+  assert.deepEqual(fromMap, {
+    "slime@1,2": { hp: 3 },
+    "cave:0,0:0|wolf@5,5": { hp: 0, deadUntil: 999 },
+  });
 });
 
 test("HP の現在値: 未保存は満タン、deadUntil 経過で復活", () => {

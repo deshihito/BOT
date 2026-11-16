@@ -10,6 +10,7 @@
 // （/api/worldbox/economy）が返し、移動は Bot 本体が数十秒で適用する。
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { EconomyOp } from "@/lib/worldbox/economy-bridge";
+import { onEconomyApplied } from "@/lib/worldbox/economy-push";
 import { ITEMS, RECIPES, itemById, sellPrice } from "@/lib/worldbox/items";
 import { dailyPriceFor, dailyStockForGenre, genreById, isShopExcluded, itemsForGenre, shopDayKeyOf, type ShopGenreId } from "@/lib/worldbox/shops";
 import type { LobbyStation } from "@/lib/worldbox/lobby";
@@ -155,8 +156,11 @@ export default function WorldBoxEconomyPanel({ space, station, genre, onClose }:
     aliveRef.current = true;
     void refreshProfile();
     void refreshBridge();
+    // 経済オプ確定の push で残高・履歴を即時更新する
+    const off = onEconomyApplied(() => { void refreshProfile(); void refreshBridge(); });
     return () => {
       aliveRef.current = false;
+      off();
     };
   }, [refreshProfile, refreshBridge]);
 
@@ -269,14 +273,14 @@ export default function WorldBoxEconomyPanel({ space, station, genre, onClose }:
           <span style={{ width: 90, height: 10, borderRadius: 5, background: "rgba(255,255,255,0.12)", overflow: "hidden", display: "inline-block" }}>
             <span style={{ display: "block", width: `${profile.hunger}%`, height: "100%", background: profile.hunger <= 20 ? "#ff7a59" : "#ffd23e" }} />
           </span>
-          <strong>{profile.hunger}</strong>
+          <strong>{Math.floor(profile.hunger)}</strong>
         </span>
         <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
           HP
           <span style={{ width: 90, height: 10, borderRadius: 5, background: "rgba(255,255,255,0.12)", overflow: "hidden", display: "inline-block" }}>
             <span style={{ display: "block", width: `${profile.hp}%`, height: "100%", background: profile.hp <= 25 ? "#e2483a" : "#7ed957" }} />
           </span>
-          <strong>{profile.hp}</strong>
+          <strong>{Math.floor(profile.hp)}</strong>
         </span>
         {profile.status.some((e) => e.kind === "poison") && <span style={{ color: "#b6f26d" }}>毒</span>}
         <span style={{ flex: 1 }} />

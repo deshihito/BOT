@@ -21,7 +21,7 @@ import { mobById, mobOccupiesTile, type PlacedMob } from "@/lib/worldbox/mobs";
 import { PATTERN_DEF, createBehaviorState, isBossMob, locomotionFor, locomotionPose, stepMobBehavior, type BehaviorEvent, type MobBehaviorState, type MobPatternId } from "@/lib/worldbox/mob-behavior";
 import {
   MOB_ATTACK_RANGE, MOB_RESPAWN_MS, MOB_SPRITE, MOB_SPRITE_FALLBACK, attackTarget, knockbackTarget, mobBlockedTiles, mobDistance, mobFootprintTiles,
-  mobHpNow, mobKeyOf, mobRespawnDelayMs, visibleMobs, type MobState,
+  mobHpNow, mobKeyOf, mobRespawnDelayMs, parseMobState, visibleMobs, type MobState,
 } from "@/lib/worldbox/combat";
 import { advanceWalkPhase, attackSwingAngle, damp, moveLean, stepBeatIndex, walkBob, walkSquashY } from "@/lib/worldbox/anim";
 import {
@@ -38,6 +38,7 @@ import {
 import { clockOffsetEstimate, type PresenceEntry } from "@/lib/worldbox/presence";
 import { createPollGuard, type PollGuard } from "@/lib/poll-guard";
 import { isWsHealthy, presencePollDue } from "@/lib/worldbox/realtime-poll";
+import { notifyEconomyApplied } from "@/lib/worldbox/economy-push";
 import {
   STAMINA_MAX, canDash, createStamina, createTapTracker, isStickDash, registerKeyTap, rescueStamina,
   staminaGaugeVisible, stepStamina, type StaminaState, type StaminaUse, type TapTracker,
@@ -67,11 +68,11 @@ import { biomeAt, structureById, structuresForChunk, type PlacedStructure } from
 import { nearestEntrances, type CompassTarget } from "@/lib/worldbox/compass";
 import { objectsForChunk, specialObjectById } from "@/lib/worldbox/objects";
 import { fishingSpotAt } from "@/lib/worldbox/fishing";
-import type { BoardPost } from "@/lib/worldbox/board";
+import { parseBoardPosts, type BoardPost } from "@/lib/worldbox/board";
 import { parseSave, serializeSave, type SaveSpace } from "@/lib/worldbox/save";
 import { chooseInitialSave } from "@/lib/worldbox/save-source";
 import {
-  actionForTile, blockHpFraction, cropStage, isFlowerPotItem, isOverrideActive, isSeatItem, placedBlockSolid, tileKey, tileView,
+  actionForTile, blockHpFraction, cropStage, isFlowerPotItem, isOverrideActive, isSeatItem, parseTileOverride, placedBlockSolid, tileKey, tileView,
   type TileActionKind, type TileOverridesMap,
 } from "@/lib/worldbox/tiles";
 import { CROPS, ITEMS, itemById } from "@/lib/worldbox/items";
@@ -480,6 +481,16 @@ export default function WorldBoxClient() {
   const vitalsGuardRef = useRef<PollGuard>(createPollGuard());
   const deathsGuardRef = useRef<PollGuard>(createPollGuard());
   const instanceGuardRef = useRef<PollGuard>(createPollGuard());
+  // WS 中継の接続状態（エンジンが書き、コンポーネント側ポーリングの
+  // 間引き判定が読む）。WS push が健全な間は対象ポーリングを止める。
+  const rtOpenRef = useRef(false);
+  const rtLastMsgRef = useRef(0);
+  const wsHealthyNow = () => isWsHealthy(rtOpenRef.current, rtLastMsgRef.current, Date.now());
+  /** エンジンから呼ぶ再同期用の橋（各 refresh の最新版を毎レンダーで差す）。 */
+  const nationsRefreshRef = useRef<(force?: boolean) => Promise<void>>(async () => {});
+  const boardRefreshRef = useRef<() => Promise<void>>(async () => {});
+  const chatReloadRef = useRef<(() => void) | null>(null);
+  const invRefreshRef = useRef<() => Promise<void>>(async () => {});
   const [statusText, setStatusText] = useState("読み込み中…");
   const [othersCount, setOthersCount] = useState(0);
   const [showMap, setShowMap] = useState(true);
@@ -836,7 +847,8 @@ export default function WorldBoxClient() {
   useEffect(() => {
     if (!boardOpen) return;
     void refreshBoard();
-    const timer = window.setInterval(() => void refreshBoard(), 10000);
+    // WS push が健全な間は掲示板の差分が push で届くため定期取得しない
+    const timer = window.setInterval(() => { if (!wsHealthyNow()) void refreshBoard(); }, 10000);
     return () => window.clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [boardOpen]);
@@ -904,6 +916,8 @@ export default function WorldBoxClient() {
       nationsGuardRef.current.end(ticket);
     }
   };
+  nationsRefreshRef.current = refreshNations;
+  boardRefreshRef.current = refreshBoard;
   const nationAction = async (body: Record<string, unknown>) => {
     setNationMsg("");
     try {
@@ -1112,6 +1126,7 @@ export default function WorldBoxClient() {
       invGuardRef.current.end(ticket);
     }
   };
+  invRefreshRef.current = refreshInv;
   /** バイタル API の結果を反映する（死亡時はリスポーン移動まで行う）。 */
   const applyVitalsResult = (data: {
     profile?: PlayerProfile; died?: boolean; respawn?: { x: number; y: number };
@@ -1280,7 +1295,10 @@ export default function WorldBoxClient() {
   chatChannelRef.current = chatChannel;
   useEffect(() => {
     let disposed = false;
-    const load = async () => {
+    const load = async (force = false) => {
+      // WS push が健全な間は定期取得を止める（変更時は relay の poke で
+      // force 取得が走る）。初期表示とチャンネル切替はスナップショット取得。
+      if (!force && wsHealthyNow()) return;
       // 古いレスポンスが新しいメッセージ一覧を上書きしない（S6）
       const ticket = chatGuardRef.current.begin();
       if (ticket === null) return;
@@ -1297,9 +1315,10 @@ export default function WorldBoxClient() {
         chatGuardRef.current.end(ticket);
       }
     };
-    void load();
+    chatReloadRef.current = () => { void load(true); };
+    void load(true);
     const timer = window.setInterval(() => { void load(); }, 3000);
-    return () => { disposed = true; window.clearInterval(timer); };
+    return () => { disposed = true; chatReloadRef.current = null; window.clearInterval(timer); };
   }, [spaceUi, chatChannel]);
   /** 釣り: 魚影タップでキャスト、食いつきの窓でもう一度タップすると釣れる。 */
   const fishingRef = useRef<{ x: number; y: number; biteAt: number } | null>(null);
@@ -1376,7 +1395,8 @@ export default function WorldBoxClient() {
   refreshPartyRef.current = refreshParty;
   useEffect(() => {
     void refreshParty();
-    const timer = window.setInterval(() => { void refreshPartyRef.current(); }, 4000);
+    // WS push が健全な間はパーティ変更が poke で届くため定期取得しない
+    const timer = window.setInterval(() => { if (!wsHealthyNow()) void refreshPartyRef.current(); }, 4000);
     return () => window.clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -1904,6 +1924,12 @@ export default function WorldBoxClient() {
     void refreshTiles();
     void refreshMobs();
     const timer = window.setInterval(() => {
+      // WS push が健全な間は nations/tiles/mobs が push（poke 含む）で
+      // 届くため取得しない。プロフィールは push 対象外なので従来どおり。
+      if (wsHealthyNow()) {
+        void refreshInv();
+        return;
+      }
       void refreshNations();
       void refreshInv();
       void refreshTiles();
@@ -2335,6 +2361,9 @@ export default function WorldBoxClient() {
         ws.onopen = () => {
           rtBackoffMs = 1000;
           lastWsMsgAt = Date.now();
+          rtOpenRef.current = true;
+          rtLastMsgRef.current = lastWsMsgAt;
+          const reconnected = rtEverConnected;
           // 再接続の復帰演出: 薄いパルスだけ（暗転しない・入力は止めない）。
           // ワープ遷移中はそちらを優先して上書きしない。
           if (rtEverConnected && transitionStart < 0) {
@@ -2345,11 +2374,27 @@ export default function WorldBoxClient() {
           }
           rtEverConnected = true;
           sendWsHeartbeat();
+          if (reconnected) {
+            // 再接続時は push の取りこぼしを REST スナップショットで
+            // 再同期する（取りこぼしが新しい同期バグになるため）。
+            void pollOthers();
+            void refreshTilesRef.current();
+            void refreshMobsRef.current();
+            void refreshPartyRef.current(true);
+            void nationsRefreshRef.current(true);
+            void boardRefreshRef.current();
+            chatReloadRef.current?.();
+          }
         };
         ws.onmessage = (ev) => {
           const arrivedAt = Date.now();
           lastWsMsgAt = arrivedAt;
-          let msg: { t?: string; now?: number; p?: PresenceEntry; players?: PresenceEntry[]; id?: string };
+          rtLastMsgRef.current = arrivedAt;
+          let msg: {
+            t?: string; now?: number; p?: PresenceEntry; players?: PresenceEntry[]; id?: string;
+            kind?: string; changes?: { key: string; value: unknown }[]; value?: unknown;
+            channel?: string; space?: string; guildId?: string;
+          };
           try {
             msg = JSON.parse(String(ev.data));
           } catch {
@@ -2375,10 +2420,61 @@ export default function WorldBoxClient() {
             others.delete(msg.id);
             missedPolls.delete(msg.id);
             setOthersCount(others.size);
+          } else if (msg.t === "kv" && msg.kind === "tiles" && Array.isArray(msg.changes)) {
+            // タイル差分（サーバー側 watch が正。ローカル行為と同じ適用経路）
+            const nextTiles: TileOverridesMap = { ...tilesRef.current };
+            for (const c of msg.changes) {
+              if (!c || typeof c.key !== "string") continue;
+              const parsed = c.value == null ? null : parseTileOverride(c.value);
+              if (parsed) nextTiles[c.key] = parsed;
+              else delete nextTiles[c.key];
+            }
+            tilesRef.current = nextTiles;
+            tilesVersionRef.current += 1;
+            syncBlockBlocked();
+          } else if (msg.t === "kv" && msg.kind === "mobs" && Array.isArray(msg.changes)) {
+            // モブ状態の差分（世代を進め、進行中の REST 取得は古い応答を捨てる）
+            const nextMobs: Record<string, MobState> = { ...mobStatesRef.current };
+            for (const c of msg.changes) {
+              if (!c || typeof c.key !== "string") continue;
+              const parsed = c.value == null ? null : parseMobState(c.value);
+              if (parsed) nextMobs[c.key] = parsed;
+              else delete nextMobs[c.key];
+            }
+            mobStatesRef.current = nextMobs;
+            mobsVersionRef.current += 1;
+          } else if (msg.t === "kv" && msg.kind === "board") {
+            // 掲示板は単一キーなので全文を差し替える（進行中の REST 取得を無効化）
+            const ticket = boardGuardRef.current.begin({ force: true });
+            if (ticket !== null) {
+              setBoardPosts(parseBoardPosts(msg.value ?? null));
+              setBoardLoggedIn(true);
+              boardGuardRef.current.end(ticket);
+            }
+          } else if (msg.t === "sync" && msg.kind === "nations") {
+            void nationsRefreshRef.current(true);
+          } else if (msg.t === "sync" && msg.kind === "party") {
+            void refreshPartyRef.current(true);
+          } else if (msg.t === "sync" && msg.kind === "economy") {
+            // 自分の経済オプが確定した: 残高を取り直し、開いている
+            // 経済/カジノ/アリーナパネルへも合図する（金額は push に無い）
+            void invRefreshRef.current();
+            notifyEconomyApplied();
+          } else if (msg.t === "sync" && msg.kind === "chat") {
+            // 自分が見ているチャンネル・空間の変更だけ取り直す
+            if (msg.channel === chatChannelRef.current) {
+              if (msg.channel === "union") {
+                const myGuild = nationsRef.current.me?.nationId ?? null;
+                if (!msg.guildId || !myGuild || msg.guildId === myGuild) chatReloadRef.current?.();
+              } else if (msg.space === space) {
+                chatReloadRef.current?.();
+              }
+            }
           }
         };
         const onGone = () => {
           if (rtSocket === ws) rtSocket = null;
+          rtOpenRef.current = false;
           if (disposed) return;
           rtRetryAt = Date.now() + rtBackoffMs;
           rtBackoffMs = Math.min(10_000, rtBackoffMs * 2);
@@ -5665,14 +5761,14 @@ export default function WorldBoxClient() {
               <span style={{ flex: 1, height: 8, borderRadius: 4, background: "rgba(255,255,255,0.18)", overflow: "hidden" }}>
                 <span style={{ display: "block", width: `${Math.max(0, Math.min(100, (invProfile.hp / maxHpFor(invProfile)) * 100))}%`, height: "100%", background: invProfile.hp <= 25 ? "#e2483a" : "#7ed957" }} />
               </span>
-              <strong style={{ color: "#fff", fontSize: 11 }}>{invProfile.hp}</strong>
+              <strong style={{ color: "#fff", fontSize: 11 }}>{Math.floor(invProfile.hp)}</strong>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
               <span style={{ color: "#ffd23e", fontSize: 11, width: 28 }}>空腹</span>
               <span style={{ flex: 1, height: 8, borderRadius: 4, background: "rgba(255,255,255,0.18)", overflow: "hidden" }}>
                 <span style={{ display: "block", width: `${Math.max(0, Math.min(100, (invProfile.hunger / HUNGER_MAX) * 100))}%`, height: "100%", background: invProfile.hunger <= 20 ? "#ff7a59" : "#ffd23e" }} />
               </span>
-              <strong style={{ color: "#fff", fontSize: 11 }}>{invProfile.hunger}</strong>
+              <strong style={{ color: "#fff", fontSize: 11 }}>{Math.floor(invProfile.hunger)}</strong>
             </div>
             {invProfile.status.some((e) => e.kind === "poison") && (
               <span style={{ color: "#b6f26d", fontSize: 11 }}>毒</span>

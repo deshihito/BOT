@@ -86,12 +86,12 @@ test("vitals: 空腹は活動で減り方が変わり、0 が続くと HP が減
   const p = { ...fresh(), vitalAt: T0 };
   // 放置（既定）: 10分でもわずかしか減らない（満腹→空まで約4時間）
   const idle10 = v.stepVitals(p, T0 + 600_000);
-  assert.equal(idle10.profile.hunger, 95);
+  assert.equal(idle10.profile.hunger, 95.833);
   assert.equal(idle10.profile.hp, v.HP_MAX);
   assert.equal(idle10.died, false);
   // 移動は放置の1.6倍、ダッシュは2.5倍の速さで減る
-  assert.equal(v.stepVitals(p, T0 + 600_000, "move").profile.hunger, 93);
-  assert.equal(v.stepVitals(p, T0 + 600_000, "dash").profile.hunger, 89);
+  assert.equal(v.stepVitals(p, T0 + 600_000, "move").profile.hunger, 93.333);
+  assert.equal(v.stepVitals(p, T0 + 600_000, "dash").profile.hunger, 89.583);
   // 空腹が窓の途中で尽きると、残り時間ぶん飢えダメージが入る
   const almost = { ...fresh(), vitalAt: T0, hunger: 10 };
   const starved = v.stepVitals(almost, T0 + 1800_000, "dash");
@@ -107,16 +107,16 @@ test("vitals: 放置レートは満腹→空まで約4時間、活動倍率は 1
   // 30分精算を7回つなげると（=3.5時間放置）空腹は残りわずかで HP は無事
   let p = { ...fresh(), vitalAt: T0, hunger: 100 };
   for (let i = 1; i <= 7; i++) p = v.stepVitals(p, T0 + i * 1800_000).profile;
-  assert.equal(p.hunger, 9); // 1回 12.5 ずつ減り、切り捨てで少しずつ目減りする
+  assert.equal(p.hunger, 12.5); // 1回 12.5 ずつ、端数は保持される
   assert.equal(p.hp, v.HP_MAX);
 });
 
 test("vitals: warm は活動レートにも掛かる", () => {
   const base = { ...fresh(), vitalAt: T0, hunger: 100 };
   const warmed = v.applyBuff(base, "warm", T0);
-  // ダッシュ10分: 素では 89、warm 中は実効レート ×0.6 で 93
-  assert.equal(v.stepVitals(base, T0 + 600_000, "dash").profile.hunger, 89);
-  assert.equal(v.stepVitals(warmed, T0 + 600_000, "dash").profile.hunger, 93);
+  // ダッシュ10分: 素では 89.583、warm 中は実効レート ×0.6 で 93.75
+  assert.equal(v.stepVitals(base, T0 + 600_000, "dash").profile.hunger, 89.583);
+  assert.equal(v.stepVitals(warmed, T0 + 600_000, "dash").profile.hunger, 93.75);
 });
 
 test("vitals: 飢えの開始は warm 込みの実効レートで決まる", () => {
@@ -125,12 +125,12 @@ test("vitals: 飢えの開始は warm 込みの実効レートで決まる", () 
   // → 315秒の窓で飢えは 142.2秒、HP は 0.5 × 142.2 = 71.1 減る
   const plain = v.stepVitals(base, T0 + 315_000, "dash");
   assert.equal(plain.profile.hunger, 0);
-  assert.equal(plain.profile.hp, 28);
+  assert.equal(plain.profile.hp, 28.9);
   // warm が窓全体を覆うと実効レート ×0.6 で 288秒に尽き、飢えは 27秒だけ
   const warmed = v.applyBuff(base, "warm", T0);
   const withWarm = v.stepVitals(warmed, T0 + 315_000, "dash");
   assert.equal(withWarm.profile.hunger, 0);
-  assert.equal(withWarm.profile.hp, 86); // 100 - 0.5 × 27 = 86.5 → floor
+  assert.equal(withWarm.profile.hp, 86.5); // 100 - 0.5 × 27
 });
 
 test("vitals: 活動クラスは平均速度で決まる（上限で頭打ち）", () => {
@@ -178,12 +178,37 @@ test("vitals: 精算は30分で頭打ち（長期離脱で飢え死にしない�
   const p = { ...fresh(), hunger: 100, hp: 100, vitalAt: T0 };
   const after = v.stepVitals(p, T0 + 24 * 3600_000);
   // 30分ぶんだけ精算する: 放置レートで 1800秒 × 100/14400 = 12.5 減るだけ
-  assert.equal(after.profile.hunger, 87);
+  assert.equal(after.profile.hunger, 87.5);
   assert.equal(after.profile.vitalAt, T0 + 24 * 3600_000);
   assert.equal(after.died, false);
-  const safe = v.stepVitals(p, T0 + 900_000); // 15分: 空腹 93、HP 無事
-  assert.equal(safe.profile.hunger, 93);
+  const safe = v.stepVitals(p, T0 + 900_000); // 15分: 空腹 93.75、HP 無事
+  assert.equal(safe.profile.hunger, 93.75);
   assert.equal(safe.died, false);
+});
+
+test("vitals: 15秒間隔の精算でも空腹レートは仕様どおり（端数を捨てない）", () => {
+  // クライアントは15秒ごとに sync する。精算のたびに整数化すると
+  // 放置でも1回 -1 ずつ減り約25分で空になる（活動倍率の差も消える）。
+  let idle = { ...fresh(), vitalAt: T0, hunger: 100 };
+  let dash = { ...fresh(), vitalAt: T0, hunger: 100 };
+  for (let i = 1; i <= 100; i++) {
+    idle = v.stepVitals(idle, T0 + i * 15_000, "idle").profile;
+    dash = v.stepVitals(dash, T0 + i * 15_000, "dash").profile;
+  }
+  // 1500秒: 放置 = 100 - 100×1500/14400、ダッシュはその2.5倍の減少
+  // （小数第3位までの保持のため、累積の丸め誤差は許容する）
+  assert.ok(Math.abs(idle.hunger - 89.583) < 0.05);
+  assert.ok(Math.abs(dash.hunger - 73.958) < 0.05);
+  assert.equal(idle.hp, v.HP_MAX);
+});
+
+test("vitals: 毒は精算を細かく分けても一括と同じ総ダメージになる", () => {
+  // 1秒間隔の精算では tick の端数（3秒未満）が毎回消え、毒が無力化した。
+  let p = { ...fresh(), vitalAt: T0, hunger: 100 };
+  p = v.applyPoison(p, T0);
+  for (let i = 1; i <= 30; i++) p = v.stepVitals(p, T0 + i * 1000).profile;
+  assert.ok(Math.abs(p.hp - (v.HP_MAX - 20)) < 0.05); // 30秒ぶん = 2 × (30000/3000)。端数丸めの誤差は許容
+  assert.deepEqual(p.status, []);
 });
 
 test("vitals: 毒の tick は毒の有効窓で数える（vitalAt が古くても過剰に引かない）", () => {
