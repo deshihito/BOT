@@ -85,70 +85,37 @@ function sanitizeHeartbeat(raw) {
   };
 }
 
-/** 移動連続性（presence.ts と同じ値。B4）: 正規の最大移動速度（タイル/秒）。 */
-const MAX_MOVE_SPEED = 10;
-/** 移動連続性: 許容距離に足す余裕（タイル）。 */
-const MOVEMENT_MARGIN_TILES = 3;
-/** 移動連続性: 保管位置がこの時間より古ければ新規入室として受け入れる。 */
-const MOVEMENT_RESET_MS = 30_000;
-/** 移動連続性: プレゼンスが無いときのセーブ基準の許容距離（タイル）。 */
-const SAVE_FALLBACK_MAX_TILES = 12;
-
-/**
- * 移動連続性の判定（時刻基準。presence.ts の checkMovementContinuity と同じ規則）。
- * baseline は { x, y, space, ts }、next は { x, y, space }。
- */
-function checkMovementContinuity(baseline, next, now) {
-  if (!baseline) return { ok: true };
-  if (baseline.space !== next.space) return { ok: true };
-  if (now - baseline.ts >= MOVEMENT_RESET_MS) return { ok: true };
-  const elapsedSec = Math.max(0, (now - baseline.ts) / 1000);
-  const allowed = MAX_MOVE_SPEED * elapsedSec + MOVEMENT_MARGIN_TILES;
-  const dist = Math.hypot(next.x - baseline.x, next.y - baseline.y);
-  return dist <= allowed ? { ok: true } : { ok: false, reason: "position_jump" };
-}
-
-/**
- * 移動連続性の判定（セーブ基準・固定距離。presence.ts の checkSaveFallbackContinuity と同じ規則）。
- * baseline は { x, y, space }（ts 無し）。
- */
-function checkSaveFallbackContinuity(saved, next) {
-  if (!saved) return { ok: true };
-  if (saved.space !== next.space) return { ok: true };
-  const dist = Math.hypot(next.x - saved.x, next.y - saved.y);
-  return dist <= SAVE_FALLBACK_MAX_TILES ? { ok: true } : { ok: false, reason: "position_jump" };
-}
-
-/** 部屋: 空間ごとのプレイヤー表（id → エントリ）。エントリは PresenceEntry と同じ形。 */
+/** 部屋: 空間ごとのプレイヤー表（id → エントリ）と、pid ごとの現行タブ世代。エントリは PresenceEntry と同じ形。 */
 function createRoom() {
-  return { spaces: new Map() };
+  return { spaces: new Map(), gens: new Map() };
 }
 
-/** 部屋の中からそのプレイヤーの直近エントリ（空間を問わず）を探す。無ければ null。 */
-function findRoomEntry(room, id) {
-  for (const table of room.spaces.values()) {
-    const entry = table.get(id);
-    if (entry) return entry;
-  }
-  return null;
-}
-
-/** ハートビートを受け付け、保存したエントリを返す。不正なら null。
- * 移動連続性を満たさない申告は { rejected: true, x, y, space }（保管位置つき）
- * を返し、部屋へは保存しない。externalBaseline は部屋に前回が無いときの
- * 基準（bot_kv のプレゼンス、無ければセーブ。ts 付きなら時刻基準、無ければ固定距離）。
+/**
+ * タブ世代の接続可否（presence.ts の tabVerdict と同じ規則）。
+ * タブ申告が無い接続は常時 accept（evict なし）。
+ * 戻り値: { verdict: "accept" | "reject", evict: boolean }
+ * evict=true は「同じ pid の旧世代の接続を閉じるべき」という指示。
  */
-function acceptHeartbeat(room, id, name, raw, now, externalBaseline = null) {
+function admitTab(room, pid, tab, tabAt) {
+  if (typeof tab !== "string" || tab.length === 0 || typeof tabAt !== "number" || !Number.isFinite(tabAt)) {
+    return { verdict: "accept", evict: false };
+  }
+  const cur = room.gens.get(pid);
+  if (!cur) {
+    room.gens.set(pid, { tab, tabAt });
+    return { verdict: "accept", evict: false };
+  }
+  if (cur.tab === tab) return { verdict: "accept", evict: false };
+  const newer = tabAt !== cur.tabAt ? tabAt > cur.tabAt : tab > cur.tab;
+  if (!newer) return { verdict: "reject", evict: false };
+  room.gens.set(pid, { tab, tabAt });
+  return { verdict: "accept", evict: true };
+}
+
+/** ハートビートを受け付け、保存したエントリを返す。不正なら null。 */
+function acceptHeartbeat(room, id, name, raw, now) {
   const hb = sanitizeHeartbeat(raw);
   if (!hb) return null;
-  const prev = findRoomEntry(room, id);
-  const baseline = prev ?? externalBaseline;
-  const check = baseline && typeof baseline.ts === "number"
-    ? checkMovementContinuity(baseline, hb, now)
-    : checkSaveFallbackContinuity(baseline, hb);
-  if (!check.ok) {
-    return { rejected: true, x: baseline.x, y: baseline.y, space: baseline.space };
-  }
   // 空間が変わったら旧空間から消す
   for (const [space, table] of room.spaces) {
     if (space !== hb.space) table.delete(id);
@@ -177,12 +144,13 @@ function snapshot(room, space, selfId, now) {
   return out.slice(0, MAX_PLAYERS);
 }
 
-/** プレイヤーを全空間から消し、消えた空間の配列を返す。 */
+/** プレイヤーを全空間から消し、消えた空間の配列を返す。タブ世代の記録も消す。 */
 function removePlayer(room, id) {
   const removedFrom = [];
   for (const [space, table] of room.spaces) {
     if (table.delete(id)) removedFrom.push(space);
   }
+  room.gens.delete(id);
   return removedFrom;
 }
 
@@ -308,16 +276,11 @@ module.exports = {
   SPACE_BOUNDS,
   WORLD_COORD_LIMIT,
   TOKEN_TTL_MS,
-  MAX_MOVE_SPEED,
-  MOVEMENT_MARGIN_TILES,
-  MOVEMENT_RESET_MS,
-  SAVE_FALLBACK_MAX_TILES,
-  checkMovementContinuity,
-  checkSaveFallbackContinuity,
   boundsForSpace,
   sanitizeSpace,
   sanitizeHeartbeat,
   createRoom,
+  admitTab,
   acceptHeartbeat,
   snapshot,
   removePlayer,
