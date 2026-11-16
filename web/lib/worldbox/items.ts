@@ -527,11 +527,16 @@ export function sellPrice(item: ItemDef): number {
 
 // ---------------------------------------------------------------- 合成
 // ボット側 workshop/craft と同じ「2種の素材を組み合わせる」方式。
+/** レシピの種別。どの設置物/施設で作れるかの判定に使う（未指定は "craft"）。 */
+export type RecipeKind = "craft" | "smelt" | "cook" | "weave";
+
 export type Recipe = {
   id: string;
   inputs: Readonly<Record<string, number>>;
   output: string;
   outputCount: number;
+  /** 種別（未指定は "craft" = 作業台/鍛冶屋）。精錬は "smelt"、調理は "cook"、織りは "weave"。 */
+  kind?: RecipeKind;
   /** 成功時に追加でレアアイテムが落ちる確率（0〜1）。 */
   rareItem?: string;
   rareChance?: number;
@@ -547,8 +552,8 @@ export const RECIPES: readonly Recipe[] = [
   { id: "toolbox", inputs: { iron_ore: 2, wood: 1 }, output: "toolbox", outputCount: 1 },
   { id: "tent", inputs: { cloth: 3, wood: 2 }, output: "tent", outputCount: 1 },
   { id: "accessory", inputs: { gold_ore: 1, glass: 1 }, output: "accessory", outputCount: 1, rareItem: "star_shard", rareChance: 0.08 },
-  { id: "special_course", inputs: { meal: 1, wheat: 2, herb: 1 }, output: "special_course", outputCount: 1 },
-  { id: "bread", inputs: { wheat: 2 }, output: "bread", outputCount: 1 },
+  { id: "special_course", inputs: { meal: 1, wheat: 2, herb: 1 }, output: "special_course", outputCount: 1, kind: "cook" },
+  { id: "bread", inputs: { wheat: 2 }, output: "bread", outputCount: 1, kind: "cook" },
   { id: "crown", inputs: { accessory: 1, mithril: 1 }, output: "crown", outputCount: 1 },
   // 道具（木/石/鉄 × 斧/ツルハシ/剣/クワ）
   { id: "wooden_axe", inputs: { wood: 3, stick: 2 }, output: "wooden_axe", outputCount: 1 },
@@ -573,10 +578,10 @@ export const RECIPES: readonly Recipe[] = [
   { id: "bone_block", inputs: { bone: 4 }, output: "bone_block", outputCount: 1 },
   { id: "wool_block", inputs: { cloth: 2 }, output: "wool_block", outputCount: 1 },
   // 作物料理
-  { id: "grilled_corn", inputs: { corn: 1 }, output: "grilled_corn", outputCount: 1 },
-  { id: "corn_soup", inputs: { corn: 2 }, output: "corn_soup", outputCount: 1 },
+  { id: "grilled_corn", inputs: { corn: 1 }, output: "grilled_corn", outputCount: 1, kind: "cook" },
+  { id: "corn_soup", inputs: { corn: 2 }, output: "corn_soup", outputCount: 1, kind: "cook" },
   { id: "salad", inputs: { cabbage: 1, tomato: 1, carrot: 1 }, output: "salad", outputCount: 1 },
-  { id: "pumpkin_pie", inputs: { pumpkin: 1, wheat: 1 }, output: "pumpkin_pie", outputCount: 1 },
+  { id: "pumpkin_pie", inputs: { pumpkin: 1, wheat: 1 }, output: "pumpkin_pie", outputCount: 1, kind: "cook" },
   // 家具
   { id: "bench", inputs: { wood: 2 }, output: "bench", outputCount: 1 },
   { id: "chair", inputs: { wood: 2 }, output: "chair", outputCount: 1 },
@@ -591,7 +596,7 @@ export const RECIPES: readonly Recipe[] = [
   { id: "lamp", inputs: { glass: 1, charcoal: 1 }, output: "lamp", outputCount: 1 },
   { id: "hedge", inputs: { fiber: 3 }, output: "hedge", outputCount: 1 },
   { id: "sofa", inputs: { cloth: 3, wood: 2 }, output: "sofa", outputCount: 1 },
-  { id: "tapestry", inputs: { cloth: 2, string: 1 }, output: "tapestry", outputCount: 1 },
+  { id: "tapestry", inputs: { cloth: 2, string: 1 }, output: "tapestry", outputCount: 1, kind: "weave" },
   { id: "piano", inputs: { wood: 5, iron_ore: 2 }, output: "piano", outputCount: 1 },
   // 道具（ミスリル段位）
   { id: "mithril_axe", inputs: { mithril: 3, stick: 2 }, output: "mithril_axe", outputCount: 1 },
@@ -610,18 +615,18 @@ export const RECIPES: readonly Recipe[] = [
   { id: "honey_block", inputs: { honey: 4 }, output: "honey_block", outputCount: 1 },
   { id: "mushroom_block", inputs: { mushroom: 4 }, output: "mushroom_block", outputCount: 1 },
   // 調理（追加分）
-  { id: "cookie", inputs: { wheat: 2, honey: 1 }, output: "cookie", outputCount: 1 },
-  { id: "grilled_meat", inputs: { raw_meat: 1 }, output: "grilled_meat", outputCount: 1 },
-  { id: "grilled_fish", inputs: { fish: 1 }, output: "grilled_fish", outputCount: 1 },
-  { id: "omelette", inputs: { egg: 2 }, output: "omelette", outputCount: 1 },
-  { id: "baked_potato", inputs: { potato: 1 }, output: "baked_potato", outputCount: 1 },
-  { id: "stew", inputs: { potato: 1, carrot: 1, raw_meat: 1 }, output: "stew", outputCount: 1 },
-  { id: "honey_candy", inputs: { honey: 2 }, output: "honey_candy", outputCount: 1 },
+  { id: "cookie", inputs: { wheat: 2, honey: 1 }, output: "cookie", outputCount: 1, kind: "cook" },
+  { id: "grilled_meat", inputs: { raw_meat: 1 }, output: "grilled_meat", outputCount: 1, kind: "cook" },
+  { id: "grilled_fish", inputs: { fish: 1 }, output: "grilled_fish", outputCount: 1, kind: "cook" },
+  { id: "omelette", inputs: { egg: 2 }, output: "omelette", outputCount: 1, kind: "cook" },
+  { id: "baked_potato", inputs: { potato: 1 }, output: "baked_potato", outputCount: 1, kind: "cook" },
+  { id: "stew", inputs: { potato: 1, carrot: 1, raw_meat: 1 }, output: "stew", outputCount: 1, kind: "cook" },
+  { id: "honey_candy", inputs: { honey: 2 }, output: "honey_candy", outputCount: 1, kind: "cook" },
   // 合成品（追加分）
   { id: "rope", inputs: { string: 2 }, output: "rope", outputCount: 1 },
   { id: "stone_statue", inputs: { stone: 5 }, output: "stone_statue", outputCount: 1 },
   { id: "flower_wreath", inputs: { flower: 3, fiber: 1 }, output: "flower_wreath", outputCount: 1 },
-  { id: "embroidered_cloth", inputs: { cloth: 2, flower: 1 }, output: "embroidered_cloth", outputCount: 1 },
+  { id: "embroidered_cloth", inputs: { cloth: 2, flower: 1 }, output: "embroidered_cloth", outputCount: 1, kind: "weave" },
   { id: "gem_ring", inputs: { gold_ingot: 1, ruby: 1 }, output: "gem_ring", outputCount: 1 },
   { id: "pearl_necklace", inputs: { pearl: 3, string: 1 }, output: "pearl_necklace", outputCount: 1 },
   // 施設（作業台・鍛冶台・かまど等）
@@ -657,7 +662,7 @@ export const RECIPES: readonly Recipe[] = [
   { id: "honey_tea", inputs: { honey: 1, herb: 1 }, output: "honey_tea", outputCount: 1 },
   { id: "cheese", inputs: { milk: 2 }, output: "cheese", outputCount: 1 },
   { id: "ceramic_vase", inputs: { ceramic: 3 }, output: "ceramic_vase", outputCount: 1 },
-  { id: "silk_cloth", inputs: { silk: 2 }, output: "silk_cloth", outputCount: 1 },
+  { id: "silk_cloth", inputs: { silk: 2 }, output: "silk_cloth", outputCount: 1, kind: "weave" },
   { id: "painting", inputs: { paper: 2, flower: 1 }, output: "painting", outputCount: 1 },
   { id: "music_box", inputs: { wood: 3, iron_ingot: 1 }, output: "music_box", outputCount: 1 },
   { id: "stone_fence", inputs: { stone: 3 }, output: "stone_fence", outputCount: 1 },
@@ -714,12 +719,25 @@ export const RECIPES: readonly Recipe[] = [
   { id: "star_crown", inputs: { crown: 1, star_shard: 1 }, output: "star_crown", outputCount: 1 },
   { id: "world_seed", inputs: { star_shard: 1, melon: 1, grape: 1 }, output: "world_seed", outputCount: 1 },
   { id: "ago_emblem", inputs: { mithril: 1, gold_ingot: 1 }, output: "ago_emblem", outputCount: 1 },
+  // 精錬（かまど）: 鉱石をインゴットにする。木炭は木を焼く
+  { id: "iron_ingot", inputs: { iron_ore: 2, coal: 1 }, output: "iron_ingot", outputCount: 1, kind: "smelt" },
+  { id: "gold_ingot", inputs: { gold_ore: 2, coal: 1 }, output: "gold_ingot", outputCount: 1, kind: "smelt" },
+  { id: "copper_ingot", inputs: { copper_ore: 2, coal: 1 }, output: "copper_ingot", outputCount: 1, kind: "smelt" },
+  { id: "charcoal", inputs: { wood: 2 }, output: "charcoal", outputCount: 1, kind: "smelt" },
+  // 織り（織り機）: 繊維から糸と布を作る
+  { id: "string", inputs: { fiber: 2 }, output: "string", outputCount: 1, kind: "weave" },
+  { id: "cloth", inputs: { fiber: 3 }, output: "cloth", outputCount: 1, kind: "weave" },
 ];
 
 
 
 export function recipeById(id: unknown): Recipe | null {
   return typeof id === "string" ? RECIPES.find((r) => r.id === id) ?? null : null;
+}
+
+/** レシピの種別（未指定は "craft"）。 */
+export function recipeKind(recipe: Recipe): RecipeKind {
+  return recipe.kind ?? "craft";
 }
 
 // ---------------------------------------------------------------- steal

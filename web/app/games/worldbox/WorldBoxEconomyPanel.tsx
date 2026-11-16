@@ -12,6 +12,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { EconomyOp } from "@/lib/worldbox/economy-bridge";
 import { onEconomyApplied } from "@/lib/worldbox/economy-push";
 import { ITEMS, itemById, recipeById, sellPrice } from "@/lib/worldbox/items";
+import type { StationKind } from "@/lib/worldbox/tiles";
 import { dailyPriceFor, dailyStockForGenre, genreById, isShopExcluded, itemsForGenre, shopDayKeyOf, type ShopGenreId } from "@/lib/worldbox/shops";
 import type { LobbyStation } from "@/lib/worldbox/lobby";
 import { ENHANCE_BASE_COST, ENHANCE_MATERIALS, ENHANCE_MAX_LEVEL, type PlayerProfile } from "@/lib/worldbox/profile";
@@ -110,7 +111,7 @@ function mixColorFor(set: Record<string, number>): { liquid: string; smoke: stri
   };
 }
 
-export default function WorldBoxEconomyPanel({ space, station, genre, onClose }: { space: SaveSpace; station: LobbyStation | null; genre: ShopGenreId | null; onClose: () => void }) {
+export default function WorldBoxEconomyPanel({ space, station, genre, worldStationKinds, onClose }: { space: SaveSpace; station: LobbyStation | null; genre: ShopGenreId | null; worldStationKinds?: string; onClose: () => void }) {
   // 行動の場所制約: 売買はショップの前、合成は作業台（鍛冶屋）の前、
   // 送金は銀行の前でのみ。いる場所に対応するタブだけを出す（サーバー側
   // でもプレゼンスで検証されるため、ここは表示の一致が役割）。
@@ -119,7 +120,11 @@ export default function WorldBoxEconomyPanel({ space, station, genre, onClose }:
   // （鍛冶屋はジャンル "smith"）。ジャンルが無い店は全品目。
   const shopGenre: ShopGenreId | null = station === "smith" ? "smith" : genre;
   const atShop = inLobby && (station === "shop" || station === "smith");
-  const atWorkbench = space !== "world" && station === "smith";
+  // ロビーの鍛冶屋は全種別可。ワールドでは設置した作業施設の種別だけ可
+  const atLobbySmith = space !== "world" && station === "smith";
+  const worldKinds = new Set((worldStationKinds ?? "").split(",").filter(Boolean));
+  const canWork = (kind: StationKind) => atLobbySmith || worldKinds.has(kind);
+  const atWorkbench = atLobbySmith || worldKinds.size > 0;
   const atBank = inLobby && station === "bank";
   const [profile, setProfile] = useState<PlayerProfile | null>(null);
   const [loadState, setLoadState] = useState<LoadState>("loading");
@@ -655,7 +660,7 @@ export default function WorldBoxEconomyPanel({ space, station, genre, onClose }:
         </div>
       )}
 
-      {activeTab === "craft" && (
+      {activeTab === "craft" && canWork("enhance") && (
         <div style={{ marginTop: 10, borderTop: "1px solid rgba(255,255,255,0.14)", paddingTop: 8 }}>
           <strong style={{ fontSize: 13 }}>道具の強化</strong>
           <div style={{ marginTop: 6 }}>

@@ -298,6 +298,8 @@ const apiProfileOnlineUrl = dataUrl(
     .replaceAll('"../bot-api"', JSON.stringify(apiBotStubUrl))
     .replaceAll('"./profile"', JSON.stringify(apiProfileUrl)),
 );
+const tilesStubUrl = dataUrl(`export function placedStationKinds() { return []; }`);
+const tilesOnlineStubUrl = dataUrl(`export async function loadTileOverride() { return null; }`);
 const apiStationOnlineUrl = dataUrl(
   transpile("worldbox/station-online.ts")
     .replaceAll('"./lobby"', JSON.stringify(apiLobbyUrl))
@@ -306,7 +308,9 @@ const apiStationOnlineUrl = dataUrl(
     .replaceAll('"./presence-online"', JSON.stringify(apiPresenceOnlineUrl))
     .replaceAll('"./save"', JSON.stringify(apiSaveUrl))
     .replaceAll('"./save-online"', JSON.stringify(apiSaveOnlineUrl))
-    .replaceAll('"./profile-online"', JSON.stringify(apiProfileOnlineUrl)),
+    .replaceAll('"./profile-online"', JSON.stringify(apiProfileOnlineUrl))
+    .replaceAll('"./tiles"', JSON.stringify(tilesStubUrl))
+    .replaceAll('"./tiles-online"', JSON.stringify(tilesOnlineStubUrl)),
 );
 const apiRequestsUrl = dataUrl(
   transpile("worldbox/requests.ts")

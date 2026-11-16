@@ -14,6 +14,8 @@ import { loadProfile } from "./profile-online";
 import { isPresenceEnabled, loadMyPresence } from "./presence-online";
 import { parseSave } from "./save";
 import { loadWorldBoxSave } from "./save-online";
+import { placedStationKinds, type StationKind } from "./tiles";
+import { loadTileOverride } from "./tiles-online";
 
 /** 本人の現在位置（室内オブジェクト一覧＋タイル座標）。室内にいなければ null。 */
 async function loadMyIndoorPosition(
@@ -73,4 +75,42 @@ export async function loadMyLobbyShopGenre(ownerKey: string): Promise<ShopGenreI
   if (station === "smith") return "smith";
   if (station !== "shop") return null;
   return stationGenreNear(pos.objects, pos.tx, pos.ty);
+}
+
+/** 設置した作業施設の探索半径（タイル、チェビシェフ）。ベッド検証と同じ 2。 */
+export const WORLD_STATION_RADIUS = 2;
+
+/**
+ * 本人がワールドで今隣接している設置施設の作業種別（作業台・かまど等）。
+ * 位置の正は室内と同じくプレゼンス（無ければセーブの保存位置）。
+ * 周囲のタイル上書きをサーバー保存の真値で走査する（クライアント申告は使わない）。
+ */
+export async function loadMyWorldStationKinds(ownerKey: string): Promise<ReadonlySet<StationKind>> {
+  const kinds = new Set<StationKind>();
+  if (!isPresenceEnabled()) return kinds;
+  let wx: number | null = null;
+  let wy: number | null = null;
+  const presence = await loadMyPresence(ownerKey);
+  if (presence && presence.space === "world") {
+    wx = Math.floor(presence.x);
+    wy = Math.floor(presence.y);
+  } else if (!presence) {
+    const saved = parseSave(await loadWorldBoxSave(ownerKey));
+    if (saved && saved.space === "world") {
+      wx = Math.floor(saved.x);
+      wy = Math.floor(saved.y);
+    }
+  }
+  if (wx === null || wy === null) return kinds;
+  const jobs: Promise<void>[] = [];
+  for (let dy = -WORLD_STATION_RADIUS; dy <= WORLD_STATION_RADIUS; dy++) {
+    for (let dx = -WORLD_STATION_RADIUS; dx <= WORLD_STATION_RADIUS; dx++) {
+      jobs.push((async () => {
+        const ov = await loadTileOverride(wx + dx, wy + dy);
+        for (const kind of placedStationKinds(ov?.block?.itemId)) kinds.add(kind);
+      })());
+    }
+  }
+  await Promise.all(jobs);
+  return kinds;
 }

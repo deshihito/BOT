@@ -364,7 +364,7 @@ const instancesOnlineUrl = mod("worldbox/instances-online.ts", { "../bot-api": b
 const stationOnlineUrl = mod("worldbox/station-online.ts", {
   "./lobby": lobbyUrl, "./lobby-floors": floorsUrl, "./presence-online": presenceOnlineUrl,
   "./profile-online": profileOnlineUrl, "./save": saveUrl, "./save-online": saveOnlineUrl,
-  "./shops": shopsUrl, "./tent": tentUrl,
+  "./shops": shopsUrl, "./tent": tentUrl, "./tiles": tilesUrl, "./tiles-online": tilesOnlineUrl,
 });
 const userLockUrl = mod("worldbox/user-lock.ts");
 const nextServerStubUrl = dataUrl(`
