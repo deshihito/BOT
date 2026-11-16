@@ -25,6 +25,7 @@ const ACTION_SE: Record<string, WbSeName> = {
   sell: "sell",
   craft: "craft",
   eat: "harvest",
+  enhance: "success",
 };
 
 type Tab = "bag" | "shop" | "craft" | "bank";
@@ -132,6 +133,11 @@ export default function WorldBoxEconomyPanel({ space, station, genre, onClose }:
   // かばん/ショップのスロット選択（注釈は選択中アイテムのものだけ出す）
   const [bagSel, setBagSel] = useState<string | null>(null);
   const [shopSel, setShopSel] = useState<string | null>(null);
+  // 強化のスロット選択と成功フラッシュ（金色背景 → 透明へ transition）
+  const [enhanceSel, setEnhanceSel] = useState<string | null>(null);
+  const [enhanceFlashId, setEnhanceFlashId] = useState<string | null>(null);
+  const [enhanceFlashOn, setEnhanceFlashOn] = useState(false);
+  const enhanceFlashTimersRef = useRef<number[]>([]);
   // 合成台（PR-B）: セットした素材（id → 個数）、工程の進捗、気配、出現した成果物
   const [craftSet, setCraftSet] = useState<Record<string, number>>({});
   const [craftBusy, setCraftBusy] = useState(false);
@@ -187,6 +193,8 @@ export default function WorldBoxEconomyPanel({ space, station, genre, onClose }:
       off();
       if (craftTimerRef.current !== null) window.clearInterval(craftTimerRef.current);
       craftTimerRef.current = null;
+      for (const t of enhanceFlashTimersRef.current) window.clearTimeout(t);
+      enhanceFlashTimersRef.current = [];
     };
   }, [refreshProfile, refreshBridge]);
 
@@ -216,6 +224,22 @@ export default function WorldBoxEconomyPanel({ space, station, genre, onClose }:
     } finally {
       setBusy(false);
     }
+  };
+
+  /**
+   * 強化成功時の金色フラッシュ。act の describe（成功時にだけ呼ばれる）
+   * から呼ぶことで成否に連動させる。背景を金色で点灯させた直後に
+   * 透明へ戻し、約600ms の transition で消えるようにする。
+   */
+  const triggerEnhanceFlash = (itemId: string) => {
+    for (const t of enhanceFlashTimersRef.current) window.clearTimeout(t);
+    enhanceFlashTimersRef.current = [];
+    setEnhanceFlashId(itemId);
+    setEnhanceFlashOn(true);
+    enhanceFlashTimersRef.current.push(
+      window.setTimeout(() => { if (aliveRef.current) setEnhanceFlashOn(false); }, 30),
+      window.setTimeout(() => { if (aliveRef.current) setEnhanceFlashId(null); }, 700),
+    );
   };
 
   const sendTransfer = async () => {
@@ -368,6 +392,9 @@ export default function WorldBoxEconomyPanel({ space, station, genre, onClose }:
   // 選択中アイテム（所持/品目から消えていたら注釈を出さない）
   const bagSelItem = owned.find((item) => item.id === bagSel) ?? null;
   const shopSelItem = shopItems.find((item) => item.id === shopSel) ?? null;
+  // 強化対象: 所持している道具だけ（従来の row リストと同じ対象）
+  const enhanceTools = ITEMS.filter((item) => (profile.items[item.id] ?? 0) > 0 && item.tool);
+  const enhanceSelItem = enhanceTools.find((item) => item.id === enhanceSel) ?? null;
   // 発見図鑑: 自分が完全一致で作れたレシピだけ（未発見のレシピは出さない）
   const discovered = (profile.discoveredRecipes ?? [])
     .map((id) => recipeById(id))
@@ -631,34 +658,70 @@ export default function WorldBoxEconomyPanel({ space, station, genre, onClose }:
       {activeTab === "craft" && (
         <div style={{ marginTop: 10, borderTop: "1px solid rgba(255,255,255,0.14)", paddingTop: 8 }}>
           <strong style={{ fontSize: 13 }}>道具の強化</strong>
-          {Object.entries(profile.items)
-            .filter(([itemId, n]) => n > 0 && itemById(itemId)?.tool)
-            .map(([itemId]) => {
-              const def = itemById(itemId);
-              const level = profile.enhance[itemId] ?? 0;
-              const material = def?.tier ? ENHANCE_MATERIALS[def.tier] : undefined;
+          <div style={{ marginTop: 6 }}>
+            <ItemSlotGrid>
+              {enhanceTools.map((item) => {
+                const level = profile.enhance[item.id] ?? 0;
+                const flashing = enhanceFlashId === item.id;
+                return (
+                  <span
+                    key={item.id}
+                    style={{
+                      display: "inline-flex", borderRadius: 10,
+                      background: flashing && enhanceFlashOn ? "rgba(255,210,62,0.35)" : "transparent",
+                      transition: "background 0.6s ease-out",
+                    }}
+                  >
+                    <ItemSlot
+                      itemId={item.id}
+                      count={profile.items[item.id]}
+                      badge={level > 0 ? `+${level}` : undefined}
+                      selected={enhanceSel === item.id}
+                      onClick={() => setEnhanceSel(item.id)}
+                    />
+                  </span>
+                );
+              })}
+            </ItemSlotGrid>
+            {enhanceSelItem && (() => {
+              const level = profile.enhance[enhanceSelItem.id] ?? 0;
+              const material = enhanceSelItem.tier ? ENHANCE_MATERIALS[enhanceSelItem.tier] : undefined;
+              const flashing = enhanceFlashId === enhanceSelItem.id;
               return (
-                <div key={itemId} style={row}>
-                  <ItemIcon id={itemId} />
-                  <strong>{def?.name ?? itemId}</strong>
-                  <span className="muted">{"+".repeat(level) || "未強化"}</span>
-                  {material && level < ENHANCE_MAX_LEVEL && (
-                    <span className="muted">
-                      {itemById(material.itemId)?.name}×{material.count}（所持 {profile.items[material.itemId] ?? 0}）+ {ENHANCE_BASE_COST * (level + 1)}
-                    </span>
-                  )}
-                  <span style={{ flex: 1 }} />
-                  {level < ENHANCE_MAX_LEVEL ? (
-                    <button type="button" style={btn} disabled={busy}
-                      onClick={() => void act({ action: "enhance", itemId }, () => `${def?.name ?? "道具"}を強化した`)}>
-                      強化する
-                    </button>
-                  ) : (
-                    <span className="muted">最大</span>
-                  )}
+                <div
+                  style={{
+                    borderRadius: 10,
+                    background: flashing && enhanceFlashOn ? "rgba(255,210,62,0.35)" : "transparent",
+                    transition: "background 0.6s ease-out",
+                  }}
+                >
+                  <ItemAnnotation itemId={enhanceSelItem.id}>
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 6, alignItems: "center" }}>
+                      <span>{"+".repeat(level) || "未強化"}</span>
+                      {level >= ENHANCE_MAX_LEVEL ? (
+                        <span className="muted">最大</span>
+                      ) : material ? (
+                        <span className="muted">
+                          {itemById(material.itemId)?.name}×{material.count}（所持 {profile.items[material.itemId] ?? 0}）・{ENHANCE_BASE_COST * (level + 1)} コイン
+                        </span>
+                      ) : null}
+                    </div>
+                    {level < ENHANCE_MAX_LEVEL && (
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
+                        <button type="button" style={btn} disabled={busy}
+                          onClick={() => void act({ action: "enhance", itemId: enhanceSelItem.id }, () => {
+                            triggerEnhanceFlash(enhanceSelItem.id);
+                            return `${enhanceSelItem.name}を強化した`;
+                          })}>
+                          強化する
+                        </button>
+                      </div>
+                    )}
+                  </ItemAnnotation>
                 </div>
               );
-            })}
+            })()}
+          </div>
         </div>
       )}
 
