@@ -78,7 +78,7 @@ export function pvpDuelCode(aDiscordId: string, bDiscordId: string, now: number)
 
 /** 参加費オプの決定的 ID（1試合・1人1件）。 */
 export function pvpFeeOpId(code: string, discordId: string): string {
-  return `pvp-fee-${code}-${discordId.slice(-4)}`;
+  return `pvp-fee-${code}-${discordId}`;
 }
 
 /** 賞金オプの決定的 ID（1試合1件）。 */

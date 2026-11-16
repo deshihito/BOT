@@ -141,8 +141,8 @@ test("casino-tournament: 対局時間を過ぎたら終了する", () => {
 test("casino-tournament: 賞金・参加費・返金の ID は決定的", () => {
   assert.equal(C.casinoTournamentPrizePool(tournament([A, B, D])), 600);
   assert.equal(C.casinoTournamentPrizeOpId(`ct-${NOW}`, 1), `ct-prize-ct-${NOW}-1`);
-  assert.equal(C.casinoTournamentFeeOpId(`ct-${NOW}`, A), `ct-fee-ct-${NOW}-1111`);
-  assert.equal(C.casinoTournamentRefundOpId(`ct-${NOW}`, A), `ct-refund-ct-${NOW}-1111`);
+  assert.equal(C.casinoTournamentFeeOpId(`ct-${NOW}`, A), `ct-fee-ct-${NOW}-${A}`);
+  assert.equal(C.casinoTournamentRefundOpId(`ct-${NOW}`, A), `ct-refund-ct-${NOW}-${A}`);
   for (const id of [C.casinoTournamentPrizeOpId(`ct-${NOW}`, 1), C.casinoTournamentFeeOpId(`ct-${NOW}`, A)]) {
     assert.match(id, /^[A-Za-z0-9-]{8,64}$/);
   }

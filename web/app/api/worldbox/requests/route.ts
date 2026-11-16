@@ -3,7 +3,7 @@ import { getRequestSession, publicOrigin, sessionOwnerKey } from "@/lib/auth";
 import type { CoinMovement } from "@/lib/worldbox/economy";
 import { buildEconomyOp } from "@/lib/worldbox/economy-bridge";
 import {
-  enqueueEconomyOpOnce, isEconomyEnabled, readUserBalance,
+  enqueueEconomyOpOnce, findEconomyOp, isEconomyEnabled, readUserBalance,
 } from "@/lib/worldbox/economy-bridge-online";
 import { withUserLock } from "@/lib/worldbox/user-lock";
 import { loadNationsState } from "@/lib/worldbox/nations-online";
@@ -60,6 +60,20 @@ function view(state: Parameters<typeof requestsForGuild>[0], guildId: string, ow
  * 積まれず、再試行や並行リクエストで預かり・報酬・返金が二重に
  * 動くことはない（カジノの精算オプと同じ規則、PR #943）。
  */
+/**
+ * 預かり（escrow）オプの状態。報酬・返金は escrow が done のときだけ動かす
+ * （カジノ・アリーナの「先払い done ゲート」と同じ規則）。
+ * これが無いと、投稿直後に残高を抜いて escrow を failed にしたうえで
+ * 取消/納品すると、預けていない金の返金・報酬がプールから出てしまう。
+ * pending の間はクライアントに待たせ、failed の依頼は返金なしで
+ * 取り消すだけにする（納品は不可）。
+ */
+async function escrowStatus(posterKey: string, requestId: string): Promise<"done" | "pending" | "failed"> {
+  const op = await findEconomyOp(posterKey, `escrow-${requestId}`);
+  if (!op) return "failed";
+  return op.status;
+}
+
 async function enqueueCoin(ownerKey: string, discordId: string, coin: CoinMovement, opId: string): Promise<boolean> {
   const op = buildEconomyOp(
     { kind: coin.kind, userKey: ownerKey, discordId, amount: coin.amount, reason: coin.reason },
@@ -173,6 +187,9 @@ async function handlePost(request: Request, session: AuthedSession) {
       if (typeof data.requestId !== "string") return statusError("invalid_request", 400);
       const target = state.requests[data.requestId];
       if (!target) return errorResponse("not_found");
+      const esc = await escrowStatus(target.posterKey, data.requestId);
+      if (esc === "pending") return errorResponse("escrow_pending");
+      if (esc === "failed") return errorResponse("escrow_failed");
       const [fulfillerProfile, posterProfile] = await Promise.all([
         loadProfile(ownerKey),
         loadProfile(target.posterKey),
@@ -212,8 +229,12 @@ async function handlePost(request: Request, session: AuthedSession) {
       if (typeof data.requestId !== "string") return statusError("invalid_request", 400);
       const result = cancelRequest(state, data.requestId, ownerKey);
       if (!result.ok) return errorResponse(result.error);
+      // 取消も escrow の確定が前提: pending は待たせ、failed（残高不足で
+      // 預かれなかった）依頼は返金オプなしで取り消す。
+      const esc = await escrowStatus(ownerKey, data.requestId);
+      if (esc === "pending") return errorResponse("escrow_pending");
       if (!(await storeRequestsState(result.state))) return statusError("store_failed", 503);
-      if (!(await enqueueCoin(ownerKey, discordId, result.coin, `refund-${data.requestId}`))) {
+      if (esc === "done" && !(await enqueueCoin(ownerKey, discordId, result.coin, `refund-${data.requestId}`))) {
         await storeRequestsState(state);
         return statusError("economy_failed", 503);
       }
