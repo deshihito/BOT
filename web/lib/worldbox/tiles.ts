@@ -5,7 +5,7 @@
 // 保存は tiles-online.ts（bot_kv、タイルごとのキー）が担う。
 import { ITEMS, cropById, cropBySeedId, itemById, type ItemDef, type ToolKind } from "./items";
 import {
-  T_DIRT, T_GRASS, T_ROCK, T_SAND, T_SNOW, T_SNOW_TREE, T_TREE, WORLD_COORD_LIMIT,
+  T_DIRT, T_GRASS, T_ROCK, T_SAND, T_SNOW, T_SNOW_TREE, T_TREE, T_WATER, WORLD_COORD_LIMIT,
   mapTileAt, type TopDownMap,
 } from "./mapgen";
 import { addItem, countItem, removeItem, type PlayerProfile } from "./profile";
@@ -44,9 +44,12 @@ export type PlacedBlock = {
  * 設置物が移動の当たり判定を持つか。固体ブロックは true、施設
  * （ItemDef.facility: 作業台・家具など）は false — 施設はそのマスを
  * 占有する（他のブロック/施設は置けない）が、プレイヤーは通過できる。
+ * 床ブロック（小道・氷・はちみつ・スライム・橋）も false で、上に乗れる。
  * 区別はアイテム定義のデータで持つ。
  */
 export function placedBlockSolid(itemId: string): boolean {
+  if (isFloorItem(itemId)) return false;
+  if (isFenceItem(itemId)) return true;
   const def = itemById(itemId);
   return def !== null && def.facility !== true;
 }
@@ -71,6 +74,38 @@ export function placedStationKinds(itemId: unknown): readonly StationKind[] {
   return PLACED_STATION_KINDS[itemId] ?? [];
 }
 
+/** 床ブロック: 固体にせず、上に乗ると効果がある（橋は水上に置けて渡れる）。 */
+export const FLOOR_ITEM_IDS: ReadonlySet<string> = new Set([
+  "path_block", "ice_block", "honey_block", "slime_block", "bridge_block",
+]);
+
+export function isFloorItem(itemId: string): boolean {
+  return FLOOR_ITEM_IDS.has(itemId);
+}
+
+/** 床の歩行速度倍率（小道は速く、はちみつは遅い。それ以外は等倍）。 */
+export function floorSpeedMultiplier(itemId: string | null): number {
+  if (itemId === "path_block") return 1.3;
+  if (itemId === "honey_block") return 0.5;
+  return 1;
+}
+
+/** 柵: 家具扱い（facility）だが、区切りとして固体にする（placedBlockSolid の例外）。 */
+export const FENCE_ITEM_IDS: ReadonlySet<string> = new Set([
+  "fence_wood", "stone_fence", "iron_fence",
+]);
+
+export function isFenceItem(itemId: string): boolean {
+  return FENCE_ITEM_IDS.has(itemId);
+}
+
+/** 開閉できる門。閉じている間は固体、開けば通過できる（固体判定は上書きの gateOpen と併せて行う）。 */
+export const GATE_ITEM_IDS: ReadonlySet<string> = new Set(["wooden_gate"]);
+
+export function isGateItem(itemId: string): boolean {
+  return GATE_ITEM_IDS.has(itemId);
+}
+
 /** 1タイルの上書き。無い項目は「地形どおり・素の状態」を意味する。 */
 export type TileOverride = {
   /** 地形の置き換え（伐採→草/雪、採掘→土）。 */
@@ -85,6 +120,8 @@ export type TileOverride = {
   block?: PlacedBlock;
   /** 植木鉢・プランターに植えた飾りのアイテム ID（現在は "flower" のみ）。 */
   deco?: string;
+  /** 門（wooden_gate）の開閉状態。true は開いている（通過できる）。 */
+  gateOpen?: boolean;
   /** 最後に手を入れた人（作物の所有者）の不透明 ID。 */
   ownerId: string;
   /** この上書きが失効する時刻（木の再生）。過ぎたら地形どおりに戻る。 */
@@ -142,8 +179,8 @@ export type TileView = {
   farmland: boolean;
   stump: boolean;
   crop: { cropId: string; stage: 0 | 1 | 2; ready: boolean } | null;
-  /** 設置されたブロック（自分のものかどうか・残り HP 割合つき）。 */
-  block: { itemId: string; mine: boolean; hpFrac: number } | null;
+  /** 設置されたブロック（自分のものかどうか・残り HP 割合・門の開閉つき）。 */
+  block: { itemId: string; mine: boolean; hpFrac: number; gateOpen?: boolean } | null;
   /** 自分の作物・作業かどうか。 */
   mine: boolean;
 };
@@ -174,6 +211,7 @@ export function tileView(
           itemId: active.block.itemId,
           mine: selfId !== null && active.block.ownerId === selfId,
           hpFrac: blockHpFraction(active.block),
+          ...(active.gateOpen !== undefined ? { gateOpen: active.gateOpen } : {}),
         }
       : null,
     mine: selfId !== null && active !== null && active.ownerId === selfId,
@@ -188,7 +226,7 @@ export function hasTool(profile: PlayerProfile, kind: ToolKind): boolean {
 
 export type TileActionKind =
   | "chop" | "mine" | "till" | "plant" | "harvest"
-  | "place_block" | "mine_block" | "plant_flower" | "remove_flower";
+  | "place_block" | "mine_block" | "plant_flower" | "remove_flower" | "toggle_gate";
 
 export type TileActionResult =
   | {
@@ -436,7 +474,9 @@ export function applyPlaceBlock(
   if (active?.stump) return { ok: false, error: "tile_blocked" }; // 木の再生待ち（切り株）
   // 岩の再生待ちの土は設置できる（下地として保持され、until は引き継ぐ）
   const eff = active?.tile !== undefined ? active.tile : mapTileAt(map, x, y);
-  if (!PLACEABLE_TERRAIN.has(eff)) return { ok: false, error: "tile_blocked" };
+  // 橋だけは水の上にも置ける（渡れる板）。それ以外の設置物は陸地のみ。
+  const placeable = PLACEABLE_TERRAIN.has(eff) || (def.id === "bridge_block" && eff === T_WATER);
+  if (!placeable) return { ok: false, error: "tile_blocked" };
   const removed = removeItem(profile, held.id, 1);
   if (!removed) return { ok: false, error: "not_enough_items" };
   const selfId = presenceIdFor(ownerKey);
@@ -591,6 +631,37 @@ export function applyFlowerAction(
   };
 }
 
+/**
+ * 門の開閉: 門タイルの gateOpen を反転する。開閉は所有者でなくてもできる
+ * （門は出入りのための物。掘って壊すのは従来どおり所有者だけ）。
+ * アイテムの消費・獲得は無い。
+ */
+export function applyToggleGate(
+  current: TileOverride | null,
+  profile: PlayerProfile,
+  map: TopDownMap,
+  ownerKey: string,
+  xRaw: unknown,
+  yRaw: unknown,
+  now: number,
+): TileActionResult {
+  const tile = checkedTile(xRaw, yRaw);
+  if (!tile) return { ok: false, error: "invalid_tile" };
+  const { x, y } = tile;
+  const key = tileKey(x, y);
+  const active = isOverrideActive(current, now) ? current : null;
+  if (!active?.block || !isGateItem(active.block.itemId)) return { ok: false, error: "no_block" };
+  const next: TileOverride = { ...active, gateOpen: active.gateOpen !== true };
+  const overrides: TileOverridesMap = { [key]: active };
+  return {
+    ok: true,
+    override: next,
+    profile,
+    view: viewAfter(map, overrides, key, next, x, y, now, ownerKey),
+    gained: {},
+  };
+}
+
 // ---------------------------------------------------------------- 保存形式
 function parseCropState(raw: unknown): CropState | null {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
@@ -645,6 +716,7 @@ export function parseTileOverride(raw: unknown): TileOverride | null {
     if (crop) out.crop = crop;
   }
   if (v.deco === "flower") out.deco = "flower";
+  if (v.gateOpen === true) out.gateOpen = true;
   if (typeof v.until === "number" && Number.isFinite(v.until)) out.until = v.until;
   return out;
 }
@@ -677,6 +749,8 @@ export function actionForTile(
 ): TileContextAction {
   if (view.crop?.ready) return { action: "harvest" };
   if (view.block) {
+    // 門はタップで開閉する。ただし所有者が道具を選んでいるときは採掘を優先する（回収できるように）。
+    if (isGateItem(view.block.itemId) && !(view.block.mine && selected?.tool)) return { action: "toggle_gate" };
     // 自分のブロックは道具を持っているときだけ掘る。他人のブロックは触れない。
     if (view.block.mine && selected?.tool) return { action: "mine_block" };
     return null;
@@ -686,8 +760,11 @@ export function actionForTile(
     return { action: "plant-picker" };
   }
   if (view.crop) return null; // 育ちきるまでは何もしない
-  if (selected?.blockId && PLACEABLE_TERRAIN.has(view.tile) && !view.farmland && !view.stump) {
-    return { action: "place_block", itemId: selected.blockId };
+  if (selected?.blockId && !view.farmland && !view.stump) {
+    // 通常の設置は陸地のみ。橋ブロックだけは水の上にも置ける。
+    if (PLACEABLE_TERRAIN.has(view.tile) || (selected.blockId === "bridge_block" && view.tile === T_WATER)) {
+      return { action: "place_block", itemId: selected.blockId };
+    }
   }
   // 木は素手でも伐採できる（選択中の道具を問わない）
   if (view.tile === T_TREE || view.tile === T_SNOW_TREE) return { action: "chop" };
