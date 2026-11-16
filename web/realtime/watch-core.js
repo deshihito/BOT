@@ -23,6 +23,10 @@ const WATCH_PLAN = [
   { namespace: "worldbox_mobs", kind: "mobs", intervalMs: 2_000 },
   { namespace: "worldbox_board", kind: "board", intervalMs: 5_000 },
   { namespace: "worldbox_nations", kind: "nations", intervalMs: 5_000 },
+  // インスタンス状態（洞窟の枯渇・遺跡の個人状態・ダンジョンのセッション
+  // 進行）は遊びの同期に効くため速い系。応答が本人向け加工を含むので
+  // party と同じ poke 方式で、宛先はキーから解決する（instanceKeyScope）
+  { namespace: "worldbox_instances", kind: "instances", intervalMs: 2_000 },
   // 経済オプの確定は体感遅延に直結するため速い系（2秒）で watch する
   { namespace: "worldbox_economy", kind: "economy", intervalMs: 2_000 },
 ];
@@ -132,6 +136,26 @@ function economyTargetPids(prevValue, nextValue) {
   return pids;
 }
 
+/**
+ * インスタンス名前空間のキー → 通知スコープ。対象外は null。
+ * - "<space>"（洞窟/遺跡の共有状態）: その空間にいる全員へ { space }
+ * - "dungeon:<x>,<y>:<layer>#<partyKey>"（ダンジョンのセッション）:
+ *   その入口のダンジョンにいる全員へ（フロア不問） { spacePrefix }
+ * - "<space>#<ownerKey>"（遺跡の個人状態）: 本人だけへ { pid }
+ * - "dungeonclear:<ownerKey>"（週次クリア記録）: 同期不要のため null
+ */
+function instanceKeyScope(key) {
+  if (typeof key !== "string" || key.startsWith("dungeonclear:")) return null;
+  const hash = key.indexOf("#");
+  const head = hash >= 0 ? key.slice(0, hash) : key;
+  const tail = hash >= 0 ? key.slice(hash + 1) : "";
+  const dm = /^dungeon:(-?\d+),(-?\d+):\d+$/.exec(head);
+  if (dm) return { spacePrefix: `dungeon:${dm[1]},${dm[2]}:` };
+  if (tail) return { pid: presenceIdFor(tail) };
+  if (/^(cave|ruins):-?\d+,-?\d+:\d+$/.test(head)) return { space: head };
+  return null;
+}
+
 module.exports = {
   WATCH_PLAN,
   normalizeValue,
@@ -141,4 +165,5 @@ module.exports = {
   chatKeyScope,
   unionBoardGuildId,
   economyTargetPids,
+  instanceKeyScope,
 };

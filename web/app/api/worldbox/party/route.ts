@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { getRequestSession, publicOrigin, sessionOwnerKey } from "@/lib/auth";
 import { MAP_SEED } from "@/lib/worldbox/mapgen";
 import { CHUNK_SIZE, structuresForChunk } from "@/lib/worldbox/maplogic";
-import { isProfileEnabled, loadProfile } from "@/lib/worldbox/profile-online";
+import { isProfileEnabled, loadProfile, storeProfile } from "@/lib/worldbox/profile-online";
 import { masteryRankOf } from "@/lib/worldbox/roles";
 import { listPresenceWithOwners } from "@/lib/worldbox/presence-online";
 import { presenceIdFor } from "@/lib/worldbox/presence";
@@ -18,7 +18,10 @@ import {
   deleteDungeonSession, dungeonSessionClosed, loadDungeonSession, storeDungeonSession,
   type DungeonSession,
 } from "@/lib/worldbox/instances-online";
-import { makeInstanceSpace } from "@/lib/worldbox/instances";
+import { makeInstanceSpace, parseInstanceSpace } from "@/lib/worldbox/instances";
+import { parseSave } from "@/lib/worldbox/save";
+import { loadWorldBoxSave } from "@/lib/worldbox/save-online";
+import { withUserLock } from "@/lib/worldbox/user-lock";
 
 export const runtime = "nodejs";
 
@@ -74,6 +77,65 @@ async function memberOf(ownerKey: string, name: string): Promise<PartyMember> {
     role: profile?.role ?? "free",
     rank: profile ? masteryRankOf(profile, profile.role) : 1,
   };
+}
+
+/**
+ * ダンジョン内にいるメンバーを入口前へ戻す予約を積む。移動そのものは
+ * 本人の次回 vitals sync が pendingTeleport として配送し、プレゼンスと
+ * セーブの整合もそちらで取る（PvP 被害者の死亡通知と同じ仕組み）。
+ * 既に配送予定（蘇生など）がある場合はそちらを優先する。
+ */
+async function queueDungeonExitTeleport(memberKey: string, entrance: { x: number; y: number }): Promise<void> {
+  try {
+    const saved = parseSave(await loadWorldBoxSave(memberKey));
+    if (!saved) return;
+    const inst = parseInstanceSpace(saved.space);
+    if (!inst || inst.kind !== "dungeon" || inst.entranceX !== entrance.x || inst.entranceY !== entrance.y) return;
+    const dest = saved.worldReturn ?? { x: entrance.x + 0.5, y: entrance.y + 0.5 };
+    await withUserLock(memberKey, async () => {
+      const profile = await loadProfile(memberKey);
+      if (!profile || profile.pendingTeleport) return;
+      await storeProfile(memberKey, { ...profile, pendingTeleport: { space: "world", x: dest.x, y: dest.y } });
+    });
+  } catch { /* ベストエフォート: 失敗しても退出自体は成立させる */ }
+}
+
+/**
+ * パーティ退出時のダンジョンセッション後始末。セッションは partyKey
+ * （パーティ ID）に紐づくため、退出した人は二度とアドレスできなくなる。
+ * 何もしないと、中にいる全員の操作が no_session になり、セッション
+ * 自体も消えずに残り続ける（孤児化）。
+ * - 退出者を departed に入れ、残りのメンバーの閉鎖判定を正しくする。
+ * - 解散（リーダー退出）ならセッション自体を削除する。
+ * - セッションへアクセスを失う人（退出者本人は常時、解散時は中にいる
+ *   全員）は pendingTeleport で入口前へ戻す。
+ */
+async function settleDungeonSessionOnLeave(party: Party, ownerKey: string, disbanded: boolean): Promise<void> {
+  const floor1 = makeInstanceSpace("dungeon", party.entrance.x, party.entrance.y, 0);
+  const ds = await loadDungeonSession(floor1, party.id);
+  if (!ds) return;
+  const inSession = ds.members.includes(ownerKey);
+  let session: DungeonSession = ds;
+  if (inSession && !ds.departed.includes(ownerKey)) {
+    session = { ...ds, departed: [...ds.departed, ownerKey] };
+  }
+  if (disbanded || dungeonSessionClosed(session)) {
+    await deleteDungeonSession(floor1, party.id);
+  } else if (session !== ds) {
+    await storeDungeonSession(floor1, session);
+  }
+  const targets = new Set<string>();
+  if (inSession && !ds.dead.includes(ownerKey)) targets.add(ownerKey);
+  if (disbanded) {
+    for (const m of session.members) {
+      if (m === ownerKey) continue;
+      if (session.departed.includes(m) || session.dead.includes(m)) continue;
+      targets.add(m);
+    }
+  }
+  for (const memberKey of targets) {
+    await queueDungeonExitTeleport(memberKey, party.entrance);
+  }
 }
 
 function partyView(party: Party | null) {
@@ -161,6 +223,12 @@ export async function POST(request: Request) {
   if (fields.action === "accept") {
     const invited = await loadInvitedParty(ownerKey);
     if (!invited || !inviteFor(invited, ownerKey, now)) return err("no_invite", 409);
+    // 既に別のパーティに所属している場合は受け入れない。所属の索引だけ
+    // 上書きすると旧パーティに幽霊メンバーが残り、人数とダンジョンの
+    // セッションに数えられ続ける。所属の変更は leave を明示的に挟む
+    // （create が既存パーティを返すのと同じ方針）。
+    const existing = await loadPartyOf(ownerKey);
+    if (existing && existing.id !== invited.id) return err("already_in_party", 409);
     if (!pos || pos.space !== "world") return err("not_at_entrance", 409);
     if (Math.hypot(invited.entrance.x + 0.5 - pos.x, invited.entrance.y + 0.5 - pos.y) > ENTRANCE_RANGE + 2) {
       return err("not_at_entrance", 409);
@@ -187,6 +255,9 @@ export async function POST(request: Request) {
     const party = await loadPartyOf(ownerKey);
     if (!party) return NextResponse.json({ ok: true }, { headers: NO_STORE });
     const next = leaveParty(party, ownerKey);
+    // ダンジョンのセッションを畳む（中にいる人を入口前へ戻す予約込み）。
+    // パーティの削除・保存より先に、partyKey が生きているうちに行う。
+    await settleDungeonSessionOnLeave(party, ownerKey, next === null);
     if (!next) {
       await deleteParty(party);
     } else {

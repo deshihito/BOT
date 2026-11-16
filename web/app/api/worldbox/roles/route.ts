@@ -434,11 +434,15 @@ export async function POST(request: Request) {
       if (targets.length === 0) return err("no_target", 409);
     }
 
-    // ダンジョンのフロアボスは技の対象にしない（進行登録は通常攻撃の経路に一本化）
+    // ダンジョンのフロアボスは技の対象にしない（進行登録は通常攻撃の経路に一本化）。
+    // 番人（鍵持ち）は対象のままだが、倒した場合は通常攻撃と同じく鍵を落とす
+    // （鍵の付与だけは技経路にも必要。落とさないと再出現まで扉が開けられない）。
+    let dungeonKeyHolder: { mobId: string; x: number; y: number } | null = null;
     {
       const instD = parseInstanceSpace(space);
       if (instD?.kind === "dungeon") {
         const floorD = buildDungeonFloor(MAP_SEED, instD.entranceX, instD.entranceY, instD.layer);
+        dungeonKeyHolder = floorD.keyHolder;
         targets = targets.filter((m) => !(m.mobId === floorD.boss.mobId && m.x === floorD.boss.x && m.y === floorD.boss.y));
         if (targets.length === 0) return err("no_target", 409);
       }
@@ -468,6 +472,10 @@ export async function POST(request: Request) {
       if (result.dead) {
         anyDead = true;
         for (const [id, n] of Object.entries(result.gained)) gainedAll[id] = (gainedAll[id] ?? 0) + n;
+        // 番人を技で倒した場合も通常攻撃と同じくダンジョンの鍵を落とす
+        if (dungeonKeyHolder && dungeonKeyHolder.mobId === placed.mobId && dungeonKeyHolder.x === placed.x && dungeonKeyHolder.y === placed.y) {
+          gainedAll.dungeon_key = (gainedAll.dungeon_key ?? 0) + 1;
+        }
       }
     }
     if (results.length === 0) return err("no_target", 409);
