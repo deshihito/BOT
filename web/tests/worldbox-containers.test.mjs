@@ -67,7 +67,7 @@ const tilesUrl = bundleModule(
   ["worldbox/rng.ts", "worldbox/mapgen.ts", "worldbox/items.ts", "worldbox/profile.ts", "worldbox/presence.ts", "worldbox/seasons.ts", "worldbox/tiles.ts"],
   [
     "worldTileSource", "mapTileAt", "T_GRASS",
-    "applyTileAction", "applyPlaceBlock", "applyMineBlock", "applyFlowerAction",
+    "applyTileAction", "applyPlaceBlock", "applyMineBlock", "applyFlowerAction", "applyToggleGate",
     "tileKey", "parseTileOverride", "parseTileOverrides",
     "presenceIdFor", "isOverrideActive",
   ],
