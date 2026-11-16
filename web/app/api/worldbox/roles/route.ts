@@ -26,7 +26,7 @@ import { isOverrideActive } from "@/lib/worldbox/tiles";
 import { loadTileOverride } from "@/lib/worldbox/tiles-online";
 import { buildEconomyOp } from "@/lib/worldbox/economy-bridge";
 import {
-  enqueueEconomyOp, isEconomyEnabled, readUserBalance,
+  enqueueEconomyOp, isEconomyEnabled, readUserBalance, waitForOpDone,
 } from "@/lib/worldbox/economy-bridge-online";
 import { withUserLock } from "@/lib/worldbox/user-lock";
 import { maxHpFor } from "@/lib/worldbox/profile";
@@ -210,6 +210,15 @@ export async function POST(request: Request) {
       if (!(await enqueueEconomyOp(op))) {
         await storeProfile(ownerKey, current);
         return err("economy_failed", 503);
+      }
+      // 決済が server-side wait のうちに failed になったら役職を元へ
+      // 戻す（構造問題#4「即時 spend の無担保交付」の是正: 役職だけ
+      // 変わって課金されない状態を作らない）。pending のままなら従来
+      // どおり返し、クライアントのポーリングに引き継ぐ。
+      const settled = await waitForOpDone(ownerKey, op.id);
+      if (settled && settled.status === "failed") {
+        await storeProfile(ownerKey, current);
+        return err("economy_failed", 409);
       }
       return NextResponse.json({ ok: true, profile: next, cost }, { headers: NO_STORE });
     });

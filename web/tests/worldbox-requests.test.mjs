@@ -491,3 +491,61 @@ test("API(requests): escrow が failed の依頼は納品不可、取消は返�
   assert.equal(apiFindOps((o) => o.id === `refund-${id}`).length, 0);
   assert.equal(apiFindOps((o) => o.id === `reward-${id}`).length, 0);
 });
+
+/** Bot ワーカーが報酬・返金オプを終端させた状態を再現する（B2・構造問題#4）。 */
+function apiArmFlip(pred, status, error = "pay_house_failed") {
+  return new Promise((resolve) => {
+    let timer;
+    const timeout = setTimeout(() => { clearInterval(timer); resolve(false); }, 5000);
+    timer = setInterval(() => {
+      for (const [k, v] of globalThis.__wbReqStore) {
+        if (k.startsWith("worldbox_economy ") && v && typeof v === "object" && v.status === "pending" && pred(v)) {
+          globalThis.__wbReqStore.set(k, { ...v, status, error });
+          clearInterval(timer);
+          clearTimeout(timeout);
+          resolve(true);
+          return;
+        }
+      }
+    }, 10);
+  });
+}
+async function apiListRequests(cookie) {
+  const res = await apiRequestsRoute.GET(new Request(API_URL, { headers: { cookie } }));
+  assert.equal(res.status, 200);
+  return (await res.json()).requests;
+}
+
+test("API(requests): 納品の報酬決済が failed なら納品自体を巻き戻す", async () => {
+  apiReset();
+  const id = await apiPost(apiCookie(API_POSTER, "poster"));
+  apiSetEscrowStatus(id, "done");
+  const flipped = apiArmFlip((o) => o.id === `reward-${id}`, "failed", "pay_house_failed");
+  const res = await apiRequestsRoute.POST(apiReq(apiCookie(API_MEMBER1, "m1"), { action: "fulfill", requestId: id }));
+  assert.equal(await flipped, true, "ワーカーが報酬オプを failed にした");
+  assert.equal(res.status, 409);
+  const data = await res.json();
+  assert.equal(data.error, "economy_failed");
+  assert.equal(data.opError, "pay_house_failed");
+  assert.equal(apiProfileItems(API_MEMBER1).wood, 5, "納品者のアイテムは戻っている");
+  assert.equal(apiProfileItems(API_POSTER).wood ?? 0, 0, "投稿者へアイテムは渡っていない");
+  const listed = await apiListRequests(apiCookie(API_POSTER, "poster"));
+  assert.equal(listed.length, 1, "依頼は残っている（納品が巻き戻された）");
+  assert.equal(listed[0].id, id);
+});
+
+test("API(requests): 取消の返金決済が failed なら取消自体を巻き戻す", async () => {
+  apiReset();
+  const id = await apiPost(apiCookie(API_POSTER, "poster"));
+  apiSetEscrowStatus(id, "done");
+  const flipped = apiArmFlip((o) => o.id === `refund-${id}`, "failed", "credit_failed");
+  const res = await apiRequestsRoute.POST(apiReq(apiCookie(API_POSTER, "poster"), { action: "cancel", requestId: id }));
+  assert.equal(await flipped, true, "ワーカーが返金オプを failed にした");
+  assert.equal(res.status, 409);
+  const data = await res.json();
+  assert.equal(data.error, "economy_failed");
+  assert.equal(data.opError, "credit_failed");
+  const listed = await apiListRequests(apiCookie(API_POSTER, "poster"));
+  assert.equal(listed.length, 1, "依頼は残っている（取消が巻き戻された）");
+  assert.equal(listed[0].id, id);
+});

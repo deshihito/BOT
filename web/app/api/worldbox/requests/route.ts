@@ -3,7 +3,7 @@ import { getRequestSession, publicOrigin, sessionOwnerKey } from "@/lib/auth";
 import type { CoinMovement } from "@/lib/worldbox/economy";
 import { buildEconomyOp } from "@/lib/worldbox/economy-bridge";
 import {
-  enqueueEconomyOpOnce, findEconomyOp, isEconomyEnabled, readUserBalance,
+  enqueueEconomyOpOnce, findEconomyOp, isEconomyEnabled, readUserBalance, waitForOpDone,
 } from "@/lib/worldbox/economy-bridge-online";
 import { withUserLock } from "@/lib/worldbox/user-lock";
 import { loadNationsState } from "@/lib/worldbox/nations-online";
@@ -216,6 +216,20 @@ async function handlePost(request: Request, session: AuthedSession) {
         await storeRequestsState(state);
         return statusError("economy_failed", 503);
       }
+      // 報酬の決済が server-side wait のうちに failed になったら納品
+      // 自体を巻き戻す（構造問題#4と同型: アイテムだけ渡って報酬が出ない
+      // 状態を作らない）。pending のままなら従来どおり返し、クライアントの
+      // ポーリングに引き継ぐ。
+      const settled = await waitForOpDone(ownerKey, `reward-${data.requestId}`);
+      if (settled && settled.status === "failed") {
+        await storeProfile(ownerKey, fulfillerProfile);
+        await storeProfile(result.request.posterKey, posterProfile);
+        await storeRequestsState(state);
+        return NextResponse.json(
+          { error: "economy_failed", opError: settled.error ?? null },
+          { status: 409, headers: NO_STORE },
+        );
+      }
       return NextResponse.json(
         {
           requests: view(result.state, guildId, ownerKey),
@@ -234,9 +248,21 @@ async function handlePost(request: Request, session: AuthedSession) {
       const esc = await escrowStatus(ownerKey, data.requestId);
       if (esc === "pending") return errorResponse("escrow_pending");
       if (!(await storeRequestsState(result.state))) return statusError("store_failed", 503);
-      if (esc === "done" && !(await enqueueCoin(ownerKey, discordId, result.coin, `refund-${data.requestId}`))) {
-        await storeRequestsState(state);
-        return statusError("economy_failed", 503);
+      if (esc === "done") {
+        if (!(await enqueueCoin(ownerKey, discordId, result.coin, `refund-${data.requestId}`))) {
+          await storeRequestsState(state);
+          return statusError("economy_failed", 503);
+        }
+        // 返金の決済が failed なら取消自体を巻き戻す（預かり金が戻らない
+        // まま依頼だけ消える状態を作らない）。
+        const refundSettled = await waitForOpDone(ownerKey, `refund-${data.requestId}`);
+        if (refundSettled && refundSettled.status === "failed") {
+          await storeRequestsState(state);
+          return NextResponse.json(
+            { error: "economy_failed", opError: refundSettled.error ?? null },
+            { status: 409, headers: NO_STORE },
+          );
+        }
       }
       return NextResponse.json(
         { requests: view(result.state, guildId, ownerKey) },

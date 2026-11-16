@@ -382,6 +382,7 @@ export async function enqueueEconomyOpOnce(op) { if (state.failEnqueue) return f
 export async function loadMyEconomyOps() { return []; }
 export async function readUserBalance(id) { return state.balances.has(id) ? state.balances.get(id) : 0; }
 export async function findEconomyOp(userKey, opId) { const op = state.ops.find((o) => o.id === opId); return op && op.userKey === userKey ? op : null; }
+export async function deleteEconomyOp(opId) { const i = state.ops.findIndex((o) => o.id === opId); if (i >= 0) state.ops.splice(i, 1); return true; }
 export async function waitForOpDone(userKey, opId) { return findEconomyOp(userKey, opId); }
 `);
 const profileOnlineStubUrl = dataUrl(`
