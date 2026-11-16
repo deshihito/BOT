@@ -7,7 +7,7 @@
 // 式は数字タイルと演算子をタップして組み立て、最後の計算結果が答えになる。
 // ローカルの検証はサーバーと同じ evaluateCountdown を使う。
 import { useEffect, useRef, useState, type CSSProperties } from "react";
-import { playSe } from "@/lib/balku-sound";
+import { playSe } from "@/lib/balku/balku-sound";
 import { tappableProps, useGesture } from "@/lib/gesture";
 import {
   evaluateCountdown,

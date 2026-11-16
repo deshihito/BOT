@@ -16,7 +16,7 @@ import { createStage, type Stage } from "@/lib/three-kit/stage";
 import { canvasTexture } from "@/lib/three-kit/primitives";
 import { attachPickPointer } from "@/lib/three-kit/pointer";
 import SceneBox from "@/lib/three-kit/SceneBox";
-import { memorySymbol } from "@/lib/memory-match";
+import { memorySymbol } from "@/lib/games/memory-match";
 
 export interface MemorySceneCard {
   faceUp: boolean;

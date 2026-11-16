@@ -10,7 +10,7 @@ import { useEffect, useRef, useState } from "react";
 
 // 3D シーンは three を含むため遅延読み込み（このページ専用チャンクに閉じる）。
 const HagetakaScene3D = dynamic(() => import("./HagetakaScene3D"), { ssr: false });
-import { playSe } from "@/lib/balku-sound";
+import { playSe } from "@/lib/balku/balku-sound";
 import OnlineShell from "../online/OnlineShell";
 import type { OnlineRoomApi, OnlineRoomView } from "../online/useOnlineRoom";
 import { useRoomJuice } from "../GameJuice";

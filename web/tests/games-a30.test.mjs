@@ -1,7 +1,7 @@
 // A30フェーズの新規2本＋増量のロジック検証。
-// - lib/tsume.ts: 合法手（二歩・行き場のない駒・打ち歩詰め）・王手/詰み判定・
+// - lib/games/tsume.ts: 合法手（二歩・行き場のない駒・打ち歩詰め）・王手/詰み判定・
 //   収録問題は全てソルバーで「指定手数・初手一意」を検証
-// - lib/bowling.ts: 正式スコア計算（既知ケース）・ピン倒れモデルの決定性・全ゲーム進行
+// - lib/games/bowling.ts: 正式スコア計算（既知ケース）・ピン倒れモデルの決定性・全ゲーム進行
 // - lib/online/games/wordwolf.ts: お題ペア 60組・形式・単語の重複なし
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -42,8 +42,8 @@ async function loadOnline(name, exportsList) {
   return import("data:text/javascript;base64," + Buffer.from(code).toString("base64"));
 }
 
-const tsume = await loadLib("tsume.ts");
-const bowling = await loadLib("bowling.ts");
+const tsume = await loadLib("games/tsume.ts");
+const bowling = await loadLib("games/bowling.ts");
 const wordwolf = await loadOnline("wordwolf.ts", ["gameModule", "WORDWOLF_PAIRS"]);
 
 function barePosition(boardEntries, handA = {}, handD = {}) {

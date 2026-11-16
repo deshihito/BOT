@@ -6,7 +6,7 @@
 //   phase finished: standings が付く
 // 回答は { type: "answer", choice }。制限時間はサーバー側の tick で締め切られる。
 import { useEffect, useRef, useState } from "react";
-import { playSe } from "@/lib/balku-sound";
+import { playSe } from "@/lib/balku/balku-sound";
 import OnlineShell from "../online/OnlineShell";
 import type { OnlineRoomApi, OnlineRoomView } from "../online/useOnlineRoom";
 import { useRoomJuice } from "../GameJuice";

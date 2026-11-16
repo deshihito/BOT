@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import OpHeader, { type OpMenuUser } from "./OpHeader";
 import { getCurrentSession, isGoogleConfigured } from "@/lib/auth";
 import { userAvatarUrl } from "@/lib/dashboard-core";
-import { isUserKeyEnabled } from "@/lib/one-prompter-user-key";
+import { isUserKeyEnabled } from "@/lib/one-prompter/one-prompter-user-key";
 
 // One Prompter 単独の外枠。
 // このページでは AGO BOT サイト共通のヘッダー/フッターを出さない

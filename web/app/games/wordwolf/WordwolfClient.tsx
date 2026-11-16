@@ -6,7 +6,7 @@
 //   - phase vote/revote: vote アクション。revote では tiedCandidates のみ投票可
 //   - phase finished: result にウルフ・お題ペア・集計が開示される
 import { useEffect, useRef, useState } from "react";
-import { playSe } from "@/lib/balku-sound";
+import { playSe } from "@/lib/balku/balku-sound";
 import OnlineShell, { useOnlineCreateOptions } from "../online/OnlineShell";
 import type { OnlineRoomApi, OnlineRoomView } from "../online/useOnlineRoom";
 import { useRoomJuice } from "../GameJuice";

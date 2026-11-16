@@ -1,5 +1,5 @@
 "use client";
-// 色文字マッチ（ストループ課題）。ロジックは lib/colormatch.ts。
+// 色文字マッチ（ストループ課題）。ロジックは lib/games/colormatch.ts。
 // 文字の意味とインクの色が「あっている」かを30秒で何問答えられるか競う。
 // ベストスコアは localStorage に保存する。サーバーへ送信しない。
 import Link from "next/link";
@@ -10,7 +10,7 @@ import {
   answerColorMatch,
   createColorMatchGame,
   type CmState,
-} from "@/lib/colormatch";
+} from "@/lib/games/colormatch";
 import { sfxCorrect, sfxTap, sfxTick, sfxWin, sfxWrong } from "@/lib/sfx";
 import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";

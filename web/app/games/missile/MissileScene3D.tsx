@@ -1,7 +1,7 @@
 "use client";
 // ミサイル防衛の 3D シーン。空＋都市/基地の造形、飛来ミサイル（軌跡つき）、
 // 迎撃弾と爆発球を立体表現する。
-// 物理・判定は lib/missile.ts の固定ステップが決め、ここは親の最新状態を
+// 物理・判定は lib/games/missile.ts の固定ステップが決め、ここは親の最新状態を
 // getState() で毎フレーム読み、onFrame で補間追従するだけ（airhockey の型）。
 // 3D 側で当たり判定はしない。爆風の半径も lib の blastRadius を使う。
 // 入力: 空の面へのレイキャスト点 → 既存ハンドラ onFire の座標系
@@ -22,7 +22,7 @@ import {
   enemyPosition,
   interceptorPosition,
   type MissileState,
-} from "@/lib/missile";
+} from "@/lib/games/missile";
 
 interface Props {
   /** 親の固定ステップが進める最新の状態を読む (React 再描画を介さない)。 */

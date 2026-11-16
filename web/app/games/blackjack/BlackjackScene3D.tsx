@@ -2,7 +2,7 @@
 // ブラックジャックの 3D シーン（カード系の型・第1号）。
 // 3D テーブルに createCard のカードを配り、ディーラーの伏せカードは
 // ヒット/スタンド確定（phase が settled へ遷移）した瞬間にめくれる。
-// カードの値・勝敗は lib/blackjack.ts の状態そのままで、ここは演出だけ。
+// カードの値・勝敗は lib/games/blackjack.ts の状態そのままで、ここは演出だけ。
 // 操作は既存ジェスチャと同一語彙をレイキャストで受ける:
 //   タップ = 進行（対局中はヒット）/ ダブルタップ = ダブル（対局中・2枚時のみ）
 //   下スワイプ/下フリック = スタンド（対局中）
@@ -15,7 +15,7 @@ import { createStage } from "@/lib/three-kit/stage";
 import { createCard, createChip } from "@/lib/three-kit/primitives";
 import { attachPickPointer } from "@/lib/three-kit/pointer";
 import SceneBox from "@/lib/three-kit/SceneBox";
-import type { BjPhase, Card } from "@/lib/blackjack";
+import type { BjPhase, Card } from "@/lib/games/blackjack";
 
 interface Props {
   playerHand: Card[];

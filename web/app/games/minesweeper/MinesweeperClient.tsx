@@ -1,5 +1,5 @@
 "use client";
-// マインスイーパー。ロジックは lib/minesweeper.ts（初手は必ず安全）。
+// マインスイーパー。ロジックは lib/games/minesweeper.ts（初手は必ず安全）。
 // タップで開く／旗モードか右クリックで旗を立てる。端末内で完結し、サーバーへ送信しない。
 import Link from "next/link";
 import dynamic from "next/dynamic";
@@ -13,7 +13,7 @@ import {
   revealCell,
   toggleFlag,
   type MsState,
-} from "@/lib/minesweeper";
+} from "@/lib/games/minesweeper";
 import { sfxFlip, sfxHit, sfxLose, sfxPlace, sfxTap, sfxWin } from "@/lib/sfx";
 import { juiceFlash, juiceHitstop, juiceShake, type JuiceIntensity } from "@/lib/juice";
 import { tappableProps } from "@/lib/gesture";

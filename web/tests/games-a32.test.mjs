@@ -1,6 +1,6 @@
 // A32フェーズの新規2本＋増量のロジック検証。
-// - lib/missile.ts: 固定ステップの決定性・迎撃での破壊・都市全滅での終了・ウェーブ遷移
-// - lib/dragrace.ts: 反応＋シフト誤差のタイムモデル・フライング・自動遅れシフト
+// - lib/games/missile.ts: 固定ステップの決定性・迎撃での破壊・都市全滅での終了・ウェーブ遷移
+// - lib/games/dragrace.ts: 反応＋シフト誤差のタイムモデル・フライング・自動遅れシフト
 // - lib/online/games/shiritori.ts: 単語バンク増量（第2弾）後の妥当性（1000語以上・重複なし・形式）
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -41,8 +41,8 @@ async function loadOnline(name, exportsList) {
   return new Function(body)();
 }
 
-const mi = await loadLib("missile.ts");
-const dr = await loadLib("dragrace.ts");
+const mi = await loadLib("games/missile.ts");
+const dr = await loadLib("games/dragrace.ts");
 const shi = await loadOnline("shiritori.ts", [
   "SHIRITORI_WORDS",
   "isValidWordForm",

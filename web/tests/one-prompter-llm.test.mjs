@@ -1,5 +1,5 @@
-// One Prompter の LLM 連携（lib/one-prompter-llm.ts の検証ロジックと
-// lib/one-prompter-server.ts の Logfare クライアント）をネットワークなしで確かめる。
+// One Prompter の LLM 連携（lib/one-prompter/one-prompter-llm.ts の検証ロジックと
+// lib/one-prompter/one-prompter-server.ts の Logfare クライアント）をネットワークなしで確かめる。
 // サーバー側モジュールは "./one-prompter-llm" を import するので、
 // transpile 後に specifier を llm 側の data URL へ差し替えて読み込む。
 import { test } from "node:test";
@@ -19,8 +19,8 @@ function dataUrl(js) {
   return "data:text/javascript;base64," + Buffer.from(js).toString("base64");
 }
 
-const llm = await import(dataUrl(transpile("lib/one-prompter-llm.ts")));
-const serverJs = transpile("lib/one-prompter-server.ts").replaceAll('"./one-prompter-llm"', JSON.stringify(dataUrl(transpile("lib/one-prompter-llm.ts"))));
+const llm = await import(dataUrl(transpile("lib/one-prompter/one-prompter-llm.ts")));
+const serverJs = transpile("lib/one-prompter/one-prompter-server.ts").replaceAll('"./one-prompter-llm"', JSON.stringify(dataUrl(transpile("lib/one-prompter/one-prompter-llm.ts"))));
 const server = await import(dataUrl(serverJs));
 
 const VALID_QUESTIONS = {

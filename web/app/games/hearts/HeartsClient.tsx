@@ -1,5 +1,5 @@
 "use client";
-// ハーツ（自分＋CPU3人）。ロジックは lib/hearts.ts。
+// ハーツ（自分＋CPU3人）。ロジックは lib/games/hearts.ts。
 // ベスト記録の設計: localStorage `ago-hearts-best` に「優勝した回数」を保存する。
 // 端末内で完結し、サーバーへ送信しない。
 import Link from "next/link";
@@ -19,7 +19,7 @@ import {
   pointsOfCard,
   submitPass,
   type HeartsState,
-} from "@/lib/hearts";
+} from "@/lib/games/hearts";
 import { sfxDeal, sfxFlip, sfxLose, sfxTap, sfxWin } from "@/lib/sfx";
 import { tappableProps } from "@/lib/gesture";
 import { EndScreen } from "../GameJuice";

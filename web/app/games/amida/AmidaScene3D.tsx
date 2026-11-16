@@ -16,7 +16,7 @@ import { createStage, type Stage } from "@/lib/three-kit/stage";
 import { canvasTexture, createBall } from "@/lib/three-kit/primitives";
 import { attachPickPointer } from "@/lib/three-kit/pointer";
 import SceneBox from "@/lib/three-kit/SceneBox";
-import type { AmidaState } from "@/lib/amida";
+import type { AmidaState } from "@/lib/games/amida";
 
 interface Props {
   amida: AmidaState;

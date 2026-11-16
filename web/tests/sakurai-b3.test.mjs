@@ -28,7 +28,7 @@ function read(rel) {
   return fs.readFileSync(path.join(webDir, rel), "utf8");
 }
 
-const lights = await loadLib("lightsout.ts");
+const lights = await loadLib("games/lightsout.ts");
 
 // ---- B: lightsout remainingPresses ----
 

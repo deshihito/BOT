@@ -1,6 +1,6 @@
 "use client";
 // バランスタワーの 3D シーン。土台の上にブロックを積む空間を 3D 化する。
-// 安定判定は lib/balancestack.ts が決め、ここは置かれたブロックの位置と
+// 安定判定は lib/games/balancestack.ts が決め、ここは置かれたブロックの位置と
 // 崩壊時の傾きを状態へ補間追従するだけ（独自の物理判定はしない）。
 // 入力: 盤面のタップ/ドラッグ = 置く位置（現行のタップ位置決め・スライダーと同一）。
 // 配置の確定は従来どおり DOM の「置く」ボタン。
@@ -16,7 +16,7 @@ import {
   overallCenterOfMass,
   type BalanceBlockSpec,
   type PlacedBalanceBlock,
-} from "@/lib/balancestack";
+} from "@/lib/games/balancestack";
 
 interface Props {
   blocks: PlacedBalanceBlock[];

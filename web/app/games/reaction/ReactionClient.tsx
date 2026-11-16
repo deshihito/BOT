@@ -1,5 +1,5 @@
 "use client";
-// 反応速度（リアクション）。状態遷移と集計は lib/reaction.ts。
+// 反応速度（リアクション）。状態遷移と集計は lib/games/reaction.ts。
 // 赤く光っている間は待つ → 緑になった瞬間にタップまでの ms を計る。5回計測して平均を出す。
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -13,7 +13,7 @@ import {
   summarizeResults,
   tapTooEarly,
   type ReactionState,
-} from "@/lib/reaction";
+} from "@/lib/games/reaction";
 import { sfxCorrect, sfxTap, sfxWin, sfxWrong } from "@/lib/sfx";
 import { EndScreen, GoalBand } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";

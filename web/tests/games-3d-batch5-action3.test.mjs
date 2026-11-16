@@ -6,7 +6,7 @@
 // - <button> 数が現行 (breakout 1 / pong 1) 以下
 // - 入力が既存ハンドラへ接続される (breakout: 発射・次レベル / パドル追従 /
 //   下スワイプ = ポーズ。pong: pointerdown 直通の既存タップ判定 / パドル追従)
-// - ロジック (lib/breakout.ts) へ three が混入していないこと。
+// - ロジック (lib/games/breakout.ts) へ three が混入していないこと。
 //   pong は lib に専用ファイルがなく、クライアント内ロジックも無変更が前提。
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -109,7 +109,7 @@ test("3D batch5-action3 pong: タップ判定は pointerdown 直通で既存ハ�
 });
 
 test("3D batch5-action3: ロジック層に three が混入していない (pong に lib ファイルを作らない)", () => {
-  assert.doesNotMatch(read("lib", "breakout.ts"), /from "three"/, "lib/breakout.ts");
+  assert.doesNotMatch(read("lib", "games/breakout.ts"), /from "three"/, "lib/games/breakout.ts");
   assert.equal(fs.existsSync(path.join(webDir, "lib", "pong.ts")), false, "pong のロジックはクライアント内のまま");
 });
 

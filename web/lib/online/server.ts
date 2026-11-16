@@ -1,5 +1,5 @@
 // オンライン対戦ゲーム共通のサーバー側ルーム基盤（サーバー専用）。
-// lib/balku-server.ts の流儀をゲーム非依存に一般化したもの。
+// lib/balku/balku-server.ts の流儀をゲーム非依存に一般化したもの。
 // 状態の正本は Bot API 経由の bot_kv（namespace "online_rooms"、キーは
 // ルームコード、レコードに gameId を持つ）に保持する。読み込みは初回に
 // kvList で一括して行い、以後の処理はメモリ上の状態で完結させる。

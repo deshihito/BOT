@@ -1,5 +1,5 @@
 "use client";
-// パットゴルフ（9ホール）。ロジックとコース生成は lib/puttgolf.ts。
+// パットゴルフ（9ホール）。ロジックとコース生成は lib/games/puttgolf.ts。
 // 角度の規約: 0度が右、90度が下（画面座標 y 下向き）、-90度が上。
 // ベスト記録: localStorage `ago-puttgolf-best` に9ホールの最少総打数を保存する。
 // 端末内で完結し、サーバーへ送信しない。
@@ -21,7 +21,7 @@ import {
   totalPar,
   type PgPoint,
   type PuttState,
-} from "@/lib/puttgolf";
+} from "@/lib/games/puttgolf";
 import { sfxCorrect, sfxSlide, sfxTap, sfxWin } from "@/lib/sfx";
 import { tappableProps, useGesture } from "@/lib/gesture";
 import { EndScreen } from "../GameJuice";

@@ -22,7 +22,7 @@ const countButtons = (dir) => {
 };
 
 const BATCH = [
-  { dir: "nonogram", client: "NonogramClient.tsx", scene: "NonogramScene3D.tsx", buttons: 1, lib: "nonogram.ts" },
+  { dir: "nonogram", client: "NonogramClient.tsx", scene: "NonogramScene3D.tsx", buttons: 1, lib: "games/nonogram.ts" },
 ];
 
 for (const g of BATCH) {

@@ -15,7 +15,7 @@ import {
   type AdScreening,
   type ScreeningInput,
 } from "./ads-core";
-import { logfareApiKeys } from "./one-prompter-server";
+import { logfareApiKeys } from "./one-prompter/one-prompter-server";
 
 export const PARTNER_ADS_NAMESPACE = "partner_ads";
 

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { BalkuRoomError, parseRoomCode, parseTokenRevisionBody, startBalkuGame } from "@/lib/balku-server";
+import { BalkuRoomError, parseRoomCode, parseTokenRevisionBody, startBalkuGame } from "@/lib/balku/balku-server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

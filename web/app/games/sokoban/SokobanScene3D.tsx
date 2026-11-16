@@ -8,7 +8,7 @@
 //   箱タップ = 親の onBoxTap（歩いて行って押す pushBoxByClick 経路）
 //   床のダブルタップ = 親の onUndo（1手戻す。誤発火防止は親側の記録で判定）
 //   キーボード（矢印/WASD・Ctrl+Z）は親の window リスナーが従来どおり担う。
-// 移動可否・詰み判定はすべて lib/sokoban.ts と親ハンドラが決め、
+// 移動可否・詰み判定はすべて lib/games/sokoban.ts と親ハンドラが決め、
 // ここは表現と入力の橋渡しだけを行う。手数・ベストは親の DOM 併記が担う。
 // WebGL が使えない場合は onFail で親へ知らせ、親は 2D 表示に切り替える。
 import { useEffect, useRef, useState, type ReactNode } from "react";
@@ -17,7 +17,7 @@ import { createStage, type Stage } from "@/lib/three-kit/stage";
 import { createBall } from "@/lib/three-kit/primitives";
 import { attachPickPointer } from "@/lib/three-kit/pointer";
 import SceneBox from "@/lib/three-kit/SceneBox";
-import type { SokobanDir } from "@/lib/sokoban";
+import type { SokobanDir } from "@/lib/games/sokoban";
 
 interface Props {
   width: number;

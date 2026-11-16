@@ -8,7 +8,7 @@ import {
   maskUserApiKey,
   saveUserApiKey,
   validateUserApiKey,
-} from "@/lib/one-prompter-user-key";
+} from "@/lib/one-prompter/one-prompter-user-key";
 
 export const runtime = "nodejs";
 

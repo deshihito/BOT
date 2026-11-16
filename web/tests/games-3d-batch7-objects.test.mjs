@@ -8,7 +8,7 @@
 //   mastermind: onSlotTap・onSubmit）へ接続される
 // - 合法判定・勝敗判定を 3D 側で再実装していないこと
 // - mastermind の答え（secret）をシーンへ渡していないこと
-// - ロジック（lib/sokoban.ts 等）へ three が混入していないこと
+// - ロジック（lib/games/sokoban.ts 等）へ three が混入していないこと
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -169,8 +169,8 @@ test("3D batch7-objects mastermind: 答え（secret）をシーンへ渡さな�
   assert.match(client, /guesses=\{state\.guesses\}/, "シーンへ渡すのは判定済み履歴だけ");
 });
 
-test("3D batch7-objects: ロジック層（lib/sokoban.ts, rushhour.ts, peg.ts, mastermind.ts）に three が混入していない", () => {
-  for (const f of ["sokoban.ts", "rushhour.ts", "peg.ts", "mastermind.ts"]) {
+test("3D batch7-objects: ロジック層（lib/games/sokoban.ts, rushhour.ts, peg.ts, mastermind.ts）に three が混入していない", () => {
+  for (const f of ["games/sokoban.ts", "games/rushhour.ts", "games/peg.ts", "games/mastermind.ts"]) {
     assert.doesNotMatch(read("lib", f), /from "three"/, `lib/${f}`);
   }
 });

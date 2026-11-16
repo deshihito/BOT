@@ -6,7 +6,7 @@
 //   phase finished: standings が付く
 // 進行は申告制: 正しい接頭辞の長さを { type: "progress", count } で送る。
 import { useEffect, useRef, useState } from "react";
-import { playSe } from "@/lib/balku-sound";
+import { playSe } from "@/lib/balku/balku-sound";
 import OnlineShell from "../online/OnlineShell";
 import type { OnlineRoomApi, OnlineRoomView } from "../online/useOnlineRoom";
 import { useRoomJuice } from "../GameJuice";

@@ -1,6 +1,6 @@
 "use client";
 // スタッカーの 3D シーン。積み上がった段と移動中ブロックを 3D ブロック列で描く。
-// 移動・重なり・切り落としの判定は lib/stacker.ts が決め、ここは状態へ
+// 移動・重なり・切り落としの判定は lib/games/stacker.ts が決め、ここは状態へ
 // 補間追従するだけ（落下アニメーションと切り落とし片の落下は表現のみ）。
 // タワーが高くなるとカメラが上がる。入力: タップ/フリック = 落とす（現行どおり）。
 // WebGL が使えない場合は onFail で親へ知らせ、親は 2D 表示に切り替える。
@@ -9,7 +9,7 @@ import * as THREE from "three";
 import { createStage } from "@/lib/three-kit/stage";
 import { attachPickPointer } from "@/lib/three-kit/pointer";
 import SceneBox from "@/lib/three-kit/SceneBox";
-import type { StackRow } from "@/lib/stacker";
+import type { StackRow } from "@/lib/games/stacker";
 
 interface Props {
   rows: StackRow[];

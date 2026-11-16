@@ -1,5 +1,5 @@
 "use client";
-// 数字記憶。ロジックは lib/numbermemory.ts。
+// 数字記憶。ロジックは lib/games/numbermemory.ts。
 // 表示された数字を覚えて入力し、正解するたびに桁数が増える。
 // ベスト桁数は localStorage に保存する。サーバーへ送信しない。
 import Link from "next/link";
@@ -10,7 +10,7 @@ import {
   showDurationMs,
   submitNumberAnswer,
   type NmState,
-} from "@/lib/numbermemory";
+} from "@/lib/games/numbermemory";
 import { sfxCorrect, sfxLose, sfxSpawn, sfxTap, sfxWrong } from "@/lib/sfx";
 import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";

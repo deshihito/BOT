@@ -1,5 +1,5 @@
 "use client";
-// ブロック崩し。配置・得点は lib/breakout.ts、物理は canvas の rAF ループ。
+// ブロック崩し。配置・得点は lib/games/breakout.ts、物理は canvas の rAF ループ。
 // マウス/タッチ/キーでパドルを動かす。残機3、レベル進行あり。
 import Link from "next/link";
 import dynamic from "next/dynamic";
@@ -16,7 +16,7 @@ import {
   hasNextLevel,
   isBreakoutCleared,
   type BreakoutBrick,
-} from "@/lib/breakout";
+} from "@/lib/games/breakout";
 import { sfxLose, sfxPop, sfxTap, sfxWin, sfxWrong } from "@/lib/sfx";
 import { useGesture } from "@/lib/gesture";
 import { EndScreen } from "../GameJuice";

@@ -1,5 +1,5 @@
 "use client";
-// ヤッツィー。ロジックは lib/yahtzee.ts。
+// ヤッツィー。ロジックは lib/games/yahtzee.ts。
 // ダイス5個を振り（振り直し最大2回）、13カテゴリへ順に記録していく。
 // 端末内で完結し、サーバーへ送信しない。
 import Link from "next/link";
@@ -21,7 +21,7 @@ import {
   YAHTZEE_CATEGORIES,
   YAHTZEE_CATEGORY_LABELS,
   type YahtzeeState,
-} from "@/lib/yahtzee";
+} from "@/lib/games/yahtzee";
 import { useGamesNav } from "../GamesShell";
 import { tappableProps, useGesture } from "@/lib/gesture";
 import { sfxDice, sfxPlace, sfxTap, sfxWin } from "@/lib/sfx";

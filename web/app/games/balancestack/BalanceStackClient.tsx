@@ -1,6 +1,6 @@
 "use client";
 // バランスタワー。提示されたブロックを左右位置を選んで積み、重心が支持範囲を外れると崩れる。
-// 安定判定は lib/balancestack.ts の決定的モデル（各段の重心と接触区間の検証）。
+// 安定判定は lib/games/balancestack.ts の決定的モデル（各段の重心と接触区間の検証）。
 // 端末内で完結し、サーバーへ送信しない。
 import Link from "next/link";
 import dynamic from "next/dynamic";
@@ -17,7 +17,7 @@ import {
   placeBlock,
   previewStability,
   type BalanceState,
-} from "@/lib/balancestack";
+} from "@/lib/games/balancestack";
 import { sfxLose, sfxPlace, sfxTap } from "@/lib/sfx";
 import { EndScreen, ScorePop } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";

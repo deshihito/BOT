@@ -12,8 +12,13 @@
 - **Bot 用 DB API (Python/FastAPI)**: `api/`。Bot は DB に直接触らず
   この API 経由。Web 側の `web/app/api/` とは別物なので混同しない。
 - **Web (Next.js)**: `web/`。ページは `web/app/`、ロジックは `web/lib/`。
-  ドメインが育ったものは `web/lib/<domain>/` にフォルダを切る
-  (前例: worldbox)。ゲーム1本のロジックは原則そのドメイン側へ。
+  `web/lib/` の中身: 単体ゲームのロジックは `games/`、ドメイン単位は
+  `worldbox/` `balku/` `lll/` `one-prompter/` `viewslopper/` `bgcut/`
+  `online/` `three-kit/`、平置きは共通基盤 (auth / bot-api / site /
+  games-catalog / gesture / sfx 等) とワーカービルド入力
+  (compute-* / chess-* — `scripts/build-workers.mjs` がパスで参照する
+  ため平置きを維持) のみ。新規ロジックは平置きに足さず、属する
+  ドメインのフォルダへ。
 - **データ**: 実行時データの置き場は `<repo>/data/` のみ。
   `core/data/` 等は保存先ずれ期間の旧保存先 (stray) で、移行読み取り
   専用。新規書き込みで作らない。

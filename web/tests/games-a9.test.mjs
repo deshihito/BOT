@@ -1,5 +1,5 @@
 // A9フェーズの新規4本のロジック検証。
-// - lib/freecell.ts: 決定的配布・移動検証・まとめて動かせる枚数・自動送り・勝利
+// - lib/games/freecell.ts: 決定的配布・移動検証・まとめて動かせる枚数・自動送り・勝利
 // - lib/online/games/majority.ts: 秘匿（締切まで他人の回答が見えない）・多数決の採点・tick 締切
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -40,7 +40,7 @@ async function loadOnline(name, exportsList) {
   return import("data:text/javascript;base64," + Buffer.from(code).toString("base64"));
 }
 
-const fc = await loadLib("freecell.ts");
+const fc = await loadLib("games/freecell.ts");
 const mj = await loadOnline("majority.ts", [ "gameModule", "MAJORITY_QUESTIONS", "MJ_TOTAL_QUESTIONS", "MJ_POINTS_PER_VOTE", "mjScoreFor", ]);
 
 const rngStub = () => 0.5;

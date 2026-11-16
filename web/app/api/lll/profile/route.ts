@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { LllError, getProfile, parseToken } from "@/lib/lll-server";
+import { LllError, getProfile, parseToken } from "@/lib/lll/lll-server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

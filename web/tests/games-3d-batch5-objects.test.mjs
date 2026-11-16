@@ -5,7 +5,7 @@
 // - WebGL 失敗時は onFail / webglFailed で既存 2D へフォールバックする
 // - <button> 数が現行（cube 3 / mole 3）以下
 // - 入力が既存ハンドラ（cube: doMove / mole: whack）へ接続される
-// - ロジック（lib/cube.ts, lib/mole.ts）へ three が混入していないこと
+// - ロジック（lib/games/cube.ts, lib/games/mole.ts）へ three が混入していないこと
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -91,8 +91,8 @@ test("3D batch5-objects mole: 金モグラは色とリングで区別する（�
   assert.match(scene, /ring\.visible = entry\.kind === "gold" && !entry\.hit/, "金モグラは穴まわりのリングでも示す");
 });
 
-test("3D batch5-objects: ロジック層（lib/cube.ts, lib/mole.ts）に three が混入していない", () => {
-  for (const f of ["cube.ts", "mole.ts"]) {
+test("3D batch5-objects: ロジック層（lib/games/cube.ts, lib/games/mole.ts）に three が混入していない", () => {
+  for (const f of ["games/cube.ts", "games/mole.ts"]) {
     assert.doesNotMatch(read("lib", f), /from "three"/, `lib/${f}`);
   }
 });

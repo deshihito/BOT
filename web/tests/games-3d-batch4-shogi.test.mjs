@@ -4,7 +4,7 @@
 // - クライアント側に three の直接 import がないこと（シーン側だけに閉じる）
 // - シーンが three-kit の共通基盤（createStage / attachPickPointer / SceneBox）を使うこと
 // - <button> 数が現行値（各1個）から増えていないこと
-// - ロジック（lib/tsume.ts / lib/chesspuzzle.ts）へ three が混入していないこと
+// - ロジック（lib/games/tsume.ts / lib/games/chesspuzzle.ts）へ three が混入していないこと
 // - 入力（タップ/フリック）が既存ハンドラへ繋がっていること
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -80,7 +80,7 @@ test("3D chesspuzzle: 駒はプリミティブ造形で6種判別でき、盤は
 });
 
 test("3D batch4-shogi: ロジック層（tsume / chesspuzzle）に three が混入していない", () => {
-  for (const f of ["tsume.ts", "chesspuzzle.ts"]) {
+  for (const f of ["games/tsume.ts", "games/chesspuzzle.ts"]) {
     assert.doesNotMatch(read("lib", f), /from "three"/, `lib/${f}`);
     assert.doesNotMatch(read("lib", f), /three-kit/, `lib/${f}`);
   }

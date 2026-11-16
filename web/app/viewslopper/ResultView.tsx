@@ -43,7 +43,7 @@ export default function ResultView({ result, savedAt }: { result: ViewResult; sa
   const [cardName, setCardName] = useState("");
 
   async function makeCard() {
-    const { drawScoreCard, buildCardFileName } = await import("@/lib/viewslopper-card");
+    const { drawScoreCard, buildCardFileName } = await import("@/lib/viewslopper/viewslopper-card");
     const canvas = document.createElement("canvas");
     drawScoreCard(canvas, {
       url: result.url,

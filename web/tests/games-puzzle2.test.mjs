@@ -1,7 +1,7 @@
 // ソロパズル第2弾のロジック検証（lib のみ、UI 非依存）。
-// - lib/sudoku.ts: 唯一解・完成判定・ヒント・矛盾チェック
-// - lib/fifteen.ts: 解可能性・スライド・完成判定
-// - lib/lightsout.ts: 生成盤が解けること・十字反転・全消灯判定
+// - lib/games/sudoku.ts: 唯一解・完成判定・ヒント・矛盾チェック
+// - lib/games/fifteen.ts: 解可能性・スライド・完成判定
+// - lib/games/lightsout.ts: 生成盤が解けること・十字反転・全消灯判定
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -18,9 +18,9 @@ async function loadLib(name) {
   return import("data:text/javascript;base64," + Buffer.from(js).toString("base64"));
 }
 
-const sudoku = await loadLib("sudoku.ts");
-const fifteen = await loadLib("fifteen.ts");
-const lights = await loadLib("lightsout.ts");
+const sudoku = await loadLib("games/sudoku.ts");
+const fifteen = await loadLib("games/fifteen.ts");
+const lights = await loadLib("games/lightsout.ts");
 
 // ---- 数独 ----
 

@@ -1,5 +1,5 @@
 "use client";
-// ノノグラム（お絵かきロジック）。ロジックは lib/nonogram.ts。
+// ノノグラム（お絵かきロジック）。ロジックは lib/games/nonogram.ts。
 // 塗る／×印の2モード。マスを押したままなぞると連続で塗れる（ドラッグ塗り）。
 // 端末内で完結し、サーバーへ送信しない。
 import Link from "next/link";
@@ -13,7 +13,7 @@ import {
   type NonoMark,
   type NonoSize,
   type NonoState,
-} from "@/lib/nonogram";
+} from "@/lib/games/nonogram";
 import { sfxPlace, sfxTap, sfxWin } from "@/lib/sfx";
 import { tappableProps } from "@/lib/gesture";
 import { EndScreen } from "../GameJuice";

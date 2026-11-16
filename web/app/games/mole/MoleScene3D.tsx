@@ -1,6 +1,6 @@
 "use client";
 // モグラたたきの 3D シーン。土マウンド＋穴から立体モグラが出入りする。
-// 出現スケジュール・得点・コンボは lib/mole.ts とクライアントが持ち、ここは
+// 出現スケジュール・得点・コンボは lib/games/mole.ts とクライアントが持ち、ここは
 // 表現と入力の橋渡しだけ:
 //   穴（マウンド/穴/モグラ本体）のタップ = 既存 whack（穴 index）
 //   出現/消滅は親の active 状態の差分で上下アニメーションに追従させる
@@ -13,7 +13,7 @@ import * as THREE from "three";
 import { createStage } from "@/lib/three-kit/stage";
 import { attachPickPointer } from "@/lib/three-kit/pointer";
 import SceneBox from "@/lib/three-kit/SceneBox";
-import type { MoleKind } from "@/lib/mole";
+import type { MoleKind } from "@/lib/games/mole";
 
 export interface MoleActive3D {
   hole: number;

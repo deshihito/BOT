@@ -1,5 +1,5 @@
 "use client";
-// カタカナワードル（5文字カタカナ単語推測）。ロジックは lib/kwordle.ts。
+// カタカナワードル（5文字カタカナ単語推測）。ロジックは lib/games/kwordle.ts。
 // 画面キーボードと物理キーボードの両方に対応。端末内で完結し、サーバーへ送信しない。
 // ベスト記録の設計: localStorage `ago-kwordle-best` に「勝利したゲームの最少推測回数」
 // （1〜6、小さいほど良い）を保存する。負けたゲームは記録対象外。
@@ -19,7 +19,7 @@ import {
   KWORDLE_MAX_GUESSES,
   type KanaMark,
   type KwordleState,
-} from "@/lib/kwordle";
+} from "@/lib/games/kwordle";
 import { useGamesNav } from "../GamesShell";
 
 const MARK_COLORS: Record<KanaMark, string> = {

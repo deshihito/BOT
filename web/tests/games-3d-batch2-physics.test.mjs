@@ -87,12 +87,13 @@ test("3D batch2 curling: ハウス円・ストーンとフリック投げ、最�
 });
 
 test("3D batch2: ロジック層（lib/*.ts 本体）に three が混入していない", () => {
-  for (const f of fs.readdirSync(path.join(webDir, "lib"))) {
+  for (const f of fs.readdirSync(path.join(webDir, "lib"), { recursive: true })) {
     if (!f.endsWith(".ts")) continue;
+    if (f.startsWith("three-kit/")) continue; // three-kit は three を扱う共通層なので対象外
     const src = read("lib", f);
     assert.doesNotMatch(src, /from "three"/, `lib/${f}`);
   }
-  for (const name of ["billiards.ts", "airhockey.ts", "curling.ts"]) {
+  for (const name of ["games/billiards.ts", "games/airhockey.ts", "games/curling.ts"]) {
     assert.doesNotMatch(read("lib", name), /three/, `lib/${name}`);
   }
 });

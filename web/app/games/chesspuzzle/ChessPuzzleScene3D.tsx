@@ -15,7 +15,7 @@ import { createStage } from "@/lib/three-kit/stage";
 import { canvasTexture, createBall } from "@/lib/three-kit/primitives";
 import { attachPickPointer } from "@/lib/three-kit/pointer";
 import SceneBox from "@/lib/three-kit/SceneBox";
-import type { CpBoard, CpColor, CpPieceType } from "@/lib/chesspuzzle";
+import type { CpBoard, CpColor, CpPieceType } from "@/lib/games/chesspuzzle";
 
 interface Props {
   board: CpBoard;

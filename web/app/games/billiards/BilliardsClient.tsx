@@ -1,5 +1,5 @@
 "use client";
-// ビリヤード（簡易プール）。ロジックと物理は lib/billiards.ts。
+// ビリヤード（簡易プール）。ロジックと物理は lib/games/billiards.ts。
 // 角度の規約: 0度が右、90度が下（画面座標 y 下向き）。
 // ベスト記録: localStorage `ago-billiards-best` にクリア時の最少スコア
 // （打数＋スクラッチ）を保存する。端末内で完結し、サーバーへ送信しない。
@@ -22,7 +22,7 @@ import {
   shoot,
   type BilliardsState,
   type BlBall,
-} from "@/lib/billiards";
+} from "@/lib/games/billiards";
 import { sfxCorrect, sfxSlide, sfxTap, sfxWin, sfxWrong } from "@/lib/sfx";
 import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";

@@ -1,7 +1,7 @@
 "use client";
 // クレーンゲームの 3D シーン。ガラスケース風の筐体、レール上のクレーン、
 // アーム/爪、丸みのある景品（球・箱・円柱・トーラス等の組合せ、絵文字なし）。
-// クレーンの往復・降下・掴み判定は lib/cranegame.ts が決め、ここは状態へ
+// クレーンの往復・降下・掴み判定は lib/games/cranegame.ts が決め、ここは状態へ
 // 補間追従し、下降→掴む→上昇→排出シュートへの移動→落下をアニメーションで
 // 見せるだけ（取得成否は既存ロジックの result のとおりに表現する）。
 // 入力: タップ = 「とめる」（現行ボタンと同一。aimX で横、aimY で奥行き確定）。
@@ -12,7 +12,7 @@ import { createStage } from "@/lib/three-kit/stage";
 import { createBall } from "@/lib/three-kit/primitives";
 import { attachPickPointer } from "@/lib/three-kit/pointer";
 import SceneBox from "@/lib/three-kit/SceneBox";
-import { CRANE_DROP_MS, type CranePhase, type CranePrize, type CraneResult } from "@/lib/cranegame";
+import { CRANE_DROP_MS, type CranePhase, type CranePrize, type CraneResult } from "@/lib/games/cranegame";
 
 interface Props {
   prizes: CranePrize[];

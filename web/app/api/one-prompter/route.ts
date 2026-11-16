@@ -5,15 +5,15 @@ import {
   validatePromptInput,
   validateReviseInstruction,
   validateRough,
-} from "@/lib/one-prompter-llm";
+} from "@/lib/one-prompter/one-prompter-llm";
 import {
   generateFollowupQuestionsWithLlm,
   generateQuestionsWithLlm,
   logfareApiKeys,
   reviseWithLlm,
   synthesizeWithLlm,
-} from "@/lib/one-prompter-server";
-import { loadUserApiKey } from "@/lib/one-prompter-user-key";
+} from "@/lib/one-prompter/one-prompter-server";
+import { loadUserApiKey } from "@/lib/one-prompter/one-prompter-user-key";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -32,7 +32,7 @@ export const maxDuration = 60;
 // 全 LLM 呼び出しに伝播し、reasoning を "high" に上げる。
 // true 以外（不正値・未指定）はオフに丸める。
 // API キー未設定・LLM失敗時は { fallback: true } を返し、クライアントが
-// ルールベース版（lib/one-prompter.ts）でそのまま続行する。ページは壊れない。
+// ルールベース版（lib/one-prompter/one-prompter.ts）でそのまま続行する。ページは壊れない。
 
 function publicOrigin(request: Request) {
   const url = new URL(request.url);

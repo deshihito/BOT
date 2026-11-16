@@ -8,7 +8,7 @@
 // - 入力が既存ハンドラ（falling: handleSwipe・handleTap / columns: handleSwipe・
 //   handleTap、どちらも 2D 盤面ジェスチャと共有）へ接続される
 // - 落下・消去・回転・マッチ判定を 3D 側で再実装していないこと
-// - ロジック（lib/falling.ts, lib/columns.ts）へ three が混入していないこと
+// - ロジック（lib/games/falling.ts, lib/columns.ts）へ three が混入していないこと
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";

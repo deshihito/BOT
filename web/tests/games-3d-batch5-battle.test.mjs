@@ -50,9 +50,9 @@ for (const g of BATCH) {
 
 
 
-test("3D batch5-battle: ロジック層（lib/darts.ts, lib/online/games/*）に three が混入していない", () => {
+test("3D batch5-battle: ロジック層（lib/games/darts.ts, lib/online/games/*）に three が混入していない", () => {
   for (const p of [
-    ["lib", "darts.ts"],
+    ["lib", "games/darts.ts"],
   ]) {
     assert.doesNotMatch(read(...p), /from "three"/, p.join("/"));
   }

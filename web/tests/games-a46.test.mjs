@@ -1,6 +1,6 @@
 // A46フェーズの検証（内容充実: バンク増量のみ）。
-// - lib/quiz.ts: 問題増量第3弾（140→160問→A49で180問・各カテゴリ+4問・形式・追加分の正解の妥当性）
-// - lib/flagquiz.ts: ペア増量第3弾（170→185組→A49で195組・重複なし・ISO 照合・追加分の収録）
+// - lib/games/quiz.ts: 問題増量第3弾（140→160問→A49で180問・各カテゴリ+4問・形式・追加分の正解の妥当性）
+// - lib/games/flagquiz.ts: ペア増量第3弾（170→185組→A49で195組・重複なし・ISO 照合・追加分の収録）
 // - lib/online/games/nanja.ts: 生き物増量第2弾（26→30種・自動名30件・山札120枚・Client 複製との一致）
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -41,8 +41,8 @@ async function loadOnline(name, exportsList) {
   return import("data:text/javascript;base64," + Buffer.from(code).toString("base64"));
 }
 
-const quiz = await loadLib("quiz.ts");
-const fq = await loadLib("flagquiz.ts");
+const quiz = await loadLib("games/quiz.ts");
+const fq = await loadLib("games/flagquiz.ts");
 const nanja = await loadOnline("nanja.ts", [
   "gameModule",
   "NANJA_CREATURES",

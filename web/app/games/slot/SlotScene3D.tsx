@@ -1,6 +1,6 @@
 "use client";
 // スロットの 3D シーン。筐体に 3 つのリール（回転する箱）とレバー。
-// リールは左から順に止まり、最終結果は lib/slot.ts のスピン結果と一致する
+// リールは左から順に止まり、最終結果は lib/games/slot.ts のスピン結果と一致する
 // （親が display / stopped を管理し、ここは回転演出だけを行う）。
 // レバーを引く操作は、画面の下スワイプ/下フリック（既存ジェスチャと同一）。
 // WebGL が使えない場合は onFail で親へ知らせ、親は 2D 表示に切り替える。
@@ -10,7 +10,7 @@ import { createStage } from "@/lib/three-kit/stage";
 import { canvasTexture } from "@/lib/three-kit/primitives";
 import { attachPickPointer } from "@/lib/three-kit/pointer";
 import SceneBox from "@/lib/three-kit/SceneBox";
-import { slotSymbol, type SlotSymbolId } from "@/lib/slot";
+import { slotSymbol, type SlotSymbolId } from "@/lib/games/slot";
 
 interface Props {
   display: SlotSymbolId[];

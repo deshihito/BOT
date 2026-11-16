@@ -1,5 +1,5 @@
 "use client";
-// ドラッグレース。ロジックは lib/dragrace.ts（決定的モデル）。
+// ドラッグレース。ロジックは lib/games/dragrace.ts（決定的モデル）。
 // グリーンへの反応と、各ギアのシフトタイミングだけでタイムが決まる。
 // 時刻の計測はここで行い、lib には経過 ms だけを渡す。端末内で完結する。
 import Link from "next/link";
@@ -23,7 +23,7 @@ import {
   type DragDifficulty,
   type DragState,
   createDragRace,
-} from "@/lib/dragrace";
+} from "@/lib/games/dragrace";
 import { sfxCorrect, sfxLose, sfxSlide, sfxTap, sfxTick, sfxWin, sfxWrong } from "@/lib/sfx";
 import { tappableProps } from "@/lib/gesture";
 import { EndScreen } from "../GameJuice";

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { scorePage, scoreUx, validateViewUrl } from "@/lib/viewslopper";
-import { ViewFetchError, assess, assessAppearance, diagnose, fetchPage } from "@/lib/viewslopper-server";
+import { scorePage, scoreUx, validateViewUrl } from "@/lib/viewslopper/viewslopper";
+import { ViewFetchError, assess, assessAppearance, diagnose, fetchPage } from "@/lib/viewslopper/viewslopper-server";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;

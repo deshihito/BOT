@@ -1,5 +1,5 @@
 "use client";
-// ワード当て（5文字英単語推測）。ロジックは lib/wordle.ts。
+// ワード当て（5文字英単語推測）。ロジックは lib/games/wordle.ts。
 // 画面キーボードと物理キーボードの両方に対応。端末内で完結し、サーバーへ送信しない。
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
@@ -16,7 +16,7 @@ import {
   type LetterMark,
   type WordleState,
   type WordleStats,
-} from "@/lib/wordle";
+} from "@/lib/games/wordle";
 import { sfxFlip, sfxLose, sfxTap, sfxWin, sfxWrong } from "@/lib/sfx";
 import { tappableProps } from "@/lib/gesture";
 import { EndScreen } from "../GameJuice";
