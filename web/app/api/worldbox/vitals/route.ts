@@ -24,14 +24,16 @@ import { partyKeyOf } from "@/lib/worldbox/party";
 import { loadPartyOf } from "@/lib/worldbox/party-online";
 import type { PlayerProfile, RespawnPoint } from "@/lib/worldbox/profile";
 import {
-  applyDeath, applyMobDamage, resolveRespawnPoint, setBedRespawn, stepVitals,
+  activityForWindow, applyDeath, applyMobDamage, resolveRespawnPoint, setBedRespawn, stepVitals,
 } from "@/lib/worldbox/vitals";
 
 export const runtime = "nodejs";
 
 // AGO WORLD BOX のプレイヤーバイタル（HP・空腹・毒・死亡・リスポーン）。
 // 状態の正は profile（bot_kv worldbox_profiles）で、遷移規則は vitals.ts。
-// POST { action: "sync" }: 時間経過の精算（空腹・毒・飢え）。死亡したら死亡処理まで行う
+// POST { action: "sync", px?, py?, space? }: 時間経過の精算（空腹・毒・飢え）。
+//   空腹の活動クラスは現在位置と前回精算位置の平均速度からサーバー側で判定する。
+//   死亡したら死亡処理まで行う
 // POST { action: "damage", mobId, x, y, px?, py? }: モブ接触ダメージ。
 //   配置の再計算で実在を検証し、距離は mobs ルートと同じ方式（プレゼンス→申告→セーブ）
 // POST { action: "set_bed", x, y }: そのタイルのベッドをリスポーン点にする（近接検証）
@@ -141,7 +143,30 @@ export async function POST(request: Request) {
   const current = await loadProfile(ownerKey);
 
   if (data.action === "sync") {
-    const { profile, died } = stepVitals(current, now);
+    // 空腹の活動クラスはサーバー側で判定する（クライアント申告の活動は使わない）。
+    // 本人の現在位置（プレゼンス→申告→セーブ、damage と同じ優先順）と
+    // profile に残した前回精算位置との平均速度で idle / move / dash に分類し、
+    // 現在位置は次回の判定用に profile へ残す。
+    const reported =
+      typeof data.px === "number" && typeof data.py === "number" &&
+      Number.isFinite(data.px) && Number.isFinite(data.py) &&
+      Math.abs(data.px) <= WORLD_COORD_LIMIT && Math.abs(data.py) <= WORLD_COORD_LIMIT
+        ? { x: data.px, y: data.py }
+        : null;
+    const space = typeof data.space === "string" && data.space.length > 0 ? data.space.slice(0, 64) : "world";
+    const pos = await actorWorldPosition(ownerKey, reported, space);
+    const prev = typeof current.vitalX === "number" && typeof current.vitalY === "number" &&
+      typeof current.vitalSpace === "string"
+      ? { x: current.vitalX, y: current.vitalY, space: current.vitalSpace }
+      : null;
+    const cur = pos ? { x: pos.x, y: pos.y, space } : null;
+    const elapsedSec = current.vitalAt > 0 ? (now - current.vitalAt) / 1000 : 0;
+    const activity = activityForWindow(prev, cur, elapsedSec);
+    const settled = stepVitals(current, now, activity);
+    const died = settled.died;
+    const profile = cur
+      ? { ...settled.profile, vitalX: cur.x, vitalY: cur.y, vitalSpace: cur.space }
+      : settled.profile;
     if (died) return settleDeath(ownerKey, profile, now, session.username ?? "");
     if (profile.pendingTeleport) {
       const teleport = profile.pendingTeleport;

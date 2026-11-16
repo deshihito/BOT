@@ -89,9 +89,9 @@ function baseProfile(overrides = {}) {
 test("buffs: warm slows hunger drain, alert regenerates while fed", () => {
   const now = 1_000_000 + 600_000; // 10分後
   const plain = V.stepVitals(baseProfile(), now).profile;
-  assert.equal(plain.hunger, 50); // 100 - (100/1200)*600
+  assert.equal(plain.hunger, 95); // 放置レート: 100 - (100/14400)*600
   const warmed = V.stepVitals(V.applyBuff(baseProfile(), "warm", 1_000_000), now).profile;
-  assert.equal(warmed.hunger, 70); // ドレイン ×0.6
+  assert.equal(warmed.hunger, 97); // ドレイン ×0.6
   assert.ok(warmed.status.some((e) => e.kind === "warm"));
   const alerted = V.stepVitals(V.applyBuff(baseProfile(), "alert", 1_000_000), now).profile;
   // alert は5分で切れる: 再生は 300秒 × 0.2 = 60 → 上限内で +60 だが満腹条件は精算後 hunger で判定

@@ -61,6 +61,10 @@ export type PlayerProfile = {
   status: StatusEffect[];
   /** バイタル（空腹・毒・飢え）を最後に精算した時刻（epoch ms）。0 は未精算。 */
   vitalAt: number;
+  /** 前回バイタル精算時の位置と空間（空腹の活動判定用。未記録は undefined）。 */
+  vitalX?: number;
+  vitalY?: number;
+  vitalSpace?: string;
   /** ベッドで設定したリスポーン点（ワールド座標）。無ければ null。 */
   respawn: RespawnPoint | null;
   /** 最後に休憩した地点（ワールド座標）。無ければ null。 */
@@ -254,6 +258,9 @@ export function parseProfile(raw: unknown): PlayerProfile {
     hp: clampInt(data.hp, 0, HP_MAX + 20, HP_MAX), // 守護の最大HPボーナス分まで許す
     status: parseStatus(data.status),
     vitalAt: clampInt(data.vitalAt, 0, Number.MAX_SAFE_INTEGER, 0),
+    vitalX: parseVitalCoord(data.vitalX),
+    vitalY: parseVitalCoord(data.vitalY),
+    vitalSpace: parseVitalSpace(data.vitalSpace),
     respawn: parsePoint(data.respawn),
     restPoint: parsePoint(data.restPoint),
     lastDamageAt: clampInt(data.lastDamageAt, 0, Number.MAX_SAFE_INTEGER, 0),
@@ -350,6 +357,18 @@ function parseStatus(raw: unknown): StatusEffect[] {
   return out.slice(0, 4);
 }
 
+/** 前回精算位置の座標を読む（範囲外・非数は undefined）。 */
+function parseVitalCoord(v: unknown): number | undefined {
+  if (typeof v !== "number" || !Number.isFinite(v)) return undefined;
+  return Math.max(-1_000_000, Math.min(1_000_000, v));
+}
+
+/** 前回精算位置の空間を読む（空文字・非文字列は undefined）。 */
+function parseVitalSpace(v: unknown): string | undefined {
+  if (typeof v !== "string" || v.length === 0) return undefined;
+  return v.slice(0, 64);
+}
+
 function parsePoint(raw: unknown): RespawnPoint | null {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
   const v = raw as { x?: unknown; y?: unknown };
@@ -369,6 +388,14 @@ export function serializeProfile(profile: PlayerProfile): string {
     hp: clampInt(profile.hp, 0, HP_MAX + 20, HP_MAX),
     status: parseStatus(profile.status),
     vitalAt: clampInt(profile.vitalAt, 0, Number.MAX_SAFE_INTEGER, 0),
+    // 前回精算位置は3点そろったときだけ書く（欠けた状態を保存しない）
+    ...(typeof profile.vitalX === "number" && typeof profile.vitalY === "number" && typeof profile.vitalSpace === "string"
+      ? {
+          vitalX: parseVitalCoord(profile.vitalX),
+          vitalY: parseVitalCoord(profile.vitalY),
+          vitalSpace: profile.vitalSpace.slice(0, 64),
+        }
+      : {}),
     respawn: parsePoint(profile.respawn),
     restPoint: parsePoint(profile.restPoint),
     lastDamageAt: clampInt(profile.lastDamageAt, 0, Number.MAX_SAFE_INTEGER, 0),
