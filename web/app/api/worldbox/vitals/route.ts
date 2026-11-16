@@ -26,7 +26,7 @@ import { partyKeyOf } from "@/lib/worldbox/party";
 import { loadPartyOf } from "@/lib/worldbox/party-online";
 import type { PlayerProfile, RespawnPoint } from "@/lib/worldbox/profile";
 import {
-  activityForWindow, applyDeath, applyMobDamage, applyPvpDamage, pvpSpaceAllowed,
+  activityForWindow, applyDeath, applyHazardDamage, applyMobDamage, applyPvpDamage, hazardDamageFor, pvpSpaceAllowed,
   PVP_ATTACK_MAX_DISTANCE, resolveRespawnPoint, setBedRespawn, stepVitals,
 } from "@/lib/worldbox/vitals";
 
@@ -456,6 +456,36 @@ export async function POST(request: Request) {
         { headers: NO_STORE },
       );
     });
+  }
+
+  if (data.action === "hazard") {
+    // 環境ハザード（サボテン・マグマ）: 位置は申告させず、サーバー側の現在位置の
+    // 当たり円が触れているタイルにハザードブロックがあるときだけダメージ。
+    // ハザードは固体ブロックなので「足元」ではなく「接触」で判定する。
+    const pos = await actorWorldPosition(ownerKey, null);
+    if (!pos) {
+      return NextResponse.json({ profile: current, died: false, applied: false }, { headers: NO_STORE });
+    }
+    let dmg = 0;
+    const r = 0.32;
+    for (let ty = Math.floor(pos.y - r); ty <= Math.floor(pos.y + r); ty++) {
+      for (let tx = Math.floor(pos.x - r); tx <= Math.floor(pos.x + r); tx++) {
+        const override = await loadTileOverride(tx, ty);
+        if (override?.block) dmg = Math.max(dmg, hazardDamageFor(override.block.itemId));
+      }
+    }
+    if (dmg <= 0) {
+      return NextResponse.json({ profile: current, died: false, applied: false }, { headers: NO_STORE });
+    }
+    const result = applyHazardDamage(current, dmg, now);
+    if (result.died) return settleDeath(ownerKey, result.profile, now, session.username ?? "");
+    if (result.profile !== current && !(await storeProfile(ownerKey, result.profile))) {
+      return errorResponse("store_failed", 503);
+    }
+    return NextResponse.json(
+      { profile: result.profile, died: false, applied: result.applied },
+      { headers: NO_STORE },
+    );
   }
 
   if (data.action === "set_bed") {
