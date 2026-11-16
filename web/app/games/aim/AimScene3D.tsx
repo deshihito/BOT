@@ -1,6 +1,6 @@
 "use client";
 // エイムの 3D シーン。空間内の立体ターゲット（円盤 + 同心リング）を表示する。
-// 出現スケジュール・命中判定・得点は lib/aim.ts とクライアントが持ち、
+// 出現スケジュール・命中判定・得点は lib/games/aim.ts とクライアントが持ち、
 // ここは表現と入力の橋渡しだけ: 的は親状態（targets）から差分同期し、
 // タップ位置はレイキャスト点を lib と同じ統一単位（横幅=100）へ変換して
 // 既存の shootAt へ渡す（3D 側で命中判定は再実装しない）。
@@ -13,7 +13,7 @@ import { createStage } from "@/lib/three-kit/stage";
 import { canvasTexture } from "@/lib/three-kit/primitives";
 import { attachPickPointer } from "@/lib/three-kit/pointer";
 import SceneBox from "@/lib/three-kit/SceneBox";
-import { AIM_FIELD_HEIGHT, AIM_FIELD_WIDTH, type AimTarget } from "@/lib/aim";
+import { AIM_FIELD_HEIGHT, AIM_FIELD_WIDTH, type AimTarget } from "@/lib/games/aim";
 
 interface Props {
   targets: AimTarget[];

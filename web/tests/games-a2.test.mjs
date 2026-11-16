@@ -1,7 +1,7 @@
 // A2 フェーズ新規4本のロジック検証（lib のみ、UI 非依存）。
-// - lib/nonogram.ts: ヒント計算・完成判定・ミス照合・変形
-// - lib/peg.ts: 合法手・行き詰まり・評価
-// - lib/hanoi.ts: 最少手数・解答生成・合法判定
+// - lib/games/nonogram.ts: ヒント計算・完成判定・ミス照合・変形
+// - lib/games/peg.ts: 合法手・行き詰まり・評価
+// - lib/games/hanoi.ts: 最少手数・解答生成・合法判定
 // - lib/online/games/speed.ts: ±1判定・つなぎ札リセット・秘匿ビュー
 // online モジュールは games-falling-online2.test.mjs と同じ transpile＋連結方式で読む。
 import { test } from "node:test";
@@ -45,9 +45,9 @@ async function loadSpeed() {
   return import("data:text/javascript;base64," + Buffer.from(code).toString("base64"));
 }
 
-const nono = await loadLib("nonogram.ts");
-const peg = await loadLib("peg.ts");
-const hanoi = await loadLib("hanoi.ts");
+const nono = await loadLib("games/nonogram.ts");
+const peg = await loadLib("games/peg.ts");
+const hanoi = await loadLib("games/hanoi.ts");
 const { speedModule: speed, speedRankOf, speedCanPlayOn, speedLegalPlays } = await loadSpeed();
 
 const players = () => [

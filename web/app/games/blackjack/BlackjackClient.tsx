@@ -1,5 +1,5 @@
 "use client";
-// ブラックジャック。ロジックは lib/blackjack.ts（配当 3:2、ディーラーは17でスタンド）。
+// ブラックジャック。ロジックは lib/games/blackjack.ts（配当 3:2、ディーラーは17でスタンド）。
 // チップは端末内だけの遊び用ポイントで localStorage に保存する。サーバーへ送信しない。
 import Link from "next/link";
 import dynamic from "next/dynamic";
@@ -21,7 +21,7 @@ import {
   startRound,
   type BjState,
   type Card,
-} from "@/lib/blackjack";
+} from "@/lib/games/blackjack";
 import { useGamesNav } from "../GamesShell";
 import { tappableProps, useGesture } from "@/lib/gesture";
 import { sfxCorrect, sfxDeal, sfxPlace, sfxPop, sfxTap, sfxWrong } from "@/lib/sfx";

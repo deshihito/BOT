@@ -1,8 +1,8 @@
 // A36フェーズ: パズル問題集の増量分の機械検証（lib のみ、UI 非依存）。
-// - lib/tsume.ts: 全10題（1手詰め5・3手詰め5）がソルバーで「初期局面で玉に王手なし・
+// - lib/games/tsume.ts: 全10題（1手詰め5・3手詰め5）がソルバーで「初期局面で玉に王手なし・
 //   指定手数ちょうどで詰み・初手が1つだけ」を満たす
-// - lib/chesspuzzle.ts: 全15題（1手詰め7・2手詰め8）が verifyProblem を通る
-// - lib/river.ts: 全12題が BFS で解け、最短手数が既知の値と一致する
+// - lib/games/chesspuzzle.ts: 全15題（1手詰め7・2手詰め8）が verifyProblem を通る
+// - lib/games/river.ts: 全12題が BFS で解け、最短手数が既知の値と一致する
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -20,9 +20,9 @@ async function loadLib(name) {
   return import("data:text/javascript;base64," + Buffer.from(js).toString("base64"));
 }
 
-const tsume = await loadLib("tsume.ts");
-const cp = await loadLib("chesspuzzle.ts");
-const rv = await loadLib("river.ts");
+const tsume = await loadLib("games/tsume.ts");
+const cp = await loadLib("games/chesspuzzle.ts");
+const rv = await loadLib("games/river.ts");
 
 // ------------------------------------------------------------ tsume
 

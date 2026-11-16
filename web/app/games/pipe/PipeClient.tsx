@@ -1,5 +1,5 @@
 "use client";
-// パイプつなぎ。ロジックは lib/pipe.ts（解の存在する生成・回転・水の流れ判定）。
+// パイプつなぎ。ロジックは lib/games/pipe.ts（解の存在する生成・回転・水の流れ判定）。
 // タイルをタップすると90度回転し、水源から水が届くタイルは色づく。
 // 端末内で完結し、サーバーへ送信しない。
 import Link from "next/link";
@@ -17,7 +17,7 @@ import {
   rotatePipe,
   type PipeCell,
   type PipeState,
-} from "@/lib/pipe";
+} from "@/lib/games/pipe";
 import { useGamesNav } from "../GamesShell";
 
 const BEST_KEY = "ago-pipe-best";

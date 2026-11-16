@@ -1,5 +1,5 @@
 "use client";
-// ハノイの塔。ロジックは lib/hanoi.ts。
+// ハノイの塔。ロジックは lib/games/hanoi.ts。
 // 柱を押して円盤を持ち上げ、置きたい柱を押して移す。自動解答の再生もできる。端末内で完結。
 import Link from "next/link";
 import dynamic from "next/dynamic";
@@ -16,7 +16,7 @@ import {
   moveDisk,
   type HanoiMove,
   type HanoiState,
-} from "@/lib/hanoi";
+} from "@/lib/games/hanoi";
 import { sfxPlace, sfxTap, sfxWin, sfxWrong } from "@/lib/sfx";
 import { tappableProps } from "@/lib/gesture";
 import { EndScreen } from "../GameJuice";

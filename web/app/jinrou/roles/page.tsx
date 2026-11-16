@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { JINROU_ROLES, type JinrouTeam } from "@/lib/jinrou-roles";
+import { JINROU_ROLES, type JinrouTeam } from "@/lib/games/jinrou-roles";
 import Breadcrumbs from "../../Breadcrumbs";
 
 export const metadata = {

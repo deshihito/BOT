@@ -15,8 +15,8 @@ const pageSrc = read("app/one-prompter/page.tsx");
 const menuSrc = read("app/one-prompter/OpMenu.tsx");
 const clientSrc = read("app/one-prompter/OnePrompterClient.tsx");
 const routeSrc = read("app/api/one-prompter/route.ts");
-const llmSrc = read("lib/one-prompter-llm.ts");
-const serverSrc = read("lib/one-prompter-server.ts");
+const llmSrc = read("lib/one-prompter/one-prompter-llm.ts");
+const serverSrc = read("lib/one-prompter/one-prompter-server.ts");
 const cssSrc = read("app/globals.css");
 
 /** 行コメント（// で始まる行）を除いた本文。コメント中の言及を表示と数えないため。 */
@@ -118,8 +118,8 @@ test("クライアント側コードと表示文言にプロバイダ名（Logfa
 test("モデル選択は廃止され、生成は ds1017 固定（env 差し替えのみ）", () => {
   // 選択肢・キー解決・対応表の痕跡がどこにもない
   for (const [name, src] of [
-    ["one-prompter-llm.ts", llmSrc],
-    ["one-prompter-server.ts", serverSrc],
+    ["one-prompter/one-prompter-llm.ts", llmSrc],
+    ["one-prompter/one-prompter-server.ts", serverSrc],
     ["OnePrompterClient.tsx", clientSrc],
     ["OpMenu.tsx", menuSrc],
     ["OpHeader.tsx", headerSrc],

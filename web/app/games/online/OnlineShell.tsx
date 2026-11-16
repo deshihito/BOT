@@ -8,7 +8,7 @@
 //     フックで { options, setOptions } を読み書きし、作成時に options として送られる
 //   - 関数（render prop）を渡す場合は同じ { options, setOptions } を引数で受け取る
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
-import { loadSoundSettings, playSe, saveSoundSettings, unlockAudio, type BalkuSoundSettings } from "@/lib/balku-sound";
+import { loadSoundSettings, playSe, saveSoundSettings, unlockAudio, type BalkuSoundSettings } from "@/lib/balku/balku-sound";
 import { inviteUrlForGame, roomCodeFromSearch } from "@/lib/discord-activity";
 import { useGamesNav } from "../GamesShell";
 import { useOnlineRoom, type OnlineRoomApi, type OnlineRoomView } from "./useOnlineRoom";

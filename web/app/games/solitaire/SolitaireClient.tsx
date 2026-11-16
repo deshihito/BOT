@@ -1,5 +1,5 @@
 "use client";
-// ソリティア（クロンダイク）。ロジックは lib/solitaire.ts。
+// ソリティア（クロンダイク）。ロジックは lib/games/solitaire.ts。
 // クリックで選択 → 移動先クリックで移動。ダブルクリックで組札へ自動移動。
 // ドラッグは使わず、スマホでもタップだけで完結する。端末内で完結し、サーバーへ送信しない。
 import Link from "next/link";
@@ -29,7 +29,7 @@ import {
   SUITS,
   type SolCard,
   type SolState,
-} from "@/lib/solitaire";
+} from "@/lib/games/solitaire";
 import { useGamesNav } from "../GamesShell";
 import { sfxFlip, sfxPlace, sfxTap, sfxWin } from "@/lib/sfx";
 import { tappableProps, useGesture } from "@/lib/gesture";

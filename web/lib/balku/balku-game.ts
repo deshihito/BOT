@@ -1,6 +1,6 @@
 // BALKU（建築ブラフのカードゲーム）の純粋ロジック。自己完結モジュール
 // （import なし）。元実装 server/balkuGame.ts のルールを、そのままの
-// 仕様で AGO WEB に移植したもの。オンライン同期は lib/balku-server.ts が
+// 仕様で AGO WEB に移植したもの。オンライン同期は lib/balku/balku-server.ts が
 // この状態遷移関数だけを使って行う。
 //
 // 核ループ:

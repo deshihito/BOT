@@ -1,6 +1,6 @@
 "use client";
 // ワニワニ（3D）。頭部と歯の描画・タップ判定は CrocodileScene3D（three.js、動的 import）、
-// 進行は lib/crocodile.ts（当たりの歯はシードで決まり、CPU の手も決定的）。
+// 進行は lib/games/crocodile.ts（当たりの歯はシードで決まり、CPU の手も決定的）。
 // 歯をタップすると指が沈めに行き、当たりなら顎が高速で閉じる。
 // ベスト記録の設計: localStorage `ago-crocodile-best` に「勝った回数」を保存する。
 import dynamic from "next/dynamic";
@@ -11,7 +11,7 @@ import {
   pressTooth,
   remainingTeeth,
   type CrState,
-} from "@/lib/crocodile";
+} from "@/lib/games/crocodile";
 import { isSfxMuted, setSfxMuted } from "@/lib/sfx";
 import { useGamesNav } from "../GamesShell";
 

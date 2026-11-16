@@ -1,5 +1,5 @@
 "use client";
-// スネーク。ロジックは lib/snake.ts（純粋関数）。
+// スネーク。ロジックは lib/games/snake.ts（純粋関数）。
 // canvas 描画、盤面スワイプで方向転換・タップで開始/ポーズ（ボタンなし）。矢印/WASDも可。ベストスコア保存。
 import Link from "next/link";
 import dynamic from "next/dynamic";
@@ -17,7 +17,7 @@ import {
   tickSnake,
   type SnakeDir,
   type SnakeState,
-} from "@/lib/snake";
+} from "@/lib/games/snake";
 import { sfxHit, sfxKo, sfxLose } from "@/lib/sfx";
 import { juiceFlash, juiceHitstop, juiceShake, type JuiceIntensity } from "@/lib/juice";
 import { useGesture } from "@/lib/gesture";

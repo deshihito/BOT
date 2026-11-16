@@ -1,6 +1,6 @@
 "use client";
 // カーリングの 3D シーン。氷面 + ハウス円 + ストーン。
-// 物理は lib/curling.ts が決め、ここは displayStones (親がフレーム列を再生した
+// 物理は lib/games/curling.ts が決め、ここは displayStones (親がフレーム列を再生した
 // 位置) へ補間追従するだけ。3D 側で衝突・得点判定はしない。
 // 投げたストーンが最終位置へ収束する見た目は、親の frames 再生 + ここでの
 // 指数補間 (減速に合わせて追従が緩む) で表現する。
@@ -24,7 +24,7 @@ import {
   CU_THROW_Y,
   CU_WIDTH,
   type CuStone,
-} from "@/lib/curling";
+} from "@/lib/games/curling";
 
 interface Props {
   stones: CuStone[];

@@ -1,5 +1,5 @@
 "use client";
-// ダイスクエスト。ロジックは lib/dicequest.ts（スコアシート式ソロダイス）。
+// ダイスクエスト。ロジックは lib/games/dicequest.ts（スコアシート式ソロダイス）。
 // 白ダイス2個＋色ダイス4個を振り、各行の候補から1マスだけチェックする。
 // 端末内で完結し、サーバーへ送信しない。
 import Link from "next/link";
@@ -25,7 +25,7 @@ import {
   DQ_MAX_FAILURES,
   type DqColor,
   type DqState,
-} from "@/lib/dicequest";
+} from "@/lib/games/dicequest";
 import { useGamesNav } from "../GamesShell";
 import { tappableProps, useGesture } from "@/lib/gesture";
 import { sfxDice, sfxPlace, sfxWin, sfxWrong } from "@/lib/sfx";

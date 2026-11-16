@@ -1,6 +1,6 @@
 // A49フェーズ: 内容充実3件（バンク増量のみ）の検証。
-// - lib/quiz.ts: 問題増量第4弾（160→180問・各カテゴリ+4問・形式・追加分の正解の妥当性）
-// - lib/flagquiz.ts: ペア増量第4弾（185→195組・重複なし・ISO 照合・追加分の収録）
+// - lib/games/quiz.ts: 問題増量第4弾（160→180問・各カテゴリ+4問・形式・追加分の正解の妥当性）
+// - lib/games/flagquiz.ts: ペア増量第4弾（185→195組・重複なし・ISO 照合・追加分の収録）
 // - lib/online/games/shiritori.ts: 辞書増量第3弾（1400→1600語・重複なし・
 //   「ン」終わりの比率 約10%・行き止まり0件・増量語での実プレイ）
 import { test } from "node:test";
@@ -42,8 +42,8 @@ async function loadOnline(name, exportsList) {
   return import("data:text/javascript;base64," + Buffer.from(code).toString("base64"));
 }
 
-const quiz = await loadLib("quiz.ts");
-const fq = await loadLib("flagquiz.ts");
+const quiz = await loadLib("games/quiz.ts");
+const fq = await loadLib("games/flagquiz.ts");
 const shi = await loadOnline("shiritori.ts", [
   "SHIRITORI_WORDS",
   "isValidWordForm",

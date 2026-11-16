@@ -1,5 +1,5 @@
 "use client";
-// 数独。ロジックは lib/sudoku.ts（唯一解を保って穴あけ、ヒント・矛盾チェック付き）。
+// 数独。ロジックは lib/games/sudoku.ts（唯一解を保って穴あけ、ヒント・矛盾チェック付き）。
 // 端末内で完結し、サーバーへ送信しない。
 import Link from "next/link";
 import dynamic from "next/dynamic";
@@ -17,7 +17,7 @@ import {
   toggleNote,
   type SudokuDifficulty,
   type SudokuState,
-} from "@/lib/sudoku";
+} from "@/lib/games/sudoku";
 import { sfxCorrect, sfxPlace, sfxTap, sfxWin, sfxWrong } from "@/lib/sfx";
 import { tappableProps, useGesture } from "@/lib/gesture";
 import { EndScreen } from "../GameJuice";

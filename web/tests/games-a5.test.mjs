@@ -1,6 +1,6 @@
 // A5フェーズの新規4本のロジック検証。
-// - lib/darts.ts: エリア判定（ブル/ダブル/トリプル/セクター）・ラウンド制と合計
-// - lib/touchnumber.ts: 配置・次の数字判定・ミス集計
+// - lib/games/darts.ts: エリア判定（ブル/ダブル/トリプル/セクター）・ラウンド制と合計
+// - lib/games/touchnumber.ts: 配置・次の数字判定・ミス集計
 // - lib/online/games/wordwolf.ts: お題秘匿・議論tick・投票/決選投票の決着
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -40,8 +40,8 @@ async function loadWordwolf() {
   return import("data:text/javascript;base64," + Buffer.from(code).toString("base64"));
 }
 
-const darts = await loadLib("darts.ts");
-const touch = await loadLib("touchnumber.ts");
+const darts = await loadLib("games/darts.ts");
+const touch = await loadLib("games/touchnumber.ts");
 const ww = await loadWordwolf();
 
 function seeded(seed) {

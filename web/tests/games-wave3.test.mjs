@@ -1,6 +1,6 @@
 // 第3波（反射/エイム系）のロジック検証（lib のみ、UI 非依存）。
-// - lib/reaction.ts: 待機スケジュール・状態遷移・フライング・集計・評価
-// - lib/aim.ts: 的スケジュール・ヒット判定・得点・命中率
+// - lib/games/reaction.ts: 待機スケジュール・状態遷移・フライング・集計・評価
+// - lib/games/aim.ts: 的スケジュール・ヒット判定・得点・命中率
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -17,8 +17,8 @@ async function loadLib(name) {
   return import("data:text/javascript;base64," + Buffer.from(js).toString("base64"));
 }
 
-const reaction = await loadLib("reaction.ts");
-const aim = await loadLib("aim.ts");
+const reaction = await loadLib("games/reaction.ts");
+const aim = await loadLib("games/aim.ts");
 
 // ---------------- reaction ----------------
 

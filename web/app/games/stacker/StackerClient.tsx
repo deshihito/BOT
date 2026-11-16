@@ -1,5 +1,5 @@
 "use client";
-// スタッカー。ロジックは lib/stacker.ts。
+// スタッカー。ロジックは lib/games/stacker.ts。
 // 左右に往復するブロックをタイミングよく止めて積み上げ、はみ出しは切り落とされる。
 // ベスト段数は localStorage に保存する。サーバーへ送信しない。
 import Link from "next/link";
@@ -14,7 +14,7 @@ import {
   dropStacker,
   stackerIntervalMs,
   type StackerState,
-} from "@/lib/stacker";
+} from "@/lib/games/stacker";
 import { sfxCorrect, sfxLose, sfxPlace } from "@/lib/sfx";
 import { EndScreen, GoalBand } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";

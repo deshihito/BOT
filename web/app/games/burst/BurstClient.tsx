@@ -8,7 +8,7 @@
 // 提出は { type: "play", card }、列の選択は { type: "takeRow", row }。
 import dynamic from "next/dynamic";
 import { useEffect, useRef, useState } from "react";
-import { playSe } from "@/lib/balku-sound";
+import { playSe } from "@/lib/balku/balku-sound";
 
 // 3D シーンは three を含むため遅延読み込み（このページ専用チャンクに閉じる）。
 const BurstScene3D = dynamic(() => import("./BurstScene3D"), { ssr: false });

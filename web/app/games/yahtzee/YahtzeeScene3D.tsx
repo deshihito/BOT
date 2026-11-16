@@ -1,7 +1,7 @@
 "use client";
 // ヤッツィーの 3D シーン。トレイの上で 5 個のサイコロが転がる。
 // キープはサイコロ自体のタップ、振るのはトレイのタップ/フリック
-// （既存ジェスチャと同一）。出目と保持判定は lib/yahtzee.ts が担う。
+// （既存ジェスチャと同一）。出目と保持判定は lib/games/yahtzee.ts が担う。
 // WebGL が使えない場合は onFail で親へ知らせ、親は 2D 表示に切り替える。
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import * as THREE from "three";

@@ -1,5 +1,5 @@
 "use client";
-// PK戦。ロジックは lib/penalty.ts（シード決定的）。
+// PK戦。ロジックは lib/games/penalty.ts（シード決定的）。
 // キッカーのときは狙うゾーン、キーパーのときは飛ぶゾーンを選ぶ読み合い。
 // ベストの設計: localStorage の ago-penalty-best に「勝利回数」を保存する。
 import Link from "next/link";
@@ -15,7 +15,7 @@ import {
   playerShoot,
   type PenKick,
   type PenaltyState,
-} from "@/lib/penalty";
+} from "@/lib/games/penalty";
 import { sfxCorrect, sfxLose, sfxTap, sfxWin, sfxWrong } from "@/lib/sfx";
 import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";

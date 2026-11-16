@@ -1,5 +1,5 @@
 "use client";
-// タイピング（60秒計測）。ロジックは lib/typing.ts。
+// タイピング（60秒計測）。ロジックは lib/games/typing.ts。
 // 初めの1文字で計測開始、60秒経過か課題文の打ち切りで終了する。
 // ベスト WPM は localStorage（ago-typing-best）に端末内だけ保存する。
 import Link from "next/link";
@@ -9,7 +9,7 @@ import {
   evaluateTyping,
   isTypingComplete,
   type TypingResult,
-} from "@/lib/typing";
+} from "@/lib/games/typing";
 import { sfxCorrect, sfxTap, sfxWrong } from "@/lib/sfx";
 import { EndScreen, GoalBand } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";

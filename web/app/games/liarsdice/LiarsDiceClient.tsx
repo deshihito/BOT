@@ -7,7 +7,7 @@
 // ルール: 1の目はワイルド。宣言は「個数を上げる」か「同じ個数で数字を上げる」。
 import { useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
-import { playSe } from "@/lib/balku-sound";
+import { playSe } from "@/lib/balku/balku-sound";
 import OnlineShell from "../online/OnlineShell";
 
 // 3D シーンは three を含むため遅延読み込み（このページ専用チャンクに閉じる）。

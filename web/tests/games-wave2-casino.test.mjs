@@ -1,8 +1,8 @@
 // 第2波（カジノ/タイミング/記憶系）4本のロジック検証（lib のみ、UI 非依存）。
-// - lib/blackjack.ts: 配布・配当 3:2・ディーラー17スタンド・バースト・ダブル・プッシュ
-// - lib/stacker.ts: 前進/反転・切り落とし・重なり無しで終了
-// - lib/colormatch.ts: 問題生成の整合・スコア/コンボ
-// - lib/numbermemory.ts: 数字生成・判定・桁進行
+// - lib/games/blackjack.ts: 配布・配当 3:2・ディーラー17スタンド・バースト・ダブル・プッシュ
+// - lib/games/stacker.ts: 前進/反転・切り落とし・重なり無しで終了
+// - lib/games/colormatch.ts: 問題生成の整合・スコア/コンボ
+// - lib/games/numbermemory.ts: 数字生成・判定・桁進行
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -19,10 +19,10 @@ async function loadLib(name) {
   return import("data:text/javascript;base64," + Buffer.from(js).toString("base64"));
 }
 
-const bj = await loadLib("blackjack.ts");
-const st = await loadLib("stacker.ts");
-const cm = await loadLib("colormatch.ts");
-const nm = await loadLib("numbermemory.ts");
+const bj = await loadLib("games/blackjack.ts");
+const st = await loadLib("games/stacker.ts");
+const cm = await loadLib("games/colormatch.ts");
+const nm = await loadLib("games/numbermemory.ts");
 
 const C = (rank, suit = "spade") => ({ suit, rank });
 

@@ -1,6 +1,6 @@
 // A34フェーズの検証。
-// - lib/chesspuzzle.ts: 収録問題の機械検証（指定手数ちょうど・初手一意）・合法手・進行と応手・1手戻す
-// - lib/balancestack.ts: 安定判定（重心と支持範囲）・崩壊・決定性・クランプ
+// - lib/games/chesspuzzle.ts: 収録問題の機械検証（指定手数ちょうど・初手一意）・合法手・進行と応手・1手戻す
+// - lib/games/balancestack.ts: 安定判定（重心と支持範囲）・崩壊・決定性・クランプ
 // - lib/online/games/drawguess.ts: お題バンク増量分（130語・形式・重複なし）
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -41,8 +41,8 @@ async function loadDrawGuess() {
   return import("data:text/javascript;base64," + Buffer.from(code).toString("base64"));
 }
 
-const cp = await loadLib("chesspuzzle.ts");
-const bs = await loadLib("balancestack.ts");
+const cp = await loadLib("games/chesspuzzle.ts");
+const bs = await loadLib("games/balancestack.ts");
 const dg = await loadDrawGuess();
 
 // ---------------------------------------------------------------- chesspuzzle

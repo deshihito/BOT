@@ -1,7 +1,7 @@
 // A3 フェーズ4本のロジック検証（lib のみ、UI 非依存）。
-// - lib/slot.ts: 配当判定・チップ計算・確率表
-// - lib/amida.ts: 到達先計算（置換性）・経路トレース
-// - lib/kanacross.ts: 盤データ整合性・完成判定・単語チェック
+// - lib/games/slot.ts: 配当判定・チップ計算・確率表
+// - lib/games/amida.ts: 到達先計算（置換性）・経路トレース
+// - lib/games/kanacross.ts: 盤データ整合性・完成判定・単語チェック
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -18,9 +18,9 @@ async function loadLib(name) {
   return import("data:text/javascript;base64," + Buffer.from(js).toString("base64"));
 }
 
-const slot = await loadLib("slot.ts");
-const amida = await loadLib("amida.ts");
-const kana = await loadLib("kanacross.ts");
+const slot = await loadLib("games/slot.ts");
+const amida = await loadLib("games/amida.ts");
+const kana = await loadLib("games/kanacross.ts");
 
 // ---------- スロット ----------
 

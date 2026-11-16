@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { LllError, getOrCreateProfile, parseSessionBody } from "@/lib/lll-server";
+import { LllError, getOrCreateProfile, parseSessionBody } from "@/lib/lll/lll-server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

@@ -1,7 +1,7 @@
 "use client";
 // スネークの 3D シーン。グリッド床＋蛇体は頭（目つきの箱）と体の
 // 立方体列で表し、餌は赤い球で表す。進行・食事・衝突・得点は親の
-// ゲームループ（lib/snake.ts の進行関数）が決め、ここは親の状態を
+// ゲームループ（lib/games/snake.ts の進行関数）が決め、ここは親の状態を
 // getState で毎フレーム読み、補間追従するだけ（第5期 breakout / pong
 // の getState 補間方式）。3D 側で進行判定はしない。
 // 入力は現行語彙どおり: 盤面スワイプ = 方向転換（onSwipe）、
@@ -14,7 +14,7 @@ import { createStage } from "@/lib/three-kit/stage";
 import { canvasTexture, createBall } from "@/lib/three-kit/primitives";
 import { attachPickPointer } from "@/lib/three-kit/pointer";
 import SceneBox from "@/lib/three-kit/SceneBox";
-import type { SnakeDir, SnakePoint, SnakeStatus } from "@/lib/snake";
+import type { SnakeDir, SnakePoint, SnakeStatus } from "@/lib/games/snake";
 
 export interface SnakeViewState {
   cols: number;

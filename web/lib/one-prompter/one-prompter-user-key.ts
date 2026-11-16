@@ -8,7 +8,7 @@
 // 共有キーで動く。対象は現在の生成バックエンドで使うキー 1 種類のみで、
 // ベース URL や他プロバイダの指定は扱わない。
 import crypto from "node:crypto";
-import { isBotApiConfigured, kvDelete, kvGet, kvSet } from "./bot-api";
+import { isBotApiConfigured, kvDelete, kvGet, kvSet } from "../bot-api";
 
 export const USER_KEY_NAMESPACE = "oneprompter_user_keys";
 

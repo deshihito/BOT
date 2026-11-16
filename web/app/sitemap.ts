@@ -1,6 +1,6 @@
 import type { MetadataRoute } from "next";
 import { SITE_URL } from "@/lib/site";
-import { JINROU_ROLES } from "@/lib/jinrou-roles";
+import { JINROU_ROLES } from "@/lib/games/jinrou-roles";
 import { COMMAND_GUIDES } from "@/lib/command-guides";
 import { playableGames } from "@/lib/games-catalog";
 

@@ -9,7 +9,7 @@
 // 反応順はサーバー受信順で決まる（モジュール側のコメント参照）。
 import { useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
-import { playSe } from "@/lib/balku-sound";
+import { playSe } from "@/lib/balku/balku-sound";
 
 const MusicalChairsScene3D = dynamic(() => import("./MusicalChairsScene3D"), { ssr: false });
 import OnlineShell from "../online/OnlineShell";

@@ -25,7 +25,7 @@ import {
   type PageData,
   type ViewScore,
 } from "./viewslopper";
-import { logfareApiKeys, logfareChat } from "./one-prompter-server";
+import { logfareApiKeys, logfareChat } from "../one-prompter/one-prompter-server";
 
 const FETCH_TIMEOUT_MS = 10_000;
 const MAX_RESPONSE_BYTES = 2_000_000;

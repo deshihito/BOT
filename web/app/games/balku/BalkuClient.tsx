@@ -22,14 +22,14 @@ import {
   type ProjectCard,
   type SnapshotPlayer,
   type SnapshotSubmission,
-} from "@/lib/balku-game";
+} from "@/lib/balku/balku-game";
 import {
   loadSoundSettings,
   playSe,
   saveSoundSettings,
   unlockAudio,
   type BalkuSoundSettings,
-} from "@/lib/balku-sound";
+} from "@/lib/balku/balku-sound";
 import { inviteUrlForGame, roomCodeFromSearch } from "@/lib/discord-activity";
 import { useGamesNav } from "../GamesShell";
 

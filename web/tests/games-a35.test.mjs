@@ -1,7 +1,7 @@
 // A35 で追加したゲームのロジック検証（lib のみ、UI 非依存）。
-// - lib/chinchiro.ts: 役判定・強さ比較・倍率・全ラウンド完走と得点整合
-// - lib/crocodile.ts: 進行・CPU の応答・決着・決定性
-// - lib/kanacross.ts: 増量分を含む全問題の整合性（isValidPuzzle）
+// - lib/games/chinchiro.ts: 役判定・強さ比較・倍率・全ラウンド完走と得点整合
+// - lib/games/crocodile.ts: 進行・CPU の応答・決着・決定性
+// - lib/games/kanacross.ts: 増量分を含む全問題の整合性（isValidPuzzle）
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -18,9 +18,9 @@ async function loadLib(name) {
   return import("data:text/javascript;base64," + Buffer.from(js).toString("base64"));
 }
 
-const cc = await loadLib("chinchiro.ts");
-const cr = await loadLib("crocodile.ts");
-const kana = await loadLib("kanacross.ts");
+const cc = await loadLib("games/chinchiro.ts");
+const cr = await loadLib("games/crocodile.ts");
+const kana = await loadLib("games/kanacross.ts");
 
 // ---------- チンチロリン: 役判定 ----------
 

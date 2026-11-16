@@ -11,7 +11,7 @@
 //   長押し（500ms 以上）= 旗の付け外し（現行 DOM の右クリック相当。
 //     タッチ代替は現行どおり旗モードで、長押しはその補助経路）
 //   右クリック（contextmenu）= 旗の付け外し（現行 DOM と同じ）
-// 着手可否・合法判定はすべて lib/minesweeper.ts と親ハンドラが決め、
+// 着手可否・合法判定はすべて lib/games/minesweeper.ts と親ハンドラが決め、
 // ここは表現と入力の橋渡しだけを行う。
 // WebGL が使えない場合は onFail で親へ知らせ、親は 2D 表示に切り替える。
 import { useEffect, useRef, useState, type ReactNode } from "react";
@@ -20,7 +20,7 @@ import { createStage, type Stage } from "@/lib/three-kit/stage";
 import { canvasTexture, createBall } from "@/lib/three-kit/primitives";
 import { attachPickPointer } from "@/lib/three-kit/pointer";
 import SceneBox from "@/lib/three-kit/SceneBox";
-import type { MsCell, MsStatus } from "@/lib/minesweeper";
+import type { MsCell, MsStatus } from "@/lib/games/minesweeper";
 
 interface Props {
   cells: MsCell[];

@@ -13,7 +13,7 @@ import { createStage } from "@/lib/three-kit/stage";
 import { createCard } from "@/lib/three-kit/primitives";
 import { attachPickPointer } from "@/lib/three-kit/pointer";
 import SceneBox from "@/lib/three-kit/SceneBox";
-import { cardRank, cardSuit, type HeartsPhase, type HeartsTrickPlay } from "@/lib/hearts";
+import { cardRank, cardSuit, type HeartsPhase, type HeartsTrickPlay } from "@/lib/games/hearts";
 
 export interface HeartsScenePlayer {
   seat: number;

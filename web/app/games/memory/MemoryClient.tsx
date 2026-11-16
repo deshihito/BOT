@@ -1,5 +1,5 @@
 "use client";
-// メモリーマッチ（神経衰弱）。ロジックは lib/memory-match.ts。
+// メモリーマッチ（神経衰弱）。ロジックは lib/games/memory-match.ts。
 // 2枚開いたら、一致はすぐ・不一致は少し見せてから settlePair で照合する。
 // 端末内で完結し、サーバーへ送信しない。
 import Link from "next/link";
@@ -16,7 +16,7 @@ import {
   pendingIsMatch,
   settlePair,
   type MemState,
-} from "@/lib/memory-match";
+} from "@/lib/games/memory-match";
 import { sfxCorrect, sfxFlip, sfxWin, sfxWrong } from "@/lib/sfx";
 import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";

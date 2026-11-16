@@ -8,7 +8,7 @@
 // アクションは { type: "stop" }。計測はサーバー時刻で行われるため、
 // 表示上の精度は通信間隔の範囲に限られる。
 import { useEffect, useRef, useState } from "react";
-import { playSe } from "@/lib/balku-sound";
+import { playSe } from "@/lib/balku/balku-sound";
 import OnlineShell from "../online/OnlineShell";
 import type { OnlineRoomApi, OnlineRoomView } from "../online/useOnlineRoom";
 import { useRoomJuice } from "../GameJuice";

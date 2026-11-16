@@ -1,4 +1,4 @@
-// LLL（lib/lll-game.ts / lib/lll-battle.ts）の検証。
+// LLL（lib/lll/lll-game.ts / lib/lll/lll-battle.ts）の検証。
 // balku.test.mjs と同じ loadBundle 方式で TS を読み込む。
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -36,7 +36,7 @@ async function loadBundle(files, exportNames) {
 }
 
 const game = await loadBundle(
-  ["lll-game.ts", "lll-tactics.ts", "lll-battle.ts", "lll-playback.ts"],
+  ["lll/lll-game.ts", "lll/lll-tactics.ts", "lll/lll-battle.ts", "lll/lll-playback.ts"],
   [
     "TIER_BUDGET",
     "STAT_TOTAL_CAP",

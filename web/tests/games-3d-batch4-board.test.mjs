@@ -100,7 +100,7 @@ test("3D lightsout: 点灯は発光＋盛り上がり、消灯は沈み込みで
 });
 
 test("3D batch4-board: ロジック層に three が混入していない", () => {
-  for (const f of [["fifteen.ts"], ["lightsout.ts"], ["online", "games", "territory.ts"], ["online", "games", "battleship.ts"]]) {
+  for (const f of [["games/fifteen.ts"], ["games/lightsout.ts"], ["online", "games", "territory.ts"], ["online", "games", "battleship.ts"]]) {
     assert.doesNotMatch(read("lib", ...f), /from "three"/, `lib/${f.join("/")}`);
     assert.doesNotMatch(read("lib", ...f), /three-kit/, `lib/${f.join("/")}`);
   }

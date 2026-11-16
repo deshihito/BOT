@@ -1,5 +1,5 @@
 "use client";
-// スロット。ロジックは lib/slot.ts（確率表と配当表は lib 内で明示）。
+// スロット。ロジックは lib/games/slot.ts（確率表と配当表は lib 内で明示）。
 // リールは左から順に止まるアニメーションで、最終結果は lib のスピン結果と一致させる。
 // チップは端末内だけの遊び用ポイントで localStorage に保存する。サーバーへ送信しない。
 import Link from "next/link";
@@ -19,7 +19,7 @@ import {
   spin,
   type SlotState,
   type SlotSymbolId,
-} from "@/lib/slot";
+} from "@/lib/games/slot";
 import { sfxCorrect, sfxHit, sfxKo, sfxSlide, sfxTap, sfxTick } from "@/lib/sfx";
 import { juiceFlash, juiceHitstop, juiceShake, type JuiceIntensity } from "@/lib/juice";
 import { JuiceHit, ScorePop } from "../GameJuice";

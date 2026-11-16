@@ -6,7 +6,7 @@
 // 選択中の牌は持ち上げて金縁で示す。ヒントの牌は金縁を脈動させる
 // （現行 2D のヒント色 #f2b01e と同じ金）。
 // 入力は現行どおり牌タップ = onTile（選択/ペア確定は親ハンドラと
-// lib/mahjong.ts が判定する）。残り枚数等の状態は親の DOM 併記が担う。
+// lib/games/mahjong.ts が判定する）。残り枚数等の状態は親の DOM 併記が担う。
 // WebGL が使えない場合は onFail で親へ知らせ、親は 2D 表示に切り替える。
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import * as THREE from "three";
@@ -14,7 +14,7 @@ import { createStage } from "@/lib/three-kit/stage";
 import { canvasTexture } from "@/lib/three-kit/primitives";
 import { attachPickPointer } from "@/lib/three-kit/pointer";
 import SceneBox from "@/lib/three-kit/SceneBox";
-import { MJ_BOARD_H, MJ_BOARD_W, MJ_KINDS, type MjTile } from "@/lib/mahjong";
+import { MJ_BOARD_H, MJ_BOARD_W, MJ_KINDS, type MjTile } from "@/lib/games/mahjong";
 
 interface Props {
   tiles: MjTile[];

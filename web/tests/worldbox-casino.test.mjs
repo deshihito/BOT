@@ -29,10 +29,10 @@ const casinoUrl = dataUrl(transpile("worldbox/casino.ts"));
 const casino = await import(casinoUrl);
 const casinoGamesUrl = dataUrl(transpile("worldbox/casino-games.ts"));
 const games = await import(casinoGamesUrl);
-const blackjackUrl = dataUrl(transpile("blackjack.ts"));
+const blackjackUrl = dataUrl(transpile("games/blackjack.ts"));
 const casinoSessionUrl = dataUrl(
   transpile("worldbox/casino-session.ts")
-    .replaceAll('"../blackjack"', JSON.stringify(blackjackUrl))
+    .replaceAll('"../games/blackjack"', JSON.stringify(blackjackUrl))
     .replaceAll('"./casino-games"', JSON.stringify(casinoGamesUrl)),
 );
 const sessionLib = await import(casinoSessionUrl);
@@ -213,7 +213,7 @@ const casinoRoute = await import(
       .replaceAll('"next/server"', JSON.stringify(nextServerStubUrl))
       .replaceAll('"@/lib/auth"', JSON.stringify(authUrl))
       .replaceAll('"@/lib/worldbox/casino"', JSON.stringify(casinoUrl))
-      .replaceAll('"@/lib/blackjack"', JSON.stringify(blackjackUrl))
+      .replaceAll('"@/lib/games/blackjack"', JSON.stringify(blackjackUrl))
       .replaceAll('"@/lib/worldbox/casino-games"', JSON.stringify(casinoGamesUrl))
       .replaceAll('"@/lib/worldbox/casino-session"', JSON.stringify(casinoSessionUrl))
       .replaceAll('"@/lib/worldbox/casino-session-online"', JSON.stringify(casinoSessionOnlineUrl))

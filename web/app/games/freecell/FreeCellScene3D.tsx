@@ -3,7 +3,7 @@
 // 場札8列＋フリーセル4枠＋組札4枠を createCard で立体化する。上段は
 // 左半分がフリーセル枠（青寄りの枠）、右半分が組札枠（金寄りの枠）で、
 // 3D でも両者の区別が付く配置にする。列が長い場合は間隔を圧縮する。
-// 状態・合法判定は lib/freecell.ts とクライアントの既存ハンドラが持ち、
+// 状態・合法判定は lib/games/freecell.ts とクライアントの既存ハンドラが持ち、
 // ここは表現と入力の橋渡しだけを行う:
 //   タップ = 既存の選択→移動（フリーセル/組札タップも同じ）
 //   ドラッグ = 掴んだ束を移動先（列/フリーセル/組札）へ落とす
@@ -25,7 +25,7 @@ import {
   type FcCard,
   type FcState,
   type FcTarget,
-} from "@/lib/freecell";
+} from "@/lib/games/freecell";
 
 export type FcSelection =
   | { kind: "column"; column: number; startIndex: number }

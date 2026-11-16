@@ -1,5 +1,5 @@
 "use client";
-// 15パズル。ロジックは lib/fifteen.ts（解可能性を保証するシャッフル）。
+// 15パズル。ロジックは lib/games/fifteen.ts（解可能性を保証するシャッフル）。
 // 空白と同じ行・列のタイルをタップするとまとめてスライドする。端末内で完結。
 import Link from "next/link";
 import dynamic from "next/dynamic";
@@ -13,7 +13,7 @@ import {
   slideTile,
   type FifteenSize,
   type FifteenState,
-} from "@/lib/fifteen";
+} from "@/lib/games/fifteen";
 import { sfxSlide, sfxWin, sfxWrong } from "@/lib/sfx";
 import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";

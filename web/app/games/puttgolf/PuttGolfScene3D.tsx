@@ -1,7 +1,7 @@
 "use client";
 // パットゴルフの 3D シーン。グリーン＋傾斜パッド＋壁＋カップ（穴＋旗）を
 // 立体化し、ボールは createBall で表現する。
-// 物理・到達判定は lib/puttgolf.ts が決め、ここは親が result.points の
+// 物理・到達判定は lib/games/puttgolf.ts が決め、ここは親が result.points の
 // 軌跡再生で更新する表示位置 (ball) へ指数補間で追従して結果位置へ
 // 収束させるだけ。3D 側で当たり判定・カップイン判定はしない。
 // 傾斜ゾーンは lib の PgSlope (dx, dy) を、流れ方向へわずかに傾けた
@@ -27,7 +27,7 @@ import {
   powerForDistance,
   type PgHole,
   type PgPoint,
-} from "@/lib/puttgolf";
+} from "@/lib/games/puttgolf";
 
 interface Props {
   hole: PgHole;

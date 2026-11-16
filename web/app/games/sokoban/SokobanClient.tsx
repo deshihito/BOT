@@ -1,5 +1,5 @@
 "use client";
-// 倉庫番。ロジックは lib/sokoban.ts。箱を全部ゴールの上に運ぶ定番パズル。
+// 倉庫番。ロジックは lib/games/sokoban.ts。箱を全部ゴールの上に運ぶ定番パズル。
 // 盤面のスワイプとキーボード（矢印/WASD）で操作。1手戻し・最初から直し対応。
 import Link from "next/link";
 import dynamic from "next/dynamic";
@@ -16,7 +16,7 @@ import {
   undoSokoban,
   type SokobanDir,
   type SokobanState,
-} from "@/lib/sokoban";
+} from "@/lib/games/sokoban";
 import { sfxPlace, sfxSlide, sfxTap, sfxWin, sfxWrong } from "@/lib/sfx";
 import { tappableProps, useGesture } from "@/lib/gesture";
 import { EndScreen } from "../GameJuice";

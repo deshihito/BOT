@@ -1,7 +1,7 @@
 // アクションゲーム3本のロジック検証（lib のみ、UI 非依存）。
-// - lib/snake.ts: 初期状態・進行・食事/成長・壁/自分衝突・方向反転防止・速度段階
-// - lib/breakout.ts: 配置生成・レベル定義・得点・ダメージ/破壊・クリア判定
-// - lib/mole.ts: スケジュール・種別・コンボ得点・出現間隔
+// - lib/games/snake.ts: 初期状態・進行・食事/成長・壁/自分衝突・方向反転防止・速度段階
+// - lib/games/breakout.ts: 配置生成・レベル定義・得点・ダメージ/破壊・クリア判定
+// - lib/games/mole.ts: スケジュール・種別・コンボ得点・出現間隔
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -18,9 +18,9 @@ async function loadLib(name) {
   return import("data:text/javascript;base64," + Buffer.from(js).toString("base64"));
 }
 
-const snake = await loadLib("snake.ts");
-const breakout = await loadLib("breakout.ts");
-const mole = await loadLib("mole.ts");
+const snake = await loadLib("games/snake.ts");
+const breakout = await loadLib("games/breakout.ts");
+const mole = await loadLib("games/mole.ts");
 
 // ---------------- snake ----------------
 

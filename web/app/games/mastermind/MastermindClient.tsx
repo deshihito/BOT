@@ -1,5 +1,5 @@
 "use client";
-// マスターマインド。ロジックは lib/mastermind.ts（ヒット＆ブローの集計・勝敗）。
+// マスターマインド。ロジックは lib/games/mastermind.ts（ヒット＆ブローの集計・勝敗）。
 // 色を4つ並べて判定し、10回までに正解の並びを当てる。端末内で完結。
 import Link from "next/link";
 import dynamic from "next/dynamic";
@@ -18,7 +18,7 @@ import {
   type MmColor,
   type MmDifficulty,
   type MmState,
-} from "@/lib/mastermind";
+} from "@/lib/games/mastermind";
 import { sfxFlip, sfxLose, sfxPlace, sfxTap, sfxWin } from "@/lib/sfx";
 import { tappableProps, useGesture } from "@/lib/gesture";
 import { EndScreen } from "../GameJuice";

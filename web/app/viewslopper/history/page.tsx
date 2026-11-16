@@ -8,7 +8,7 @@ import {
   loadHistory,
   removeHistoryEntry,
   type HistoryEntry,
-} from "@/lib/viewslopper-history";
+} from "@/lib/viewslopper/viewslopper-history";
 
 // 保存した診断の一覧画面。保存先はこの端末の localStorage だけ
 // （サーバーに送らない）。別端末・別ブラウザでは見えない。

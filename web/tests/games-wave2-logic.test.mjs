@@ -1,6 +1,6 @@
 // 第2波・論理/推測系3本のロジック検証（lib のみ、UI 非依存）。
-// - lib/maze.ts: 完全迷路（全到達・ループなし）・最短路・移動合法判定
-// - lib/mastermind.ts: ヒット＆ブローの重複集計・10回制限・勝敗
+// - lib/games/maze.ts: 完全迷路（全到達・ループなし）・最短路・移動合法判定
+// - lib/games/mastermind.ts: ヒット＆ブローの重複集計・10回制限・勝敗
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -17,8 +17,8 @@ async function loadLib(name) {
   return import("data:text/javascript;base64," + Buffer.from(js).toString("base64"));
 }
 
-const maze = await loadLib("maze.ts");
-const mm = await loadLib("mastermind.ts");
+const maze = await loadLib("games/maze.ts");
+const mm = await loadLib("games/mastermind.ts");
 
 // ---- めいろ ----
 

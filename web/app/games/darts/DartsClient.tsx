@@ -1,5 +1,5 @@
 "use client";
-// ダーツ（カウントアップ）。ロジックは lib/darts.ts。
+// ダーツ（カウントアップ）。ロジックは lib/games/darts.ts。
 // 円形ボードを SVG で描き、クリック位置へ投げる。ブレはクライアント側で
 // クリック点へ小さな乱数を加える方式（ON/OFF 即時切替、lib は jitter 無効で生成）。
 import Link from "next/link";
@@ -9,7 +9,7 @@ import { useEffect, useRef, useState } from "react";
 const DartsScene3D = dynamic(() => import("./DartsScene3D"), { ssr: false });
 import { sfxCorrect, sfxPlace, sfxWin, sfxWrong } from "@/lib/sfx";
 import { EndScreen } from "../GameJuice";
-import { DART_SECTORS, createDartsGame, roundScores, throwDart, type DartsState } from "@/lib/darts";
+import { DART_SECTORS, createDartsGame, roundScores, throwDart, type DartsState } from "@/lib/games/darts";
 import { useGamesNav } from "../GamesShell";
 
 const BEST_KEY = "ago-darts-best";

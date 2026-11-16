@@ -1,5 +1,5 @@
-// BALKU のルーム内チャット / CPU 戦（lib/balku-server.ts /
-// lib/balku-cpu.ts）の検証。balku.test.mjs と同じ loadBundle 方式で
+// BALKU のルーム内チャット / CPU 戦（lib/balku/balku-server.ts /
+// lib/balku/balku-cpu.ts）の検証。balku.test.mjs と同じ loadBundle 方式で
 // TS を読み込む。balku-server の bot-api は未設定スタブに差し替え、
 // メモリのみモードで動かす（isBotApiConfigured() === false）。
 import { test } from "node:test";
@@ -58,7 +58,7 @@ async function kvDelete() {}
 `;
 
 const cpu = await loadBundle(
-  ["balku-game.ts", "balku-cpu.ts"],
+  ["balku/balku-game.ts", "balku/balku-cpu.ts"],
   [
     "createLobbyState",
     "addLobbyPlayer",
@@ -75,7 +75,7 @@ const cpu = await loadBundle(
 );
 
 const server = await loadBundle(
-  ["balku-game.ts", "balku-cpu.ts", "balku-server.ts"],
+  ["balku/balku-game.ts", "balku/balku-cpu.ts", "balku/balku-server.ts"],
   [
     "createBalkuRoom",
     "joinBalkuRoom",
