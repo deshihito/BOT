@@ -17,6 +17,7 @@ class _Result:
 class _Query:
     def __init__(self, db, table):
         self.db, self.table, self.op, self.payload, self.filters, self.window = db, table, "select", None, [], None
+        self.contains_filters = []
 
     def select(self, columns="*"):
         self.op = "select"
@@ -35,12 +36,24 @@ class _Query:
         self.filters.append((column, value))
         return self
 
+    def contains(self, column, value):
+        self.contains_filters.append((column, value))
+        return self
+
     def range(self, start, end):
         self.window = (start, end)
         return self
 
     def _match(self, row):
-        return all(row.get(c) == v for c, v in self.filters)
+        if not all(row.get(c) == v for c, v in self.filters):
+            return False
+        for column, expected in self.contains_filters:
+            value = row.get(column)
+            if not isinstance(value, dict):
+                return False
+            if any(value.get(k) != v for k, v in expected.items()):
+                return False
+        return True
 
     def execute(self):
         self.db.calls.append((self.op, self.table))

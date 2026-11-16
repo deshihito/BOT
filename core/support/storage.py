@@ -47,6 +47,18 @@ def _lock_for(path: str) -> threading.Lock:
     return _file_locks.setdefault(os.path.abspath(path), threading.Lock())
 
 
+def _value_matches(value: Any, match: dict[str, Any]) -> bool:
+    """保存値（dict か JSON 文字列）が match の全キー・値を含むか。"""
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except (ValueError, TypeError):
+            return False
+    if not isinstance(value, dict):
+        return False
+    return all(value.get(key) == expected for key, expected in match.items())
+
+
 def is_missing_table(error: Exception) -> bool:
     """テーブルが無いことを表すエラーか（旧REST API の PGRST205 / Postgres の 42P01 など）。"""
     text = f"{getattr(error, 'code', '')} {getattr(error, 'message', '')} {error}"
@@ -59,7 +71,7 @@ def is_missing_table(error: Exception) -> bool:
 class KVStore:
     def __init__(self, namespace: str, *, client: Any = _MISSING, path: str | None = None,
                  timeout: float = REMOTE_TIMEOUT, retry_delay: float = RETRY_DELAY,
-                 max_retry_delay: float = MAX_RETRY_DELAY):
+                 max_retry_delay: float = MAX_RETRY_DELAY, remote_only: bool = False):
         if client is _MISSING:
             try:
                 import config
@@ -72,11 +84,17 @@ class KVStore:
         self.timeout = timeout
         self.retry_delay = retry_delay
         self.max_retry_delay = max_retry_delay
+        # remote_only: ローカルの写しも未送信ジャーナルも持たず、遠隔だけを
+        # 読み書きする（失敗は例外で返す）。高頻度に読み書きする名前空間用。
+        # ローカル写しは set のたびに合本ファイル全体を書き直すため、頻度が
+        # 高いとそれ自体が律速になる。遠隔が落ちたら読み書き先の本体
+        # （wallet 等）も同じ API を使うので、写しがあっても処理は進まない。
+        self._remote_only = remote_only
         self._remote_disabled = False   # テーブルが無いときは、再起動まで 自前API を使わない
         self._warned = False
         self._remote_down = False       # 直近の 自前API 操作が失敗しているか（失敗/復旧の遷移をログに残す）
         # key -> {"value": ...} または {"deleted": True}。まだ 自前API に届いていない最新の変更。
-        self._pending: dict[str, dict[str, Any]] = self._load_pending()
+        self._pending: dict[str, dict[str, Any]] = {} if remote_only else self._load_pending()
         self._locks: dict[str, asyncio.Lock] = {}
         self._tasks: set[asyncio.Task] = set()
         self._retry_task: asyncio.Task | None = None
@@ -165,6 +183,39 @@ class KVStore:
     async def _upsert_remote(self, key: str, value: Any) -> None:
         row = self._row(key, value)
         await self._run(lambda: self.client.table(TABLE).upsert(row, on_conflict="namespace,key"))
+
+    async def _fetch_remote(self, match: dict[str, Any] | None = None) -> dict[str, Any]:
+        """遠隔からこの namespace を読む。match 指定時は値（jsonb）の
+        contains でサーバー側に絞るため、ヒット件数ぶんしか転送されない。"""
+        result: dict[str, Any] = {}
+        start = 0
+        while True:
+            def build(s: int = start):
+                query = self.client.table(TABLE).select("key,value").eq("namespace", self.namespace)
+                if match:
+                    query = query.contains("value", match)
+                return query.range(s, s + PAGE_SIZE - 1)
+
+            response = await self._run(build)
+            rows = list(getattr(response, "data", None) or [])
+            for row in rows:
+                result[str(row["key"])] = row.get("value")
+            if len(rows) < PAGE_SIZE:
+                break
+            start += PAGE_SIZE
+        return result
+
+    async def _load_remote_only(self, match: dict[str, Any] | None = None) -> dict[str, Any]:
+        """remote_only ストアの読み取り。失敗は例外として呼び出し側へ返す。"""
+        if not self.remote_enabled:
+            raise RuntimeError("remote_only の KVStore は自前APIが使えません")
+        try:
+            result = await self._fetch_remote(match)
+        except Exception as error:
+            self._remote_failed("読み込み", error)
+            raise
+        self._remote_recovered("読み込み")
+        return result
 
     async def _delete_remote(self, key: str) -> None:
         await self._run(
@@ -371,6 +422,8 @@ class KVStore:
     # ------------------------------------------------------------ 読み書き
     async def load_all(self) -> dict[str, Any]:
         """この namespace の全データ。未送信のローカル変更があればそちらを優先する。"""
+        if self._remote_only:
+            return await self._load_remote_only()
         if self.remote_enabled:
             snapshot = dict(self._pending)
             versions = dict(self._local_versions)
@@ -420,6 +473,17 @@ class KVStore:
             self._schedule_retry()
         return await asyncio.to_thread(self.load_local)
 
+    async def load_matching(self, match: dict[str, Any]) -> dict[str, Any]:
+        """値が match の全キー・値を含むレコードだけを読む。
+
+        remote_only では jsonb の contains でサーバー側に絞る（名前空間の
+        全件は転送されない）。通常ストアでは load_all の結果を手元で絞る。
+        """
+        if self._remote_only:
+            return await self._load_remote_only(match)
+        records = await self.load_all()
+        return {k: v for k, v in records.items() if _value_matches(v, match)}
+
     async def load_one(self, key: str) -> Any:
         """1キーだけを保存先から読み直す。キーが無ければ None。
 
@@ -427,6 +491,20 @@ class KVStore:
         ローカル値 → 遠隔値）。全体を読み直さずに、書き込み直前の最新確認に使う。
         """
         key = str(key)
+        if self._remote_only:
+            if not self.remote_enabled:
+                raise RuntimeError("remote_only の KVStore は自前APIが使えません")
+            try:
+                response = await self._run(
+                    lambda: self.client.table(TABLE).select("key,value")
+                    .eq("namespace", self.namespace).eq("key", key).range(0, 0)
+                )
+            except Exception as error:
+                self._remote_failed("読み込み", error)
+                raise
+            self._remote_recovered("読み込み")
+            rows = list(getattr(response, "data", None) or [])
+            return rows[0].get("value") if rows else None
         if self.remote_enabled:
             snapshot = self._pending.get(key)
             version = self._local_versions.get(key, 0)
@@ -464,6 +542,18 @@ class KVStore:
 
     async def set(self, key: str, value: Any, *, wait: bool = True) -> None:
         key = str(key)
+        if self._remote_only:
+            # ローカル写しとジャーナルを経由せず直接書く。失敗は例外で返す
+            # （再試行や終端化の判断は呼び出し側の責務）。
+            if not self.remote_enabled:
+                raise RuntimeError("remote_only の KVStore は自前APIが使えません")
+            try:
+                await self._upsert_remote(key, value)
+            except Exception as error:
+                self._remote_failed("保存", error)
+                raise
+            self._remote_recovered("保存")
+            return
         self._bump(key)
         recorded = self._record_pending(key, {"value": value})
         await asyncio.to_thread(
@@ -481,6 +571,16 @@ class KVStore:
 
     async def delete(self, key: str, *, wait: bool = True) -> None:
         key = str(key)
+        if self._remote_only:
+            if not self.remote_enabled:
+                raise RuntimeError("remote_only の KVStore は自前APIが使えません")
+            try:
+                await self._delete_remote(key)
+            except Exception as error:
+                self._remote_failed("削除", error)
+                raise
+            self._remote_recovered("削除")
+            return
         self._bump(key)
         recorded = self._record_pending(key, {"deleted": True})
         await asyncio.to_thread(
