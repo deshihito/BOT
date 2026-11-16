@@ -28,55 +28,6 @@ export const SNAP_DISTANCE = 6;
 const MAX_VELOCITY = 16;
 /** 表示名の上限文字数。 */
 export const PRESENCE_NAME_MAX = 24;
-/** 移動連続性: 正規の最大移動速度（タイル/秒）。ダッシュ 7.0 + 約40%の余裕。 */
-export const MAX_MOVE_SPEED = 10;
-/** 移動連続性: 許容距離に足す余裕（タイル）。ノックバック（最大2〜3）と埋没救済の小幅なずれを吸収する。 */
-export const MOVEMENT_MARGIN_TILES = 3;
-/** 移動連続性: 保管位置がこの時間（ミリ秒）より古ければ新規入室として受け入れる。 */
-export const MOVEMENT_RESET_MS = 30_000;
-/** 移動連続性: プレゼンスが無いときのセーブ基準の許容距離（タイル）。初期スポーンの findFreeNear 最大 8 + 余裕。 */
-export const SAVE_FALLBACK_MAX_TILES = 12;
-
-/** 移動連続性の判定対象（空間つき位置）。 */
-export type PositionLike = { x: number; y: number; space: PresenceSpace };
-/** 移動連続性の基準（保管位置＋保管時刻）。 */
-export type MovementBaseline = PositionLike & { ts: number };
-
-/**
- * 移動連続性の判定（時刻基準）: 保管位置から、経過時間で移動可能な
- * 距離（MAX_MOVE_SPEED × 経過秒 + 余裕）を超えるジャンプを却下する。
- * 基準が無い・空間が変わった・保管が古い（RESET_MS 超）場合は受け入れる。
- * 空間の変化は入退室・階段・テント・階層移動の正当な不連続なので常に許可する。
- */
-export function checkMovementContinuity(
-  baseline: MovementBaseline | null,
-  next: PositionLike,
-  now: number,
-): { ok: true } | { ok: false; reason: "position_jump" } {
-  if (!baseline) return { ok: true };
-  if (baseline.space !== next.space) return { ok: true };
-  if (now - baseline.ts >= MOVEMENT_RESET_MS) return { ok: true };
-  const elapsedSec = Math.max(0, (now - baseline.ts) / 1000);
-  const allowed = MAX_MOVE_SPEED * elapsedSec + MOVEMENT_MARGIN_TILES;
-  const dist = Math.hypot(next.x - baseline.x, next.y - baseline.y);
-  return dist <= allowed ? { ok: true } : { ok: false, reason: "position_jump" };
-}
-
-/**
- * 移動連続性の判定（セーブ基準・固定距離）: プレゼンスが無いときに
- * サーバー保存のセーブを基準にし、固定 SAVE_FALLBACK_MAX_TILES 以内だけ受け入れる。
- * セーブにはタイムスタンプが無いため、固定距離だと連続 PUT で少しずつ
- * 寄せられる（残る抜け穴として共有ノートに記録）。空間が変われば受け入れる。
- */
-export function checkSaveFallbackContinuity(
-  saved: PositionLike | null,
-  next: PositionLike,
-): { ok: true } | { ok: false; reason: "position_jump" } {
-  if (!saved) return { ok: true };
-  if (saved.space !== next.space) return { ok: true };
-  const dist = Math.hypot(next.x - saved.x, next.y - saved.y);
-  return dist <= SAVE_FALLBACK_MAX_TILES ? { ok: true } : { ok: false, reason: "position_jump" };
-}
 
 /** プレイヤーがいる空間。ワールドとロビーでプレゼンスは混ざらない。 */
 /** 既存3空間 + インスタンス空間 ID（"cave:x,y:層" 等）。 */
@@ -109,6 +60,10 @@ export type Heartbeat = {
   party?: string;
   /** 椅子・ベンチ・ソファに座っているか（見た目だけの申告）。 */
   sit?: boolean;
+  /** 開いているタブの識別子（同一アカウントの分身防止用。同アカウントでは最新のタブだけが有効）。 */
+  tab?: string;
+  /** そのタブを開いた時刻（ミリ秒）。タブ世代の新旧判定に使う。 */
+  tabAt?: number;
 };
 
 export type PresenceEntry = Heartbeat & {
@@ -160,7 +115,32 @@ export function sanitizeHeartbeat(raw: unknown, bounds: CoordBounds): Heartbeat 
     rank: typeof v.rank === "number" && Number.isFinite(v.rank) ? Math.max(1, Math.min(5, Math.floor(v.rank))) : 1,
     party: typeof v.party === "string" ? v.party.slice(0, 48) : "",
     ...(v.sit === true ? { sit: true } : {}),
+    ...(typeof v.tab === "string" && v.tab.length > 0 ? { tab: v.tab.slice(0, 64) } : {}),
+    ...(typeof v.tabAt === "number" && Number.isFinite(v.tabAt) && v.tabAt > 0 ? { tabAt: v.tabAt } : {}),
   };
+}
+
+/**
+ * タブ世代の判定（同一アカウントの分身防止）。
+ * 保存済みエントリ（stored）と新しいハートビート（incoming）を見て、
+ * incoming を受理してよいかを返す。規則:
+ * - stored が無い/鮮度切れ、incoming にタブ申告が無い、stored にタブ記録が無い → 受理（世代は incoming で初期化/維持）
+ * - 同じタブ → 受理
+ * - incoming の開始時刻が新しい → 受理（世代交代。旧タブは以後 rejected になる）
+ * - incoming の開始時刻が古い → 拒否（旧タブからの書き込み）
+ * - 開始時刻が同値ならタブ ID の辞書順で大きい方を受理（決定的にするため）
+ */
+export function tabVerdict(
+  stored: PresenceEntry | null,
+  incoming: { tab?: string; tabAt?: number },
+  now: number,
+): "accept" | "reject" {
+  if (!incoming.tab || typeof incoming.tabAt !== "number") return "accept";
+  if (!stored || !isFreshPresence(stored, now)) return "accept";
+  if (!stored.tab || typeof stored.tabAt !== "number") return "accept";
+  if (stored.tab === incoming.tab) return "accept";
+  if (incoming.tabAt !== stored.tabAt) return incoming.tabAt > stored.tabAt ? "accept" : "reject";
+  return incoming.tab > stored.tab ? "accept" : "reject";
 }
 
 /** bot_kv に保存された1件（JSON 文字列 or オブジェクト）をエントリへ戻す。壊れていれば null。 */
