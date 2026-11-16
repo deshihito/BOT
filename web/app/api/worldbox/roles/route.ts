@@ -26,7 +26,7 @@ import { isOverrideActive } from "@/lib/worldbox/tiles";
 import { loadTileOverride } from "@/lib/worldbox/tiles-online";
 import { buildEconomyOp } from "@/lib/worldbox/economy-bridge";
 import {
-  enqueueEconomyOp, isEconomyEnabled, readUserBalance, waitForOpDone,
+  isEconomyEnabled, readUserBalance, submitEconomyOp, waitForOpDone,
 } from "@/lib/worldbox/economy-bridge-online";
 import { withUserLock } from "@/lib/worldbox/user-lock";
 import { maxHpFor } from "@/lib/worldbox/profile";
@@ -207,15 +207,18 @@ export async function POST(request: Request) {
       );
       if (!op) return err("economy_failed", 503);
       if (!(await storeProfile(ownerKey, next))) return err("store_failed", 503);
-      if (!(await enqueueEconomyOp(op))) {
+      // 提出は直接適用が正（submitEconomyOp）: spend はその場で終端する。
+      // 直接適用できずキューへ寄せた（pending）ときだけ従来どおり待つ。
+      const submitted = await submitEconomyOp(op);
+      if (submitted.state === "unavailable") {
         await storeProfile(ownerKey, current);
         return err("economy_failed", 503);
       }
-      // 決済が server-side wait のうちに failed になったら役職を元へ
-      // 戻す（構造問題#4「即時 spend の無担保交付」の是正: 役職だけ
-      // 変わって課金されない状態を作らない）。pending のままなら従来
-      // どおり返し、クライアントのポーリングに引き継ぐ。
-      const settled = await waitForOpDone(ownerKey, op.id);
+      // 決済が failed になったら役職を元へ戻す（構造問題#4「即時 spend
+      // の無担保交付」の是正: 役職だけ変わって課金されない状態を
+      // 作らない）。pending のままなら従来どおり返し、クライアントの
+      // ポーリングに引き継ぐ。
+      const settled = submitted.state === "pending" ? await waitForOpDone(ownerKey, op.id) : submitted.op;
       if (settled && settled.status === "failed") {
         await storeProfile(ownerKey, current);
         return err("economy_failed", 409);

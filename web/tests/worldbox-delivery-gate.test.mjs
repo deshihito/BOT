@@ -3,6 +3,11 @@
 // - テント拡張: failed なら段階を上げない。再試行は失敗オプを消して積み直す
 // - 転職: failed なら役職を元へ戻す
 // - pending のままなら従来どおり交付する（フォールバック維持）
+// コイン API 直接化（PR1）後の形: spend は bot-api の CAS でその場で
+// 適用されるため、failed は「CAS が最後まで成立しない」状態を
+// __wbDgFailUpdate フラグで再現し、done は即時適用そのものを検証する。
+// earn（売却）は PR1 では従来キュー経路のため、ワーカーの終端化を
+// armFlip で再現する従来形のまま。
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -44,6 +49,30 @@ export async function tableSelect(table, columns, filters, limit) {
   const id = filters.find((f) => f.column === "user_id")?.value;
   if (!users.has(id)) return [];
   return [{ balance: users.get(id) }];
+}
+export class BotApiError extends Error { constructor(status, code) { super("api " + status); this.status = status; this.code = code; } }
+export async function tableInsert(table, values) {
+  if (table === "users") { if (!users.has(values.user_id)) users.set(values.user_id, values.balance); return; }
+  if (table === "transaction_history") { (globalThis.__wbHistory ??= []).push(values); return; }
+  throw new Error("unexpected table " + table);
+}
+export async function tableUpdate(table, values, filters) {
+  if (table !== "users") throw new Error("unexpected table " + table);
+  if (globalThis.__wbDgFailUpdate) return [];
+  const id = filters.find((f) => f.column === "user_id")?.value;
+  const bal = filters.find((f) => f.column === "balance")?.value;
+  if (!users.has(id)) return [];
+  if (bal !== undefined && users.get(id) !== bal) return [];
+  users.set(id, values.balance);
+  return [{ user_id: id, balance: values.balance }];
+}
+export async function rpc(name, params) {
+  if (name !== "transfer_coins") throw new Error("unexpected rpc " + name);
+  const senderBalance = users.get(params.p_sender_id) ?? 0;
+  if (senderBalance < params.p_amount) throw new BotApiError(400, "P0001");
+  users.set(params.p_sender_id, senderBalance - params.p_amount);
+  users.set(params.p_receiver_id, (users.has(params.p_receiver_id) ? users.get(params.p_receiver_id) : params.p_new_user_balance) + params.p_amount);
+  return users.get(params.p_sender_id);
 }
 `);
 const subdomainUrl = dataUrl(transpile("subdomain.ts"));
@@ -325,6 +354,7 @@ function reset() {
   globalThis.__wbDgStore.clear();
   globalThis.__wbDgUsers.clear();
   globalThis.__wbDgUsers.set(ME, 200000);
+  globalThis.__wbDgFailUpdate = false;
   seedProfile(ME);
 }
 
@@ -336,14 +366,14 @@ assert.ok(BUY_ITEM, "本日の tools 棚に買える品目がある");
 test("API(profile): 購入の決済が failed ならアイテムは付かない（巻き戻し）", async () => {
   reset();
   seedPresence(ME, 5.5, 19.5);
-  const flipped = armFlip((o) => o.kind === "spend" && o.reason === "shop_buy", "failed", "insufficient_funds");
+  globalThis.__wbDgFailUpdate = true; // CAS が最後まで成立しない = 直接適用が確定失敗する
   const res = await profileRoute.POST(apiReq(PROFILE_URL, cookie(ME), { action: "buy", itemId: BUY_ITEM.id, count: 1 }));
-  assert.equal(await flipped, true, "ワーカーがオプを failed にした");
   assert.equal(res.status, 409);
   const data = await res.json();
   assert.equal(data.error, "economy_failed");
-  assert.equal(data.opError, "insufficient_funds");
+  assert.equal(data.opError, "balance_update_failed");
   assert.equal(readProfile(ME).items[BUY_ITEM.id] ?? 0, 0, "購入アイテムは付いていない");
+  assert.equal(globalThis.__wbDgUsers.get(ME), 200000, "残高は動いていない");
   const ops = findOps((o) => o.reason === "shop_buy");
   assert.equal(ops.length, 1, "spend オプは1件だけ");
   assert.equal(ops[0].status, "failed");
@@ -352,24 +382,31 @@ test("API(profile): 購入の決済が failed ならアイテムは付かない�
 test("API(profile): 購入の決済が done ならアイテムが付いて opStatus が返る", async () => {
   reset();
   seedPresence(ME, 5.5, 19.5);
-  const flipped = armFlip((o) => o.kind === "spend" && o.reason === "shop_buy", "done", undefined);
   const res = await profileRoute.POST(apiReq(PROFILE_URL, cookie(ME), { action: "buy", itemId: BUY_ITEM.id, count: 1 }));
-  assert.equal(await flipped, true, "ワーカーがオプを done にした");
   assert.equal(res.status, 200);
   const data = await res.json();
   assert.equal(data.opStatus, "done");
-  assert.equal(data.balance, 200000, "残高はワーカー適用前の読み取り値のまま（Web は残高を動かさない）");
+  assert.equal(data.balance, globalThis.__wbDgUsers.get(ME), "同一レスポンスの残高は適用後の値");
+  assert.ok(data.balance < 200000, "残高がその場で減っている（直接適用）");
   assert.equal(readProfile(ME).items[BUY_ITEM.id] ?? 0, 1, "購入アイテムが付いている");
+  const ops = findOps((o) => o.reason === "shop_buy");
+  assert.equal(ops.length, 1, "spend オプは1件だけ");
+  assert.equal(ops[0].status, "done");
 });
 
-test("API(profile): 購入の決済が pending のままなら従来どおり交付する", async () => {
+test("API(profile): 売却の決済が pending のままなら従来どおり交付する", async () => {
   reset();
+  seedProfile(ME, { items: { wood: 3 } });
   seedPresence(ME, 5.5, 19.5);
-  const res = await profileRoute.POST(apiReq(PROFILE_URL, cookie(ME), { action: "buy", itemId: BUY_ITEM.id, count: 1 }));
+  // earn は PR1 ではキュー経路: ワーカーが拾わない限り pending のまま。
+  const res = await profileRoute.POST(apiReq(PROFILE_URL, cookie(ME), { action: "sell", itemId: "wood", count: 1 }));
   assert.equal(res.status, 200);
   const data = await res.json();
   assert.equal(data.opStatus, undefined, "pending のままなら opStatus は付かない");
-  assert.equal(readProfile(ME).items[BUY_ITEM.id] ?? 0, 1, "pending フォールバックで交付される");
+  assert.equal(readProfile(ME).items.wood, 2, "pending フォールバックで売却が交付される");
+  const ops = findOps((o) => o.reason === "shop_sale");
+  assert.equal(ops.length, 1);
+  assert.equal(ops[0].status, "pending");
 });
 
 test("API(profile): 売却の決済が failed ならアイテムは戻る（巻き戻し）", async () => {
@@ -388,9 +425,8 @@ test("API(profile): 強化の決済が failed ならレベルも素材も戻る�
   reset();
   seedProfile(ME, { items: { wooden_sword: 1, wood: 5 } });
   seedPresence(ME, 25.5, 35.5);
-  const flipped = armFlip((o) => o.kind === "spend" && o.reason === "tool_enhance", "failed", "insufficient_funds");
+  globalThis.__wbDgFailUpdate = true;
   const res = await profileRoute.POST(apiReq(PROFILE_URL, cookie(ME), { action: "enhance", itemId: "wooden_sword" }));
-  assert.equal(await flipped, true, "ワーカーがオプを failed にした");
   assert.equal(res.status, 409);
   assert.equal((await res.json()).error, "economy_failed");
   const after = readProfile(ME);
@@ -403,27 +439,26 @@ test("API(profile): 強化の決済が done ならレベルが上がって素材
   reset();
   seedProfile(ME, { items: { wooden_sword: 1, wood: 5 } });
   seedPresence(ME, 25.5, 35.5);
-  const flipped = armFlip((o) => o.kind === "spend" && o.reason === "tool_enhance", "done", undefined);
   const res = await profileRoute.POST(apiReq(PROFILE_URL, cookie(ME), { action: "enhance", itemId: "wooden_sword" }));
-  assert.equal(await flipped, true, "ワーカーがオプを done にした");
   assert.equal(res.status, 200);
   const after = readProfile(ME);
   assert.equal(after.enhance?.wooden_sword, 1, "強化レベルが上がっている");
   assert.equal(after.items.wood, 3, "素材が2個消費されている");
+  const ops = findOps((o) => o.reason === "tool_enhance");
+  assert.equal(ops.length, 1);
+  assert.equal(ops[0].status, "done", "spend は直接適用で done になっている");
 });
 
 test("API(profile): テント拡張の決済が failed なら段階は上がらない。再試行は失敗オプを消して積み直す", async () => {
   reset();
-  const first = armFlip((o) => o.kind === "spend" && o.reason === "tent_expand", "failed", "insufficient_funds");
+  globalThis.__wbDgFailUpdate = true;
   const res1 = await profileRoute.POST(apiReq(PROFILE_URL, cookie(ME), { action: "expand_tent" }));
-  assert.equal(await first, true, "ワーカーがオプを failed にした");
   assert.equal(res1.status, 409);
   assert.equal((await res1.json()).error, "economy_failed");
   assert.equal(readProfile(ME).tentTier ?? 0, 0, "段階は上がっていない");
-  // 再試行: 失敗オプが決定的 ID を塞がないこと。新しい試行が done になれば段階が上がる。
-  const second = armFlip((o) => o.kind === "spend" && o.reason === "tent_expand", "done", undefined);
+  // 再試行: 失敗オプ（と台帳）が決定的 ID を塞がないこと。
+  globalThis.__wbDgFailUpdate = false;
   const res2 = await profileRoute.POST(apiReq(PROFILE_URL, cookie(ME), { action: "expand_tent" }));
-  assert.equal(await second, true, "再試行のオプが done になった");
   assert.equal(res2.status, 200);
   assert.equal(readProfile(ME).tentTier, 1, "再試行で段階が上がっている");
   const ops = findOps((o) => o.reason === "tent_expand");
@@ -436,23 +471,22 @@ test("API(roles): 転職の決済が failed なら役職は変わらない（巻
   reset();
   seedProfile(ME, { role: "blade", rolePicked: true });
   seedPresence(ME, 24.5, 16.5);
-  const flipped = armFlip((o) => o.kind === "spend" && o.reason === "role_change", "failed", "insufficient_funds");
+  globalThis.__wbDgFailUpdate = true;
   const res = await rolesRoute.POST(apiReq(ROLES_URL, cookie(ME), { action: "set_role", role: "guard" }));
-  assert.equal(await flipped, true, "ワーカーがオプを failed にした");
   assert.equal(res.status, 409);
   assert.equal((await res.json()).error, "economy_failed");
   assert.equal(readProfile(ME).role, "blade", "役職は変わっていない");
+  assert.equal(globalThis.__wbDgUsers.get(ME), 200000, "残高は動いていない");
 });
 
 test("API(roles): 転職の決済が done なら役職が変わる", async () => {
   reset();
   seedProfile(ME, { role: "blade", rolePicked: true });
   seedPresence(ME, 24.5, 16.5);
-  const flipped = armFlip((o) => o.kind === "spend" && o.reason === "role_change", "done", undefined);
   const res = await rolesRoute.POST(apiReq(ROLES_URL, cookie(ME), { action: "set_role", role: "guard" }));
-  assert.equal(await flipped, true, "ワーカーがオプを done にした");
   assert.equal(res.status, 200);
   const data = await res.json();
   assert.equal(data.cost, 100000);
   assert.equal(readProfile(ME).role, "guard", "役職が変わっている");
+  assert.equal(globalThis.__wbDgUsers.get(ME), 100000, "課金がその場で引かれている");
 });

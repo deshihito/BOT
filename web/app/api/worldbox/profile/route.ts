@@ -7,7 +7,7 @@ import {
 } from "@/lib/worldbox/economy";
 import { buildEconomyOp, type EconomyOp } from "@/lib/worldbox/economy-bridge";
 import {
-  deleteEconomyOp, enqueueEconomyOp, enqueueEconomyOpOnce, findEconomyOp, isEconomyEnabled, readUserBalance, waitForOpDone,
+  deleteEconomyOp, deleteEconomyOpLedger, findEconomyOp, isEconomyEnabled, readUserBalance, submitEconomyOp, waitForOpDone,
 } from "@/lib/worldbox/economy-bridge-online";
 import { TENT_MAX_TIER, TENT_TIERS } from "@/lib/worldbox/tent";
 import {
@@ -26,9 +26,10 @@ export const runtime = "nodejs";
 
 // AGO WORLD BOX の経済（プロフィール＋かばん＋ショップ＋合成。steal・労働は廃止済み）。
 // 状態遷移の規則は lib/worldbox/economy（ボット側経済機能の写し）。
-// コインの正は AGO コイン本体: このルートは残高を書き換えず、遷移が
-// 返した coin を経済ブリッジ（bot_kv worldbox_economy）のオプとして
-// 積むだけ（案B）。実際の移動は Bot 本体のワーカーが適用する。
+// コインの正は AGO コイン本体: 遷移が返した coin は経済ブリッジの
+// オプとして submitEconomyOp へ渡す。spend は bot-api 経由でその場で
+// 適用され、直接適用できない種別・環境では bot_kv のキュー経由で
+// Bot 本体のワーカーが適用する（案B の冪等規則は両経路で共通）。
 // GET: 自分のプロフィール
 // POST { action: "buy" | "sell", itemId, count? }: ショップ売買
 //   （場所制約: ロビーの店か鍛冶屋の前にいること。サーバー側でプレゼンス検証。
@@ -66,19 +67,17 @@ function discordIdOf(session: { provider: string; id: string }): string | null {
   return session.provider === "discord" ? session.id : null;
 }
 
-/** coin をブリッジのオプとして積む。積めたらそのオプ、駄目なら null。 */
-async function enqueueCoin(
+/** coin からブリッジのオプを組み立てる。提出は submitEconomyOp が行う。 */
+function buildCoinOp(
   ownerKey: string,
   discordId: string,
   coin: CoinMovement,
-): Promise<EconomyOp | null> {
-  const op = buildEconomyOp(
+): EconomyOp | null {
+  return buildEconomyOp(
     { kind: coin.kind, userKey: ownerKey, discordId, amount: coin.amount, reason: coin.reason },
     crypto.randomUUID(),
     Date.now(),
   );
-  if (!op) return null;
-  return (await enqueueEconomyOp(op)) ? op : null;
 }
 
 export async function GET(request: Request) {
@@ -161,15 +160,22 @@ async function handlePost(request: Request, session: AuthedSession) {
       return NextResponse.json({ error: "store_failed" }, { status: 503, headers: NO_STORE });
     }
     if (result.coin) {
-      const op = await enqueueCoin(ownerKey, discordId, result.coin);
+      const op = buildCoinOp(ownerKey, discordId, result.coin);
       if (!op) {
         await storeProfile(ownerKey, current);
         return statusError("economy_failed", 503);
       }
-      // 適用を server-side wait でその場で待ち、終端していれば最終
-      // 残高も同一レスポンスで返す。予算を超えて pending のままなら
-      // 従来どおり（残高はクライアントの次の取得で反映される）。
-      const settled = await waitForOpDone(ownerKey, op.id);
+      // 提出は直接適用が正（submitEconomyOp）: spend はその場で終端する。
+      // 直接適用できずキューへ寄せた（pending）ときだけ、従来どおり
+      // server-side wait で追い、終端していれば最終残高も同一レスポンス
+      // で返す。予算を超えて pending のままなら従来どおり（残高は
+      // クライアントの次の取得で反映される）。
+      const submitted = await submitEconomyOp(op);
+      if (submitted.state === "unavailable") {
+        await storeProfile(ownerKey, current);
+        return statusError("economy_failed", 503);
+      }
+      const settled = submitted.state === "pending" ? await waitForOpDone(ownerKey, op.id) : submitted.op;
       if (settled && settled.status === "failed") {
         await storeProfile(ownerKey, current);
         return NextResponse.json(
@@ -268,17 +274,21 @@ async function handlePost(request: Request, session: AuthedSession) {
       const existing = await findEconomyOp(ownerKey, opId);
       if (existing && existing.status === "failed") {
         // 前の試行の失敗オプが残っていると決定的 ID が塞がれて再試行できない。
-        // 金は動いていない終端オプなので消してから積み直す。消せなくても
-        // 下の wait が failed を見て 409 を返す（安全側）。
+        // 金は動いていない終端オプなので消してから積み直す。適用台帳の
+        // failed も対で消す（台帳が残ると再提出が即 failed に戻る）。
+        // 消せなくても下の判定が failed を見て 409 を返す（安全側）。
         await deleteEconomyOp(opId);
+        await deleteEconomyOpLedger(opId);
       }
       const op = buildEconomyOp(
         { kind: "spend", userKey: ownerKey, discordId: gate.discordId, amount: price, reason: "tent_expand" },
         opId,
         Date.now(),
       );
-      if (!op || !(await enqueueEconomyOpOnce(op))) return statusError("economy_failed", 503);
-      const settled = await waitForOpDone(ownerKey, op.id);
+      if (!op) return statusError("economy_failed", 503);
+      const submitted = await submitEconomyOp(op);
+      if (submitted.state === "unavailable") return statusError("economy_failed", 503);
+      const settled = submitted.state === "pending" ? await waitForOpDone(ownerKey, op.id) : submitted.op;
       if (settled && settled.status === "failed") {
         return NextResponse.json(
           { error: "economy_failed", opError: settled.error ?? null },
