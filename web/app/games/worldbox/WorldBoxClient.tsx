@@ -1712,6 +1712,38 @@ export default function WorldBoxClient() {
   };
   const attackMobRef = useRef(attackMob);
   attackMobRef.current = attackMob;
+  /** 他プレイヤーへの攻撃（フィールド PvP。サーバーがプレゼンスで実在・距離を検証し、HP の正を持つ）。 */
+  const attackPlayer = async (targetId: string, tx: number, ty: number) => {
+    try {
+      const res = await fetch("/api/worldbox/vitals", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "pvp", targetId,
+          ...(parseInstanceSpace(spaceUi) ? { space: spaceUi } : {}),
+          // 距離検証のフォールバック（モブ攻撃と同じ。プレゼンスが新鮮ならそちらが優先）
+          px: playerPosRef.current.x, py: playerPosRef.current.y,
+        }),
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        error?: string; applied?: boolean; dead?: boolean;
+      };
+      if (!res.ok) {
+        if (data.error === "too_far") setTileMsg(TILE_ERROR_LABEL.too_far);
+        fxEventsRef.current.push({ kind: "whiff", x: tx, y: ty });
+        return;
+      }
+      fxEventsRef.current.push({
+        kind: data.applied ? (data.dead ? "death" : "hit") : "whiff",
+        x: tx, y: ty,
+        color: "#e2483a",
+      });
+    } catch {
+      fxEventsRef.current.push({ kind: "whiff", x: tx, y: ty });
+    }
+  };
+  const attackPlayerRef = useRef(attackPlayer);
+  attackPlayerRef.current = attackPlayer;
   const refreshMobsRef = useRef(refreshMobs);
   refreshMobsRef.current = refreshMobs;
   /** テント拡張の購入（サーバー側 expand_tent が正）。 */
@@ -2470,7 +2502,7 @@ export default function WorldBoxClient() {
         if (t.x !== px || t.y !== py) player.face = t.x + 0.5 >= player.x ? 1 : -1;
         swing = { startedAt: performance.now(), itemId: selDef.id, face: player.face, whiff: false };
         playWbSe("swing");
-        const candidates: { mobId: string; x: number; y: number; size: number; placed: PlacedMob }[] = [];
+        const candidates: { mobId: string; x: number; y: number; size: number; placed?: PlacedMob; playerId?: string }[] = [];
         for (const placed of mobCache) {
           const def = mobById(placed.mobId);
           if (!def) continue;
@@ -2485,11 +2517,24 @@ export default function WorldBoxClient() {
             placed,
           });
         }
+        // フィールド PvP: 剣の範囲には他プレイヤーも入る（PvP 対象空間のみ）
+        if (space === "world" || parseInstanceSpace(space)?.kind === "cave" || parseInstanceSpace(space)?.kind === "ruins") {
+          for (const [oid, other] of others) {
+            candidates.push({
+              mobId: "",
+              x: Math.floor(other.track.rx),
+              y: Math.floor(other.track.ry),
+              size: 1,
+              playerId: oid,
+            });
+          }
+        }
         const target = attackTarget(px, py, t.x, t.y, candidates);
         if (target) {
           if (nowMs - lastAttackAt >= 350) {
             lastAttackAt = nowMs;
-            void attackMobRef.current(target.placed, { x: target.x, y: target.y });
+            if (target.playerId) void attackPlayerRef.current(target.playerId, target.x, target.y);
+            else if (target.placed) void attackMobRef.current(target.placed, { x: target.x, y: target.y });
           }
           return true;
         }
@@ -2731,10 +2776,15 @@ export default function WorldBoxClient() {
       }
       if (space === "world" || parseInstanceSpace(space)) {
         const t = toTile(e);
-        // 他プレイヤーをタップしたらプロフィールチップを出す（招待導線もここから）
+        // 他プレイヤーをタップしたらプロフィールチップを出す（招待導線もここから）。
+        // ただし剣を構えている PvP 対象空間では、チップでなく攻撃として扱う。
         if (space === "world" || parseInstanceSpace(space)) {
+          const selItemId = invRef.current?.hotbar[selSlotRef.current]?.id ?? null;
+          const selTool = selItemId ? itemById(selItemId)?.tool : null;
+          const pvpSpace = space === "world" || parseInstanceSpace(space)?.kind === "cave" || parseInstanceSpace(space)?.kind === "ruins";
           for (const [oid, other] of others) {
             if (Math.floor(other.track.rx) === t.x && Math.floor(other.track.ry) === t.y) {
+              if (selTool === "sword" && pvpSpace) break;
               showPlayerCardRef.current({
                 id: oid,
                 name: other.track.entry.name || "プレイヤー",
@@ -3969,16 +4019,18 @@ export default function WorldBoxClient() {
           }
         }
         ctx.restore();
-        // HP バー（傷ついた個体だけ）
-        if (hpFrac < 1) {
-          const bw = Math.max(26, w * 0.9);
+        // HP バー（常時表示: 満タンでも出して、敵の残り HP が一目で分かるようにする）
+        {
+          const bw = Math.min(180, Math.max(26, w * 0.9));
           const bh2 = 4;
-          const bxHp = cxp - bw / 2;
-          const byHp = by - 9;
+          const bxHp = Math.round(cxp - bw / 2);
+          const byHp = Math.round(by - 9);
           ctx.fillStyle = "rgba(12,14,12,0.55)";
           ctx.fillRect(bxHp - 1, byHp - 1, bw + 2, bh2 + 2);
+          ctx.fillStyle = "rgba(255,255,255,0.22)";
+          ctx.fillRect(bxHp, byHp, bw, bh2);
           ctx.fillStyle = hpFrac > 0.5 ? "#7ed957" : hpFrac > 0.25 ? "#f2c53c" : "#e2483a";
-          ctx.fillRect(bxHp, byHp, bw * Math.max(0, hpFrac), bh2);
+          ctx.fillRect(bxHp, byHp, Math.round(bw * Math.min(1, Math.max(0, hpFrac))), bh2);
         }
       };
       if (space === "world" || parseInstanceSpace(space)) {
