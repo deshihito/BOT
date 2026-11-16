@@ -127,5 +127,37 @@ class RadioSupervisorSurvivalTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(called_guild.id, guild2.id)
 
 
+class WorldBoxDiscordLoopSurvivalTest(unittest.IsolatedAsyncioTestCase):
+    """B5 #7: worldbox_discord_loop 本体で例外が漏れてもループは止まらない。"""
+
+    def make_cog(self, publish):
+        obj = types.SimpleNamespace()
+        obj.worldbox_discord = types.SimpleNamespace(publish_directory_once=publish)
+        return obj
+
+    async def test_loop_survives_publish_failure(self):
+        async def boom():
+            raise RuntimeError("directory boom")
+
+        from core.general.circulation import cog as circulation_cog
+
+        obj = self.make_cog(boom)
+        await circulation_cog.CirculationCog.worldbox_discord_loop.coro(obj)
+        # 例外が外へ漏れなければ、ループは次周期も生きている（=止まっていない）
+
+    async def test_loop_runs_publish_once(self):
+        calls = []
+
+        async def ok():
+            calls.append(1)
+            return 1
+
+        from core.general.circulation import cog as circulation_cog
+
+        obj = self.make_cog(ok)
+        await circulation_cog.CirculationCog.worldbox_discord_loop.coro(obj)
+        self.assertEqual(calls, [1])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -580,8 +580,13 @@ class CirculationCog(commands.Cog):
 
     @tasks.loop(seconds=worldbox_discord_core.DIRECTORY_INTERVAL_SECONDS)
     async def worldbox_discord_loop(self) -> None:
-        # 失敗は publish_directory_once の中で吸収される（警告ログのみ）
-        await self.worldbox_discord.publish_directory_once()
+        # tasks.loop は本体で例外が漏れるとループごと止まる（無言死）。
+        # 失敗は publish_directory_once の中で吸収される作りだが、想定外の
+        # 漏れでも次周期に再試行できるよう本体全体をここでも吸収する。
+        try:
+            await self.worldbox_discord.publish_directory_once()
+        except Exception:
+            logger.exception("worldbox discord: ディレクトリ公開に失敗しました（次周期に再試行）")
 
     @worldbox_discord_loop.before_loop
     async def _before_worldbox_discord_loop(self) -> None:
