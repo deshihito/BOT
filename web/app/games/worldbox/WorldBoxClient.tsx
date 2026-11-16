@@ -2331,6 +2331,8 @@ export default function WorldBoxClient() {
     let rtReconnectTimer: number | undefined;
     /** WS で最後にメッセージを受けた時刻（生存判定とポーリング間引き用）。 */
     let lastWsMsgAt = 0;
+    /** プレゼンス集約が有効か（relay の hello/agg 合図で切り替わる）。 */
+    let rtAggOn = false;
     /** プレゼンス REST ポーリングの最終実行時刻（間引き判定用）。 */
     let lastPresencePollAt = 0;
     // 初回接続と再接続の区別（再接続だけ薄い復帰パルスを出す）。
@@ -2394,6 +2396,7 @@ export default function WorldBoxClient() {
             t?: string; now?: number; p?: PresenceEntry; players?: PresenceEntry[]; id?: string;
             kind?: string; changes?: { key: string; value: unknown }[]; value?: unknown;
             channel?: string; space?: string; guildId?: string;
+            agg?: number; on?: boolean;
           };
           try {
             msg = JSON.parse(String(ev.data));
@@ -2402,7 +2405,12 @@ export default function WorldBoxClient() {
           }
           if (typeof msg.now === "number") absorbClockSample(msg.now, arrivedAt, arrivedAt);
           const now = presenceNow();
-          if (msg.t === "snap") {
+          if (msg.t === "hello" && msg.agg === 1) {
+            // プレゼンス集約が有効: 以後の REST ハートビートは止める
+            rtAggOn = true;
+          } else if (msg.t === "agg") {
+            rtAggOn = msg.on === true;
+          } else if (msg.t === "snap") {
             for (const entry of msg.players ?? []) {
               if (isOtherPartyInDungeon(entry)) continue;
               missedPolls.delete(entry.id);
@@ -2475,6 +2483,8 @@ export default function WorldBoxClient() {
         const onGone = () => {
           if (rtSocket === ws) rtSocket = null;
           rtOpenRef.current = false;
+          // 切断時は即座に REST ハートビートへ復帰する（過去の凍結実害の再演防止）
+          rtAggOn = false;
           if (disposed) return;
           rtRetryAt = Date.now() + rtBackoffMs;
           rtBackoffMs = Math.min(10_000, rtBackoffMs * 2);
@@ -2587,9 +2597,11 @@ export default function WorldBoxClient() {
       const moving = Math.hypot(player.vx, player.vy) > 0.1 || movedDist > 0.05;
       const wsOpen = rtSocket?.readyState === WebSocket.OPEN;
       // bot_kv プレゼンスはサーバー検証（カジノ・ステーション・ギルドボード・
-      // モブ距離）の正だが、WS 中継は bot_kv に書かない。REST ハートビートを
-      // WS の有無と独立に併送し、bot_kv 側の鮮度を保つ（止めると全ゲートが死ぬ）。
-      if (movedDist > 4 || now - lastRestHeartbeatAt >= (moving ? 500 : 2000)) {
+      // モブ距離）の正。Phase 2 以降は集約合図（hello/agg）がある間だけ
+      // relay が WS 受信の位置を bot_kv へ書き、REST ハートビートを止める。
+      // 合図が無い・切断した場合は従来どおり REST を併送して鮮度を保つ
+      // （WS 接続中でも集約なしに止めると全ゲートが死ぬ: 過去の実害）。
+      if (!rtAggOn && (movedDist > 4 || now - lastRestHeartbeatAt >= (moving ? 500 : 2000))) {
         lastRestHeartbeatAt = now;
         lastHeartbeatPos = { x: player.x, y: player.y };
         sendHeartbeat();
