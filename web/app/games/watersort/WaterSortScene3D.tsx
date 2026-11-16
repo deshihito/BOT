@@ -29,7 +29,9 @@ const TUBE_H = 1.5;
 const LAYER_H = 0.33;
 
 function bottleX(i: number, n: number): number {
-  return (i - (n - 1) / 2) * 1.02;
+  // 本数が多い（最大9本）ときは間隔を詰めて全体幅を画面内に収める。
+  const pitch = n > 1 ? Math.min(1.02, 6.4 / (n - 1)) : 1.02;
+  return (i - (n - 1) / 2) * pitch;
 }
 
 function findPickId(obj: THREE.Object3D | null): string | null {

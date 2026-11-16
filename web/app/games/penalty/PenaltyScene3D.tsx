@@ -131,7 +131,7 @@ export default function PenaltyScene3D({ state, onChoose, onFail, fallback }: Pr
     let detach: (() => void) | null = null;
     const stage = createStage(container, {
       background: 0x14532d,
-      camera: { position: [0, 2.1, 6.4], lookAt: [0, 1.0, 0], fov: 42 },
+      camera: { position: [0, 2.5, 8.74], lookAt: [0, 1.0, 0], fov: 42 },
       onFrame: (_dt, t) => {
         const rt = rtRef.current;
         if (!rt) return;

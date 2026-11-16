@@ -10,7 +10,7 @@
 // WebGL が使えない場合は onFail で親へ知らせ、親は 2D 表示に切り替える。
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import * as THREE from "three";
-import { createStage } from "@/lib/three-kit/stage";
+import { createStage, FIT_REFERENCE_ASPECT, type Stage } from "@/lib/three-kit/stage";
 import { canvasTexture, createBall } from "@/lib/three-kit/primitives";
 import { attachPickPointer } from "@/lib/three-kit/pointer";
 import SceneBox from "@/lib/three-kit/SceneBox";
@@ -41,6 +41,25 @@ const MAX_SEGMENTS = 420;
 
 function cellPos(p: SnakePoint, cols: number, rows: number): [number, number] {
   return [(p.x - (cols - 1) / 2) * PITCH, (p.y - (rows - 1) / 2) * PITCH];
+}
+
+// 盤全体が画面に収まるようカメラ距離を盤サイズから決める（他ボードゲームの
+// fitCamera と同方式）。スネークは傾斜が急（方向比 0.895/0.445）なため、
+// 奥行きの投影率はその傾斜に合わせた 0.9 を使う。
+function fitCamera(stage: Stage, container: HTMLElement, cols: number, rows: number) {
+  const w = container.clientWidth || 840;
+  const h = container.clientHeight || 480;
+  const aspect = Math.max(w / h, FIT_REFERENCE_ASPECT); // stage の画角フィットと二重に効かせないよう基準アスペクトで下限クランプ
+  const vFov = (42 * Math.PI) / 180;
+  const hFov = 2 * Math.atan(Math.tan(vFov / 2) * aspect);
+  const distW = ((cols * PITCH + 0.3) / 2 + 0.9) / Math.tan(hFov / 2);
+  const distD = (((rows * PITCH + 0.3) / 2 + 0.9) / Math.tan(vFov / 2)) * 0.9;
+  const dist = Math.max(distW, distD) + 1.2;
+  stage.setCamera({
+    position: [0, dist * 0.895, 0.8 + dist * 0.445],
+    lookAt: [0, 0, 0.8],
+    fov: 42,
+  });
 }
 
 interface SceneRt {
@@ -133,6 +152,7 @@ export default function SnakeScene3D({ getState, onSwipe, onTap, onFail, fallbac
     const { scene } = stage;
 
     const s0 = propsRef.current.getState();
+    fitCamera(stage, container, s0.cols, s0.rows);
     // グリッド床: 現行 2D と同じ濃緑に格子線を描いた平板。
     const gridTex = canvasTexture(`snake-grid-${s0.cols}x${s0.rows}`, 512, 512, (g) => {
       g.fillStyle = "#14231a";

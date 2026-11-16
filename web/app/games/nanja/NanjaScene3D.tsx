@@ -168,7 +168,7 @@ export default function NanjaScene3D({ top, pile, pileCount, deckCount, canFlip,
     let detach: (() => void) | null = null;
     const stage = createStage(container, {
       background: 0x232b26,
-      camera: { position: [0, 3.4, 5.6], lookAt: [0, 0.55, 0], fov: 42 },
+      camera: { position: [0, 3.83, 6.44], lookAt: [0, 0.55, 0], fov: 42 },
       onFrame: () => {
         const rt = rtRef.current;
         if (!rt) return;
@@ -211,13 +211,13 @@ export default function NanjaScene3D({ top, pile, pileCount, deckCount, canFlip,
     const { scene } = stage;
 
     const table = new THREE.Mesh(
-      new THREE.CylinderGeometry(3.1, 3.3, 0.18, 40),
+      new THREE.CylinderGeometry(2.45, 2.6, 0.18, 40),
       new THREE.MeshStandardMaterial({ color: 0x2e4a38, roughness: 0.9 }),
     );
     table.position.y = -0.1;
     scene.add(table);
     const rim = new THREE.Mesh(
-      new THREE.TorusGeometry(3.1, 0.05, 10, 48),
+      new THREE.TorusGeometry(2.45, 0.05, 10, 48),
       new THREE.MeshStandardMaterial({ color: 0x8a6f45, roughness: 0.5 }),
     );
     rim.rotation.x = Math.PI / 2;

@@ -126,7 +126,7 @@ export default function CrocodileScene3D({ pressed, status, lastPlayer, lastCpu,
     scene.background = new THREE.Color(0xe9f4ec);
 
     const camera = new THREE.PerspectiveCamera(46, 1, 0.1, 60);
-    camera.position.set(0, 3.35, 6.9);
+    camera.position.set(0, 3.83, 7.91);
     camera.lookAt(0, 0.3, 0.5);
 
     scene.add(new THREE.HemisphereLight(0xffffff, 0x51735c, 1.1));
