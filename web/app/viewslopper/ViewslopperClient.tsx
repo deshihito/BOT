@@ -26,19 +26,19 @@ export default function ViewslopperClient() {
       });
       const data = await res.json().catch(() => null);
       if (!res.ok) {
-        setError(data?.error ?? "診断に失敗しました。");
+        setError(data?.error ?? "診断に失敗した。向こうが逃げたか、URLが怪しい。");
         return;
       }
       const typed = data as ViewResult;
       setResult(typed);
       try {
         saveHistory(window.localStorage, toHistoryEntry(typed, Date.now()));
-        setSavedNote("保存しました");
+        setSavedNote("証拠はこの端末に保存した");
       } catch {
         // 保存できなくても診断結果の表示は続ける
       }
     } catch {
-      setError("診断に失敗しました。");
+      setError("診断に失敗した。向こうが逃げたか、URLが怪しい。");
     } finally {
       setBusy(false);
     }
@@ -56,7 +56,7 @@ export default function ViewslopperClient() {
           onKeyDown={(e) => {
             if (e.key === "Enter") void run();
           }}
-          aria-label="診断するURL"
+          aria-label="晒すURL"
           style={{
             flex: 1, minWidth: 0, padding: "12px 14px", borderRadius: 10, border: "1px solid #2c2f36",
             background: "#17191c", color: "#f2f3f5", fontSize: 16,
@@ -73,7 +73,7 @@ export default function ViewslopperClient() {
             cursor: busy || !url.trim() ? "default" : "pointer",
           }}
         >
-          {busy ? "診断中…" : "測る"}
+          {busy ? "粗探し中…" : "晒す"}
         </button>
       </div>
       {error && (

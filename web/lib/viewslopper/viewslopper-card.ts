@@ -28,6 +28,19 @@ export function cardScoreColor(score: number): string {
   return "#e5484d";
 }
 
+/**
+ * カード用の一言判決（短縮版）。帯ごとの文言は lib 側の verdictFor と
+ * 対応させる（カードは幅の都合で短い版を使う）。
+ */
+export function cardVerdict(score: number): string {
+  if (score < 10) return "奇跡。人間が書いた形跡あり";
+  if (score < 20) return "ほぼ人間。油断するとAIに寄る";
+  if (score < 40) return "うっすらAI臭。誤魔化せてない";
+  if (score < 60) return "中身スカスカ寸前。言い逃れ不可";
+  if (score < 80) return "はい、Slopです";
+  return "Slopの化身。人間、辞めたんか？";
+}
+
 /** 保存ファイル名: viewslopper-<host>-<score>.png（host が取れなければ result） */
 export function buildCardFileName(url: string, score: number): string {
   let host = "result";
@@ -126,14 +139,19 @@ export function drawScoreCard(canvas: HTMLCanvasElement, data: CardData): void {
   ctx.font = `700 44px ${FONT}`;
   ctx.fillText(data.grade, 56, 416);
 
+  // 一言判決（煽り）
+  ctx.fillStyle = cardScoreColor(data.score);
+  ctx.font = `700 27px ${FONT}`;
+  ctx.fillText(fitText(ctx, cardVerdict(data.score), 520), 56, 462);
+
   // タイトルと URL
   ctx.fillStyle = "#d6d9de";
   ctx.font = `30px ${FONT}`;
   const titleLines = wrapText(ctx, data.title || data.url, 500, 2);
-  titleLines.forEach((line, i) => ctx.fillText(line, 56, 478 + i * 42));
+  titleLines.forEach((line, i) => ctx.fillText(line, 56, 516 + i * 42));
   ctx.fillStyle = "#8a8f98";
   ctx.font = `22px ${FONT}`;
-  ctx.fillText(fitText(ctx, data.url, 500), 56, 478 + titleLines.length * 42 + 8);
+  ctx.fillText(fitText(ctx, data.url, 500), 56, 516 + titleLines.length * 42 + 8);
 
   // 左下: サブスコアは数字だけを静かに並べる（説明文は置かない）
   const stats: string[] = [];
@@ -148,7 +166,7 @@ export function drawScoreCard(canvas: HTMLCanvasElement, data: CardData): void {
   // 右: 次元の内訳バー
   ctx.fillStyle = "#8a8f98";
   ctx.font = `600 20px ${FONT}`;
-  ctx.fillText("内訳", 640, 168);
+  ctx.fillText("内訳（言い逃れ不可）", 640, 168);
   const barX = 820;
   const barW = 300;
   data.dimensions.slice(0, 6).forEach((d, i) => {

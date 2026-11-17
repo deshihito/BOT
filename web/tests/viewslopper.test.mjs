@@ -155,7 +155,7 @@ test("LLM主採点: 応答検証は全次元・全軸が揃った場合だけ通
   const composed = m.composeAssessed(parsed, heuristic);
   // cliche=100 が重み20 → 合計20
   assert.equal(composed.total, 20);
-  assert.equal(composed.grade, "Light");
+  assert.equal(composed.grade, "AI臭あり");
   assert.equal(composed.diagnosis.length, 1);
   assert.equal(composed.diagnosis[0].dimension, "cliche");
   // 採点メッセージにはアンカーが入り、決定的スコアは渡さない（引きずり防止）
@@ -173,7 +173,7 @@ test("外観採点: vision応答を検証し、重み付け集計と所見化す
   assert.ok(composed);
   // 80*0.35 + 40*0.25 + 40*0.20 + 40*0.20 = 54
   assert.equal(composed.score, 54);
-  assert.equal(composed.grade, "Slop気味");
+  assert.equal(composed.grade, "Slop予備軍");
   assert.equal(composed.findings[0].axis, "テンプレ感");
   // 軸が欠けた応答は不採用
   assert.equal(m.composeAppearance(JSON.stringify({ axes: axes.slice(0, 3) })), null);
@@ -190,7 +190,7 @@ test("診断履歴: 端末保存の追加・重複URLの最新化・上限・削
     setItem: (k, v) => store.set(k, v),
     removeItem: (k) => store.delete(k),
   };
-  const mk = (url, score, at) => h.toHistoryEntry({ url, title: "t", score, grade: "Light", ux: { friction: 10 }, appearance: { score: 20 } }, at);
+  const mk = (url, score, at) => h.toHistoryEntry({ url, title: "t", score, grade: "AI臭あり", ux: { friction: 10 }, appearance: { score: 20 } }, at);
   assert.equal(h.toHistoryEntry({ score: 1 }, 0), null);
   let list = h.saveHistory(storage, mk("https://a.com/", 10, 1000));
   assert.equal(list.length, 1);
@@ -279,6 +279,29 @@ test("16:9カード: 寸法・ファイル名・省略が仕様通り", async ()
   assert.equal(c.ellipsize("abc", 4), "abc");
   assert.equal(c.cardScoreColor(10), "#46a758");
   assert.equal(c.cardScoreColor(90), "#e5484d");
+  assert.equal(c.cardVerdict(5), "奇跡。人間が書いた形跡あり");
+  assert.equal(c.cardVerdict(85), "Slopの化身。人間、辞めたんか？");
+});
+
+test("煽りグレードと一言判決: 帯ごとに決定的に切り替わる", () => {
+  // スコア計算は不変、表示ラベルだけが煽り仕様
+  assert.equal(m.scoreText(SOLID_TEXT).grade, "辛うじて人間");
+  assert.ok(m.scoreText(SLOP_TEXT).grade === "Slop確定" || m.scoreText(SLOP_TEXT).grade === "重度Slop");
+  assert.equal(m.verdictFor(0), "奇跡。人間が書いた形跡がある。");
+  assert.equal(m.verdictFor(19), "ほぼ人間。だが油断するとすぐAIに寄るぞ。");
+  assert.equal(m.verdictFor(20), "うっすらAI臭。誤魔化せてると思うな。");
+  assert.equal(m.verdictFor(59), "中身スカスカまであと一歩。言い逃れは効かない。");
+  assert.equal(m.verdictFor(60), "はい、Slopです。言い訳は受け付けない。");
+  assert.equal(m.verdictFor(100), "Slopの化身。人間、辞めたんか？");
+  assert.equal(m.uxVerdictFor(10), "摩擦なし。今日だけは褒めてやる。");
+  assert.equal(m.uxVerdictFor(90), "開いた時点で敗北宣言。作り直せ。");
+  assert.equal(m.appearanceVerdictFor(10), "見た目はまとも。今日はここだけ褒める。");
+  assert.equal(m.appearanceVerdictFor(90), "見た目が完全に量産品。人間味ゼロ。");
+  // 採点プロンプトは煽り口調を義務化している
+  const page = { url: "https://e.com", title: "t", description: "", headings: [], text: SOLID_TEXT, ux: m.emptyUxSignals() };
+  const msgs = m.buildAssessMessages(page, m.scoreText(SOLID_TEXT));
+  assert.ok(msgs[0].content.includes("煽り口調"));
+  assert.ok(m.APPEARANCE_PROMPT.includes("煽り口調"));
 });
 
 test("LLM診断メッセージはスコア固定を指示し、応答検証は不正要素を捨てる", () => {
