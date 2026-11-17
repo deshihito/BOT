@@ -360,6 +360,27 @@ if (wss) {
           }
         }
         if (pids.size > 0) sendTo((info) => pids.has(info.pid), { t: "sync", kind: "party" });
+      } else if (kind === "instances") {
+        // インスタンス状態は本人向け加工（個人状態・セッション要約）が
+        // 要るため poke にし、宛先はキーから解決する: 共有状態は同じ
+        // 空間、セッションは同じ入口のダンジョン、個人状態は本人だけ
+        const spaces = new Set();
+        const prefixes = new Set();
+        const pids = new Set();
+        for (const c of changes) {
+          const scope = watchCore.instanceKeyScope(c.key);
+          if (!scope) continue;
+          if (scope.space) spaces.add(scope.space);
+          if (scope.spacePrefix) prefixes.add(scope.spacePrefix);
+          if (scope.pid) pids.add(scope.pid);
+        }
+        if (spaces.size > 0 || prefixes.size > 0) {
+          sendTo(
+            (info) => !!info.space && (spaces.has(info.space) || [...prefixes].some((p) => info.space.startsWith(p))),
+            { t: "sync", kind: "instances" },
+          );
+        }
+        if (pids.size > 0) sendTo((info) => pids.has(info.pid), { t: "sync", kind: "instances" });
       } else if (kind === "economy") {
         // 経済オプの確定は本人のみに合図する（金額・内容は載せない）
         const pids = new Set();
@@ -395,7 +416,7 @@ if (wss) {
         setInterval(() => void run(), plan.intervalMs);
       }, 500 + idx * 300);
     });
-    console.log("[realtime] kv watch enabled (chat/party/tiles/mobs/board/nations)");
+    console.log("[realtime] kv watch enabled (chat/party/tiles/mobs/board/nations/instances/economy)");
   } else {
     console.log("[realtime] kv watch disabled (bot api not configured)");
   }

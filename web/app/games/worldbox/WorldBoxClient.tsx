@@ -1192,10 +1192,14 @@ export default function WorldBoxClient() {
     }
   };
   /** モブ接触ダメージ（サーバーが配置・距離・攻撃力を検証する）。 */
-  const postMobDamage = (mobId: string, x: number, y: number) => {
+  const postMobDamage = (mobId: string, x: number, y: number, mx?: number, my?: number) => {
     void postVitals({
       action: "damage", mobId, x, y,
       px: playerPosRef.current.x, py: playerPosRef.current.y,
+      // モブの見た目の現在タイルも申告する（攻撃と同じ）。サーバーは
+      // アンカーしか知らないため、これがないと追跡してきたモブの
+      // 接触が too_far で無効化される。
+      ...(typeof mx === "number" && typeof my === "number" ? { mx, my } : {}),
       ...(parseInstanceSpace(spaceUi) ? { space: spaceUi } : {}),
     }, true);
   };
@@ -1399,13 +1403,31 @@ export default function WorldBoxClient() {
     const ticket = partyGuardRef.current.begin(force ? { force: true } : undefined);
     if (ticket === null) return;
     try {
-      const res = await fetch("/api/worldbox/party", { headers: { Accept: "application/json" } });
+      // ダンジョン内ではセッション要約も一緒に受け取る（?space= を付けないと
+      // サーバー側の要約経路が死んだままになる）
+      const dungeonSpace = parseInstanceSpace(spaceUi)?.kind === "dungeon" ? spaceUi : null;
+      const res = await fetch(
+        dungeonSpace ? `/api/worldbox/party?space=${encodeURIComponent(dungeonSpace)}` : "/api/worldbox/party",
+        { headers: { Accept: "application/json" } },
+      );
       if (!res.ok) return;
       const data = (await res.json()) as {
         party?: PartyViewClient | null; partyKey?: string; isLeader?: boolean;
         invite?: { partyId: string; leaderName: string } | null;
+        dungeon?: { size: number; floorBossDead: Record<string, boolean>; bossDead: boolean } | null;
       };
       if (!partyGuardRef.current.isCurrent(ticket)) return;
+      if (data.dungeon) {
+        // ボス進行と人数だけを要約で更新する（宝箱・扉はインスタンス
+        // 取得の正のまま残す）。インスタンス watch の poke と二重に
+        // 届いても同じ値へ収束する。
+        dungeonStateRef.current = {
+          ...dungeonStateRef.current,
+          size: data.dungeon.size,
+          floorBossDead: data.dungeon.floorBossDead,
+          bossDead: data.dungeon.bossDead,
+        };
+      }
       myPartyKeyRef.current = data.partyKey ?? "";
       setPartyUi({
         party: data.party ?? null, partyKey: data.partyKey ?? "",
@@ -1463,6 +1485,11 @@ export default function WorldBoxClient() {
       };
       if (!res.ok) {
         if (data.error && TILE_ERROR_LABEL[data.error]) setTileMsg(TILE_ERROR_LABEL[data.error]);
+        // 失敗理由がサーバー状態とのずれ（他人が先に採って枯渇した等）の
+        // ことがあるため、表示キャッシュをサーバーの正へ寄せ直す
+        if (kindNow === "cave") void refreshCaveState(space);
+        else if (kindNow === "dungeon") void refreshDungeonState(space);
+        else void refreshRuinsState(space);
         return;
       }
       if (data.profile) setInvProfile(data.profile);
@@ -1814,6 +1841,12 @@ export default function WorldBoxClient() {
         color: def ? MOB_FX_COLOR[def.id] : undefined,
       });
       if (data.profile) setInvProfile(data.profile);
+      // ダンジョンで倒したらセッション進行（フロアボス撃破→階段開放、
+      // 番人の鍵は profile 側）を取り直す。従来は自分の画面でも階段が
+      // 「ボスを倒すと開く」のまま固まっていた。
+      if (data.dead && parseInstanceSpace(spaceUi)?.kind === "dungeon") {
+        void refreshDungeonState(spaceUi);
+      }
     } catch {
       fxEventsRef.current.push({ kind: "whiff", x: placed.x, y: placed.y });
     }
@@ -2538,6 +2571,14 @@ export default function WorldBoxClient() {
             void nationsRefreshRef.current(true);
           } else if (msg.t === "sync" && msg.kind === "party") {
             void refreshPartyRef.current(true);
+          } else if (msg.t === "sync" && msg.kind === "instances") {
+            // インスタンス状態（洞窟の枯渇・遺跡の個人状態・ダンジョンの
+            // ボス進行など）が他人の行為で変わった: 今いる空間の状態を
+            // 取り直す（従来は再ワープするまで古い表示のままだった）
+            const instNow = parseInstanceSpace(space);
+            if (instNow?.kind === "cave") void refreshCaveStateRef.current(space);
+            else if (instNow?.kind === "dungeon") void refreshDungeonStateRef.current(space);
+            else if (instNow?.kind === "ruins") void refreshRuinsStateRef.current(space);
           } else if (msg.t === "sync" && msg.kind === "economy") {
             // 自分の経済オプが確定した: 残高を取り直し、開いている
             // 経済/カジノ/アリーナパネルへも合図する（金額は push に無い）
@@ -3944,10 +3985,15 @@ export default function WorldBoxClient() {
           const isNew = contact.key !== contactMobKeyNow;
           contactMobKeyNow = contact.key;
           const def = mobById(contact.placed.mobId);
-          if (def?.temperament === "hostile" && (isNew || now - contactFiredAt >= 1000)) {
+          // 敵対は常時、中立は provoked（被弾して敵対化している間）だけ
+          // 接触ダメージを送る。サーバーの受け付け条件（passive 以外）と
+          // 一致させる（従来は中立が一切ダメージを与えなかった）。
+          const contactRender = mobRenders.get(contact.key);
+          const provoked = contactRender !== undefined && now < contactRender.provokedUntil;
+          if (def && (def.temperament === "hostile" || (def.temperament === "neutral" && provoked)) && (isNew || now - contactFiredAt >= 1000)) {
             contactFiredAt = now;
             // 着地点へ瞬間移動させず、着地点までの方向に初速だけ与える（適用は移動ステップ側）
-            postMobDamage(contact.placed.mobId, contact.placed.x, contact.placed.y);
+            postMobDamage(contact.placed.mobId, contact.placed.x, contact.placed.y, contact.cx, contact.cy);
             const target = knockbackTarget({ x: contact.cx, y: contact.cy, size: contact.placed.size }, player);
             kbVel = { x: (target.x - player.x) / 0.16, y: (target.y - player.y) / 0.16 };
             fxEventsRef.current.push({
