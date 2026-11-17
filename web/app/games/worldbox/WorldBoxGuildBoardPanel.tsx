@@ -56,6 +56,12 @@ const SETTINGS_ERROR_LABEL: Record<string, string> = {
 /** 国家設定タブで選べる税率（%）。サーバー側は 0〜10% の範囲で受ける。 */
 const TAX_RATE_PERCENT_STEPS = [0, 1, 2, 3, 5, 7, 10];
 
+/** 国家設定タブで選べる入国料（コイン）。サーバー側は 0〜100,000 で受ける。 */
+const ENTRY_FEE_STEPS = [0, 100, 500, 1000, 5000, 10000, 50000];
+
+/** 国家設定タブで選べる出金料率（%）。サーバー側は 0〜80% の範囲で受ける。 */
+const EXIT_FEE_PERCENT_STEPS = [0, 5, 10, 20, 40, 80];
+
 type NationSettingsMember = {
   key: string;
   name: string;
@@ -72,6 +78,9 @@ type NationSettingsData = {
   taxRate: number;
   visibility: "open" | "private";
   taxCollected: number;
+  entryFee: number;
+  exitFeeRate: number;
+  feesCollected: number;
   members: NationSettingsMember[];
 };
 
@@ -958,6 +967,46 @@ export default function WorldBoxGuildBoardPanel({
                 )}
               </div>
               <div style={rowStyle}>
+                <span style={{ fontSize: 13, opacity: 0.8 }}>入国料</span>
+                <span style={{ flex: 1 }} />
+                {nsData.role === "king" ? (
+                  ENTRY_FEE_STEPS.map((f) => (
+                    <button
+                      key={f}
+                      type="button"
+                      style={{ ...tabBtn, ...(nsData.entryFee === f ? tabOn : {}) }}
+                      aria-pressed={nsData.entryFee === f}
+                      disabled={busy}
+                      onClick={() => void settingsAct({ action: "set_entry_fee", entryFee: f })}
+                    >
+                      {f === 0 ? "無料" : f.toLocaleString("ja-JP")}
+                    </button>
+                  ))
+                ) : (
+                  <span style={{ fontSize: 14 }}>{nsData.entryFee === 0 ? "無料" : nsData.entryFee.toLocaleString("ja-JP")}</span>
+                )}
+              </div>
+              <div style={rowStyle}>
+                <span style={{ fontSize: 13, opacity: 0.8 }}>出金料</span>
+                <span style={{ flex: 1 }} />
+                {nsData.role === "king" ? (
+                  EXIT_FEE_PERCENT_STEPS.map((p) => (
+                    <button
+                      key={p}
+                      type="button"
+                      style={{ ...tabBtn, ...(Math.round(nsData.exitFeeRate * 100) === p ? tabOn : {}) }}
+                      aria-pressed={Math.round(nsData.exitFeeRate * 100) === p}
+                      disabled={busy}
+                      onClick={() => void settingsAct({ action: "set_exit_fee", exitFeeRate: p / 100 })}
+                    >
+                      {p}%
+                    </button>
+                  ))
+                ) : (
+                  <span style={{ fontSize: 14 }}>{Math.round(nsData.exitFeeRate * 100)}%</span>
+                )}
+              </div>
+              <div style={rowStyle}>
                 <span style={{ fontSize: 13, opacity: 0.8 }}>公開</span>
                 <span style={{ flex: 1 }} />
                 {nsData.role === "king" ? (
@@ -989,6 +1038,11 @@ export default function WorldBoxGuildBoardPanel({
                 <span style={{ fontSize: 13, opacity: 0.8 }}>税収</span>
                 <span style={{ flex: 1 }} />
                 <span style={{ fontSize: 14 }}>{nsData.taxCollected.toLocaleString("ja-JP")}</span>
+              </div>
+              <div style={rowStyle}>
+                <span style={{ fontSize: 13, opacity: 0.8 }}>手数料収入</span>
+                <span style={{ flex: 1 }} />
+                <span style={{ fontSize: 14 }}>{nsData.feesCollected.toLocaleString("ja-JP")}</span>
               </div>
               <p style={{ margin: "10px 0 6px", fontSize: 13 }}>大臣</p>
               <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
@@ -1121,6 +1175,9 @@ export default function WorldBoxGuildBoardPanel({
                           )}
                           <strong>{g.name}</strong>
                           <span style={{ opacity: 0.75, fontSize: 13 }}>{ROLE_LABEL[g.myRole]}{n ? ` ・ ${n.members}人` : ""}</span>
+                          {g.entryFee ? (
+                            <span style={{ fontSize: 13 }}>入国料 {g.entryFee.toLocaleString("ja-JP")}</span>
+                          ) : null}
                           <span style={{ flex: 1 }} />
                           <button type="button" style={btn} onClick={() => onNationAction({ action: "join", guildId: g.guildId })}>
                             参加
