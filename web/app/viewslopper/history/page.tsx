@@ -34,16 +34,16 @@ export default function ViewslopperHistoryPage() {
   return (
     <div style={{ maxWidth: 720, margin: "0 auto", padding: "28px 20px 0" }}>
       <Link href="/viewslopper" style={{ color: "#8a8f98", fontSize: 13, textDecoration: "none" }}>
-        ← 診断に戻る
+        ← また晒しに行く
       </Link>
-      <h1 style={{ fontSize: 24, margin: "14px 0 6px" }}>保存した診断</h1>
+      <h1 style={{ fontSize: 24, margin: "14px 0 6px" }}>晒し上げの記録</h1>
       <p style={{ color: "#8a8f98", fontSize: 13, margin: "0 0 20px", lineHeight: 1.7 }}>
-        この端末にのみ保存（最大50件）
+        証拠はこの端末にのみ残る（最大50件）。消せば無かったことになるが、スコアは変わらない。
       </p>
       {entries === null ? (
         <p style={{ color: "#8a8f98" }}>読み込み中…</p>
       ) : entries.length === 0 ? (
-        <p style={{ color: "#b6bac2" }}>まだ診断が保存されていません。</p>
+        <p style={{ color: "#b6bac2" }}>まだ何も晒してない。まず1件、暴いてこい。</p>
       ) : (
         <>
           <div style={{ display: "grid", gap: 10 }}>
@@ -82,7 +82,7 @@ export default function ViewslopperHistoryPage() {
                       onClick={() => remove(e.savedAt)}
                       style={{ marginTop: 14, padding: "8px 14px", borderRadius: 8, border: "1px solid #2c2f36", background: "none", color: "#ff9c9f", cursor: "pointer", fontSize: 13 }}
                     >
-                      この診断を削除
+                      この証拠を消す
                     </button>
                   </div>
                 )}
@@ -94,7 +94,7 @@ export default function ViewslopperHistoryPage() {
             onClick={clearAll}
             style={{ marginTop: 20, padding: "8px 14px", borderRadius: 8, border: "1px solid #2c2f36", background: "none", color: "#8a8f98", cursor: "pointer", fontSize: 13 }}
           >
-            すべて削除
+            証拠を全部消す
           </button>
         </>
       )}

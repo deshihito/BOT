@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import ViewslopperClient from "./ViewslopperClient";
 
-const VS_DESCRIPTION = "URLを入れると、ページの Slop Score（0–100）と診断、さらにUX・配置の摩擦診断を返します。";
+const VS_DESCRIPTION = "URLを投げると、ページの Slop 度を証拠つきで容赦なく言い渡す。Slop Score・診断・UX摩擦・外観まで、言い訳無用の毒舌診断。";
 
 // 独立サービスのため、メタ情報も AGO BOT の名義（ルートの title テンプレート、
 // OGP、サイト名、既定アイコン）を継がず、viewslopper 単独名義で完結させる。
@@ -29,14 +29,14 @@ export const metadata: Metadata = {
 export default function ViewslopperPage() {
   return (
     <div style={{ maxWidth: 720, margin: "0 auto", padding: "28px 20px 0" }}>
-      <h1 style={{ fontSize: 26, lineHeight: 1.35, margin: "0 0 8px" }}>そのページ、どれだけ slop か。</h1>
+      <h1 style={{ fontSize: 26, lineHeight: 1.35, margin: "0 0 8px" }}>そのページ、どれだけ Slop か暴いてやる。</h1>
       <p style={{ color: "#b6bac2", margin: "0 0 20px", lineHeight: 1.7 }}>
-        URLを入れると、そのページの slop 度合いを測ります。
+        URLを入れろ。Slop Score と証拠つきの言い渡しを返す。甘い言葉は期待するな。
       </p>
       <ViewslopperClient />
       <p style={{ marginTop: 28 }}>
         <Link href="/viewslopper/history" style={{ color: "#8a8f98", fontSize: 13 }}>
-          保存した診断を見る →
+          過去の晒し上げを見る →
         </Link>
       </p>
     </div>

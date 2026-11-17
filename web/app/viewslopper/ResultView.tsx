@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { verdictFor, uxVerdictFor, appearanceVerdictFor } from "@/lib/viewslopper/viewslopper";
 
 // 診断結果の表示専用コンポーネント。診断画面と保存画面（履歴）で共有する。
 
@@ -27,7 +28,7 @@ export type ViewResult = {
   appearance?: { score: number; grade: string; findings: UxFinding[]; screenshotUrl: string } | null;
 };
 
-const SEVERITY_LABEL: Record<UxFinding["severity"], string> = { high: "重大", mid: "中", low: "軽微" };
+const SEVERITY_LABEL: Record<UxFinding["severity"], string> = { high: "致命傷", mid: "痛い", low: "小傷" };
 const SEVERITY_COLOR: Record<UxFinding["severity"], string> = { high: "#e5484d", mid: "#e5b83b", low: "#8a8f98" };
 
 export function scoreColor(score: number): string {
@@ -72,7 +73,10 @@ export default function ResultView({ result, savedAt }: { result: ViewResult; sa
                 <span style={{ fontSize: 18, fontWeight: 700 }}>{result.grade}</span>
                 <span style={{ color: "#8a8f98", fontSize: 13 }}>Slop Score</span>
               </div>
-              <p style={{ color: "#b6bac2", margin: "10px 0 0", lineHeight: 1.6 }}>
+              <p style={{ fontSize: 20, fontWeight: 800, color: scoreColor(result.score), margin: "12px 0 0", lineHeight: 1.5 }}>
+                {verdictFor(result.score)}
+              </p>
+              <p style={{ color: "#b6bac2", margin: "8px 0 0", lineHeight: 1.6 }}>
                 {result.title || result.url}
               </p>
               <div style={{ marginTop: 20, display: "grid", gap: 10 }}>
@@ -86,7 +90,7 @@ export default function ResultView({ result, savedAt }: { result: ViewResult; sa
                   </div>
                 ))}
               </div>
-              <h2 style={{ fontSize: 18, margin: "28px 0 12px" }}>診断</h2>
+              <h2 style={{ fontSize: 18, margin: "28px 0 12px" }}>言い渡し</h2>
               <div style={{ display: "grid", gap: 12 }}>
                 {result.diagnosis.map((item, i) => (
                   <article key={i} style={{ border: "1px solid #23252a", borderRadius: 12, padding: "14px 16px", background: "#121316" }}>
@@ -97,24 +101,27 @@ export default function ResultView({ result, savedAt }: { result: ViewResult; sa
                       </blockquote>
                     )}
                     <p style={{ margin: "6px 0", lineHeight: 1.7 }}>{item.why}</p>
-                    <p style={{ margin: 0, color: "#b6bac2", lineHeight: 1.7 }}>直し方: {item.fix}</p>
+                    <p style={{ margin: 0, color: "#b6bac2", lineHeight: 1.7 }}>せめて直せ: {item.fix}</p>
                   </article>
                 ))}
               </div>
               <p style={{ color: "#6d7278", fontSize: 12, marginTop: 14 }}>
-                {result.scoreSource === "llm" ? "AI採点" : "ルール採点"}
+                {result.scoreSource === "llm" ? "AIが容赦なく採点" : "ルールで容赦なく採点"}
                 {result.rendered ? " ・ 描画経由" : ""}
               </p>
 
-              <h2 style={{ fontSize: 18, margin: "32px 0 12px" }}>UX・配置</h2>
+              <h2 style={{ fontSize: 18, margin: "32px 0 12px" }}>UX・配置（迷子製造チェック）</h2>
               <div style={{ display: "flex", alignItems: "baseline", gap: 14, flexWrap: "wrap" }}>
                 <span style={{ fontSize: 40, fontWeight: 800, color: scoreColor(result.ux.friction), lineHeight: 1 }}>
                   {result.ux.friction}
                 </span>
                 <span style={{ fontSize: 16, fontWeight: 700 }}>{result.ux.grade}</span>
               </div>
+              <p style={{ fontSize: 16, fontWeight: 700, color: scoreColor(result.ux.friction), margin: "10px 0 0" }}>
+                {uxVerdictFor(result.ux.friction)}
+              </p>
               {result.ux.findings.length === 0 ? (
-                <p style={{ color: "#b6bac2", marginTop: 12 }}>目立った摩擦はありません。</p>
+                <p style={{ color: "#b6bac2", marginTop: 12 }}>目立った摩擦はなし。文句のつけようがない。珍しい。</p>
               ) : (
                 <div style={{ display: "grid", gap: 12, marginTop: 14 }}>
                   {result.ux.findings.map((f, i) => (
@@ -127,12 +134,12 @@ export default function ResultView({ result, savedAt }: { result: ViewResult; sa
                       </p>
                       <p style={{ margin: "8px 0 0", color: "#d6d9de" }}>{f.evidence}</p>
                       <p style={{ margin: "6px 0", lineHeight: 1.7 }}>{f.why}</p>
-                      <p style={{ margin: 0, color: "#b6bac2", lineHeight: 1.7 }}>直し方: {f.fix}</p>
+                      <p style={{ margin: 0, color: "#b6bac2", lineHeight: 1.7 }}>せめて直せ: {f.fix}</p>
                     </article>
                   ))}
                 </div>
               )}
-              <h2 style={{ fontSize: 18, margin: "32px 0 12px" }}>外観</h2>
+              <h2 style={{ fontSize: 18, margin: "32px 0 12px" }}>外観（その量産顔）</h2>
               {result.appearance ? (
                 <>
                   <div style={{ display: "flex", alignItems: "baseline", gap: 14, flexWrap: "wrap" }}>
@@ -142,6 +149,9 @@ export default function ResultView({ result, savedAt }: { result: ViewResult; sa
                     <span style={{ fontSize: 16, fontWeight: 700 }}>{result.appearance.grade}</span>
                     <span style={{ color: "#8a8f98", fontSize: 13 }}>外観スコア</span>
                   </div>
+                  <p style={{ fontSize: 16, fontWeight: 700, color: scoreColor(result.appearance.score), margin: "10px 0 0" }}>
+                    {appearanceVerdictFor(result.appearance.score)}
+                  </p>
                   {/* 採点に使った描画画像そのもの。署名付きURLで数時間で失効する */}
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
@@ -150,7 +160,7 @@ export default function ResultView({ result, savedAt }: { result: ViewResult; sa
                     style={{ width: "100%", borderRadius: 12, border: "1px solid #23252a", marginTop: 14 }}
                   />
                   {result.appearance.findings.length === 0 ? (
-                    <p style={{ color: "#b6bac2", marginTop: 12 }}>目立った問題はありません。</p>
+                    <p style={{ color: "#b6bac2", marginTop: 12 }}>目立った問題はなし。見た目だけは人間やってる。</p>
                   ) : (
                     <div style={{ display: "grid", gap: 12, marginTop: 14 }}>
                       {result.appearance.findings.map((f, i) => (
@@ -163,14 +173,14 @@ export default function ResultView({ result, savedAt }: { result: ViewResult; sa
                           </p>
                           <p style={{ margin: "8px 0 0", color: "#d6d9de" }}>{f.evidence}</p>
                           <p style={{ margin: "6px 0", lineHeight: 1.7 }}>{f.why}</p>
-                          <p style={{ margin: 0, color: "#b6bac2", lineHeight: 1.7 }}>直し方: {f.fix}</p>
+                          <p style={{ margin: 0, color: "#b6bac2", lineHeight: 1.7 }}>せめて直せ: {f.fix}</p>
                         </article>
                       ))}
                     </div>
                   )}
                 </>
               ) : (
-                <p style={{ color: "#b6bac2" }}>外観は採点できませんでした。</p>
+                <p style={{ color: "#b6bac2" }}>外観は採点できなかった。顔を見せないページは、それはそれで怪しい。</p>
               )}
 
           <div style={{ marginTop: 32, borderTop: "1px solid #23252a", paddingTop: 20 }}>
@@ -179,7 +189,7 @@ export default function ResultView({ result, savedAt }: { result: ViewResult; sa
               onClick={() => void makeCard()}
               style={{ padding: "12px 20px", borderRadius: 10, border: "none", fontWeight: 700, fontSize: 15, background: "#f2f3f5", color: "#17191c", cursor: "pointer" }}
             >
-              16:9カード画像を作る
+              晒し上げカードを作る（16:9）
             </button>
             {cardUrl && (
               <div style={{ marginTop: 16 }}>
@@ -188,7 +198,7 @@ export default function ResultView({ result, savedAt }: { result: ViewResult; sa
                 <img src={cardUrl} alt="診断結果の16:9カード画像" style={{ width: "100%", borderRadius: 12, border: "1px solid #23252a" }} />
                 <p style={{ marginTop: 10, fontSize: 13 }}>
                   <a href={cardUrl} download={cardName} style={{ color: "#d6d9de" }}>
-                    画像を保存する
+                    証拠画像を保存する
                   </a>
                   <span style={{ color: "#6d7278" }}>（長押しでも保存できます）</span>
                 </p>

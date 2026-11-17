@@ -39,7 +39,7 @@ export class ViewFetchError extends Error {}
 
 /** 名前解決の結果にプライベート宛先が混ざっていないか確認する（SSRF対策）。 */
 async function assertPublicHost(hostname: string): Promise<void> {
-  if (isPrivateIpLiteral(hostname)) throw new ViewFetchError("そのURLは診断できません。");
+  if (isPrivateIpLiteral(hostname)) throw new ViewFetchError("そのURLは診断できない。公開ページを出せ、逃げるな。");
   let records: { address: string }[];
   try {
     records = await lookup(hostname, { all: true });
@@ -47,7 +47,7 @@ async function assertPublicHost(hostname: string): Promise<void> {
     throw new ViewFetchError("URL先に接続できませんでした。");
   }
   if (records.length === 0 || records.some((r) => isPrivateIpLiteral(r.address))) {
-    throw new ViewFetchError("そのURLは診断できません。");
+    throw new ViewFetchError("そのURLは診断できない。公開ページを出せ、逃げるな。");
   }
 }
 
@@ -73,7 +73,7 @@ export async function fetchPage(rawUrl: string): Promise<PageData> {
       const location = response.headers.get("location");
       if (!location || hop === MAX_REDIRECTS) throw new ViewFetchError("リダイレクトが多すぎます。");
       const next = validateViewUrl(new URL(location, current).toString());
-      if (!next) throw new ViewFetchError("そのURLは診断できません。");
+      if (!next) throw new ViewFetchError("そのURLは診断できない。公開ページを出せ、逃げるな。");
       current = next;
       continue;
     }
@@ -85,7 +85,7 @@ export async function fetchPage(rawUrl: string): Promise<PageData> {
     if (contentType.includes("text/plain")) {
       return { url: current, title: "", description: "", headings: [], text: bodyText.slice(0, 20000), ux: emptyUxSignals() };
     }
-    if (!contentType.includes("html")) throw new ViewFetchError("HTMLページだけが診断対象です。");
+    if (!contentType.includes("html")) throw new ViewFetchError("HTMLページだけが対象だ。それ以外は門前払い。");
     const page = extractPage(bodyText, current);
     // SPA の殻しか取れていない場合は、描画経由で本文を取り直す。
     // 直接取得の UX シグナル（元の HTML 構造から数えたもの）はそのまま使う。

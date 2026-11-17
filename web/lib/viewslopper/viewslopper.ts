@@ -179,12 +179,45 @@ function sentences(text: string): string[] {
     .filter((s) => s.length >= 4);
 }
 
+// グレードは煽りラベル（2026-11-17 ユーザー指示「煽り感満載」）。
+// 境界とスコア計算は従来通り変えない。表示名だけが煽りになった。
 function grade(total: number): string {
-  if (total < 20) return "Clean";
-  if (total < 40) return "Light";
-  if (total < 60) return "Slop気味";
-  if (total < 80) return "Slop";
-  return "Heavy Slop";
+  if (total < 20) return "辛うじて人間";
+  if (total < 40) return "AI臭あり";
+  if (total < 60) return "Slop予備軍";
+  if (total < 80) return "Slop確定";
+  return "重度Slop";
+}
+
+/**
+ * スコア帯ごとの一言判決（煽り文句）。スコアから決定的に選ぶため、
+ * 同じスコアなら必ず同じ判決になる。結果画面の見出しとカードに使う。
+ */
+export function verdictFor(score: number): string {
+  if (score < 10) return "奇跡。人間が書いた形跡がある。";
+  if (score < 20) return "ほぼ人間。だが油断するとすぐAIに寄るぞ。";
+  if (score < 40) return "うっすらAI臭。誤魔化せてると思うな。";
+  if (score < 60) return "中身スカスカまであと一歩。言い逃れは効かない。";
+  if (score < 80) return "はい、Slopです。言い訳は受け付けない。";
+  return "Slopの化身。人間、辞めたんか？";
+}
+
+/** UX摩擦の一言判決。 */
+export function uxVerdictFor(friction: number): string {
+  if (friction < 20) return "摩擦なし。今日だけは褒めてやる。";
+  if (friction < 40) return "まあ我慢できる。次は迷わせるな。";
+  if (friction < 60) return "迷子製造機。来た人を帰す気か？";
+  if (friction < 80) return "摩擦まみれ。触るたびに人を消耗させるな。";
+  return "開いた時点で敗北宣言。作り直せ。";
+}
+
+/** 外観スコアの一言判決。 */
+export function appearanceVerdictFor(score: number): string {
+  if (score < 20) return "見た目はまとも。今日はここだけ褒める。";
+  if (score < 40) return "量産顔に寄り始めてる。個性、どこ置いた？";
+  if (score < 60) return "テンプレの匂いがする。既視感の塊だ。";
+  if (score < 80) return "AI生成丸出しの顔。名前を隠せば判別不能。";
+  return "見た目が完全に量産品。人間味ゼロ。";
 }
 
 /**
@@ -370,11 +403,11 @@ export function extractUxSignals(html: string): UxSignals {
 }
 
 function uxGrade(friction: number): string {
-  if (friction < 20) return "良好";
-  if (friction < 40) return "軽微";
-  if (friction < 60) return "要改善";
-  if (friction < 80) return "摩擦大";
-  return "深刻";
+  if (friction < 20) return "文句なし（珍しい）";
+  if (friction < 40) return "まあ我慢できる";
+  if (friction < 60) return "迷子製造機";
+  if (friction < 80) return "摩擦まみれ";
+  return "開いた時点で敗北";
 }
 
 /**
@@ -398,48 +431,48 @@ export function scoreUx(s: UxSignals): UxResult {
   // 有無のような実装様式を摩擦として数えない。構造ではなく目的で見る。
   const singlePurpose = s.inputs >= 1 && s.totalLinks <= 20 && s.navLinkCount <= 5;
 
-  if (!s.hasViewport) add(10, "モバイル前提", "viewport メタタグなし", "スマホでの表示倍率が保証されず、モバイル利用が前提になっていない。", "viewport を入れ、モバイル幅を本体として設計する。");
+  if (!s.hasViewport) add(10, "モバイル前提", "viewport メタタグなし", "今どき viewport なし？ スマホで見る人を最初から捨ててる。", "viewport を入れろ。モバイル幅を本体として設計し直せ。");
   if (!singlePurpose) {
-    if (s.h1Count === 0) add(12, "見出し構造", "h1 が0個", "ページの主題を表す見出しが構造上存在しない。", "主題を表す h1 を1つ置く。");
-    else if (s.h1Count >= 4) add(16, "見出し構造", `h1 が${s.h1Count}個`, "主題が大量に分散し、何のページか構造から決められない。", "h1 は1つに絞り、残りは h2 以下に下げる。");
-    else if (s.h1Count > 1) add(8, "見出し構造", `h1 が${s.h1Count}個`, "主題が複数に分散し、何のページか構造から決められない。", "h1 は1つに絞り、残りは h2 以下に下げる。");
+    if (s.h1Count === 0) add(12, "見出し構造", "h1 が0個", "h1 が0個。何のページか、構造が白紙回答してる。", "主題を表す h1 を1つ置け。それ以外は言い訳だ。");
+    else if (s.h1Count >= 4) add(16, "見出し構造", `h1 が${s.h1Count}個`, "h1 が主役争いして全員脇役。何のページか決められない。", "h1 は1つに絞れ。残りは h2 以下に格下げだ。");
+    else if (s.h1Count > 1) add(8, "見出し構造", `h1 が${s.h1Count}個`, "h1 が複数。主題が分裂してて誰も覚えられない。", "h1 は1つに絞れ。残りは h2 以下に格下げだ。");
   }
-  if (s.headingSkips > 0) add(Math.min(12, s.headingSkips * 6), "見出し構造", `見出しレベルの飛び ${s.headingSkips}箇所`, "階層が飛ぶと構造の読み取りが崩れる。", "見出しレベルを順番に使う。");
-  if (s.navLinkCount > 30) add(20, "導線の数", `ナビ内リンク ${s.navLinkCount}本`, "導線が多すぎて、次の一手を配置で示せていない。", "ナビは主要導線だけに絞り、残りは階層を分ける。");
-  else if (s.navLinkCount > 15) add(10, "導線の数", `ナビ内リンク ${s.navLinkCount}本`, "導線が多く、迷いの余地が大きい。", "使用頻度の低い導線をナビから外す。");
+  if (s.headingSkips > 0) add(Math.min(12, s.headingSkips * 6), "見出し構造", `見出しレベルの飛び ${s.headingSkips}箇所`, "見出しの階層がすっ飛んでる。構造を読む側の身にもなれ。", "見出しレベルは順番に使え。飛ばすな。");
+  if (s.navLinkCount > 30) add(20, "導線の数", `ナビ内リンク ${s.navLinkCount}本`, "ナビがリンクのバーゲンセール。次に何を押せばいいか誰にも分からない。", "ナビは主要導線だけに絞れ。残りは階層を分けて隠せ。");
+  else if (s.navLinkCount > 15) add(10, "導線の数", `ナビ内リンク ${s.navLinkCount}本`, "導線が多すぎて迷路化してる。親切のつもりの詰め込みは迷惑だ。", "使われない導線はナビから外せ。");
   // nav 要素を使わないページでは上の観点が空振りするため、リンクの総量でも見る
-  if (s.totalLinks > 100) add(16, "導線の総量", `ページ内リンク ${s.totalLinks}本`, "リンクの総量が多く、主目的が導線の中に埋もれる。", "一次導線とその他を分け、その他は別の場所に寄せる。");
-  else if (s.totalLinks > 50) add(8, "導線の総量", `ページ内リンク ${s.totalLinks}本`, "リンクの総量が多めで、目移りの余地が大きい。", "使用頻度の低い導線を一次表示から外す。");
+  if (s.totalLinks > 100) add(16, "導線の総量", `ページ内リンク ${s.totalLinks}本`, "リンクの海に主目的が沈没してる。全部大事は、全部どうでもいいと同義だ。", "一次導線とその他を分けろ。その他は別の場所に寄せろ。");
+  else if (s.totalLinks > 50) add(8, "導線の総量", `ページ内リンク ${s.totalLinks}本`, "リンクが多めで目移り確定。主役が霞んでる自覚あるか？", "使用頻度の低い導線は一次表示から外せ。");
   for (const dup of s.duplicateLinkTexts.slice(0, 2)) {
-    add(6, "導線の重複", `「${dup.text}」が${dup.count}回出現`, "同じ導線の重複は判断を分散させる。", "同じ行き先の導線は1つにまとめる。");
+    add(6, "導線の重複", `「${dup.text}」が${dup.count}回出現`, "同じ行き先を何度も出すな。判断が分散して逆に選ばれなくなる。", "同じ行き先の導線は1つにまとめろ。");
   }
   if (s.images >= 3 && s.imagesMissingAlt / s.images >= 0.3) {
-    add(10, "画像の扱い", `画像${s.images}枚中 ${s.imagesMissingAlt}枚に alt なし`, "画像の意味がテキスト側に渡っていない。", "意味のある画像には alt を付け、装飾は alt=\"\" で明示する。");
+    add(10, "画像の扱い", `画像${s.images}枚中 ${s.imagesMissingAlt}枚に alt なし`, "alt なし画像の山。画像の意味がテキスト側に1ミリも渡ってない。", "意味のある画像には alt を付けろ。装飾は alt=\"\" で黙らせろ。");
   }
   if (s.images >= 3 && s.imagesMissingSize / s.images >= 0.5) {
-    add(6, "画像の扱い", `画像${s.images}枚中 ${s.imagesMissingSize}枚に寸法指定なし`, "読み込み後にレイアウトが動き、配置が安定しない。", "width/height か aspect-ratio を指定する。");
+    add(6, "画像の扱い", `画像${s.images}枚中 ${s.imagesMissingSize}枚に寸法指定なし`, "寸法指定なし。読み込むたびにレイアウトが暴れて配置が安定しない。", "width/height か aspect-ratio を指定しろ。当たり前だ。");
   }
   if (s.inputsMissingLabel > 0) {
-    add(10, "フォーム", `入力欄${s.inputs}件中 ${s.inputsMissingLabel}件にラベルなし`, "何を入れる欄か構造から分からない。", "全入力欄に label か aria-label を付ける。");
+    add(10, "フォーム", `入力欄${s.inputs}件中 ${s.inputsMissingLabel}件にラベルなし`, "ラベルなしの入力欄。当てずっぽうで入れろってことか？", "全入力欄に label か aria-label を付けろ。");
   }
   if (s.charsBeforeFirstHeading > 600) {
-    add(10, "ファーストビュー", `最初の見出しまで ${s.charsBeforeFirstHeading} 字`, "見出しより前に文章が続き、冒頭でページの構造が掴めない。", "冒頭に見出しと要点を置き、説明は後ろに回す。");
+    add(10, "ファーストビュー", `最初の見出しまで ${s.charsBeforeFirstHeading} 字`, "見出しが出てくる前に文章の壁。前置きが長い自覚、ある？", "冒頭に見出しと要点を置け。説明は後ろだ。");
   } else if (s.charsBeforeFirstHeading === -1 && !singlePurpose) {
-    add(6, "ファーストビュー", "見出し要素なし", "冒頭の掴みになる構造がない。", "冒頭に見出しを置く。");
+    add(6, "ファーストビュー", "見出し要素なし", "冒頭に掴みゼロ。何の話か分からないまま読まされる側の苦痛を知れ。", "冒頭に見出しを置け。");
   }
   if (!s.hasEarlyCta && s.totalLinks > 0) {
-    add(6, "ファーストビュー", "冒頭にボタン/CTAらしい導線なし", "読み始めてすぐの位置に次の一手がない。", "冒頭に主要導線を1つ置く。");
+    add(6, "ファーストビュー", "冒頭にボタン/CTAらしい導線なし", "冒頭に次の一手なし。来た人をその場で立ち尽くさせるな。", "冒頭に主要導線を1つ置け。");
   }
   if (s.longParagraphs >= 2) {
-    add(8, "文章の壁", `300字超の段落が ${s.longParagraphs}件（最大${s.maxParagraphChars}字）`, "長い段落の連続は読む前に負荷が立つ。", "段落を分け、要点は見出しと構造で運ぶ。");
+    add(8, "文章の壁", `300字超の段落が ${s.longParagraphs}件（最大${s.maxParagraphChars}字）`, "300字超の段落の連続。読む前に心が折れる文章の壁だ。", "段落を分けろ。要点は見出しと構造で運べ。");
   }
   if (s.smallFontCount >= 3) {
-    add(6, "文字サイズ", `11px以下の指定が ${s.smallFontCount}箇所`, "小さい文字の多用は可読性の下限を割る。", "本文の文字サイズに下限を設ける。");
+    add(6, "文字サイズ", `11px以下の指定が ${s.smallFontCount}箇所`, "11px以下の文字を乱発。読ませる気がないなら最初から書くな。", "本文の文字サイズに下限を設けろ。");
   }
   if (s.modalCount >= 2) {
-    add(8, "割り込み", `モーダル/ポップアップらしい要素が ${s.modalCount}件`, "割り込み要素が多いと本体の導線が霞む。", "割り込みは1つまでに絞る。");
+    add(8, "割り込み", `モーダル/ポップアップらしい要素が ${s.modalCount}件`, "ポップアップで割り込みまくり。本体の導線が霞んで本末転倒だ。", "割り込みは1つまでに絞れ。");
   }
-  if (!s.hasLang) add(4, "基本構造", "html の lang なし", "言語が構造で宣言されていない。", "html に lang を付ける。");
+  if (!s.hasLang) add(4, "基本構造", "html の lang なし", "lang すら宣言してない。基本の基本が抜けてる。", "html に lang を付けろ。");
 
   // 単一目的ページは、残りの小さな減点が積み上がっても摩擦の上限を抑える
   const total = clamp(singlePurpose ? Math.min(friction, 15) : friction);
@@ -590,20 +623,20 @@ export function collectEvidence(
 }
 
 const FIXES: Record<DimensionKey, string> = {
-  cliche: "定型句を落とし、その文でしか言えない具体的な内容に置き換える。",
-  vague: "数字・日付・固有名詞・単位を足し、検証できる形にする。",
-  abstract: "抽象語の直後に実例か数値を置き、裸で浮かせない。",
-  repeat: "繰り返されている表現を削り、文末と主語に変化をつける。",
-  mechanical: "「まず／次に／最後に」の型を外し、文の長さと始まり方をばらす。",
-  bait: "煽り語を落とし、立場を1つに決めて結論を逃げない。",
+  cliche: "定型句は全部捨てろ。その文でしか言えない具体的な中身に書き換えろ。",
+  vague: "数字・日付・固有名詞・単位を足せ。検証できない文章はただの雰囲気だ。",
+  abstract: "抽象語の直後に実例か数値をくっ付けろ。裸で浮かせるな、恥ずかしい。",
+  repeat: "繰り返しは削れ。同じことを何度言っても中身は増えない。",
+  mechanical: "「まず／次に／最後に」の量産型は崩せ。文の長さと始まりをばらせ。",
+  bait: "煽り語は落とせ。立場を1つ決めて、結論から逃げるな。",
 };
 const WHYS: Record<DimensionKey, string> = {
-  cliche: "誰が書いても同じになる定型句が多く、書き手の判断が見えない。",
-  vague: "数字や固有の事実が少なく、内容を検証する手がかりがない。",
-  abstract: "抽象語が数値や実例で裏付けされず、意味が浮いている。",
-  repeat: "同じ言い回し・同じ文末の反復で、情報量に対して冗長。",
-  mechanical: "接続表現で始まる文と均一な文長が続き、機械的な構成になっている。",
-  bait: "煽り語や両論併記で、読み手の判断ではなく反応を狙っている。",
+  cliche: "誰が書いても同じ定型句のオンパレード。書き手の判断が1ミリも見えない。",
+  vague: "数字も固有の事実もなし。検証のしようがない、ただの薄い水だ。",
+  abstract: "抽象語が裏付けゼロで浮遊中。意味があるフリだけは上手い。",
+  repeat: "同じ言い回しと文末の無限ループ。情報量の割に冗長すぎる。",
+  mechanical: "接続表現と均一な文長の量産ライン。人間が書いたリズムじゃない。",
+  bait: "煽り語と両論併記で反応だけ狙ってる。中身で勝負する気あるか？",
 };
 
 /** LLM が使えないときのルールベース診断。40点以上の次元だけを重い順に出す。 */
@@ -626,8 +659,8 @@ export function buildRuleDiagnosis(score: ViewScore): DiagnosisItem[] {
       dimension: "vague",
       label: "具体性の欠如",
       evidence: "",
-      why: "抽出できた本文が短く、ページの中身自体が薄い可能性がある。",
-      fix: "本文量を増やすか、薄い場合は診断対象として扱わない。",
+      why: "抽出できた本文が短すぎる。中身が薄いのか、そもそも何も書いてないのか。",
+      fix: "まず中身を書け。話はそれからだ。",
     });
   }
   if (items.length === 0) {
@@ -635,8 +668,8 @@ export function buildRuleDiagnosis(score: ViewScore): DiagnosisItem[] {
       dimension: "vague",
       label: "総評",
       evidence: "",
-      why: "定型句・抽象語・繰り返しの目立った兆候は検出されなかった。",
-      fix: "現状の具体性を保つ。",
+      why: "定型句・抽象語・繰り返し、どれも検出なし。珍しく人間が書いてる。悔しいが認める。",
+      fix: "この具体性を落とすな。次もこの調子で来い。",
     });
   }
   return items.slice(0, 6);
@@ -647,8 +680,9 @@ export function buildDiagnosisMessages(page: PageData, score: ViewScore): ChatMe
   const dimLines = score.dimensions.map((d) => `- ${d.label}（${d.key}）: ${d.score}点`).join("\n");
   const evLines = score.evidence.map((e) => `- [${e.dimension}] ${e.detail}: 「${e.quote}」`).join("\n");
   const system = [
-    "あなたは文章の slop（AI生成にありがちな、薄くて定型的な中身）を診断する専門家です。",
+    "あなたは文章の slop（AI生成にありがちな、薄くて定型的な中身）を容赦なく断罪する診断者です。口調は煽り全開・皮肉・直球で、遠慮は禁止。ただし人格攻撃ではなく、ページの中身だけを証拠で殴ってください。",
     "与えられた Slop Score と証拠をもとに、診断だけを書いてください。スコア自体を変えたり、新しいスコアを作ったりしないでください。",
+    "why は「何がダメか」を煽り口調で言い切り、fix は命令形で具体的に。褒める場合は渋々認める程度にし、媚びないでください。",
     "証拠の引用は、渡された証拠か本文に実在する文字列をそのまま使ってください。存在しない文を引用しないでください。",
     '出力は JSON 配列のみ。前後に説明文やコードフェンスを付けないでください。',
     '各要素: {"dimension": 次元キー, "evidence": 原文の引用(最大120字), "why": なぜslopか(60字以内), "fix": 直し方(60字以内)}',
@@ -813,10 +847,10 @@ export function buildAssessMessages(page: PageData, heuristic: ViewScore): ChatM
   void heuristic;
   const dimLines = DIMENSION_DEFS.map((d) => `- ${d.key}（${d.label}）: ${DIMENSION_RUBRIC[d.key]}`).join("\n");
   const system = [
-    "あなたは Web ページの slop（薄くて定型的な中身）を採点する専門家です。",
+    "あなたは Web ページの slop（薄くて定型的な中身）を容赦なく採点する毒舌審査員です。why と fix は煽り口調・皮肉・命令形で書いてください。遠慮と擁護は禁止。ただし対象はページの中身だけで、人格攻撃はしないでください。",
     "各次元を 0–100 で採点してください（高いほど slop が大きい）。",
     "尺度のアンカー: 具体的な数字と固有名詞だけで書かれた実務記録は合計3点相当、定型句と抽象語だらけの典型的なAIブログ文は合計78点相当です。この尺度に合わせて判断してください。",
-    "中途半端な点に寄せないでください。良いページは一桁〜20点台、悪いページは60点以上を付けるつもりで、根拠に基づいて大胆に差を付けてください。",
+    "中途半端な点に寄せるな。甘い採点はこのサービスの存在意義を殺す。良いページは一桁〜20点台、悪いページは60点以上、根拠に基づいて大胆に差を付けろ。",
     "証拠は本文・タイトル・見出しに実在する内容だけを使ってください。存在しない文を引用しないでください。",
     '出力は JSON オブジェクトのみ。前後に説明文やコードフェンスを付けないでください。',
     '{"dimensions":[{"key":次元キー,"score":0-100,"evidence":"根拠(最大120字)","why":"理由(60字以内)","fix":"直し方(60字以内)"} x6次元すべて]}',
@@ -923,8 +957,8 @@ export function composeAssessed(
         dimension: "repeat",
         label: labelByKey.get("repeat")!,
         evidence: `近似重複した文が全体の${Math.round(stats.dupSentenceRatio * 100)}%、表現の反復率${Math.round(stats.gramRepeatRatio * 100)}%（${stats.sentenceCount}文を実測）`,
-        why: "同じ内容の再掲で情報量が薄まっている（実測値）。",
-        fix: "重複した文を削り、残す側に情報を寄せる。",
+        why: "同じ内容の再掲で水増ししてるのが実測でバレた。情報量、薄っ。",
+        fix: "重複した文は削れ。残す側に情報を全部寄せろ。",
       };
     }
     if (key === "mechanical" && stats.mechanical >= 25) {
@@ -932,8 +966,8 @@ export function composeAssessed(
         dimension: "mechanical",
         label: labelByKey.get("mechanical")!,
         evidence: `文の長さのばらつき CV ${stats.sentenceCv.toFixed(2)}、接続詞で始まる文 ${Math.round(stats.scaffoldShare * 100)}%（${stats.sentenceCount}文を実測）`,
-        why: "文の型が均一で、量産された構造になっている（実測値）。",
-        fix: "文の長さと始まり方に変化を付け、型の羅列を崩す。",
+        why: "文の型が均一すぎて量産ラインの香り。実測が証拠だ、言い逃れ不可。",
+        fix: "文の長さと始まり方をばらせ。型の羅列は崩せ。",
       };
     }
     return null;
@@ -982,13 +1016,13 @@ export const APPEARANCE_AXIS_DEFS: readonly { key: AppearanceAxisKey; label: str
 ];
 
 export const APPEARANCE_PROMPT = [
-  "あなたは Web ページの見た目（外観）の slop 度合いを採点する専門家です。渡されるスクリーンショットだけを見て採点してください。",
+  "あなたは Web ページの見た目（外観）の slop 度合いを採点する毒舌審査員です。渡されるスクリーンショットだけを見て採点してください。why と fix は煽り口調・皮肉・命令形で。量産テンプレへの遠慮は禁止。",
   "各軸を 0–100 で採点してください（高いほど見た目が slop）。",
   "template（テンプレ感）: AI生成サイトに典型的な定型レイアウト（紫〜青グラデーション、中央寄せヒーロー＋ボタン2つ、均一なカードグリッド、意味のない装飾）の量。",
   "alignment（整列と余白）: 要素のズレ、詰め込み、余白の不統一、窮屈さやスカスカさ。",
   "typography（文字の階層）: 見出しと本文の階層の分かりにくさ、読みにくさ、サイズの不揃い。",
   "identity（個性のなさ）: ロゴと名前を隠したら他のどのサイトとも区別できない度合い。",
-  "尺度: 丁寧に作られた個性的なデザインは一桁〜20点台、量産テンプレ丸出しなら60点以上。中途半端な点に寄せず、見た根拠に基づいて差を付けてください。",
+  "尺度: 丁寧に作られた個性的なデザインは一桁〜20点台、量産テンプレ丸出しなら60点以上。中途半端な点に寄せるな、見た根拠で殴れ。",
   "証拠はスクリーンショットに実際に見えるものだけを書いてください。",
   '出力は JSON オブジェクトのみ: {"axes":[{"key":"template","score":0-100,"evidence":"見えた根拠(最大120字)","why":"理由(60字以内)","fix":"直し方(60字以内)"} x4軸すべて]}',
 ].join("\n");

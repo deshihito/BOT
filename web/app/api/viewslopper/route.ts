@@ -31,7 +31,7 @@ export async function POST(request: Request) {
   }
   const url = validateViewUrl(body.url);
   if (!url) {
-    return NextResponse.json({ error: "URLを確認してください（http/https の公開ページのみ）。" }, { status: 400 });
+    return NextResponse.json({ error: "URLを確認しろ（http/https の公開ページだけが対象だ）。" }, { status: 400 });
   }
   try {
     const page = await fetchPage(url);
@@ -85,6 +85,6 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: error.message }, { status: 422 });
     }
     console.error("viewslopper: diagnose failed", error instanceof Error ? error.message : "unknown error");
-    return NextResponse.json({ error: "診断に失敗しました。" }, { status: 500 });
+    return NextResponse.json({ error: "診断に失敗した。こっちの落ち度か、ページが逃げたかだ。" }, { status: 500 });
   }
 }
