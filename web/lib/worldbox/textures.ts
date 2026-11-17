@@ -135,7 +135,7 @@ export function loadFarmSprites(): Record<string, HTMLImageElement> {
   return out;
 }
 
-// モブの素材スプライト（16×16、確定素材セット由来）。マップは combat.ts の
+// モブの素材スプライト（確定素材セット由来、描き直し種は32×32）。マップは combat.ts の
 // MOB_SPRITE（モブID → パス）が正で、ここはロビー等と同じ読み込みだけを担う。
 import { MOB_SPRITE } from "./combat";
 
