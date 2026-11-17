@@ -12,7 +12,7 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import {
   CHUNK_SIZE, MAP_SEED, T_DIRT, T_GRASS, T_ROCK, T_SAND, T_SNOW, T_SNOW_TREE, T_TREE, T_WATER,
-  generateChunk, mapTileAt, rectBounds, tileAt, worldBounds, type TopDownMap,
+  generateChunk, mapTileAt, rectBounds, tileAt, tileIvsAt, worldBounds, type TopDownMap,
 } from "@/lib/worldbox/mapgen";
 import { pickRandomSpawn } from "@/lib/worldbox/spawn";
 import { DASH_SPEED, PLAYER_RADIUS, SWIM_DASH_SPEED, SWIM_SPEED, WALK_SPEED, circleHitsSolid, findFreeNear, isWaterAt, stepMove } from "@/lib/worldbox/move";
@@ -1320,6 +1320,9 @@ export default function WorldBoxClient() {
   const [storageOpen, setStorageOpen] = useState(false);
   /** インベントリ整理で持ち上げ中のスロット（タップ→タップで移動）。 */
   const [heldSlot, setHeldSlot] = useState<SlotRef | null>(null);
+  /** インベントリのダブルタップ検出（食べ物はダブルタップで食べる）。 */
+  const lastSlotTapRef = useRef<{ zone: SlotRef["zone"]; index: number; at: number } | null>(null);
+  const lastHotbarTapRef = useRef<{ index: number; at: number } | null>(null);
   /** 開いている収納コンテナ（自分の樽・宝箱）とその中身。 */
   const [containerPanel, setContainerPanel] = useState<{ x: number; y: number; itemId: string; space: "world" | "tent" | "lobby" | "lobby2" | "lobby3" } | null>(null);
   const [machinePanel, setMachinePanel] = useState<{ x: number; y: number } | null>(null);
@@ -2128,6 +2131,11 @@ export default function WorldBoxClient() {
       if (data.broke) {
         setTileMsg(`${itemById(data.broke)?.name ?? "道具"}が壊れた`);
         playWbSe("debris");
+      } else if (action === "till" || action === "plant") {
+        // 土地の豊穣度だけを断片で出す（個体値の手がかり）
+        setTileMsg(`豊穣度 ${tileIvsAt(x, y).fertility}`);
+      } else if (action === "mine") {
+        setTileMsg(`純度 ${tileIvsAt(x, y).purity}`);
       }
     } catch {
       setTileMsg("できませんでした");
@@ -2391,10 +2399,39 @@ export default function WorldBoxClient() {
       if (res.ok && data.profile) setInvProfile(data.profile);
     } catch { /* noop */ }
   };
-  /** スロットのタップ: 持ち上げ → 置く/交換。同じ枠の再タップで解除。 */
+  /** インベントリから直接食べる（サーバー側 eat が正。空腹/HP はプロフィール応答で更新）。 */
+  const eatFromInventory = async (itemId: string) => {
+    try {
+      const res = await fetch("/api/worldbox/profile", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ action: "eat", itemId }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { profile?: PlayerProfile };
+      if (res.ok && data.profile) {
+        setInvProfile(data.profile);
+        playWbSe("note", { pitch: 0.5 });
+      }
+    } catch { /* noop */ }
+  };
+
+  /** スロットのタップ: 持ち上げ → 置く/交換。同じ枠の再タップで解除。
+   * 食べ物スロットのダブルタップ（350ms 以内の同じ枠2回）だけは食べる。 */
   const tapSlot = (zone: SlotRef["zone"], index: number) => {
     if (!invProfile) return;
     const slot = zone === "hotbar" ? invProfile.hotbar[index] : invProfile.storage[index];
+    const tapAt = performance.now();
+    const lastTap = lastSlotTapRef.current;
+    lastSlotTapRef.current = { zone, index, at: tapAt };
+    if (slot && lastTap && lastTap.zone === zone && lastTap.index === index && tapAt - lastTap.at < 350) {
+      const def = itemById(slot.id);
+      if (def && (def.hunger || def.heal || def.curePoison)) {
+        lastSlotTapRef.current = null;
+        setHeldSlot(null);
+        void eatFromInventory(def.id);
+        return;
+      }
+    }
     if (!heldSlot) {
       if (slot) setHeldSlot({ zone, index });
       return;
@@ -2406,6 +2443,23 @@ export default function WorldBoxClient() {
     const from = heldSlot;
     setHeldSlot(null);
     void moveItem(from, { zone, index });
+  };
+
+  /** ホットバーのタップ: 選択。食べ物はダブルタップで食べる。 */
+  const tapHotbar = (index: number) => {
+    setSelSlot(index);
+    if (!invProfile) return;
+    const tapAt = performance.now();
+    const lastTap = lastHotbarTapRef.current;
+    lastHotbarTapRef.current = { index, at: tapAt };
+    const slot = invProfile.hotbar[index];
+    if (slot && lastTap && lastTap.index === index && tapAt - lastTap.at < 350) {
+      const def = itemById(slot.id);
+      if (def && (def.hunger || def.heal || def.curePoison)) {
+        lastHotbarTapRef.current = null;
+        void eatFromInventory(def.id);
+      }
+    }
   };
 
   /** 自分の収納コンテナ（樽・宝箱）を開く。中身はサーバーが正。
@@ -7020,7 +7074,7 @@ export default function WorldBoxClient() {
                 type="button"
                 aria-pressed={selSlot === i}
                 aria-label={slot ? (itemById(slot.id)?.name ?? slot.id) : "空き枠"}
-                onClick={() => setSelSlot(i)}
+                onClick={() => tapHotbar(i)}
                 style={{
                   ...slotBox,
                   ...(selSlot === i

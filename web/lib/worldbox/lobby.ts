@@ -200,6 +200,7 @@ function col(sprite: string, x: number, y0: number, y1: number, opts: PutOpts = 
 
 // --- 中央広場 ---
 put("fountain", 27, 23, { w: 3, h: 3, station: "fountain" }); // 噴水（3×3・固体、コイン投げ）
+put("telescope", 28, 27, { station: "telescope" }); // 中央広場・噴水の南の望遠鏡
 row("bulletin_board", 27, 29, 15, { station: "board" }); // 掲示板は広場の北縁
 row("guild_board", 24, 25, 15, { station: "guild" }); // ギルドボードは掲示板の西隣（依頼・役職）
 put("warp_pad", 28, 34, { solid: false }); // ワープパッドは広場の南縁（踏むとワールドへ）
