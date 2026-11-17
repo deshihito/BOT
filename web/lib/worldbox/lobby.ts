@@ -158,7 +158,7 @@ function floorAt(x: number, y: number): number {
 
 // ---------- オブジェクト配置 ----------
 
-export type LobbyStation = "board" | "shop" | "bank" | "casino" | "arena" | "smith" | "guild" | "fountain" | "rest" | "arcade" | "race" | "sell";
+export type LobbyStation = "board" | "shop" | "bank" | "casino" | "arena" | "smith" | "guild" | "fountain" | "rest" | "arcade" | "race" | "sell" | "telescope";
 
 export type LobbyObject = {
   sprite: string;
@@ -271,6 +271,7 @@ row("bulletin_board", 72, 75, 21, { station: "race" }); // 着順・結果の掲
 put("sign_board", 61, 21, { station: "race" }); // 通路を抜けた先の入口の看板
 col("arena_gate", 65, 23, 28); // 西直線のスタートゲート（ランドマーク、固体）
 row("bench", 84, 102, 5); // 北側スタンド
+put("telescope", 93, 6, { station: "telescope" }); // 北スタンド中央の望遠鏡（トラック観戦用）
 row("bench", 84, 102, 46); // 南側スタンド
 // パドック（インフィールド東の柵囲い、西側が開口）
 row("fence_wood", 104, 111, 22);
