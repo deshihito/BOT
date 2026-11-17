@@ -384,6 +384,7 @@ const containersRoute = await routeImport("api/worldbox/containers/route.ts", [
   ['"@/lib/worldbox/user-lock"', userLockUrl],
 ]);
 const machinesUrl = bundleModule(["worldbox/items.ts", "worldbox/machines.ts"], ["isMachineItem", "machineBufferCount"]);
+const railsUrl = bundleModule(["worldbox/rails.ts"], ["isSupplyConnected"]);
 const opsOnlineStubUrl = dataUrl(`
 export async function loadFrozen() { return false; }
 export async function appendTileJournal() {}
@@ -416,6 +417,7 @@ const tilesRoute = await routeImport("api/worldbox/tiles/route.ts", [
   ['"@/lib/worldbox/save-online"', saveOnlineStubUrl],
   ['"@/lib/worldbox/tiles"', tilesUrl],
   ['"@/lib/worldbox/tiles-online"', tilesOnlineStubUrl],
+  ['"@/lib/worldbox/rails"', railsUrl],
   ['"@/lib/worldbox/nations-online"', nationsOnlineStubUrl],
   ['"@/lib/worldbox/war"', warUrl],
   ['"@/lib/worldbox/war-online"', warsOnlineStubUrl],
