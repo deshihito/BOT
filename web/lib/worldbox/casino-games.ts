@@ -39,8 +39,7 @@ export function cleanCasinoUserState(raw: unknown): CasinoUserState {
 }
 
 // ---------------------------------------------------------------- slot7
-export const SLOT7_MIN_SPINS = 10;
-export const SLOT7_MAX_SPINS = 1000;
+// 回数指定は廃止済み（2026-11-17）: セッションは常に1回分（route.ts の slot7_start）。
 /** 揃った個数 → 基本倍率（原典 SLOT_BASE_MULTIPLIERS）。 */
 export const SLOT7_BASE_MULTIPLIERS: Record<number, number> = { 2: 1.1, 3: 6, 4: 25, 5: 120, 6: 500, 7: 2000 };
 export const SLOT7_PITY_STREAK = 3;
