@@ -731,6 +731,7 @@ const STATION_LABEL: Record<LobbyStation, string> = {
   arcade: "アーケード",
   race: "競馬場",
   sell: "売却専用ショップ",
+  telescope: "望遠鏡",
 };
 
 export default function WorldBoxClient() {
@@ -949,6 +950,17 @@ export default function WorldBoxClient() {
   useEffect(() => {
     arcadeOpenRef.current = arcadeOpen;
   }, [arcadeOpen]);
+  /** 望遠鏡モード（開いている間はプレイヤーが止まり、視点だけが自由に動く）。 */
+  const [telescopeOpen, setTelescopeOpen] = useState(false);
+  const telescopeOpenRef = useRef(false);
+  useEffect(() => {
+    telescopeOpenRef.current = telescopeOpen;
+  }, [telescopeOpen]);
+  /** 望遠鏡の視点をプレイヤー位置へ戻す合図（増えるたびにループ側が再センタリング）。 */
+  const telescopeCenterRef = useRef(0);
+  useEffect(() => {
+    setTelescopeOpen(false);
+  }, [spaceUi]);
   const warpActionRef = useRef<(target: SaveSpace) => void>(() => {});
   const instanceWarpRef = useRef<(target: string, entry: { x: number; y: number }) => void>(() => {});
   /** 開催中イベント（期間ダンジョンの入場導線用）。 */
@@ -2593,6 +2605,10 @@ export default function WorldBoxClient() {
     const spawn = pickRandomSpawn(Math.random);
     const player: PlayerState = { x: spawn.x, y: spawn.y, vx: 0, vy: 0, face: 1, phase: 0 };
     const cam = { x: player.x, y: player.y };
+    /** 望遠鏡の自由視点（null = 通常追従）。開いた瞬間のプレイヤー位置から始まる。 */
+    let telescopeCam: { x: number; y: number } | null = null;
+    let telescopeDrag: { pointerId: number; lastX: number; lastY: number } | null = null;
+    let telescopeCenterSeen = 0;
     // 空間（ワールド / ロビー）。ロビーでは国家・ミニマップは扱わない。
     let space: SaveSpace = "world";
     let worldReturn: { x: number; y: number } | null = null;
@@ -3715,6 +3731,12 @@ export default function WorldBoxClient() {
         canvas.setPointerCapture(e.pointerId);
         return;
       }
+      if (telescopeOpenRef.current) {
+        // 望遠鏡中はドラッグで視点を動かす（タイル操作はしない）。
+        telescopeDrag = { pointerId: e.pointerId, lastX: p.x, lastY: p.y };
+        canvas.setPointerCapture(e.pointerId);
+        return;
+      }
       if (space === "lobby" || space === "lobby2" || space === "lobby3" || space === "tent") {
         // 室内のタップ: 座席とテント収納だけを扱う（移動はスティック）。
         handleIndoorTap(toTile(e));
@@ -3792,6 +3814,14 @@ export default function WorldBoxClient() {
       }
     };
     const onPointerMove = (e: PointerEvent) => {
+      if (telescopeDrag && e.pointerId === telescopeDrag.pointerId && telescopeCam) {
+        const p = canvasPos(e);
+        telescopeCam.x -= (p.x - telescopeDrag.lastX) / TILE;
+        telescopeCam.y -= (p.y - telescopeDrag.lastY) / TILE;
+        telescopeDrag.lastX = p.x;
+        telescopeDrag.lastY = p.y;
+        return;
+      }
       if (!joy.active || e.pointerId !== joy.pointerId) return;
       const p = canvasPos(e);
       const v = stickVector(p.x, p.y, stickBase(p.w, p.h));
@@ -3799,6 +3829,10 @@ export default function WorldBoxClient() {
       joy.dy = v.dy;
     };
     const onPointerUp = (e: PointerEvent) => {
+      if (telescopeDrag && e.pointerId === telescopeDrag.pointerId) {
+        telescopeDrag = null;
+        return;
+      }
       if (e.pointerId !== joy.pointerId) return;
       joy.active = false;
       joy.dx = 0;
@@ -4377,6 +4411,28 @@ export default function WorldBoxClient() {
         ix /= ilen;
         iy /= ilen;
       }
+      // 望遠鏡: 開いている間は移動入力を視点へ回し、プレイヤーは止まる。
+      // 視点は今いる空間の範囲内だけを自由に動ける（ドラッグでも動く）。
+      if (telescopeOpenRef.current) {
+        if (!telescopeCam) telescopeCam = { x: player.x, y: player.y };
+        if (telescopeCenterSeen !== telescopeCenterRef.current) {
+          telescopeCenterSeen = telescopeCenterRef.current;
+          telescopeCam = { x: player.x, y: player.y };
+        }
+        const camSpeed = 14;
+        telescopeCam.x += ix * camSpeed * dt;
+        telescopeCam.y += iy * camSpeed * dt;
+        if (space !== "world") {
+          const d = indoorData();
+          telescopeCam.x = Math.min(d.width - 0.5, Math.max(0.5, telescopeCam.x));
+          telescopeCam.y = Math.min(d.height - 0.5, Math.max(0.5, telescopeCam.y));
+        }
+        ix = 0;
+        iy = 0;
+      } else if (telescopeCam) {
+        telescopeCam = null;
+        telescopeDrag = null;
+      }
       // 実効タイルは effTileAt が上書きを都度読むため、タイル配列の同期は不要。
       // モブ占有: 現在位置の footprint を移動の当たり判定へ合成する。
       // 占有の真上に立っている間は、そのモブの占有だけ通す（閉じ込め防止）。
@@ -4723,11 +4779,11 @@ export default function WorldBoxClient() {
       playerPosRef.current.x = player.x;
       playerPosRef.current.y = player.y;
 
-      // カメラ（向き先読みつきのなめらか追従）
-      const lookX = player.x + player.vx * 0.35;
-      const lookY = player.y + player.vy * 0.35;
-      cam.x = damp(cam.x, lookX, 6, dt);
-      cam.y = damp(cam.y, lookY, 6, dt);
+      // カメラ（向き先読みつきのなめらか追従。望遠鏡中は自由視点へ寄せる）
+      const lookX = telescopeCam ? telescopeCam.x : player.x + player.vx * 0.35;
+      const lookY = telescopeCam ? telescopeCam.y : player.y + player.vy * 0.35;
+      cam.x = damp(cam.x, lookX, telescopeCam ? 14 : 6, dt);
+      cam.y = damp(cam.y, lookY, telescopeCam ? 14 : 6, dt);
 
       // 他プレイヤーの描画位置（スナップショット予測へバネでなめらかに寄せる）
       const nowMs = Date.now();
@@ -6697,6 +6753,15 @@ export default function WorldBoxClient() {
                 {arenaOpen ? "閉じる" : "戦う"}
               </button>
             )}
+            {stationUi === "telescope" && (
+              <button
+                type="button"
+                style={{ ...btn, minHeight: hud.buttonMinHeight, padding: "2px 10px" }}
+                onClick={() => setTelescopeOpen((v) => !v)}
+              >
+                {telescopeOpen ? "閉じる" : "覗く"}
+              </button>
+            )}
             {stationUi === "fountain" && (
               <button
                 type="button"
@@ -7439,6 +7504,40 @@ export default function WorldBoxClient() {
       {/* パネルの開閉は左上の ≡ メニューに統合（ボタン行は置かない） */}
 
       {showEconomy && <WorldBoxEconomyPanel space={spaceUi} station={stationUi} genre={stationGenre} worldStationKinds={worldStationKinds} onClose={() => setShowEconomy(false)} />}
+      {telescopeOpen && (
+        <div style={{ position: "absolute", inset: 0, pointerEvents: "none", zIndex: 6 }}>
+          <div
+            aria-hidden
+            style={{
+              position: "absolute", inset: 0,
+              background: "radial-gradient(circle at center, transparent 52%, rgba(4,6,14,0.55) 78%, rgba(2,3,8,0.92) 100%)",
+            }}
+          />
+          <div
+            style={{
+              position: "absolute", left: "50%", top: "calc(10px + env(safe-area-inset-top, 0px))", transform: "translateX(-50%)",
+              display: "flex", gap: 8, alignItems: "center", padding: "6px 8px 6px 14px", pointerEvents: "auto",
+              borderRadius: 10, background: "rgba(0,0,0,0.6)", color: "#fff", fontSize: 13, whiteSpace: "nowrap",
+            }}
+          >
+            <span>望遠鏡</span>
+            <button
+              type="button"
+              style={{ ...btn, minHeight: hud.buttonMinHeight, padding: "2px 10px" }}
+              onClick={() => { telescopeCenterRef.current += 1; }}
+            >
+              戻す
+            </button>
+            <button
+              type="button"
+              style={{ ...btn, minHeight: hud.buttonMinHeight, padding: "2px 10px" }}
+              onClick={() => setTelescopeOpen(false)}
+            >
+              閉じる
+            </button>
+          </div>
+        </div>
+      )}
       {casinoOpen && spaceUi === "lobby" && (
         <WorldBoxCasinoPanel onClose={() => setCasinoOpen(false)} />
       )}

@@ -97,6 +97,7 @@ export const LOBBY_SPRITE_SRC: Record<string, string> = {
   piano: "/img/worldbox/lobby/piano.png",
   arena_gate: "/img/worldbox/lobby/arena_gate.png",
   bench: "/img/worldbox/lobby/bench.png",
+  telescope: "/img/worldbox/lobby/telescope.png",
   furnace: "/img/worldbox/lobby/furnace.png",
   anvil: "/img/worldbox/lobby/anvil.png",
   workbench: "/img/worldbox/lobby/workbench.png",

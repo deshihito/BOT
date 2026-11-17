@@ -283,6 +283,7 @@ put3("bench", 11, 3);
 put3("bench", 12, 3);
 put3("bench", 20, 3);
 put3("bench", 21, 3);
+put3("telescope", 18, 4, { station: "telescope" }); // 北デッキの望遠鏡（展望）
 put3("bookshelf", 13, 4); // L5 の隠し部屋の入口アンカー候補（今はただの本棚）
 put3("bookshelf", 14, 4);
 put3("planter", 11, 4);
