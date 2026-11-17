@@ -266,5 +266,6 @@ test("冪等性の配線: 共有ロックと冪等登録がブリッジ側に用
   assert.match(lock, /export async function withUserLock/);
   const online = fs.readFileSync(path.join(libDir, "worldbox/economy-bridge-online.ts"), "utf8");
   assert.match(online, /export async function enqueueEconomyOpOnce/);
-  assert.match(online, /findEconomyOp\(op\.userKey, op\.id\)/, "既存オプがあれば作り直さない");
+  assert.match(online, /submitEconomyOp\(op\)/, "冪等登録は直接適用（submitEconomyOp）へ委譲する");
+  assert.match(online, /existing\.status === "done"/, "既存オプが終端していれば作り直さない");
 });

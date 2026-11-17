@@ -527,12 +527,10 @@ test("API(casino): ダブルアップは先払い→キャッシュアウトで 
   const spends = findOps((o) => o.kind === "spend" && o.reason === "casino_double_bet");
   assert.equal(spends.length, 1);
   assert.equal(spends[0].amount, 100);
-  // 先払いが処理中のキャッシュアウトは 409
-  const early = await casinoRoute.POST(apiRequest(URL_C, "POST", cookie, { action: "double_cashout" }));
-  assert.equal(early.status, 409);
-  assert.equal((await early.json()).error, "bet_pending");
-  // ワーカーが先払いを適用した想定にしてキャッシュアウト（倍率1 → ベット返し）
-  markPendingSpendsDone();
+  // コイン API 直接化: 先払い spend は登録と同時に適用され、残高もその場で減る
+  assert.equal(spends[0].status, "done");
+  assert.equal(globalThis.__wbCasinoUsers.get(ME), 10000 - 100);
+  // そのままキャッシュアウトできる（倍率1 → ベット返し）
   const cash = await casinoRoute.POST(apiRequest(URL_C, "POST", cookie, { action: "double_cashout" }));
   assert.equal(cash.status, 200);
   assert.equal((await cash.json()).payout, 100);

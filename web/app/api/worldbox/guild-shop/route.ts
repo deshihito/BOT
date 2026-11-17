@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { getRequestSession, publicOrigin, sessionOwnerKey } from "@/lib/auth";
 import { buildEconomyOp } from "@/lib/worldbox/economy-bridge";
 import {
-  enqueueEconomyOpOnce, isEconomyEnabled, loadMyEconomyOps, readUserBalance,
+  enqueueEconomyOpOnce, isEconomyEnabled, loadMyEconomyOps, readUserBalance, submitEconomyOp,
 } from "@/lib/worldbox/economy-bridge-online";
 import {
   GUILD_LISTING_MAX, GUILD_PLOT_ANCHORS, GUILD_PLOT_COUNT, GUILD_PLOT_FEE,
@@ -259,7 +259,12 @@ export async function POST(request: Request) {
         `gshop-buy-${found.listing.id}-${newSold}`,
         Date.now(),
       );
-      if (!buyOp || !(await enqueueEconomyOpOnce(buyOp))) return err("economy_failed", 503);
+      if (!buyOp) return err("economy_failed", 503);
+      // 直接適用で確定失敗（残高不足・CAS 枯渇）した買い手には
+      // アイテムを渡さない。done / pending（キュー経路）は従来どおり進める。
+      const buySubmitted = await submitEconomyOp(buyOp);
+      if (buySubmitted.state === "unavailable") return err("economy_failed", 503);
+      if (buySubmitted.state === "failed") return err("economy_failed", 409);
       // 売り手への入金（区画の国の税率を引いた額）。税分はシンクし、
       // 累計税収へ表示用に加算する。売り手が Discord 連携でない場合は積まない
       const plotSettings = await loadNationSettings(found.plot.guildId);
