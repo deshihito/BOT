@@ -74,10 +74,12 @@ export const MOB_SPRITE: Readonly<Record<string, string>> = {
   octopus: "/img/worldbox/mobs/octopus.png",
   mushroom: "/img/worldbox/mobs/mushroom_mob.png",
   werewolf: "/img/worldbox/mobs/werewolf.png",
+  ogre: "/img/worldbox/mobs/ogre.png",
+  giant: "/img/worldbox/mobs/giant.png",
 };
 
-/** 素材が無い種の明示フォールバック（最小限の図形描画に落とす種）。 */
-export const MOB_SPRITE_FALLBACK: ReadonlySet<string> = new Set(["ogre", "giant"]);
+/** 素材が無い種の明示フォールバック（最小限の図形描画に落とす種）。全種に素材が揃ったため空。 */
+export const MOB_SPRITE_FALLBACK: ReadonlySet<string> = new Set([]);
 
 /** スプライト指定の整合チェック（テスト用）: 実在モブのみ・全モブがどちらかを持つ。 */
 export function validateMobSprites(): string[] {
