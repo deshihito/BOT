@@ -1264,7 +1264,7 @@ export default function WorldBoxClient() {
   /** インベントリ整理で持ち上げ中のスロット（タップ→タップで移動）。 */
   const [heldSlot, setHeldSlot] = useState<SlotRef | null>(null);
   /** 開いている収納コンテナ（自分の樽・宝箱）とその中身。 */
-  const [containerPanel, setContainerPanel] = useState<{ x: number; y: number; itemId: string; space: "world" | "tent" } | null>(null);
+  const [containerPanel, setContainerPanel] = useState<{ x: number; y: number; itemId: string; space: "world" | "tent" | "lobby" | "lobby2" | "lobby3" } | null>(null);
   const [machinePanel, setMachinePanel] = useState<{ x: number; y: number } | null>(null);
   /** 座っている家具のタイル（ベンチ・椅子・ソファ）。見た目だけの状態で、プレゼンスにも申告する。 */
   const sitTileRef = useRef<{ x: number; y: number } | null>(null);
@@ -2336,15 +2336,16 @@ export default function WorldBoxClient() {
   };
 
   /** 自分の収納コンテナ（樽・宝箱）を開く。中身はサーバーが正。
-   * space="tent" はテント内装の備え付け樽・木箱（サーバー側で解決する）。 */
-  const openContainer = async (x: number, y: number, itemId: string, space: "world" | "tent" = "world") => {
+   * space が world 以外のときは室内の備え付け樽・木箱（サーバー側で解決する。
+   * ロビーの中身はプレイヤー別）。 */
+  const openContainer = async (x: number, y: number, itemId: string, space: "world" | "tent" | "lobby" | "lobby2" | "lobby3" = "world") => {
     setStorageOpen(false);
     setHeldSlot(null);
     setHeldPanelSlot(null);
     setContainerSlots(null);
     setContainerPanel({ x, y, itemId, space });
     try {
-      const res = await fetch(`/api/worldbox/containers?x=${x}&y=${y}${space === "tent" ? "&space=tent" : ""}`, {
+      const res = await fetch(`/api/worldbox/containers?x=${x}&y=${y}${space !== "world" ? `&space=${space}` : ""}`, {
         headers: { Accept: "application/json" },
       });
       const data = (await res.json().catch(() => ({}))) as {
@@ -2372,7 +2373,7 @@ export default function WorldBoxClient() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action: "move", x: containerPanel.x, y: containerPanel.y, from, to,
-          ...(containerPanel.space === "tent" ? { space: "tent" } : {}),
+          ...(containerPanel.space !== "world" ? { space: containerPanel.space } : {}),
         }),
       });
       const data = (await res.json().catch(() => ({}))) as {
@@ -3463,9 +3464,12 @@ export default function WorldBoxClient() {
         }
         return true;
       }
-      if (space === "tent" && isContainerItem(obj.sprite)) {
-        // テントの備え付け樽・木箱は自分の収納として開ける
-        void openContainerRef.current(t.x, t.y, obj.sprite, "tent");
+      if (isContainerItem(obj.sprite)) {
+        // 備え付け樽・木箱は自分の収納として開ける（ロビーの中身はプレイヤー別）
+        void openContainerRef.current(
+          t.x, t.y, obj.sprite,
+          space as "tent" | "lobby" | "lobby2" | "lobby3",
+        );
         return true;
       }
       return false;
