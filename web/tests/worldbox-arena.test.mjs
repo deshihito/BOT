@@ -305,7 +305,7 @@ test("API(arena): 未ログイン 401、場所が違えば 409", async () => {
   assert.equal((await res.json()).error, "not_at_arena");
 });
 
-test("API(arena): 開始で参加費 spend、適用 done まで対戦不可、勝利で賞金 earn", async () => {
+test("API(arena): 開始で参加費 spend が即時適用され、勝利で賞金 earn", async () => {
   reset();
   setPresence(29, 12);
   const start = await arenaRoute.POST(apiRequest(URL_A, "POST", cookie, { action: "start", tier: "slime" }));
@@ -313,12 +313,9 @@ test("API(arena): 開始で参加費 spend、適用 done まで対戦不可、�
   const fees = findOps((o) => o.kind === "spend" && o.reason === "arena_entry");
   assert.equal(fees.length, 1);
   assert.equal(fees[0].amount, 50);
-
-  const early = await arenaRoute.POST(apiRequest(URL_A, "POST", cookie, { action: "act", move: "attack" }));
-  assert.equal(early.status, 409);
-  assert.equal((await early.json()).error, "payment_pending");
-
-  markOpsDone("spend", "arena_entry");
+  // コイン API 直接化: spend は登録と同時に適用され、残高もその場で減る
+  assert.equal(fees[0].status, "done");
+  assert.equal(globalThis.__wbArenaUsers.get(ME), 100000 - 50);
   // スライム HP40: 攻撃力 8（素手）では数手かかる。決着まで回す
   let outcome = null;
   for (let i = 0; i < 40 && !outcome; i++) {

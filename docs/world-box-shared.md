@@ -56,8 +56,10 @@ AGO WORLD BOX（web/app/games/worldbox）に関わる作業をする Muse は、
 - 旧来の設置型 buildings（house/field/tower のプレハブ）は廃止し、コードを完全撤去した（2026-11-16、ユーザー決定）: lib/worldbox/buildings.ts・buildings-online.ts・/api/worldbox/buildings は削除済み。**復活させない。** 繁栄度は国民数 × 5 のみ（建物の算入は廃止）。≡ メニューの「建築」パネルも中身が建物だけだったため導線ごと撤去した。bot_kv（worldbox_nations 名前空間の "buildings" キー）の既存データは残置するが、コードからは参照しない（到達不能）。
 
 ### 経済（案B ブリッジが唯一の正）
-- 通貨は AGO コイン本体のみ。**Web 側で残高を直接増減しない**（ミント禁止）。
-- Web は bot_kv 名前空間 `worldbox_economy` にオプを積み、Bot 側ワーカー（core/general/circulation/worldbox_economy.py）が pay_house / ウォレット / transfer_coins で適用する。earn はバンクロール（プール+国庫）の利益分のみ（Plan A）。
+- 通貨は AGO コイン本体のみ。**原資の無い残高増額はしない**（ミント禁止）。増額は必ず pay_house でバンクロールから確保できた分だけ。
+- Web は bot_kv 名前空間 `worldbox_economy` にオプを積み、Bot 側ワーカー（core/general/circulation/worldbox_economy.py）が pay_house / ウォレット / transfer_coins で適用する**のが従来経路**。earn はバンクロール（プール+国庫）の利益分のみ（Plan A）。
+- **コイン適用の直接化（2026-11-17、ユーザー指示。PR #1048 / #1051 / 第2段b）**: 適用の正は bot-api 直接経路（`submitEconomyOp`、`web/lib/worldbox/economy-bridge-online.ts`）へ移行した。spend=残高 CAS（wallet と同じ規則）、transfer=`transfer_coins` RPC、earn/gamble=原資 RPC（次項）。直接経路が使えない環境（SQL 未適用・bot-api 未設定）では従来のキュー＋ワーカーへフォールバックし、冪等規則（適用台帳・claim・決定的 ID）は両経路で共通。金を動かした後の失敗でキューへ積み直すことはしない。
+- **原資の正は Postgres（2026-11-17）**: `economy_pool_state`（単一行）＋ RPC（`economy_pool_pay_house` / `refund_house` / `add_loss` / `pay` / `refund` / `seed`、`docs/sql/economy_pool.sql`）。Python の `EconomyPoolStore` も同じ DB を正とし、JSON（`data/economy_pool.json`）は移行元とフォールバック専用（二重の正は作らない）。SQL 適用手順は PR #1051 本文参照。
 - profile 内の独自コイン（profile.coins）は廃止済み。読込互換のためだけに残っている。**復活させない**。
 - オプ種別: spend / earn / transfer / steal / gamble。earn 理由はホワイトリスト制。
 - カジノ（ロビー右翼）は実働施設: スロットマシンの前=スロット、カジノテーブルの前=ルーレットで実際に賭けられる。位置はサーバー側がプレゼンスで検証する。1プレイは gamble オプ1件（amount=ベット、payout=確定配当）で、ワーカーがベット引き落とし→配当（利益分は pay_house、負けは add_loss 還流）を原子的に適用する。抽選は Web サーバー側。ベット上限はブリッジの金額上限に一致（独自上限なし）。

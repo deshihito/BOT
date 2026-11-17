@@ -18,8 +18,8 @@ export function isEconomyEnabled(): boolean {
   return isBotApiConfigured();
 }
 
-/** オプをキューへ積む。成功したら true。 */
-export async function enqueueEconomyOp(op: EconomyOp): Promise<boolean> {
+/** オプをキューへそのまま積む（直接適用のフォールバック専用）。 */
+async function queueEconomyOp(op: EconomyOp): Promise<boolean> {
   if (!isBotApiConfigured()) return false;
   try {
     await kvSet(WORLDBOX_ECONOMY_NAMESPACE, op.id, op);
@@ -30,19 +30,27 @@ export async function enqueueEconomyOp(op: EconomyOp): Promise<boolean> {
 }
 
 /**
+ * オプの登録（直接適用が正）。submitEconomyOp へ委譲し、直接適用
+ * できた場合はその場で終端する。戻り値は「登録できたか」で、終端
+ * 状態そのものではない（必要な呼び出し側は findEconomyOp /
+ * waitForOpDone で読む。直接適用後は done/failed が即座に読める）。
+ */
+export async function enqueueEconomyOp(op: EconomyOp): Promise<boolean> {
+  const result = await submitEconomyOp(op);
+  return result.state !== "unavailable";
+}
+
+/**
  * 冪等なオプ登録（カジノの enqueueSettleOnce と同じ規則、PR #943）。
  * 決定的 ID のオプ専用: 同 ID のオプが既にあれば（pending / done /
  * failed を問わず）作り直さず true を返す。「1つの論理的な支払い =
  * オプ1件」を保証し、再試行や並行リクエストで二重に払われない。
- * done 済みオプを pending で上書きするとワーカーが再適用してしまう
- * ため、存在チェックなしに enqueueEconomyOp を決定的 ID で呼んでは
- * いけない。
+ * submitEconomyOp が既存記録・適用台帳を先に見るため、done 済み
+ * オプを pending で上書きして再適用させることもない。
  */
 export async function enqueueEconomyOpOnce(op: EconomyOp): Promise<boolean> {
-  if (!isBotApiConfigured()) return false;
-  const existing = await findEconomyOp(op.userKey, op.id);
-  if (existing) return true;
-  return enqueueEconomyOp(op);
+  const result = await submitEconomyOp(op);
+  return result.state !== "unavailable";
 }
 
 /** 全ユーザーのオプ（カジノ大会の最終精算など、横断的な照合用）。読めなければ空配列。 */
@@ -362,8 +370,8 @@ interface MetricRecord {
   bankroll: number | null;
 }
 
-/** ワーカーの apply_metric と同じ集計（bankroll は原資の正が DB 化されるまで触らない）。 */
-function applyMetricRecord(record: unknown, op: EconomyOp, applied: number): MetricRecord {
+/** ワーカーの apply_metric と同じ集計。bankroll は読めたときだけ更新する。 */
+function applyMetricRecord(record: unknown, op: EconomyOp, applied: number, bankroll: number | null = null): MetricRecord {
   const out: MetricRecord = { earn: {}, spend: {}, bankroll: null };
   if (typeof record === "object" && record !== null && !Array.isArray(record)) {
     const source = record as Record<string, unknown>;
@@ -385,6 +393,7 @@ function applyMetricRecord(record: unknown, op: EconomyOp, applied: number): Met
     out.spend["casino_bet"] = (out.spend["casino_bet"] ?? 0) + op.amount;
     out.earn["casino_payout"] = (out.earn["casino_payout"] ?? 0) + applied;
   }
+  if (bankroll !== null) out.bankroll = bankroll;
   return out;
 }
 
@@ -393,7 +402,8 @@ async function recordMetricDirect(op: EconomyOp, applied: number): Promise<boole
   try {
     const date = new Date().toISOString().slice(0, 10);
     const current = await kvGet(WORLDBOX_ECONOMY_METRICS_NAMESPACE, date);
-    await kvSet(WORLDBOX_ECONOMY_METRICS_NAMESPACE, date, applyMetricRecord(current, op, applied));
+    const bankroll = await readBankrollDirect();
+    await kvSet(WORLDBOX_ECONOMY_METRICS_NAMESPACE, date, applyMetricRecord(current, op, applied, bankroll));
     return true;
   } catch {
     return false;
@@ -407,6 +417,187 @@ class DirectFailure extends Error {
     super(code);
     this.code = code;
   }
+}
+
+// ---------------------------------------------------------------------------
+// 原資（economy_pool）の RPC 経由アクセス（コイン API 直接化 第2段）
+// 原資の正は Postgres の economy_pool_state（単一行）。pay_house 等は
+// docs/sql/economy_pool.sql の RPC が原子的に処理する。SQL 未適用の
+// 環境ではテーブル自体が無いので、earn / gamble の直接適用は
+// テーブルの存在を事前に確認し、無ければ従来キューへ寄せる
+// （金を動かす前に判定する。途中まで直接で動かしてから寄せない）。
+// ---------------------------------------------------------------------------
+
+interface PayHouseBreakdown {
+  paid: number;
+  pool: number;
+  treasury: number;
+}
+
+let poolProbeCache: { at: number; available: boolean } | null = null;
+const POOL_PROBE_TTL_MS = 60_000;
+
+/** 原資 DB のプローブ結果を捨てる（SQL 適用直後の回復とテスト用）。 */
+export function resetEconomyPoolProbe(): void {
+  poolProbeCache = null;
+}
+
+/** economy_pool_state テーブルが読めるか（= 第2段の SQL が適用済みか）。 */
+async function isPoolDbAvailable(): Promise<boolean> {
+  if (poolProbeCache && Date.now() - poolProbeCache.at < POOL_PROBE_TTL_MS) {
+    return poolProbeCache.available;
+  }
+  let available = false;
+  try {
+    await tableSelect("economy_pool_state", "pool", [{ column: "id", op: "eq", value: 1 }], 1);
+    available = true;
+  } catch {
+    available = false;
+  }
+  poolProbeCache = { at: Date.now(), available };
+  return available;
+}
+
+/** 現在のバンクロール（プール＋国庫）。読めなければ null。 */
+async function readBankrollDirect(): Promise<number | null> {
+  try {
+    const rows = await tableSelect<{ pool?: unknown; treasury?: unknown }>(
+      "economy_pool_state",
+      "pool,treasury",
+      [{ column: "id", op: "eq", value: 1 }],
+      1,
+    );
+    if (rows.length === 0) return 0;
+    const pool = Number(rows[0].pool ?? 0);
+    const treasury = Number(rows[0].treasury ?? 0);
+    if (!Number.isFinite(pool) || !Number.isFinite(treasury)) return null;
+    return Math.trunc(pool) + Math.trunc(treasury);
+  } catch {
+    return null;
+  }
+}
+
+function toBreakdown(raw: unknown): PayHouseBreakdown | null {
+  const row = Array.isArray(raw) ? raw[0] : raw;
+  if (typeof row !== "object" || row === null) return null;
+  const record = row as Record<string, unknown>;
+  const paid = Number(record.paid);
+  const pool = Number(record.pool_part);
+  const treasury = Number(record.treasury_part);
+  if (!Number.isFinite(paid) || !Number.isFinite(pool) || !Number.isFinite(treasury)) return null;
+  return { paid: Math.trunc(paid), pool: Math.trunc(pool), treasury: Math.trunc(treasury) };
+}
+
+/** pay_house RPC: バンクロールから確保できた分の内訳を返す。 */
+async function payHouseDirect(amount: number): Promise<PayHouseBreakdown> {
+  const breakdown = toBreakdown(await rpc("economy_pool_pay_house", { p_amount: amount }));
+  if (!breakdown) throw new Error("economy_pool_pay_house returned an invalid result");
+  return breakdown;
+}
+
+/** refund_house RPC（ベストエフォート: 失敗しても呼び出し側の終端は変えない）。 */
+async function refundHouseDirect(breakdown: PayHouseBreakdown): Promise<void> {
+  try {
+    await rpc("economy_pool_refund_house", {
+      p_pool_part: breakdown.pool,
+      p_treasury_part: breakdown.treasury,
+    });
+  } catch {
+    // ワーカー側も refund_house の失敗は記録のみで適用結果を覆さない
+  }
+}
+
+/** add_loss RPC（ベストエフォート: 還流の取りこぼしは記録のみ）。 */
+async function addLossDirect(amount: number): Promise<void> {
+  if (amount <= 0) return;
+  try {
+    await rpc("economy_pool_add_loss", { p_amount: amount });
+  } catch {
+    // ワーカー側も add_loss の失敗は適用を止めない
+  }
+}
+
+/** earn の直接適用（ワーカーの _apply_earn と同じ規則）。戻り値は実際に払えた額。 */
+async function applyEarnDirect(op: EconomyOp): Promise<number> {
+  const breakdown = await payHouseDirect(op.amount);
+  const paid = breakdown.paid;
+  if (paid <= 0) return 0;
+  let credited: ChangeBalanceResult;
+  try {
+    credited = await changeBalanceDirect(op.discordId, paid, { createWith: NEW_USER_BALANCE });
+  } catch (error) {
+    await refundHouseDirect(breakdown);
+    throw error;
+  }
+  if (!credited.ok) {
+    // 入金できなかった分は原資へ戻す（発行しない）
+    await refundHouseDirect(breakdown);
+    throw new DirectFailure("credit_failed");
+  }
+  await recordHistoryDirect(WORLDBOX_HISTORY_ID, op.discordId, paid, op.reason);
+  return paid;
+}
+
+/**
+ * gamble の直接適用（ワーカーの _apply_gamble と同じ規則）。
+ * pay_house が必要なオプは、ベットを引き落とす「前」に原資を確保する
+ * （確保の成否が確定してから残高を動かすため、途中失敗でも
+ * refund_house で原資を戻せば金はどこにも残らない）。
+ */
+async function applyGambleDirect(op: EconomyOp): Promise<number> {
+  if (op.payout === undefined) throw new DirectFailure("invalid_op");
+  const user = op.discordId;
+  const bet = op.amount;
+  const payout = op.payout;
+  const prepaid = op.prepaid === true;
+
+  const profit = Math.max(0, payout - bet);
+  let breakdown: PayHouseBreakdown | null = null;
+  let housePaid = 0;
+  if (profit > 0) {
+    breakdown = await payHouseDirect(profit);
+    housePaid = breakdown.paid;
+  }
+
+  if (!prepaid) {
+    const debit = await changeBalanceDirect(user, -bet, { requireFunds: true });
+    if (!debit.ok) {
+      if (breakdown) await refundHouseDirect(breakdown);
+      throw new DirectFailure(debit.error);
+    }
+    await recordHistoryDirect(user, WORLDBOX_HISTORY_ID, bet, op.reason);
+  }
+
+  if (payout <= 0) {
+    await addLossDirect(bet);
+    return 0;
+  }
+  if (prepaid && payout < bet) {
+    // 先払い精算の部分返し: 戻らなかった分は負けとして還流する。
+    await addLossDirect(bet - payout);
+  }
+
+  const creditAmount = Math.min(payout, bet) + housePaid;
+  let credited: ChangeBalanceResult | null = null;
+  try {
+    credited = await changeBalanceDirect(user, creditAmount, { createWith: NEW_USER_BALANCE });
+  } catch {
+    credited = null;
+  }
+  if (!credited || !credited.ok) {
+    if (breakdown) await refundHouseDirect(breakdown);
+    if (!prepaid) {
+      // ベットを返金する（失敗したらワーカー同様に記録のみで終端する）
+      try {
+        await changeBalanceDirect(user, bet);
+      } catch {
+        // 返金の成否は終端コードを変えない
+      }
+    }
+    throw new DirectFailure("credit_failed");
+  }
+  await recordHistoryDirect(WORLDBOX_HISTORY_ID, user, creditAmount, op.reason);
+  return creditAmount;
 }
 
 /** spend の直接適用。戻り値は実際に動いた額。 */
@@ -440,14 +631,22 @@ async function applyTransferDirect(op: EconomyOp): Promise<number> {
   return op.amount;
 }
 
-/** 直接適用の対象種別か（PR1: 原資の絡まない spend / transfer）。 */
-function isDirectKind(op: EconomyOp): boolean {
-  return op.kind === "spend" || op.kind === "transfer";
+/**
+ * 直接適用の対象種別か。spend / transfer は常時。earn / gamble は
+ * 原資（economy_pool_state）が DB 化されている環境でのみ対象にし、
+ * 使えない環境では従来キューへ寄せる（判定は金を動かす前に行う）。
+ */
+async function isDirectKind(op: EconomyOp): Promise<boolean> {
+  if (op.kind === "spend" || op.kind === "transfer") return true;
+  if (op.kind === "earn" || op.kind === "gamble") return isPoolDbAvailable();
+  return false;
 }
 
 async function applyDirectByKind(op: EconomyOp): Promise<number> {
   if (op.kind === "spend") return applySpendDirect(op);
   if (op.kind === "transfer") return applyTransferDirect(op);
+  if (op.kind === "earn") return applyEarnDirect(op);
+  if (op.kind === "gamble") return applyGambleDirect(op);
   throw new DirectFailure("invalid_op");
 }
 
@@ -493,13 +692,13 @@ export async function submitEconomyOp(op: EconomyOp): Promise<SubmitEconomyOpRes
   if (ledger?.status === "applying") {
     // 成否曖昧な適用が進行中/中断している。触らずキュー側の
     // 再処理（台帳から終端化）に委ねる。
-    if (await enqueueEconomyOp(op)) return { state: "pending", op };
+    if (await queueEconomyOp(op)) return { state: "pending", op };
     return { state: "unavailable" };
   }
 
   // 対象外の種別は従来のキューへ。
-  if (!isDirectKind(op)) {
-    if (await enqueueEconomyOp(op)) return { state: "pending", op };
+  if (!(await isDirectKind(op))) {
+    if (await queueEconomyOp(op)) return { state: "pending", op };
     return { state: "unavailable" };
   }
 
@@ -523,13 +722,13 @@ export async function submitEconomyOp(op: EconomyOp): Promise<SubmitEconomyOpRes
     }
   } catch {
     // claim を書く前に失敗: 金は動いていないのでキューへ寄せる。
-    if (await enqueueEconomyOp(op)) return { state: "pending", op };
+    if (await queueEconomyOp(op)) return { state: "pending", op };
     return { state: "unavailable" };
   }
 
   // 台帳へ applying。書けなければ適用しない（claim を外してキューへ）。
   if (!(await saveAppliedLedger(op.id, { status: "applying", at: Date.now() }))) {
-    if (await enqueueEconomyOp(op)) return { state: "pending", op };
+    if (await queueEconomyOp(op)) return { state: "pending", op };
     return { state: "unavailable" };
   }
 
