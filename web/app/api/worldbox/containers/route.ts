@@ -16,6 +16,8 @@ import {
   isContainersEnabled, loadContainer, storeContainer,
 } from "@/lib/worldbox/containers-online";
 import { TENT_H, buildTent } from "@/lib/worldbox/tent";
+import { buildLobby } from "@/lib/worldbox/lobby";
+import { buildLobby2, buildLobby3 } from "@/lib/worldbox/lobby-floors";
 import { withUserLock } from "@/lib/worldbox/user-lock";
 
 export const runtime = "nodejs";
@@ -27,9 +29,10 @@ export const runtime = "nodejs";
 // GET ?x&y[&space=tent]: そのタイルのコンテナの中身を返す（無ければ 404）。
 // POST { action: "move", x, y, from, to [, space] }: プロフィール⇔コンテナ
 // 間のスロット移動をサーバー側で再計算して適用し、両方の更新後を返す。
-// space=tent はテント内装の備え付け樽・木箱が対象（個人空間なので所有は
-// 常に本人）。段階で内装の高さが変わっても中身が付いてくるよう、保存キー
-// は tier 0 の高さに正規化した座標で持つ。
+// space=tent/lobby/lobby2/lobby3 は室内の備え付け樽・木箱が対象（所有は
+// 常に本人。ロビーは共用空間なので中身をプレイヤー別に持つ）。テントは
+// 段階で内装の高さが変わっても中身が付いてくるよう、保存キーは tier 0 の
+// 高さに正規化した座標で持つ。
 // 隣接検証はタイル行為と同じ（プレゼンス → セーブ、チェビシェフ ≤2）。
 // Bot API 未設定なら 503（クライアントは収納なしで遊び続ける）。
 
@@ -52,11 +55,18 @@ function checkedCoord(xRaw: unknown, yRaw: unknown): { x: number; y: number } | 
   return { x, y };
 }
 
-/** コンテナが使える空間。world=設置ブロック、tent=テント内装の備え付け。 */
-type ContainerSpace = "world" | "tent";
+/** コンテナが使える空間。world=設置ブロック、それ以外は室内の備え付け家具。 */
+type ContainerSpace = "world" | "tent" | "lobby" | "lobby2" | "lobby3";
 
 function parseContainerSpace(raw: unknown): ContainerSpace {
-  return raw === "tent" ? "tent" : "world";
+  return raw === "tent" || raw === "lobby" || raw === "lobby2" || raw === "lobby3" ? raw : "world";
+}
+
+/** 備え付け家具の保存空間キー。共用空間（ロビー各階）は中身をプレイヤー
+ * 別に持つため、空間名に所有者を付ける（world/tent は場所自体が個人の
+ * ものなので空間名だけ）。 */
+function fixtureStoreSpace(space: ContainerSpace, selfId: string): string {
+  return space === "tent" ? "tent" : `${space}@${selfId}`;
 }
 
 /** サーバーが知る本人の位置（プレゼンス → セーブの順、空間一致のみ）。無ければ null。 */
@@ -72,7 +82,7 @@ async function actorPosition(ownerKey: string, space: ContainerSpace): Promise<{
 }
 
 type ResolvedContainer =
-  | { ok: true; itemId: string; state: ContainerState; storeX: number; storeY: number }
+  | { ok: true; itemId: string; state: ContainerState; storeSpace: string; storeX: number; storeY: number }
   | { ok: false; error: string; status: number };
 
 /** そのタイルにある本人のコンテナを解決する（所有・種類は設置ブロックが正）。 */
@@ -83,23 +93,29 @@ async function resolveContainer(
   y: number,
 ): Promise<ResolvedContainer> {
   const selfId = presenceIdFor(ownerKey);
-  if (space === "tent") {
-    // テント内装の備え付け家具が正。所有者は本人（個人空間）。
-    const profile = await loadProfile(ownerKey);
-    const tent = buildTent(profile.tentTier);
-    const obj = tent.objects.find(
+  if (space !== "world") {
+    // 室内の備え付け家具が正。所有は常に本人（テントは個人空間、ロビーは
+    // 共用だが中身をプレイヤー別に持つ）。
+    const tent = space === "tent" ? buildTent((await loadProfile(ownerKey)).tentTier) : null;
+    const objects = tent ? tent.objects
+      : space === "lobby" ? buildLobby().objects
+      : space === "lobby2" ? buildLobby2().objects
+      : buildLobby3().objects;
+    const obj = objects.find(
       (o) => isContainerItem(o.sprite) && x >= o.x && x < o.x + o.w && y >= o.y && y < o.y + o.h,
     );
     if (!obj) return { ok: false, error: "no_container", status: 404 };
-    // 段階が上がると内装の高さと家具の y が変わるため、保存キーは
+    // テントは段階が上がると内装の高さと家具の y が変わるため、保存キーは
     // tier 0 の高さに正規化した座標にする（家具の x は段階で不変）。
+    // ロビーは座標が固定なのでそのまま使う。
+    const storeSpace = fixtureStoreSpace(space, selfId);
     const storeX = obj.x;
-    const storeY = obj.y - (tent.height - TENT_H);
-    const stored = await loadContainer("tent", storeX, storeY, obj.sprite);
+    const storeY = tent ? obj.y - (tent.height - TENT_H) : obj.y;
+    const stored = await loadContainer(storeSpace, storeX, storeY, obj.sprite);
     const state = stored && stored.ownerId === selfId
       ? stored
       : emptyContainer(selfId, obj.sprite);
-    return { ok: true, itemId: obj.sprite, state, storeX, storeY };
+    return { ok: true, itemId: obj.sprite, state, storeSpace, storeX, storeY };
   }
   const ov = await loadTileOverride(x, y);
   const block = ov && isOverrideActive(ov, Date.now()) ? ov.block : undefined;
@@ -114,7 +130,7 @@ async function resolveContainer(
   const state = stored && stored.ownerId === selfId
     ? stored
     : emptyContainer(selfId, block.itemId);
-  return { ok: true, itemId: block.itemId, state, storeX: x, storeY: y };
+  return { ok: true, itemId: block.itemId, state, storeSpace: "world", storeX: x, storeY: y };
 }
 
 function errorJson(error: string, status: number) {
@@ -199,7 +215,7 @@ export async function POST(request: Request) {
         const profile = await loadProfile(ownerKey);
         const moved = moveContainerSlot(profile, resolved.state, fields.from, fields.to);
         if (!moved) return errorJson("invalid_action", 400);
-        if (!(await storeContainer(space, resolved.storeX, resolved.storeY, moved.container))) {
+        if (!(await storeContainer(resolved.storeSpace, resolved.storeX, resolved.storeY, moved.container))) {
           return errorJson("containers_failed", 500);
         }
         if (!(await storeProfile(ownerKey, moved.profile))) {
