@@ -215,7 +215,7 @@ function findRoomEntry(room, id) {
  * を返し、部屋へは保存しない。externalBaseline は部屋に前回が無いときの
  * 基準（bot_kv のプレゼンス、無ければセーブ。ts 付きなら時刻基準、無ければ固定距離）。
  */
-function acceptHeartbeat(room, id, name, raw, now, externalBaseline = null) {
+function acceptHeartbeat(room, id, name, raw, now, externalBaseline = null, avatarUrl = null) {
   const hb = sanitizeHeartbeat(raw);
   if (!hb) return null;
   const prev = findRoomEntry(room, id);
@@ -235,7 +235,7 @@ function acceptHeartbeat(room, id, name, raw, now, externalBaseline = null) {
     table = new Map();
     room.spaces.set(hb.space, table);
   }
-  const entry = { id, name: String(name ?? "").slice(0, NAME_MAX), ...hb, ts: now };
+  const entry = { id, name: String(name ?? "").slice(0, NAME_MAX), ...hb, ...(avatarUrl ? { avatar: avatarUrl } : {}), ts: now };
   table.set(id, entry);
   return entry;
 }
@@ -313,6 +313,8 @@ function verifyToken(token, secret, now) {
     name: typeof payload.name === "string" ? payload.name : "",
     // 所有者キー（Phase 2 の集約書き込み用）。旧トークンには無いため任意。
     ok: typeof payload.ok === "string" && payload.ok.length > 0 ? payload.ok : null,
+    // 本人のユーザーアイコン URL（アバター描画用、presence.ts の sanitizeAvatarUrl と同じ規則）。
+    av: typeof payload.av === "string" && payload.av.length <= 256 && payload.av.startsWith("https://") && !/[\s"'<>\\]/.test(payload.av) ? payload.av : null,
   };
 }
 
@@ -334,6 +336,7 @@ function presenceKvValue(entry) {
     rank: entry.rank ?? 1,
     party: entry.party ?? "",
     ...(entry.sit === true ? { sit: true } : {}),
+    ...(entry.avatar ? { avatar: entry.avatar } : {}),
   };
   return JSON.stringify({ ...hb, ts: entry.ts });
 }

@@ -152,8 +152,8 @@ test("relay: 空間移動で旧空間から消え、削除と掃除が効く", (
 test("relay token: 署名と検証（改竄・期限切れ・鍵違いを弾く）", () => {
   const secret = "test-secret";
   const token = core.signToken({ pid: "abcd1234", name: "誰か", exp: NOW + 60_000 }, secret);
-  // ok は Phase 2 の所有者キー（このトークンには無いので null）
-  assert.deepEqual(core.verifyToken(token, secret, NOW), { pid: "abcd1234", name: "誰か", ok: null });
+  // ok は Phase 2 の所有者キー、av はユーザーアイコン URL（どちらもこのトークンには無いので null）
+  assert.deepEqual(core.verifyToken(token, secret, NOW), { pid: "abcd1234", name: "誰か", ok: null, av: null });
   assert.equal(core.verifyToken(token, "other-secret", NOW), null);
   assert.equal(core.verifyToken(token, secret, NOW + 120_000), null, "期限切れを通した");
   const tampered = token.slice(0, -2) + (token.endsWith("aa") ? "bb" : "aa");

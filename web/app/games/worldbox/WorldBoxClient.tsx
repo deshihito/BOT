@@ -2648,6 +2648,29 @@ export default function WorldBoxClient() {
     }
     const avatar = new Image();
     avatar.src = "/img/nomal.png";
+    // ユーザーアイコン（Discord アバター）の画像キャッシュ。URL ごとに1枚だけ読み込む。
+    // プレイヤーのアバターは本人のアイコンで描き、読み込み中・失敗時は従来キャラに寄せる。
+    const iconCache = new Map<string, HTMLImageElement>();
+    const iconFor = (url: string | null | undefined): HTMLImageElement | null => {
+      if (!url) return null;
+      let img = iconCache.get(url);
+      if (!img) {
+        img = new Image();
+        img.crossOrigin = "anonymous";
+        img.src = url;
+        iconCache.set(url, img);
+      }
+      return img;
+    };
+    // 自分のアイコン URL（プレゼンスの自エントリは自分へ返らないので /api/auth/me から取る）
+    let myIconUrl: string | null = null;
+    void fetch("/api/auth/me")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        const url = (data as { user?: { avatarUrl?: unknown } } | null)?.user?.avatarUrl;
+        if (typeof url === "string" && url) myIconUrl = url;
+      })
+      .catch(() => { /* noop */ });
 
     // 地形はチャンク単位で生成してキャッシュする。実効タイル源は
     // 「チャンク地形＋タイル上書き（伐採・採掘の地形置き換え）」で、
@@ -3986,6 +4009,7 @@ export default function WorldBoxClient() {
       swim = false,
       plate: { roleSymbol: string; rank: number } | null = null,
       sit = false,
+      icon: HTMLImageElement | null = null,
     ) => {
       const size = TILE * AVATAR_TILES;
       // 泳ぎ中は体を沈め、歩行の上下動をゆるい浮き沈みに替える。座りは浅く沈んで静止する
@@ -3997,7 +4021,8 @@ export default function WorldBoxClient() {
       c.beginPath();
       c.ellipse(sx, sy, size * 0.30, size * 0.10, 0, 0, Math.PI * 2);
       c.fill();
-      if (texReady(avatar)) {
+      const iconReady = icon !== null && texReady(icon);
+      if (iconReady || texReady(avatar)) {
         const paintSprite = (alpha: number, y0: number, y1: number) => {
           c.save();
           c.beginPath();
@@ -4006,8 +4031,23 @@ export default function WorldBoxClient() {
           c.globalAlpha = alpha;
           c.translate(sx, sy - bob + sink);
           c.rotate(moveLean(speedRatio) * face);
-          c.scale(face * (1 + (1 - squash) * 0.7), squash);
-          c.drawImage(avatar, -size / 2, -size, size, size);
+          // アイコンは左右反転しない（顔の向きで写真が裏返るのは不自然なため）
+          c.scale((iconReady ? 1 : face) * (1 + (1 - squash) * 0.7), squash);
+          if (iconReady && icon) {
+            c.save();
+            c.beginPath();
+            c.arc(0, -size / 2, size / 2, 0, Math.PI * 2);
+            c.clip();
+            c.drawImage(icon, -size / 2, -size, size, size);
+            c.restore();
+            c.beginPath();
+            c.arc(0, -size / 2, size / 2, 0, Math.PI * 2);
+            c.lineWidth = 2;
+            c.strokeStyle = "rgba(255,255,255,0.9)";
+            c.stroke();
+          } else {
+            c.drawImage(avatar, -size / 2, -size, size, size);
+          }
           c.restore();
         };
         if (swim) {
@@ -5524,6 +5564,7 @@ export default function WorldBoxClient() {
               o.track.entry.face, o.phase, Math.min(1, Math.hypot(o.track.entry.vx, o.track.entry.vy) / WALK_SPEED), o.track.entry.name || null, nationColor, oSwim,
               { roleSymbol: roleById((o.track.entry.role ?? "free") as AdventureRoleId).symbol, rank: o.track.entry.rank ?? 1 },
               o.track.entry.sit === true,
+              iconFor(o.track.entry.avatar),
             ),
         });
       }
@@ -5628,7 +5669,7 @@ export default function WorldBoxClient() {
             // 足元は当たり円の底（中心 + 半径）に合わせる（中心に置くと手前で止まって見える）
             (space !== "world" ? Math.round(lobbyOy + player.y * TILE) + TILE * PLAYER_RADIUS : toScreenY(player.y) + TILE * PLAYER_RADIUS) - slimeBouncePx,
             player.face, player.phase, speedRatio, null, null, playerSwimming,
-            null, sitTileRef.current !== null,
+            null, sitTileRef.current !== null, iconFor(myIconUrl),
           ),
       });
       // 競馬: 発走中のレースはトラック上に馬を描く（位置は見せ方専用、

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getRequestSession, publicOrigin, sessionOwnerKey } from "@/lib/auth";
+import { getRequestSession, publicOrigin, sessionAvatarUrl, sessionOwnerKey } from "@/lib/auth";
 import { rectBounds, worldBounds } from "@/lib/worldbox/mapgen";
 import { LOBBY_H, LOBBY_W } from "@/lib/worldbox/lobby";
 import { LOBBY2_H, LOBBY2_W, LOBBY3_H, LOBBY3_W } from "@/lib/worldbox/lobby-floors";
@@ -87,6 +87,8 @@ export async function PUT(request: Request) {
     return NextResponse.json({ error: "invalid_heartbeat" }, { status: 400, headers: NO_STORE });
   }
   const name = session.username?.trim() || heartbeat.name || "プレイヤー";
+  // アバター（ユーザーアイコン）はクライアント申告を受けず、セッションから付与する
+  const avatar = sessionAvatarUrl(session);
   const ownerKey = sessionOwnerKey(session);
   const now = Date.now();
   // 移動連続性（B4）: 申告位置が保管位置から移動可能な距離を超えていたら
@@ -112,7 +114,7 @@ export async function PUT(request: Request) {
     }
   }
   // タブ世代（分身防止）: 新しい世代のタブだけが保存できる。旧タブは 409。
-  const stored = await putPresenceTabGuarded(ownerKey, { ...heartbeat, name }, now);
+  const stored = await putPresenceTabGuarded(ownerKey, { ...heartbeat, name, ...(avatar ? { avatar } : {}) }, now);
   if (stored === "rejected") {
     return NextResponse.json({ error: "tab_superseded" }, { status: 409, headers: NO_STORE });
   }

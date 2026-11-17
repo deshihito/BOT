@@ -178,6 +178,13 @@ export type Heartbeat = {
   party?: string;
   /** 椅子・ベンチ・ソファに座っているか（見た目だけの申告）。 */
   sit?: boolean;
+  /**
+   * 本人のユーザーアイコン（Discord アバター）の URL。アバター描画用。
+   * クライアント申告では受け付けず、サーバーがセッションから付与する
+   * （REST はプレゼンスルート、WS は中継トークンの av クレーム経由）。
+   * sanitizeHeartbeat は入力から読まない。保存値の復元は parsePresenceEntry。
+   */
+  avatar?: string;
   /** 開いているタブの識別子（同一アカウントの分身防止用。同アカウントでは最新のタブだけが有効）。 */
   tab?: string;
   /** そのタブを開いた時刻（ミリ秒）。タブ世代の新旧判定に使う。 */
@@ -261,6 +268,18 @@ export function tabVerdict(
   return incoming.tab > stored.tab ? "accept" : "reject";
 }
 
+/**
+ * 保存済みアバター URL の検証（サーバーが付与した値の復元用）。
+ * https の URL で、空白・引用符・制御文字を含まないものだけを通す。
+ */
+export function sanitizeAvatarUrl(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  if (raw.length === 0 || raw.length > 256) return null;
+  if (!raw.startsWith("https://")) return null;
+  if (/[\s"'<>\\\u0000-\u001f\u007f]/.test(raw)) return null;
+  return raw;
+}
+
 /** bot_kv に保存された1件（JSON 文字列 or オブジェクト）をエントリへ戻す。壊れていれば null。 */
 export function parsePresenceEntry(id: string, raw: unknown): PresenceEntry | null {
   let data: unknown = raw;
@@ -276,7 +295,8 @@ export function parsePresenceEntry(id: string, raw: unknown): PresenceEntry | nu
   if (typeof v.ts !== "number" || !Number.isFinite(v.ts)) return null;
   const hb = sanitizeHeartbeat(v, fallbackBounds());
   if (!hb) return null;
-  return { ...hb, id, ts: v.ts };
+  const avatar = sanitizeAvatarUrl(v.avatar);
+  return { ...hb, ...(avatar ? { avatar } : {}), id, ts: v.ts };
 }
 
 /**

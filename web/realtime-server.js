@@ -111,7 +111,7 @@ if (wss) {
   /** ハートビート1件の処理（中継・集約書き込み・配信）。却下された申告は
    * 保存せず、送り主へ保管位置（jump）を返してそこへ戻させる。 */
   const handleHeartbeat = (ws, info, msg, now) => {
-    const entry = core.acceptHeartbeat(room, info.pid, info.name, msg, now, info.baseline);
+    const entry = core.acceptHeartbeat(room, info.pid, info.name, msg, now, info.baseline, info.avatar);
     if (!entry) return;
     if (entry.rejected) {
       try {
@@ -137,7 +137,7 @@ if (wss) {
 
   wss.on("connection", (ws) => {
     const auth = ws._rtAuth;
-    const info = { pid: auth.pid, name: auth.name, ok: auth.ok ?? null, space: null, joined: false, lastMsgAt: 0, alive: true, lastEntry: null, baseline: undefined, pendingHbs: [] };
+    const info = { pid: auth.pid, name: auth.name, ok: auth.ok ?? null, avatar: auth.av ?? null, space: null, joined: false, lastMsgAt: 0, alive: true, lastEntry: null, baseline: undefined, pendingHbs: [] };
     clients.set(ws, info);
     // タブ世代（同一アカウントの分身防止）: 旧世代の接続は受け付けず、
     // 世代交代時は旧世代の接続をすべて閉じる（閉じられた側は再接続しない）。

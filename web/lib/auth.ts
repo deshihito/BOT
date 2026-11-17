@@ -120,6 +120,37 @@ export async function getCurrentSession() {
   return readSessionInfo(cookieStore.get(SESSION_COOKIE)?.value);
 }
 
+/**
+ * Discord アバターの CDN URL（dashboard-core の userAvatarUrl と同じ規則。
+ * auth.ts は単体で読み込まれる場面が多いため、依存を増やさずここに複製する）。
+ * ハッシュが無ければ ID から決まる既定アバター。
+ */
+function discordAvatarUrl(userId: string, avatarHash: string | null): string {
+  if (avatarHash) {
+    const ext = avatarHash.startsWith("a_") ? "gif" : "png";
+    return `https://cdn.discordapp.com/avatars/${userId}/${avatarHash}.${ext}?size=64`;
+  }
+  let index = 0;
+  try {
+    index = Number((BigInt(userId) >> 22n) % 6n);
+  } catch {
+    index = 0;
+  }
+  return `https://cdn.discordapp.com/embed/avatars/${index}.png`;
+}
+
+/**
+ * セッションから本人のアバター画像 URL を組み立てる（/api/auth/me と同じ規則）。
+ * Discord はハッシュから CDN URL（無ければ既定アバター）、Google はプロフィール
+ * 画像の完全な URL をそのまま、Google で画像が無い場合だけ null。
+ */
+export function sessionAvatarUrl(session: SessionInfo): string | null {
+  const avatar = session.avatar ?? null;
+  if (avatar && avatar.startsWith("http")) return avatar;
+  if (session.provider === "google") return null;
+  return discordAvatarUrl(session.id, avatar);
+}
+
 export function getRequestSession(request: Request) {
   return readSessionInfo(readCookie(request, SESSION_COOKIE));
 }
