@@ -237,6 +237,7 @@ export const ITEMS: readonly ItemDef[] = [
   { id: "honey_block", name: "はちみつブロック", desc: "はちみつの塊", category: "block", price: 2100, durability: 10 },
   { id: "mushroom_block", name: "キノコブロック", desc: "キノコの塊", category: "block", price: 950, durability: 10 },
   { id: "path_block", name: "小道ブロック", desc: "踏み固めた道", category: "block", price: 60, durability: 6 },
+  { id: "rail", name: "線路", desc: "つなげると線路ワープと補給が効く", category: "block", price: 400, durability: 10 },
   { id: "flower_block", name: "花壇ブロック", desc: "花の咲く塊", category: "block", price: 160, durability: 6 },
   { id: "pumpkin_block", name: "カボチャブロック", desc: "カボチャの塊", category: "block", price: 400, durability: 12 },
   { id: "melon_block", name: "メロンブロック", desc: "メロンの塊", category: "block", price: 480, durability: 12 },
@@ -468,7 +469,7 @@ export const ITEM_ICON_IDS: readonly string[] = [
   "ruby", "sapphire", "emerald", "diamond", "pearl", "honey", "beeswax", "flower",
   "copper_block", "coal_block", "bedrock_block", "cactus_block", "leaves_block",
   "diamond_block", "emerald_block", "ruby_block", "sapphire_block", "magma_block",
-  "honey_block", "mushroom_block", "path_block", "flower_block", "pumpkin_block", "melon_block",
+  "honey_block", "mushroom_block", "path_block", "rail", "flower_block", "pumpkin_block", "melon_block",
   // 拡張分（食事・種・作物）
   "egg", "raw_meat", "mushroom", "apple", "berry", "fish",
   "cookie", "grilled_meat", "grilled_fish", "omelette", "baked_potato", "stew",
@@ -573,6 +574,7 @@ export const RECIPES: readonly Recipe[] = [
   { id: "iron_hoe", inputs: { iron_ore: 2, stick: 2 }, output: "iron_hoe", outputCount: 1 },
   // ブロック
   { id: "planks_block", inputs: { wood: 2 }, output: "planks_block", outputCount: 1 },
+  { id: "rail", inputs: { wood: 2, iron_ingot: 1 }, output: "rail", outputCount: 4 },
   { id: "stone_brick_block", inputs: { stone: 4 }, output: "stone_brick_block", outputCount: 1 },
   { id: "brick_block", inputs: { clay: 4 }, output: "brick_block", outputCount: 1 },
   { id: "glass_block", inputs: { glass: 2 }, output: "glass_block", outputCount: 1 },
