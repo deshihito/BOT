@@ -280,8 +280,8 @@ export async function POST(request: Request) {
       const buySubmitted = await submitEconomyOp(buyOp);
       if (buySubmitted.state === "unavailable") return err("economy_failed", 503);
       if (buySubmitted.state === "failed") return err("economy_failed", 409);
-      // 売り手への入金（区画の国の税率を引いた額）。税分はシンクし、
-      // 累計税収へ表示用に加算する。売り手が Discord 連携でない場合は積まない
+      // 売り手への入金（区画の国の税率を引いた額）。税分は国庫へ積み、
+      // 累計税収へも表示用に加算する。売り手が Discord 連携でない場合は積まない
       const plotSettings = await loadNationSettings(found.plot.guildId);
       const taxRate = taxRateOf(plotSettings);
       const sellerDiscord = found.listing.sellerKey.startsWith("discord:")
@@ -298,7 +298,7 @@ export async function POST(request: Request) {
       const tax = saleTaxAmount(found.listing.price, count, taxRate);
       if (tax > 0) {
         await updateNationSettings(found.plot.guildId, (cur) => ({
-          ...cur, taxCollected: cur.taxCollected + tax,
+          ...cur, taxCollected: cur.taxCollected + tax, treasury: cur.treasury + tax,
         }));
       }
       const profile = await loadProfile(ownerKey);
