@@ -9,7 +9,7 @@ import { parseSave } from "@/lib/worldbox/save";
 import { loadWorldBoxSave } from "@/lib/worldbox/save-online";
 import { loadWarState, storeWarState, isWarsEnabled, withWarLock } from "@/lib/worldbox/war-online";
 import {
-  activeWarFor, attackMark, declareWar, expireWars, prosperityRanking, repairMark,
+  attackMark, declareWar, expireWars, prosperityRanking, repairMark,
   warView, WAR_MARK_RANGE, type WarState,
 } from "@/lib/worldbox/war";
 import {

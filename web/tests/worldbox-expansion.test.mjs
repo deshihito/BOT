@@ -63,9 +63,9 @@ const cat = await loadBundle(
 const ml = await loadBundle(
   ["worldbox/rng.ts", "worldbox/mapgen.ts", "worldbox/maplogic.ts"],
   [
-    "BIOMES", "biomeById", "biomeAt", "biomeOnMap", "classifyBiome", "elevationAt", "moistureAt",
-    "isSnowZone", "resourceProfileFor", "CHUNK_SIZE", "chunkOf", "chunkKey", "parseChunkKey",
-    "chunkLocal", "STRUCTURES", "structureById", "structuresForChunk", "findLandSpawn",
+    "BIOMES", "biomeById", "biomeAt", "classifyBiome", "elevationAt", "moistureAt",
+    "isSnowZone", "CHUNK_SIZE", "chunkOf", "chunkKey", "parseChunkKey",
+    "chunkLocal", "STRUCTURES", "structureById", "structuresForChunk",
     "generateMap", "mapTileAt", "T_GRASS", "T_WATER", "T_SNOW", "MAP_SEED",
   ],
 );
@@ -166,7 +166,7 @@ test("バイオーム: 生成マップと一致する（水タイルは湖、北
   for (let y = 0; y < map.height; y += 7) {
     for (let x = 0; x < map.width; x += 7) {
       const tile = ml.mapTileAt(map, x, y);
-      const biome = ml.biomeOnMap(map, x, y);
+      const biome = ml.biomeAt(map.seed, x, y, tile);
       assert.ok(ml.biomeById(biome), `${x},${y} -> ${biome}`);
       if (tile === ml.T_WATER) { assert.equal(biome, "lake"); water++; }
       if (tile === ml.T_SNOW) { assert.ok(["snowfield", "highland", "lake", "beach"].includes(biome), `${x},${y} ${biome}`); snow++; }
@@ -215,15 +215,6 @@ test("構造物: 決定的・チャンク内・バイオーム一致・セル内
   assert.ok(found >= 5, `structures found=${found}`);
   const entrances = ml.STRUCTURES.filter((s) => s.kind === "entrance");
   assert.deepEqual(entrances.map((s) => s.targetSpace).sort(), ["cave", "dungeon", "ruins"]);
-});
-
-test("スポーン: 決定的ランダムスポーンは草地に落ちる", () => {
-  const map = ml.generateMap();
-  const a = ml.findLandSpawn(map, "user-aaa");
-  const b = ml.findLandSpawn(map, "user-aaa");
-  assert.deepEqual(a, b);
-  assert.ok(a, "spawn found");
-  assert.equal(ml.mapTileAt(map, Math.floor(a.x), Math.floor(a.y)), ml.T_GRASS);
 });
 
 // ---------------------------------------------------------------- 特殊オブジェクト

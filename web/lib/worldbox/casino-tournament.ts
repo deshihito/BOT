@@ -132,7 +132,9 @@ export function closeCasinoEntry(t: CasinoTournament, now: number): CasinoTourna
   if (t.entrants.length < 2) {
     return { ...t, status: "done", closedAt: now };
   }
-  return { ...t, status: "running", playStartedAt: now };
+  // 対局終了時刻は締め切り時点から数え直す（満員で早期に締め切った場合に
+  // 作成時固定の playEndsAt のままだと対局時間が余分に残ってしまう）。
+  return { ...t, status: "running", playStartedAt: now, playEndsAt: now + CASINO_TOURNAMENT_PLAY_MS };
 }
 
 /** 対局時間の終了（賞金の支払いは route 側）。 */

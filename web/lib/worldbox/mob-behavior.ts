@@ -196,12 +196,14 @@ export type MobBehaviorState = {
   /** strike の向き（予兆・投射物用）。 */
   dirX: number; dirY: number;
   enraged: boolean;
+  /** 凍結し始めた時刻（ms、行動時計基準）。0 は凍結していない。 */
+  frozenSince: number;
 };
 
 export function createBehaviorState(x: number, y: number): MobBehaviorState {
   return {
     mode: "idle", until: 0, pattern: null, patternIndex: 0,
-    cooldowns: {}, tx: x, ty: y, dirX: 1, dirY: 0, enraged: false,
+    cooldowns: {}, tx: x, ty: y, dirX: 1, dirY: 0, enraged: false, frozenSince: 0,
   };
 }
 
@@ -221,6 +223,8 @@ export type BehaviorInput = {
   fleeing: boolean;
   /** 中立が挑発されているか（被弾後しばらく true）。 */
   provoked: boolean;
+  /** 凍結中か（アイスランス）。true の間は状態機械を進めない。 */
+  frozen?: boolean;
   hpFrac: number;
   rng: () => number;
 };
@@ -262,6 +266,22 @@ export function stepMobBehavior(prev: MobBehaviorState, input: BehaviorInput): B
   const aggroRange = boss ? BOSS_AGGRO_RANGE : AGGRO_RANGE;
   const distPlayer = player ? dist(pos, player) : Infinity;
   const distAnchor = dist(pos, anchor);
+
+  // 凍結ゲート: 凍結中は追跡・予兆・突進を含む一切の行動を止める。
+  // 凍結していた時間は解除時に until / クールダウンへ繰り越すため、
+  // 解けた瞬間に予兆や突進が飛ばし読みされることもない。
+  if (input.frozen) {
+    if (!st.frozenSince) st.frozenSince = now;
+    return { state: st, target: pos, speed: 0, teleport: null, events: [] };
+  }
+  if (st.frozenSince) {
+    const shift = Math.max(0, now - st.frozenSince);
+    st.frozenSince = 0;
+    if (shift > 0) {
+      st.until += shift;
+      for (const key of Object.keys(st.cooldowns)) st.cooldowns[key] += shift;
+    }
+  }
 
   // 怒り（ボス級・HP30%未満）: パターン間隔を縮める
   if (boss && !st.enraged && input.hpFrac < 0.3) {

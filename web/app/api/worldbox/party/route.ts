@@ -15,10 +15,10 @@ import {
   loadPartyOf, storeParty,
 } from "@/lib/worldbox/party-online";
 import {
-  deleteDungeonSession, dungeonSessionClosed, loadDungeonSession, storeDungeonSession,
+  deleteDungeonSession, dungeonGateSatisfied, dungeonSessionClosed, loadDungeonSession, storeDungeonSession,
   type DungeonSession,
 } from "@/lib/worldbox/instances-online";
-import { makeInstanceSpace, parseInstanceSpace } from "@/lib/worldbox/instances";
+import { DUNGEON_FLOORS, makeInstanceSpace, parseInstanceSpace } from "@/lib/worldbox/instances";
 import { parseSave } from "@/lib/worldbox/save";
 import { loadWorldBoxSave } from "@/lib/worldbox/save-online";
 import { withUserLock } from "@/lib/worldbox/user-lock";
@@ -163,13 +163,23 @@ export async function GET(request: Request) {
     }
   }
   // ダンジョン内ならセッションの要約も返す（階段ゲート・倍率表示用）
-  let dungeon: { size: number; floorBossDead: Record<string, boolean>; bossDead: boolean } | null = null;
+  let dungeon: {
+    size: number; floorBossDead: Record<string, boolean>; bossDead: boolean;
+    gateFloor2: boolean; gateBoss: boolean;
+  } | null = null;
   const url = new URL(request.url);
   const space = url.searchParams.get("space");
   if (space && space.startsWith("dungeon:")) {
     const floor1 = space.replace(/:\d+$/, ":0");
     const ds = await loadDungeonSession(floor1, partyKeyOf(party && isPartyMember(party, ownerKey) ? party : null, ownerKey));
-    if (ds) dungeon = { size: ds.size, floorBossDead: ds.floorBossDead, bossDead: ds.bossDead };
+    if (ds) {
+      // 階段ゲートは最新ランクで判定したサーバーの結果を正とする
+      const [gateFloor2, gateBoss] = await Promise.all([
+        dungeonGateSatisfied(ds.members, 2),
+        dungeonGateSatisfied(ds.members, DUNGEON_FLOORS),
+      ]);
+      dungeon = { size: ds.size, floorBossDead: ds.floorBossDead, bossDead: ds.bossDead, gateFloor2, gateBoss };
+    }
   }
   return NextResponse.json({ party: partyView(party), partyKey: partyKeyOf(party, ownerKey), isLeader: party?.leaderKey === ownerKey, invite, dungeon }, { headers: NO_STORE });
 }

@@ -481,12 +481,3 @@ export function applyRest(
     ...(point ? { restPoint: point } : {}),
   };
 }
-
-/** 所持する道具の総数（死亡で失わないことの検証用ヘルパー）。 */
-export function toolCount(profile: PlayerProfile): number {
-  let n = 0;
-  for (const [itemId, count] of Object.entries(profile.items)) {
-    if (itemById(itemId)?.category === "tool") n += count;
-  }
-  return n;
-}

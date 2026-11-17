@@ -57,7 +57,7 @@ async function loadBundle(files, exportNames) {
 const wb = await loadBundle(
   ["worldbox/nation-settings.ts", "worldbox/guild-shop.ts"],
   [
-    "TAX_RATE_DEFAULT", "TAX_RATE_MAX", "TAX_RATE_STEPS",
+    "TAX_RATE_DEFAULT", "TAX_RATE_MAX",
     "defaultNationSettings", "normalizeTaxRate", "parseNationSettings",
     "taxRateOf", "isPrivateNation", "memberKeysOf", "effectiveMinisters",
     "resolveMemberRole", "isNationHiddenFrom",
@@ -107,7 +107,6 @@ test("nation-settings: 税率は 0〜0.10 の範囲だけを受け、範囲外�
   assert.equal(wb.normalizeTaxRate(-0.01), wb.TAX_RATE_DEFAULT);
   assert.equal(wb.normalizeTaxRate("0.05"), wb.TAX_RATE_DEFAULT);
   assert.equal(wb.normalizeTaxRate(Number.NaN), wb.TAX_RATE_DEFAULT);
-  assert.ok(wb.TAX_RATE_STEPS.includes(wb.TAX_RATE_DEFAULT));
 });
 
 test("nation-settings: 大臣リストは重複と不正値を落とす", () => {

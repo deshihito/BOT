@@ -105,7 +105,16 @@ export async function GET(request: Request) {
     yRaw === null ? NaN : Number(yRaw),
   );
   if (!coord) return errorJson("invalid_tile", 400);
-  const resolved = await resolveContainer(sessionOwnerKey(session), coord.x, coord.y);
+  // 隣接検証（POST と同じ。読み取りでも遠隔地から中身を覗けないように）
+  const ownerKey = sessionOwnerKey(session);
+  const pos = await actorWorldPosition(ownerKey);
+  if (!pos) return errorJson("position_unknown", 409);
+  const dist = Math.max(
+    Math.abs(Math.floor(pos.x) - coord.x),
+    Math.abs(Math.floor(pos.y) - coord.y),
+  );
+  if (dist > MAX_ACTION_DISTANCE) return errorJson("too_far", 409);
+  const resolved = await resolveContainer(ownerKey, coord.x, coord.y);
   if (!resolved.ok) return errorJson(resolved.error, resolved.status);
   return NextResponse.json(
     {

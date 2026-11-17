@@ -19,6 +19,9 @@ const WATCH_PLAN = [
   { namespace: "worldbox_chat", kind: "chat", intervalMs: 2_000 },
   { namespace: "worldbox_union_board", kind: "unionChat", intervalMs: 2_000 },
   { namespace: "worldbox_party", kind: "party", intervalMs: 2_000 },
+  // ギルド依頼は単一ドキュメントで応答が本人向け加工（所属ギルドで
+  // 絞る）を含むため、nations と同じ全体 poke 方式にする
+  { namespace: "worldbox_requests", kind: "requests", intervalMs: 2_000 },
   { namespace: "worldbox_tiles", kind: "tiles", intervalMs: 2_000 },
   { namespace: "worldbox_mobs", kind: "mobs", intervalMs: 2_000 },
   { namespace: "worldbox_board", kind: "board", intervalMs: 5_000 },
