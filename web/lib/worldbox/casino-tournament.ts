@@ -39,6 +39,9 @@ export interface CasinoTournament {
   createdAt: number;
   entryEndsAt: number;
   playEndsAt: number;
+  /** 対局開始時刻（募集が締め切って running になった時刻。旧データは null）。
+   * スコアに数える gamble オプの作成時刻の下限として使う。 */
+  playStartedAt: number | null;
   /** 参加順（同点のとき先に参加した方を上位にする）。 */
   entrants: string[];
   scores: Record<string, CasinoTournamentScore>;
@@ -129,7 +132,7 @@ export function closeCasinoEntry(t: CasinoTournament, now: number): CasinoTourna
   if (t.entrants.length < 2) {
     return { ...t, status: "done", closedAt: now };
   }
-  return { ...t, status: "running" };
+  return { ...t, status: "running", playStartedAt: now };
 }
 
 /** 対局時間の終了（賞金の支払いは route 側）。 */
@@ -187,5 +190,9 @@ export function parseCasinoTournament(raw: unknown): CasinoTournament | null {
   }
   if (typeof raw.prizesPaid !== "boolean" || typeof raw.refundPaid !== "boolean") return null;
   if (raw.closedAt !== null && typeof raw.closedAt !== "number") return null;
-  return raw as unknown as CasinoTournament;
+  const playStartedAt =
+    typeof raw.playStartedAt === "number" && Number.isFinite(raw.playStartedAt)
+      ? raw.playStartedAt
+      : null;
+  return { ...(raw as unknown as CasinoTournament), playStartedAt };
 }

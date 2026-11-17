@@ -38,6 +38,7 @@ function tournament(entrants, status = "entry", scores = {}) {
     id: `ct-${NOW}`, status, createdAt: NOW,
     entryEndsAt: NOW + C.CASINO_TOURNAMENT_ENTRY_MS,
     playEndsAt: NOW + C.CASINO_TOURNAMENT_ENTRY_MS + C.CASINO_TOURNAMENT_PLAY_MS,
+    playStartedAt: null,
     entrants: [...entrants], scores: { ...scores },
     prizesPaid: false, refundPaid: false, closedAt: null,
   };
@@ -120,6 +121,8 @@ test("casino-tournament: 募集期限を過ぎたら対局時間へ入る", () =
   const closed = C.closeCasinoEntry(t, NOW + C.CASINO_TOURNAMENT_ENTRY_MS + 1);
   assert.equal(closed.status, "running");
   assert.equal(closed.closedAt, null);
+  // 対局開始時刻が記録される（スコアに数えるオプの時刻の下限）
+  assert.equal(closed.playStartedAt, NOW + C.CASINO_TOURNAMENT_ENTRY_MS + 1);
 });
 
 test("casino-tournament: 2人未満で締め切られた大会は不成立", () => {
@@ -157,6 +160,12 @@ test("casino-tournament: 保存→復元の往復で形が残り、壊れた値�
   assert.equal(C.parseCasinoTournament(null), null);
   assert.equal(C.parseCasinoTournament({ ...t, status: "bogus" }), null);
   assert.equal(C.parseCasinoTournament({ ...t, scores: { [A]: { bet: "x", payout: 0 } } }), null);
+  // playStartedAt の無い旧データは null として読む
+  const legacy = { ...t };
+  delete legacy.playStartedAt;
+  assert.equal(C.parseCasinoTournament(legacy).playStartedAt, null);
+  const started = { ...t, playStartedAt: NOW + 1000 };
+  assert.equal(C.parseCasinoTournament(started).playStartedAt, NOW + 1000);
 });
 
 // ---------- クライアント表示 ----------

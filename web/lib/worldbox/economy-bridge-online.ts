@@ -53,8 +53,8 @@ export async function enqueueEconomyOpOnce(op: EconomyOp): Promise<boolean> {
   return result.state !== "unavailable";
 }
 
-/** 自分のオプ（新しい順・最大20件）。読めなければ空配列。 */
-export async function loadMyEconomyOps(userKey: string): Promise<EconomyOp[]> {
+/** 全ユーザーのオプ（カジノ大会の最終精算など、横断的な照合用）。読めなければ空配列。 */
+export async function loadAllEconomyOps(): Promise<EconomyOp[]> {
   if (!isBotApiConfigured()) return [];
   try {
     const all = await kvList(WORLDBOX_ECONOMY_NAMESPACE);
@@ -63,10 +63,15 @@ export async function loadMyEconomyOps(userKey: string): Promise<EconomyOp[]> {
       const op = parseEconomyOp(raw);
       if (op) ops.push(op);
     }
-    return recentEconomyOps(ops, userKey);
+    return ops;
   } catch {
     return [];
   }
+}
+
+/** 自分のオプ（新しい順・最大20件）。読めなければ空配列。 */
+export async function loadMyEconomyOps(userKey: string): Promise<EconomyOp[]> {
+  return recentEconomyOps(await loadAllEconomyOps(), userKey);
 }
 
 /** 自分のオプを ID で1件引く（セッション先払いの状態確認用）。無ければ null。 */

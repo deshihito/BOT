@@ -9,12 +9,12 @@
 import { kvGet, kvSet } from "../bot-api";
 import { playerAttack } from "./arena";
 import { buildEconomyOp } from "./economy-bridge";
-import { enqueueEconomyOpOnce } from "./economy-bridge-online";
+import { enqueueEconomyOpOnce, findEconomyOp } from "./economy-bridge-online";
 import { loadProfile } from "./profile-online";
 import {
-  advanceMatch, closeEntry, readyMatches, timeoutWinner, tournamentPrizeOpId, tournamentPrizePool,
-  tournamentRefundOpId, TOURNAMENT_FEE, TOURNAMENT_PRIZE_REASON, TOURNAMENT_REFUND_REASON,
-  parseTournament, type Tournament,
+  advanceMatch, closeEntry, readyMatches, timeoutWinner, tournamentFeeOpId, tournamentPrizeOpId,
+  tournamentRefundOpId, TOURNAMENT_FEE, TOURNAMENT_MAX_ENTRANTS, TOURNAMENT_PRIZE_REASON,
+  TOURNAMENT_REFUND_REASON, parseTournament, type Tournament,
 } from "./tournament";
 import { createTournamentDuel } from "./pvp";
 import { loadMyPvpDuel, loadPvpDuel, savePvpDuel } from "./pvp-online";
@@ -42,6 +42,29 @@ export async function saveTournament(t: Tournament): Promise<void> {
 export async function attackOf(discordId: string): Promise<number> {
   const profile = await loadProfile(`discord:${discordId}`);
   return playerAttack(profile.items);
+}
+
+// ---------- 参加費オプの照合 ----------
+// 参加は参加費オプを積んだ時点で登録されるため、オプが後から failed に
+// なると無料参加になりうる。進行・確定の各時点で決定的 ID のオプを
+// 照合し、failed の参加者は表・賞金・返金から外す。pending / 読み取り
+// 不能（unknown）は「まだ確定していない」として判断を次回へ回す
+// （払った人を誤って外さないため）。
+
+type FeeStatus = "done" | "failed" | "pending" | "unknown";
+
+async function feeStatusOf(t: Tournament, discordId: string): Promise<FeeStatus> {
+  const op = await findEconomyOp(`discord:${discordId}`, tournamentFeeOpId(t.id, discordId));
+  if (!op) return "unknown";
+  return op.status;
+}
+
+async function feeStatusesOf(t: Tournament): Promise<Map<string, FeeStatus>> {
+  const statuses = new Map<string, FeeStatus>();
+  for (const discordId of t.entrants) {
+    statuses.set(discordId, await feeStatusOf(t, discordId));
+  }
+  return statuses;
 }
 
 /** 対戦者が揃った試合に決闘を作る（どちらかが他の決闘中なら後回し）。 */
@@ -91,13 +114,25 @@ export async function settleExpiredMatchesInner(
   return { tournament: out, changed };
 }
 
-/** 優勝賞金を決定的 ID で積む（1大会1件。失敗しても大会の決着は変えない）。 */
+/**
+ * 優勝賞金を決定的 ID で積む（1大会1件。失敗しても大会の決着は変えない）。
+ * 賞金の原資は参加費が done の参加者分だけ数える。全員の参加費が
+ * 終端するまで支払いは次回へ回し、優勝者自身の参加費が failed なら
+ * 賞金は出さずに終端する（払っていない優勝は無い）。
+ */
 export async function payChampionPrizeInner(t: Tournament): Promise<Tournament> {
   if (t.status !== "done" || !t.champion || t.prizePaid) return t;
+  const statuses = await feeStatusesOf(t);
+  for (const discordId of t.entrants) {
+    const s = statuses.get(discordId);
+    if (s === "pending" || s === "unknown") return t;
+  }
+  if (statuses.get(t.champion) !== "done") return { ...t, prizePaid: true };
+  const paidCount = t.entrants.filter((id) => statuses.get(id) === "done").length;
   const op = buildEconomyOp(
     {
       kind: "earn", userKey: `discord:${t.champion}`, discordId: t.champion,
-      amount: tournamentPrizePool(t), reason: TOURNAMENT_PRIZE_REASON,
+      amount: paidCount * TOURNAMENT_FEE, reason: TOURNAMENT_PRIZE_REASON,
     },
     tournamentPrizeOpId(t.id),
     Date.now(),
@@ -107,14 +142,26 @@ export async function payChampionPrizeInner(t: Tournament): Promise<Tournament> 
   return t;
 }
 
-/** 不成立の返金を決定的 ID で積む（1大会・1人1件）。 */
+/**
+ * 不成立の返金を決定的 ID で積む（1大会・1人1件）。
+ * 返金は参加費が done の参加者だけに行う。failed の参加者は払って
+ * いないので対象外（確定として扱う）。pending / unknown が残る間は
+ * refundPaid を立てず、次回の進行で照合からやり直す。
+ */
 export async function payRefundsInner(t: Tournament): Promise<Tournament> {
   if (t.status !== "done" || t.champion || t.refundPaid) return t;
-  // refundPaid は全員ぶん積めたときだけ立てる。1件でも失敗したら
+  // refundPaid は全員ぶん決着したときだけ立てる。1件でも未確定なら
   // フラグを立てず、次回の進行で決定的 ID の冪等登録により再試行する
   // （成功済みの人へは二重に積まれない）。
-  let allPaid = true;
+  const statuses = await feeStatusesOf(t);
+  let allSettled = true;
   for (const discordId of t.entrants) {
+    const s = statuses.get(discordId);
+    if (s === "failed") continue;
+    if (s !== "done") {
+      allSettled = false;
+      continue;
+    }
     const op = buildEconomyOp(
       {
         kind: "earn", userKey: `discord:${discordId}`, discordId,
@@ -123,18 +170,29 @@ export async function payRefundsInner(t: Tournament): Promise<Tournament> {
       tournamentRefundOpId(t.id, discordId),
       Date.now(),
     );
-    if (!op || !(await enqueueEconomyOpOnce(op))) allPaid = false;
+    if (!op || !(await enqueueEconomyOpOnce(op))) allSettled = false;
   }
-  return allPaid ? { ...t, refundPaid: true } : t;
+  return allSettled ? { ...t, refundPaid: true } : t;
 }
 
 /**
  * 募集の締め切り（表の作成・不成立の返金まで）。ロックは取らない。
  * 呼び出し側が withUserLock("tournament") で囲うこと。
+ * 締め切りの時点で参加費が failed の参加者は表から外す（締め切り後
+ * に failed が判明した分は、賞金・返金の照合で対象外にする）。
  */
 export async function closeEntryInner(t: Tournament, now: number): Promise<Tournament> {
-  const closed = closeEntry(t, now);
-  if (closed === t) return t;
+  let verified = t;
+  if (
+    t.status === "entry" &&
+    (now >= t.entryEndsAt || t.entrants.length >= TOURNAMENT_MAX_ENTRANTS)
+  ) {
+    const statuses = await feeStatusesOf(t);
+    const kept = t.entrants.filter((id) => statuses.get(id) !== "failed");
+    if (kept.length !== t.entrants.length) verified = { ...t, entrants: kept };
+  }
+  const closed = closeEntry(verified, now);
+  if (closed === verified && verified === t) return t;
   let out = closed;
   if (out.status === "done") out = await payRefundsInner(out);
   if (out.status === "running") out = await startReadyMatchesInner(out);
