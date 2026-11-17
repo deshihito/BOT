@@ -31,6 +31,7 @@ from core.general.circulation import economy_pool
 from core.general.items import items as items_core
 from cogs import general as wallet_module
 from cogs.game import GamblingCog
+from core.game.gambling.cog import _double_status_text
 from tools import economy_reset
 
 
@@ -294,8 +295,16 @@ class BankrollPayoutTest(unittest.TestCase):
             cog, _store = _cog(tmp, wallet, economy, rng=rng)
             asyncio.run(cog.execute_double_start(1, 1000))
             asyncio.run(cog.execute_double_go(1))
+            # パネルの現在価値も実受取額（ベット分のみ）に一致し、
+            # 倍率どおり 1,600 との差が減額として明示される。
+            status = _double_status_text(cog, 1)
+            self.assertIn("1,000 AGO", status)
+            self.assertIn("1,600 AGO", status)
+            self.assertIn("減額", status)
             message = asyncio.run(cog.execute_double_cashout(1))
             self.assertIn("1,000 AGO 獲得", message)
+            self.assertIn("1,600 AGO", message)
+            self.assertIn("減額", message)
             self.assertEqual(wallet.balances["1"], 10_000)
 
     def test_slot_win_with_empty_bankroll_credits_stake_portion_only(self):

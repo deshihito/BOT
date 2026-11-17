@@ -26,6 +26,7 @@ from core.general.circulation import economy_pool
 from core.general.items.items import ItemError
 from cogs import general as wallet_module
 from cogs.game import BetModal, BlackjackView, DiceModal, DiceView, DoubleView, GamblingCog, SlotStartModal, SlotView, _slot_embed
+from core.game.gambling.cog import _double_status_text, _fmt_multiplier
 
 
 class _ScriptedRandom(random.Random):
@@ -621,6 +622,32 @@ class CogFlowTest(unittest.TestCase):
             message = asyncio.run(cog.execute_double_cashout(1))
             self.assertIn("確定", message)
             self.assertEqual(wallet.balances["1"], 9000 + 1600)
+
+    def test_double_multiplier_display_matches_cashout(self):
+        # 3連勝で倍率は 1.6^3 = 4.096。2桁表示「4.10」だと BET×表示倍率
+        # （41,000）と実際の配当（40,960）が食い違う（ユーザー報告）。
+        # 表示倍率・現在価値・確定額をすべて実額に一致させる。
+        self.assertEqual(_fmt_multiplier(1.6), "1.60")
+        self.assertEqual(_fmt_multiplier(4.096), "4.096")
+        self.assertEqual(_fmt_multiplier(10.48576), "10.48576")
+        with tempfile.TemporaryDirectory() as tmp:
+            wallet = _FakeWallet({"1": 100000})
+            rng = _ScriptedRandom(randoms=[0.5, 0.5, 0.5])
+            cog, store = self._cog(tmp, wallet, rng=rng)
+            asyncio.run(cog.execute_double_start(1, 10000))
+            message = ""
+            for _ in range(3):
+                message = asyncio.run(cog.execute_double_go(1))
+            self.assertIn("4.096", message)
+            self.assertIn("40,960", message)
+            status = _double_status_text(cog, 1)
+            self.assertIn("4.096", status)
+            self.assertIn("40,960", status)
+            self.assertNotIn("減額", status)
+            message = asyncio.run(cog.execute_double_cashout(1))
+            self.assertIn("40,960 AGO 獲得", message)
+            self.assertIn("4.096", message)
+            self.assertEqual(wallet.balances["1"], 100000 - 10000 + 40960)
 
     def test_double_flow_lose_loses_bet(self):
         with tempfile.TemporaryDirectory() as tmp:

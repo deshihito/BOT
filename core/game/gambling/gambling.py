@@ -588,7 +588,9 @@ class GamblingStore(DirtyFlushMixin):
                 st["internal_mode"] = "HELL"
             del self._state["sessions"][uid]
             self._mark_dirty()
-            return {"bet": int(session["bet"]), "payout": payout}
+            return {"bet": int(session["bet"]), "payout": payout,
+                    "multiplier": float(session["multiplier"]),
+                    "streak": int(session["streak"])}
 
     # ------------------------------------------------------------------ blackjack
     def _draw_card(self) -> int:

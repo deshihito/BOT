@@ -370,13 +370,48 @@ class SlotView(_SessionPanel, discord.ui.View):
 # ダブルアップ
 # ---------------------------------------------------------------------------
 
+def _fmt_multiplier(value: float) -> str:
+    """倍率の表示。2桁丸めだと 1.6^3=4.096 が「4.10」になり、実際の
+    配当（BET×4.096）と食い違うため、意味のある桁までそのまま出す
+    （最低2桁は残す）。"""
+    text = f"{float(value):.6f}".rstrip("0")
+    if text.endswith("."):
+        text += "00"
+    elif len(text.rsplit(".", 1)[1]) == 1:
+        text += "0"
+    return text
+
+
+def _double_payable(cog: "GamblingCog", bet: int, multiplier: float) -> tuple[int, int]:
+    """(倍率どおりの額, 今キャッシュアウトして実際に受け取れる額)。
+
+    配当の利益分はバンクロール（プール＋国庫）から賄う（A案）ため、
+    バンクロールが不足すると実受取額は倍率どおりより少なくなる。
+    表示は常に実受取額に合わせる（違う額を「現在価値」と呼ばない）。
+    """
+    nominal = int(int(bet) * float(multiplier))
+    profit = nominal - int(bet)
+    if profit <= 0:
+        return nominal, nominal
+    try:
+        available = (cog.economy_store.pool_balance()
+                     + cog.economy_store.treasury_balance())
+    except Exception:
+        return nominal, nominal
+    return nominal, int(bet) + min(profit, max(0, int(available)))
+
+
 def _double_status_text(cog: "GamblingCog", user_id: int) -> str:
     session = cog.store.session(str(user_id))
     if session is None or session["kind"] != "double":
         return "セッションはありません。ベットして始められます。"
-    current = int(session["bet"] * session["multiplier"])
-    return (f"BET: **{session['bet']:,} AGO**／倍率: **{session['multiplier']:.2f}**"
-            f"／現在価値: **{current:,} AGO**／GO成功: **{session['streak']} 回**")
+    nominal, payable = _double_payable(
+        cog, session["bet"], session["multiplier"])
+    text = (f"BET: **{session['bet']:,} AGO**／倍率: **{_fmt_multiplier(session['multiplier'])}**"
+            f"／現在価値: **{payable:,} AGO**／GO成功: **{session['streak']} 回**")
+    if payable < nominal:
+        text += f"\n（倍率どおりは {nominal:,} AGO／バンクロール不足で減額中）"
+    return text
 
 
 def _double_embed(cog: "GamblingCog", user_id: int, *, result: str | None = None,
@@ -1492,8 +1527,10 @@ class GamblingCog(commands.Cog):
                 return gambling_action_failed(blocked)
             result = self.store.double_go(uid)
             if result["win"]:
-                return (f"{SUCCESS} **成功！** 倍率 {result['multiplier']:.2f} 倍"
-                        f"（現在価値 {result['current_value']:,} AGO）\n"
+                _nominal, payable = _double_payable(
+                    self, result["bet"], result["multiplier"])
+                return (f"{SUCCESS} **成功！** 倍率 {_fmt_multiplier(result['multiplier'])} 倍"
+                        f"（現在価値 {payable:,} AGO）\n"
                         "GOで続けるか、CASHOUTで確定してください。")
             self._recycle(result["bet"])
             return (f"💀 **失敗…** ベット {result['bet']:,} AGO は失われました。")
@@ -1527,8 +1564,13 @@ class GamblingCog(commands.Cog):
                 return gambling_action_failed(
                     "配当の支払いに失敗しました。Botの運営に連絡してください。")
             await self._record_history(GAMBLING_ID, uid, actual_payout, "gamble_double")
-            return (f"{COIN} **確定！ {actual_payout:,} AGO 獲得！**\n"
-                    f"コイン残高: {credit:,} AGO")
+            message = (f"{COIN} **確定！ {actual_payout:,} AGO 獲得！**"
+                       f"（倍率 {_fmt_multiplier(result['multiplier'])} 倍）\n"
+                       f"コイン残高: {credit:,} AGO")
+            if actual_payout < int(result["payout"]):
+                message += (f"\n倍率どおりの配当は {int(result['payout']):,} AGO でしたが、"
+                            "バンクロール不足のため減額されました。")
+            return message
         except items_core.ItemError as exc:
             return gambling_action_failed(exc)
         except Exception:
