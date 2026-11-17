@@ -22,13 +22,18 @@ export type GamesNav = {
   /** 本人確認で得た Discord 本人情報。未認証・通常ブラウザでは null。 */
   identity: DiscordIdentity | null;
   /**
+   * 本人確認をもう一度走らせる（WORLD BOX のゲート再試行などから使う）。
+   * Activity 内でのみ有効で、それ以外は null。
+   */
+  retryIdentity: (() => void) | null;
+  /**
    * Discord の共有モーダルでルーム招待を送る。Activity 内でのみ有効で、
    * それ以外は null。成功可否を返す（失敗時は呼び出し側がリンクコピーに倒す）。
    */
   shareRoomInvite: ((gameId: string, code: string) => Promise<boolean>) | null;
 };
 
-const GamesNavContext = createContext<GamesNav>({ embedded: false, prefix: "", identity: null, shareRoomInvite: null });
+const GamesNavContext = createContext<GamesNav>({ embedded: false, prefix: "", identity: null, retryIdentity: null, shareRoomInvite: null });
 
 export function useGamesNav(): GamesNav {
   return useContext(GamesNavContext);
@@ -67,6 +72,17 @@ export default function GamesShell({ clientId, children }: { clientId: string; c
   const sdkRef = useRef<DiscordSDK | null>(null);
   const sdkStartedRef = useRef(false);
   const authStartedRef = useRef(false);
+
+  // 本人確認の再実行（ゲートの再試行ボタン用）。初回フローと違い
+  // 「1回だけ」のガードを掛けない: 初回認証が失敗したまま identity が
+  // 届かないと、セッション必須の画面（WORLD BOX）が永久に開けない。
+  const retryIdentity = useCallback(() => {
+    const sdk = sdkRef.current;
+    if (!sdk || !clientId) return;
+    void authenticateDiscordIdentity(sdk, clientId).then((result) => {
+      if (result) setIdentity(result);
+    });
+  }, [clientId]);
 
   // Discord の共有モーダルでルーム招待を送る（custom_id に宛先を運ぶ）。
   const shareRoomInvite = useCallback(async (gameId: string, code: string): Promise<boolean> => {
@@ -155,7 +171,7 @@ export default function GamesShell({ clientId, children }: { clientId: string; c
   }, [clientId]);
 
   return (
-    <GamesNavContext.Provider value={{ embedded, prefix, identity, shareRoomInvite: embedded ? shareRoomInvite : null }}>
+    <GamesNavContext.Provider value={{ embedded, prefix, identity, retryIdentity: embedded ? retryIdentity : null, shareRoomInvite: embedded ? shareRoomInvite : null }}>
       <div className="games-shell" {...(embedded ? { "data-activity-root": "" } : {})}>
         {embedded && (
           <nav className="games-embedded-bar" aria-label="ゲームメニュー">

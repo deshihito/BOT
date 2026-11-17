@@ -142,3 +142,82 @@ test("activity: クライアントは Activity 内で OAuth リンクを出さ�
   assert.ok(client.includes("identityId"), "本人情報の到着でゲートを引き直す");
   assert.ok(client.includes("/api/auth/discord/authorize?next=/games/worldbox"), "通常 Web のログイン導線は残る");
 });
+
+test("activity: SDK 認証の本人情報が届いたらセッション確認を待たずにゲートを通す", () => {
+  // ユーザー指示（2026-11-16）: Activity 経由では Discord ログイン済みが
+  // 前提なので認証は要らないはず。この分岐が消えると、Cookie が保持
+  // されない Activity の iframe で「ログインが必要」のまま詰まる
+  // （2026-11-17 に実害が再発したため、文言ごと固定する）。
+  const client = fs.readFileSync(path.join(appDir, "games/worldbox/WorldBoxClient.tsx"), "utf8");
+  assert.ok(
+    client.includes('if (embedded && identityId) setGate("ok")'),
+    "Activity では本人情報の到着でゲートを通す分岐が無い",
+  );
+  assert.ok(client.includes("retryIdentity"), "ゲート再試行が本人確認のやり直しに繋がっていない");
+  const shell = fs.readFileSync(path.join(appDir, "games/GamesShell.tsx"), "utf8");
+  assert.ok(shell.includes("retryIdentity"), "GamesShell が本人確認の再実行を提供していない");
+});
+
+// SDK 認証クライアント（lib/discord-activity-client.ts）を実物で読み、
+// モック SDK + fetch で authorize のフォールバックを検証する。
+const activityClient = await import(
+  dataUrl(
+    transpile("discord-activity-client.ts")
+      .replaceAll('"./discord-activity"', JSON.stringify(discordActivityUrl)),
+  ),
+);
+
+function fakeSdk(authorizeImpl) {
+  return {
+    commands: {
+      authorize: authorizeImpl,
+      authenticate: async () => ({
+        user: { id: ME, username: "tester", global_name: "Tester", avatar: null },
+      }),
+    },
+  };
+}
+
+async function withFetchStub(run) {
+  const original = globalThis.fetch;
+  globalThis.fetch = async () => ({
+    ok: true,
+    json: async () => ({ accessToken: "tok-test", user: { id: ME, name: "Tester", avatarUrl: "" } }),
+  });
+  try {
+    return await run();
+  } finally {
+    globalThis.fetch = original;
+  }
+}
+
+test("activity: 無言認証（prompt none）が失敗したら承認画面ありで再試行する", async () => {
+  const prompts = [];
+  const sdk = fakeSdk(async (args) => {
+    prompts.push(args.prompt ?? null);
+    if (args.prompt === "none") throw new Error("not authorized yet");
+    return { code: "code-2" };
+  });
+  const identity = await withFetchStub(() => activityClient.authenticateDiscordIdentity(sdk, "123456789012345678"));
+  assert.equal(identity?.id, ME, "初回ユーザーでも本人情報が届く");
+  assert.deepEqual(prompts, ["none", null], "無言→承認画面ありの順で authorize する");
+});
+
+test("activity: 無言認証が通れば承認画面は出さない", async () => {
+  const prompts = [];
+  const sdk = fakeSdk(async (args) => {
+    prompts.push(args.prompt ?? null);
+    return { code: "code-1" };
+  });
+  const identity = await withFetchStub(() => activityClient.authenticateDiscordIdentity(sdk, "123456789012345678"));
+  assert.equal(identity?.id, ME);
+  assert.deepEqual(prompts, ["none"], "承認済みユーザーは無言認証だけで終わる");
+});
+
+test("activity: 承認画面ありでも失敗したら null（表示は通常どおり続ける）", async () => {
+  const sdk = fakeSdk(async () => {
+    throw new Error("user declined");
+  });
+  const identity = await withFetchStub(() => activityClient.authenticateDiscordIdentity(sdk, "123456789012345678"));
+  assert.equal(identity, null);
+});
