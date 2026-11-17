@@ -24,15 +24,16 @@ export const runtime = "nodejs";
 
 // AGO WORLD BOX の収納コンテナ（樽・宝箱）。
 // 中身は bot_kv（名前空間 worldbox_containers、キー "<space>|x,y"）に
-// タイル単位で持ち、設置ブロック（worldbox_tiles の上書き）が所有と種類の正。
-// 開ける・出し入れできるのは所有者だけ（他人は 403）。
+// タイル単位で持ち、設置ブロック（worldbox_tiles の上書き）が種類の正。
+// 中身は全員共有（ユーザー指示 2026-11-17）: 誰でも開けて出し入れできる。
+// ブロック自体の回収も誰でも可（中身が空のときだけ、タイル側で検証）。
 // GET ?x&y[&space=tent]: そのタイルのコンテナの中身を返す（無ければ 404）。
 // POST { action: "move", x, y, from, to [, space] }: プロフィール⇔コンテナ
 // 間のスロット移動をサーバー側で再計算して適用し、両方の更新後を返す。
-// space=tent/lobby/lobby2/lobby3 は室内の備え付け樽・木箱が対象（所有は
-// 常に本人。ロビーは共用空間なので中身をプレイヤー別に持つ）。テントは
-// 段階で内装の高さが変わっても中身が付いてくるよう、保存キーは tier 0 の
-// 高さに正規化した座標で持つ。
+// space=tent/lobby/lobby2/lobby3 は室内の備え付け樽・木箱が対象で、
+// こちらも中身は共有（ロビーは "lobby|x,y" キーで全員同じ中身）。
+// テントは段階で内装の高さが変わっても中身が付いてくるよう、保存キーは
+// tier 0 の高さに正規化した座標で持つ。
 // 隣接検証はタイル行為と同じ（プレゼンス → セーブ、チェビシェフ ≤2）。
 // Bot API 未設定なら 503（クライアントは収納なしで遊び続ける）。
 
@@ -62,11 +63,10 @@ function parseContainerSpace(raw: unknown): ContainerSpace {
   return raw === "tent" || raw === "lobby" || raw === "lobby2" || raw === "lobby3" ? raw : "world";
 }
 
-/** 備え付け家具の保存空間キー。共用空間（ロビー各階）は中身をプレイヤー
- * 別に持つため、空間名に所有者を付ける（world/tent は場所自体が個人の
- * ものなので空間名だけ）。 */
-function fixtureStoreSpace(space: ContainerSpace, selfId: string): string {
-  return space === "tent" ? "tent" : `${space}@${selfId}`;
+/** 備え付け家具の保存空間キー。中身は全員共有なので空間名だけ
+ * （プレイヤー別にしていた時期の `lobby@<id>|…` キーは読まない）。 */
+function fixtureStoreSpace(space: ContainerSpace): string {
+  return space;
 }
 
 /** サーバーが知る本人の位置（プレゼンス → セーブの順、空間一致のみ）。無ければ null。 */
@@ -108,13 +108,12 @@ async function resolveContainer(
     // テントは段階が上がると内装の高さと家具の y が変わるため、保存キーは
     // tier 0 の高さに正規化した座標にする（家具の x は段階で不変）。
     // ロビーは座標が固定なのでそのまま使う。
-    const storeSpace = fixtureStoreSpace(space, selfId);
+    const storeSpace = fixtureStoreSpace(space);
     const storeX = obj.x;
     const storeY = tent ? obj.y - (tent.height - TENT_H) : obj.y;
     const stored = await loadContainer(storeSpace, storeX, storeY, obj.sprite);
-    const state = stored && stored.ownerId === selfId
-      ? stored
-      : emptyContainer(selfId, obj.sprite);
+    // 中身は全員共有: 保存済みの状態は誰のものでもそのまま使う
+    const state = stored ?? emptyContainer(selfId, obj.sprite);
     return { ok: true, itemId: obj.sprite, state, storeSpace, storeX, storeY };
   }
   const ov = await loadTileOverride(x, y);
@@ -122,14 +121,10 @@ async function resolveContainer(
   if (!block || !isContainerItem(block.itemId)) {
     return { ok: false, error: "no_container", status: 404 };
   }
-  if (block.ownerId !== selfId) {
-    return { ok: false, error: "not_owner", status: 403 };
-  }
+  // 中身は全員共有: 設置者のものでなくても開けて出し入れできる
+  // （ブロック自体の回収は従来どおり所有者のみ、タイル側で検証する）。
   const stored = await loadContainer("world", x, y, block.itemId);
-  // 状態が無い・所有がずれている場合は空のコンテナとして扱う
-  const state = stored && stored.ownerId === selfId
-    ? stored
-    : emptyContainer(selfId, block.itemId);
+  const state = stored ?? emptyContainer(selfId, block.itemId);
   return { ok: true, itemId: block.itemId, state, storeSpace: "world", storeX: x, storeY: y };
 }
 
