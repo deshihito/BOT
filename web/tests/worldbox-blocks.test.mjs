@@ -63,7 +63,7 @@ const tilesUrl = bundleModule(
     "T_GRASS", "T_TREE", "T_ROCK", "T_DIRT", "T_SAND", "T_SNOW", "T_WATER",
     "parseProfile", "addItem", "countItem",
     "applyTileAction", "applyPlaceBlock", "applyMineBlock", "applyFlowerAction", "applyToggleGate", "tileView", "actionForTile", "isOverrideActive", "placedBlockSolid",
-    "applySetSign", "applyDisplayAction", "applyDrawWater",
+    "applySetSign", "applyDisplayAction", "applyDrawWater", "applyFortify", "FORTIFY_COST",
     "tileKey", "parseTileOverride", "parseTileOverrides", "presenceIdFor", "HARD_BLOCK_DURABILITY", "blockMineTool",
   ],
 );
@@ -408,6 +408,20 @@ export async function loadStall() { return null; }
 export async function storeStall() { return true; }
 `);
 const railsUrl = bundleModule(["worldbox/rails.ts"], ["isSupplyConnected"]);
+const economyBridgeStubUrl = dataUrl(`
+export function buildEconomyOp(input, id, now) {
+  return { id, kind: input.kind, userKey: input.userKey, discordId: input.discordId, amount: input.amount, reason: input.reason, status: "pending", createdAt: now };
+}
+`);
+const economyBridgeOnlineStubUrl = dataUrl(`
+export function isEconomyEnabled() { return globalThis.__wbEconomyEnabled ?? false; }
+export async function readUserBalance() { return globalThis.__wbBalance ?? null; }
+export async function submitEconomyOp(op) {
+  (globalThis.__wbSubmittedOps ??= []).push(op);
+  return globalThis.__wbSubmitResult ?? { state: "done", op };
+}
+export async function waitForOpDone() { return globalThis.__wbWaitedOp ?? null; }
+`);
 const tilesRoute = await import(
   dataUrl(
     transpile("api/worldbox/tiles/route.ts", rootDir + "/app")
@@ -422,6 +436,8 @@ const tilesRoute = await import(
       .replaceAll('"@/lib/worldbox/tiles"', JSON.stringify(tilesUrl))
       .replaceAll('"@/lib/worldbox/tiles-online"', JSON.stringify(tilesOnlineStubUrl))
       .replaceAll('"@/lib/worldbox/rails"', JSON.stringify(railsUrl))
+      .replaceAll('"@/lib/worldbox/economy-bridge"', JSON.stringify(economyBridgeStubUrl))
+      .replaceAll('"@/lib/worldbox/economy-bridge-online"', JSON.stringify(economyBridgeOnlineStubUrl))
       .replaceAll('"@/lib/worldbox/containers"', JSON.stringify(containersBundleUrl))
       .replaceAll('"@/lib/worldbox/containers-online"', JSON.stringify(containersOnlineStubUrl))
       .replaceAll('"@/lib/worldbox/machines"', JSON.stringify(machinesUrl))

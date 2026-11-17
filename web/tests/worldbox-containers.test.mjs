@@ -68,7 +68,7 @@ const tilesUrl = bundleModule(
   [
     "worldTileSource", "mapTileAt", "T_GRASS",
     "applyTileAction", "applyPlaceBlock", "applyMineBlock", "applyFlowerAction", "applyToggleGate",
-    "applySetSign", "applyDisplayAction", "applyDrawWater",
+    "applySetSign", "applyDisplayAction", "applyDrawWater", "applyFortify", "FORTIFY_COST",
     "tileKey", "parseTileOverride", "parseTileOverrides",
     "presenceIdFor", "isOverrideActive",
   ],
@@ -406,6 +406,20 @@ const stallsOnlineStubUrl = dataUrl(`
 export async function loadStall() { return null; }
 export async function storeStall() { return true; }
 `);
+const economyBridgeStubUrl = dataUrl(`
+export function buildEconomyOp(input, id, now) {
+  return { id, kind: input.kind, userKey: input.userKey, discordId: input.discordId, amount: input.amount, reason: input.reason, status: "pending", createdAt: now };
+}
+`);
+const economyBridgeOnlineStubUrl = dataUrl(`
+export function isEconomyEnabled() { return globalThis.__wbEconomyEnabled ?? false; }
+export async function readUserBalance() { return globalThis.__wbBalance ?? null; }
+export async function submitEconomyOp(op) {
+  (globalThis.__wbSubmittedOps ??= []).push(op);
+  return globalThis.__wbSubmitResult ?? { state: "done", op };
+}
+export async function waitForOpDone() { return globalThis.__wbWaitedOp ?? null; }
+`);
 const tilesRoute = await routeImport("api/worldbox/tiles/route.ts", [
   ['"next/server"', nextServerStubUrl],
   ['"@/lib/auth"', authUrl],
@@ -418,6 +432,8 @@ const tilesRoute = await routeImport("api/worldbox/tiles/route.ts", [
   ['"@/lib/worldbox/tiles"', tilesUrl],
   ['"@/lib/worldbox/tiles-online"', tilesOnlineStubUrl],
   ['"@/lib/worldbox/rails"', railsUrl],
+  ['"@/lib/worldbox/economy-bridge"', economyBridgeStubUrl],
+  ['"@/lib/worldbox/economy-bridge-online"', economyBridgeOnlineStubUrl],
   ['"@/lib/worldbox/nations-online"', nationsOnlineStubUrl],
   ['"@/lib/worldbox/war"', warUrl],
   ['"@/lib/worldbox/war-online"', warsOnlineStubUrl],

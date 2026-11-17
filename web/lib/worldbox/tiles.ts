@@ -83,6 +83,11 @@ export type PlacedBlock = {
    * 未設定は満タン扱い（HP制より前の旧データ互換）。
    */
   hp?: number;
+  /**
+   * 要塞化で上乗せされた最大 HP（経済仕様書 §8.4 の要塞化）。
+   * 支払いはルート側（タイル行為 "fortify"）が担い、ここは値だけを持つ。
+   */
+  fort?: number;
 };
 
 /**
@@ -230,8 +235,8 @@ export type TileView = {
   farmland: boolean;
   stump: boolean;
   crop: { cropId: string; stage: 0 | 1 | 2; ready: boolean } | null;
-  /** 設置されたブロック（自分のものかどうか・残り HP 割合・門の開閉・看板・展示つき）。 */
-  block: { itemId: string; mine: boolean; hpFrac: number; gateOpen?: boolean; signText?: string; display?: string } | null;
+  /** 設置されたブロック（自分のものかどうか・残り HP 割合・門の開閉・看板・展示・要塞化つき）。 */
+  block: { itemId: string; mine: boolean; hpFrac: number; gateOpen?: boolean; signText?: string; display?: string; fort: number } | null;
   /** 地形（岩・木）の残り HP 割合（1 = 無傷。HP制の対象でないタイルは 1）。 */
   hpFrac: number;
   /** マスの個体値（豊穣度・純度・標高。決定的生成で保存はしない）。 */
@@ -277,6 +282,7 @@ export function tileView(
           itemId: active.block.itemId,
           mine: selfId !== null && active.block.ownerId === selfId,
           hpFrac: blockHpFraction(active.block),
+          fort: fortBonus(active.block),
           ...(active.gateOpen !== undefined ? { gateOpen: active.gateOpen } : {}),
           ...(active.signText ? { signText: active.signText } : {}),
           ...(active.display ? { display: active.display } : {}),
@@ -295,7 +301,7 @@ export function hasTool(profile: PlayerProfile, kind: ToolKind): boolean {
 export type TileActionKind =
   | "chop" | "mine" | "till" | "plant" | "harvest"
   | "place_block" | "mine_block" | "plant_flower" | "remove_flower" | "toggle_gate"
-  | "set_sign" | "set_display" | "clear_display" | "draw_water";
+  | "set_sign" | "set_display" | "clear_display" | "draw_water" | "fortify";
 
 export type TileActionResult =
   | {
@@ -509,11 +515,30 @@ export function blockMaxHp(def: ItemDef): number {
   return def.durability ?? DEFAULT_BLOCK_HP;
 }
 
+/** 要塞化1回で上乗せする最大 HP。 */
+export const FORTIFY_HP_STEP = 10;
+/** 要塞化1回の価格（コイン）。支払いはルート側が担う。 */
+export const FORTIFY_COST = 100;
+/** 要塞化で上乗せできる最大 HP の上限。 */
+export const FORTIFY_MAX_BONUS = 100;
+
+/** そのブロックの要塞化ボーナス（上限で丸める）。 */
+export function fortBonus(block: PlacedBlock): number {
+  const f = block.fort;
+  if (typeof f !== "number" || !Number.isFinite(f) || f <= 0) return 0;
+  return Math.min(Math.floor(f), FORTIFY_MAX_BONUS);
+}
+
+/** 要塞化込みの設置ブロック最大 HP。 */
+export function blockMaxHpFor(block: PlacedBlock, def: ItemDef): number {
+  return blockMaxHp(def) + fortBonus(block);
+}
+
 /** 設置ブロックの残り HP 割合（1 = 無傷）。hp 未設定の旧データは満タン。 */
 export function blockHpFraction(block: PlacedBlock): number {
   const def = itemById(block.itemId);
   if (!def) return 1;
-  const max = blockMaxHp(def);
+  const max = blockMaxHpFor(block, def);
   if (max <= 0) return 1;
   const hp = block.hp === undefined ? max : block.hp;
   return Math.max(0, Math.min(1, hp / max));
@@ -656,7 +681,7 @@ export function applyMineBlock(
   );
   const worn = wearKind ? wearTool(profile, wearKind) : { profile, brokeItemId: null };
   // HP制: 1ヒット分のダメージを適用する。残れば hp が減った上書きを返す
-  const maxHp = blockMaxHp(def);
+  const maxHp = blockMaxHpFor(block, def);
   const hpNow = Math.min(block.hp ?? maxHp, maxHp);
   const hpNext = hpNow - blockMineDamage(profile, def);
   if (hpNext > 0) {
@@ -911,6 +936,52 @@ export function applyFlowerAction(
 }
 
 /**
+ * 要塞化（経済仕様書 §8.4）: 自分の設置ブロックの最大 HP を
+ * FORTIFY_HP_STEP だけ上乗せし、現在 HP も同じだけ回復する。
+ * 価格（FORTIFY_COST）の支払いはルート側が適用前に済ませる前提で、
+ * ここは状態の検証と遷移だけを行う（所有者だけ、上限 FORTIFY_MAX_BONUS）。
+ */
+export function applyFortify(
+  current: TileOverride | null,
+  profile: PlayerProfile,
+  map: TopDownMap,
+  ownerKey: string,
+  xRaw: unknown,
+  yRaw: unknown,
+  now: number,
+): TileActionResult {
+  const tile = checkedTile(xRaw, yRaw);
+  if (!tile) return { ok: false, error: "invalid_tile" };
+  const { x, y } = tile;
+  const key = tileKey(x, y);
+  const active = isOverrideActive(current, now) ? current : null;
+  if (!active?.block) return { ok: false, error: "no_block" };
+  const selfId = presenceIdFor(ownerKey);
+  if (active.block.ownerId !== selfId) return { ok: false, error: "not_owner" };
+  const def = itemById(active.block.itemId);
+  if (!def) return { ok: false, error: "no_block" };
+  const bonus = fortBonus(active.block);
+  if (bonus >= FORTIFY_MAX_BONUS) return { ok: false, error: "fortify_max" };
+  const step = Math.min(FORTIFY_HP_STEP, FORTIFY_MAX_BONUS - bonus);
+  const maxBefore = blockMaxHpFor(active.block, def);
+  const hpNow = Math.min(active.block.hp ?? maxBefore, maxBefore);
+  const block: PlacedBlock = {
+    ...active.block,
+    fort: bonus + step,
+    hp: hpNow + step,
+  };
+  const next: TileOverride = { ...active, block };
+  const overrides: TileOverridesMap = { [key]: active };
+  return {
+    ok: true,
+    override: next,
+    profile,
+    view: viewAfter(map, overrides, key, next, x, y, now, ownerKey),
+    gained: {},
+  };
+}
+
+/**
  * 門の開閉: 門タイルの gateOpen を反転する。開閉は所有者でなくてもできる
  * （門は出入りのための物。掘って壊すのは従来どおり所有者だけ）。
  * アイテムの消費・獲得は無い。
@@ -962,6 +1033,10 @@ function parsePlacedBlock(raw: unknown): PlacedBlock | null {
   // hp は正の有限数だけ拾う（壊れた値は落として満タン扱いに戻す）
   if (typeof v.hp === "number" && Number.isFinite(v.hp) && v.hp > 0) {
     out.hp = Math.floor(v.hp);
+  }
+  // fort（要塞化ボーナス）も正の有限数だけ拾い、上限で丸める
+  if (typeof v.fort === "number" && Number.isFinite(v.fort) && v.fort > 0) {
+    out.fort = Math.min(Math.floor(v.fort), FORTIFY_MAX_BONUS);
   }
   return out;
 }

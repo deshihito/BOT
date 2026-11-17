@@ -7,9 +7,13 @@ import { presenceIdFor } from "@/lib/worldbox/presence";
 import { parseSave } from "@/lib/worldbox/save";
 import { loadWorldBoxSave } from "@/lib/worldbox/save-online";
 import {
-  applyDisplayAction, applyDrawWater, applyFlowerAction, applyMineBlock, applyPlaceBlock, applySetSign, applyTileAction, applyToggleGate, isOverrideActive, tileKey,
+  applyDisplayAction, applyDrawWater, applyFlowerAction, applyFortify, applyMineBlock, applyPlaceBlock, applySetSign, applyTileAction, applyToggleGate, FORTIFY_COST, isOverrideActive, tileKey,
   type TileActionResult, type TileOverridesMap,
 } from "@/lib/worldbox/tiles";
+import { buildEconomyOp } from "@/lib/worldbox/economy-bridge";
+import {
+  isEconomyEnabled, readUserBalance, submitEconomyOp, waitForOpDone,
+} from "@/lib/worldbox/economy-bridge-online";
 import { loadNationsState } from "@/lib/worldbox/nations-online";
 import { loadWarState } from "@/lib/worldbox/war-online";
 import { canBreakOthersBlock } from "@/lib/worldbox/war";
@@ -57,6 +61,38 @@ function errorStatus(error: string): number {
 function sameOrigin(request: Request) {
   const origin = request.headers.get("origin");
   return !origin || origin === publicOrigin(request);
+}
+
+type FortifyCharge = { ok: true } | { ok: false; error: string; status: number };
+
+/**
+ * 要塞化の価格徴収（即時 spend、入国料と同じ交付ゲート）:
+ * done が確定したときだけ ok。残高不足は insufficient_coins、
+ * 経済が使えない状態は economy_unavailable。
+ */
+async function chargeFortifyFee(
+  ownerKey: string,
+  session: { provider: string; id: string },
+): Promise<FortifyCharge> {
+  const discordId = session.provider === "discord" ? session.id : null;
+  if (!discordId || !isEconomyEnabled()) return { ok: false, error: "economy_unavailable", status: 503 };
+  const balance = await readUserBalance(discordId);
+  if (balance === null) return { ok: false, error: "economy_unavailable", status: 503 };
+  if (balance < FORTIFY_COST) return { ok: false, error: "insufficient_coins", status: 409 };
+  const op = buildEconomyOp(
+    { kind: "spend", userKey: ownerKey, discordId, amount: FORTIFY_COST, reason: "fortify_block" },
+    crypto.randomUUID(),
+    Date.now(),
+  );
+  if (!op) return { ok: false, error: "fee_failed", status: 409 };
+  const submitted = await submitEconomyOp(op);
+  if (submitted.state === "unavailable") return { ok: false, error: "economy_unavailable", status: 503 };
+  if (submitted.state === "done") return { ok: true };
+  if (submitted.state === "failed") return { ok: false, error: "fee_failed", status: 409 };
+  const done = await waitForOpDone(ownerKey, submitted.op.id);
+  if (done && done.status === "done") return { ok: true };
+  if (done && done.status === "failed") return { ok: false, error: "fee_failed", status: 409 };
+  return { ok: false, error: "fee_pending", status: 409 };
 }
 
 function intParam(raw: string | null, fallback: number): number {
@@ -268,6 +304,18 @@ export async function POST(request: Request) {
           result = applyToggleGate(
             current, profile, map, ownerKey, fields.x, fields.y, Date.now(),
           );
+        } else if (fields.action === "fortify") {
+          // 要塞化（仕様書 §8.4）: 状態遷移は applyFortify、価格の徴収は
+          // ここで即時 spend し、払えた場合だけ保存へ進む。
+          result = applyFortify(
+            current, profile, map, ownerKey, fields.x, fields.y, Date.now(),
+          );
+          if (result.ok) {
+            const charged = await chargeFortifyFee(ownerKey, session);
+            if (!charged.ok) {
+              return NextResponse.json({ error: charged.error }, { status: charged.status, headers: NO_STORE });
+            }
+          }
         } else {
           // サプライライン: 収穫・採掘のときだけ、自国の首都と線路で
           // つながっているかを全上書きから判定して渡す（ボーナス用）。
