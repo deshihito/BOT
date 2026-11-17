@@ -65,7 +65,7 @@ test("サイトマップの主要公開ページはすべて共通レイアウ�
 test("フッターは役割ごとの群に分かれ、ポリシー群は規約類だけを含む", () => {
   assert.deepEqual(
     m.FOOTER_GROUPS.map((g) => g.label),
-    ["ツール", "サポート", "サイト情報", "ポリシー"],
+    ["ツール", "サポート", "サイト情報", "ポリシー", "テスト公開"],
   );
   const policy = m.FOOTER_GROUPS.find((g) => g.label === "ポリシー");
   assert.deepEqual(
