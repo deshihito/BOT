@@ -588,32 +588,41 @@ test("API(casino): ブラックジャックは配ってスタンドすると精�
   assert.ok([0, 100, 200, 250].includes(settles[0].payout), `payout=${settles[0].payout}`);
 });
 
-test("API(casino): セブンスロットは先払いして回し切ると集計精算される", async () => {
+test("API(casino): セブンスロットは1回分を先払いして回すと精算される（回数指定は廃止）", async () => {
   globalThis.__wbCasinoUsers.set(ME, 10000);
   clearSession();
   setPresence(46.5, 20.5, "lobby");
-  const start = await casinoRoute.POST(apiRequest(URL_C, "POST", cookie, { action: "slot7_start", bet: 10, spins: 10 }));
+  const start = await casinoRoute.POST(apiRequest(URL_C, "POST", cookie, { action: "slot7_start", bet: 10 }));
   assert.equal(start.status, 200);
+  const startData = await start.json();
+  assert.equal(startData.session.total, 1, "セッションは常に1回分");
+  assert.equal(startData.session.remaining, 1);
   const spends = findOps((o) => o.kind === "spend" && o.reason === "casino_slot7_prepay");
   assert.equal(spends.length, 1);
-  assert.equal(spends[0].amount, 100);
+  assert.equal(spends[0].amount, 10, "先払いはベット1回分だけ");
   // セッション中は別のセッションを始められない
-  const dup = await casinoRoute.POST(apiRequest(URL_C, "POST", cookie, { action: "slot7_start", bet: 10, spins: 10 }));
+  const dup = await casinoRoute.POST(apiRequest(URL_C, "POST", cookie, { action: "slot7_start", bet: 10 }));
   assert.equal(dup.status, 409);
   assert.equal((await dup.json()).error, "session_active");
   markPendingSpendsDone();
-  let last = null;
-  for (let i = 0; i < 10; i++) {
-    const res = await casinoRoute.POST(apiRequest(URL_C, "POST", cookie, { action: "slot7_spin" }));
-    assert.equal(res.status, 200, `spin ${i}`);
-    last = await res.json();
-    assert.equal(last.spin.reels.length, 7);
-  }
-  assert.equal(last.session, null, "回し切ると精算されてセッションが消える");
+  const res = await casinoRoute.POST(apiRequest(URL_C, "POST", cookie, { action: "slot7_spin" }));
+  assert.equal(res.status, 200);
+  const last = await res.json();
+  assert.equal(last.spin.reels.length, 7);
+  assert.equal(last.session, null, "1回回すと精算されてセッションが消える");
   const settles = findOps((o) => o.kind === "gamble" && o.reason === "casino_slot7");
   assert.equal(settles.length, 1);
   assert.equal(settles[0].prepaid, true);
-  assert.equal(settles[0].amount, 100);
+  assert.equal(settles[0].amount, 10);
+});
+
+test("casino: セブンスロットに回数指定の UI・検証は残っていない", () => {
+  const panel = fs.readFileSync(path.join(rootDir, "app/games/worldbox/WorldBoxCasinoPanel.tsx"), "utf8");
+  assert.ok(!panel.includes("SLOT7_SPIN_CHOICES"), "回数チップが無い");
+  assert.ok(!panel.includes("invalid_spins"), "回数エラー表示が無い");
+  const route = fs.readFileSync(path.join(rootDir, "app/api/worldbox/casino/route.ts"), "utf8");
+  assert.ok(!route.includes("invalid_spins"), "API に回数検証が無い");
+  assert.ok(!route.includes("fields.spins"), "API は spins を読まない");
 });
 
 test("API(casino): 精算は並行 GET が重なっても1回だけ（二重精算の回帰防止）", async () => {

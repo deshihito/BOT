@@ -8,7 +8,7 @@ import {
   playRoulette, playSlot, validateCasinoBet, type CasinoGame, type RoulettePick,
 } from "@/lib/worldbox/casino";
 import {
-  SLOT7_MAX_SPINS, SLOT7_MIN_SPINS, doubleCashout, doubleGo, rollDice, spinSlot7,
+  doubleCashout, doubleGo, rollDice, spinSlot7,
   validateDice,
 } from "@/lib/worldbox/casino-games";
 import {
@@ -42,7 +42,7 @@ export const runtime = "nodejs";
 //   作る（先払い失敗のセッションは無効化され、配当も発生しない）。
 // GET: { balance, effectiveBalance, machine, ops, session, userState }
 // POST: { action: "play", game, bet, pick?, maxValue?, number? }
-//       { action: "slot7_start", bet, spins } / { action: "slot7_spin" }
+//       { action: "slot7_start", bet } / { action: "slot7_spin" }
 //       { action: "double_start", bet } / { action: "double_go" } /
 //       { action: "double_cashout" }
 //       { action: "bj_start", bet } / { action: "bj_hit" } /
@@ -489,11 +489,8 @@ async function handlePost(request: Request, session: AuthedSession) {
     if (noSession) return noSession;
     const bet = validateCasinoBet(fields.bet);
     if (bet === null) return errorResponse("invalid_bet", 400);
-    const spins = typeof fields.spins === "number" ? fields.spins : NaN;
-    if (!Number.isInteger(spins) || spins < SLOT7_MIN_SPINS || spins > SLOT7_MAX_SPINS) {
-      return errorResponse("invalid_spins", 400);
-    }
-    const total = bet * spins;
+    // 回数指定は廃止（2026-11-17 ユーザー指示）: 開始は常に1回分だけ先払いする。
+    const total = bet;
     if (total > ECONOMY_AMOUNT_MAX) return errorResponse("invalid_bet", 400);
     if (total > effectiveBalance) return errorResponse("not_enough_coins", 409);
     const prepay = await submitSpend(ctx.userKey, ctx.discordId, {
@@ -502,7 +499,7 @@ async function handlePost(request: Request, session: AuthedSession) {
     if (!prepay) return errorResponse("economy_failed", 503);
     if (prepay.state === "failed") return errorResponse("bet_failed", 409);
     const next: CasinoSession = {
-      kind: "slot7", bet, total: spins, remaining: spins, prepayOpId: prepay.op.id,
+      kind: "slot7", bet, total: 1, remaining: 1, prepayOpId: prepay.op.id,
       pendingReward: 0, pendingPenalty: 0, lastReels: null, lastEvents: [], createdAt: Date.now(),
     };
     await saveCasinoSession(ctx.userKey, next);
