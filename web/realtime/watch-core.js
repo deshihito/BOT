@@ -29,6 +29,10 @@ const WATCH_PLAN = [
   { namespace: "worldbox_instances", kind: "instances", intervalMs: 2_000 },
   // 経済オプの確定は体感遅延に直結するため速い系（2秒）で watch する
   { namespace: "worldbox_economy", kind: "economy", intervalMs: 2_000 },
+  // 地表オブジェクトの枯渇と釣りの釣果は、値そのもの（座標→時刻）が
+  // 表示状態そのものなので tiles / mobs と同じ差分配信にする
+  { namespace: "worldbox_objects", kind: "objects", intervalMs: 2_000 },
+  { namespace: "worldbox_fishing", kind: "fishing", intervalMs: 2_000 },
 ];
 
 /** 差分比較用の正規化（文字列はそのまま、オブジェクトは JSON 化）。 */

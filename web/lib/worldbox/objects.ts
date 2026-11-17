@@ -3,9 +3,9 @@
 // ルート（入手物）ロール・再出現の規則。定義はデータ駆動で、
 // 追加はこの表への1行で済む。配置はチャンク単位で決定的に決まるため、
 // サーバーに全オブジェクトを保存しなくても全クライアントで一致する。
-// 入口系（洞窟/ダンジョン/遺跡）は「1マスを踏む → 別枠マップ」方式で、
-// 中身の性格は構造物定義（maplogic.ts の STRUCTURES）と対応する:
-// 洞窟=希少鉱物、遺跡=宝箱（アイテム+罠）、ダンジョン=強敵。
+// 入口系（洞窟/ダンジョン/遺跡）は構造物配置（maplogic.ts の STRUCTURES）
+// が担うため、ここには定義を持たない（旧 cave_mouth/dungeon_gate/
+// ruins_gate は density 0 で配置されず、実体と二重管理になるため除去）。
 import { itemById } from "./items";
 import {
   biomeAt, chunkHash, type BiomeId,
@@ -129,10 +129,6 @@ export const SPECIAL_OBJECTS: readonly SpecialObjectDef[] = [
     { itemId: "ghost_tear", min: 1, max: 2, chance: 0.4 },
     { itemId: "mithril", min: 1, max: 2, chance: 0.45 },
   ] },
-  // ---- 入口系（1マス → 別枠マップ） ---------------------------------------
-  { id: "cave_mouth", name: "洞窟の入口", interaction: "enter", biomes: ["highland", "forest"], density: 0, respawnMs: 0, solid: true, targetSpace: "cave", loot: [] },
-  { id: "dungeon_gate", name: "ダンジョンの門", interaction: "enter", biomes: ["highland", "dense_forest", "snowfield"], density: 0, respawnMs: 0, solid: true, targetSpace: "dungeon", loot: [] },
-  { id: "ruins_gate", name: "遺跡の入口", interaction: "enter", biomes: ["plains", "forest", "dryland"], density: 0, respawnMs: 0, solid: true, targetSpace: "ruins", loot: [] },
   // ---- 回復・探索系 ---------------------------------------------------------
   { id: "hot_spring", name: "温泉", interaction: "rest", biomes: ["highland", "snowfield", "forest"], density: 0.15, respawnMs: 0, solid: false, heal: 50, loot: [
     { itemId: "salt", min: 1, max: 2, chance: 0.4 },
@@ -249,4 +245,52 @@ export function objectRespawned(def: SpecialObjectDef, harvestedAt: number | nul
   if (harvestedAt === null) return true;
   if (def.respawnMs <= 0) return false;
   return now - harvestedAt >= def.respawnMs;
+}
+
+/** 座標にある地表オブジェクトを決定的配置から逆引きする。無ければ null。 */
+export function surfaceObjectAt(seed: number, x: number, y: number): PlacedObject | null {
+  const cx = Math.floor(x / CHUNK_SIZE);
+  const cy = Math.floor(y / CHUNK_SIZE);
+  for (const o of objectsForChunk(seed, cx, cy)) {
+    if (o.x === x && o.y === y) return o;
+  }
+  return null;
+}
+
+/**
+ * 範囲 [x0..x1]×[y0..y1] 内の固体オブジェクトのタイルキー集合
+ * （ワールド側の移動衝突判定用）。枯渇しても岩・巣・倒木そのものは
+ * 残るため、採取状態には依存しない。
+ */
+export function surfaceSolidTilesInRect(
+  seed: number, x0: number, y0: number, x1: number, y1: number,
+): Set<string> {
+  const out = new Set<string>();
+  const cx0 = Math.floor(x0 / CHUNK_SIZE);
+  const cx1 = Math.floor(x1 / CHUNK_SIZE);
+  const cy0 = Math.floor(y0 / CHUNK_SIZE);
+  const cy1 = Math.floor(y1 / CHUNK_SIZE);
+  for (let cy = cy0; cy <= cy1; cy++) {
+    for (let cx = cx0; cx <= cx1; cx++) {
+      for (const o of objectsForChunk(seed, cx, cy)) {
+        if (o.x < x0 || o.x > x1 || o.y < y0 || o.y > y1) continue;
+        if (specialObjectById(o.objectId)?.solid) out.add(`${o.x},${o.y}`);
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * bot_kv の枯渇状態（キー "x,y" → 採取時刻の文字列/数値）を
+ * { "x,y": 時刻 } の辞書へ正規化する。不正なキーは捨てる。
+ */
+export function parseObjectStates(entries: Map<string, unknown>): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const [key, raw] of entries) {
+    if (!/^-?\d+,-?\d+$/.test(key)) continue;
+    const n = typeof raw === "number" ? raw : typeof raw === "string" ? Number(raw) : NaN;
+    if (Number.isFinite(n) && n > 0) out[key] = n;
+  }
+  return out;
 }
