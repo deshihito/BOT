@@ -36,6 +36,64 @@ export const MOVEMENT_MARGIN_TILES = 3;
 export const MOVEMENT_RESET_MS = 30_000;
 /** 移動連続性: プレゼンスが無いときのセーブ基準の許容距離（タイル）。初期スポーンの findFreeNear 最大 8 + 余裕。 */
 export const SAVE_FALLBACK_MAX_TILES = 12;
+/** 登録済みワープ対: 着地点の許容誤差（タイル）。着地は findFreeNear でずれることがあるため点ではなく近傍で照合する。 */
+export const WARP_LANDING_TOLERANCE_TILES = 2.5;
+/** 登録済みワープ対: セーブ基準でのワープ元タイルへの到達範囲（タイル）。
+ * セーブには時刻が無いため、元タイルの間近にいた記録がある場合だけ認める
+ * （広場など離れた場所のセーブから着地点へ直接跳べないようにする）。
+ * 往復の着地点⇔反対側の元タイルは 2 タイルしか離れていないため 5 で覆える。 */
+export const WARP_FALLBACK_SOURCE_REACH_TILES = 5;
+
+/**
+ * 同一空間内のクライアント駆動ワープ（登録済みワープ対）。
+ * 空間が変わる遷移（階層階段・テント出入り・インスタンス入口）は空間変更で
+ * 常に受け入れるため、ここには「同じ空間の中で位置だけが跳ぶ」ものだけを置く。
+ * 現在はロビーの擬似2F階段の往復のみ。値の正は lobby.ts の LOBBY_STAIRS_UP /
+ * LOBBY_STAIRS_DOWN / LOBBY_UP_LANDING / LOBBY_DOWN_LANDING で、このファイルは
+ * 単体でトランスパイルされるため複製して明示する（worldbox-warp-continuity
+ * テストが両者の一致を固定する）。ロビーのワープパッド (28,34) は world への
+ * 空間変更ワープなので対象外。
+ */
+export const SAME_SPACE_WARPS: readonly {
+  space: string;
+  sources: readonly { x: number; y: number }[];
+  landing: { x: number; y: number };
+}[] = [
+  {
+    space: "lobby",
+    sources: [{ x: 17, y: 29 }, { x: 18, y: 29 }],
+    landing: { x: 17.5, y: 60.5 },
+  },
+  {
+    space: "lobby",
+    sources: [{ x: 17, y: 62 }, { x: 18, y: 62 }],
+    landing: { x: 17.5, y: 27.5 },
+  },
+];
+
+/**
+ * 登録済みワープ対による正当な不連続か: 保管位置から到達可能な範囲
+ * （reachTiles 以内）にワープ元タイルがあり、申告位置がそのワープの
+ * 着地点の近傍にある場合だけ true。元と着地は同じワープ対で結ばれる
+ * 必要があり、対になっていないジャンプは通らない。到達範囲には時刻基準
+ * では通常移動の許容距離（保管位置から元タイルまで歩いて届く場合だけ
+ * 認める）、セーブ基準では WARP_FALLBACK_SOURCE_REACH_TILES を渡す。
+ */
+export function isRegisteredWarpJump(
+  baseline: PositionLike,
+  next: PositionLike,
+  reachTiles: number,
+): boolean {
+  if (baseline.space !== next.space) return false;
+  for (const warp of SAME_SPACE_WARPS) {
+    if (warp.space !== next.space) continue;
+    if (Math.hypot(next.x - warp.landing.x, next.y - warp.landing.y) > WARP_LANDING_TOLERANCE_TILES) continue;
+    for (const src of warp.sources) {
+      if (Math.hypot(baseline.x - (src.x + 0.5), baseline.y - (src.y + 0.5)) <= reachTiles) return true;
+    }
+  }
+  return false;
+}
 
 /** 移動連続性の判定対象（空間つき位置）。 */
 export type PositionLike = { x: number; y: number; space: PresenceSpace };
@@ -47,6 +105,9 @@ export type MovementBaseline = PositionLike & { ts: number };
  * 距離（MAX_MOVE_SPEED × 経過秒 + 余裕）を超えるジャンプを却下する。
  * 基準が無い・空間が変わった・保管が古い（RESET_MS 超）場合は受け入れる。
  * 空間の変化は入退室・階段・テント・階層移動の正当な不連続なので常に許可する。
+ * 同一空間内の跳躍は原則却下だが、登録済みワープ対（SAME_SPACE_WARPS。
+ * ロビー擬似2F階段の往復）の元→着地に一致するものだけは正当な不連続として
+ * 受け入れる（isRegisteredWarpJump）。
  */
 export function checkMovementContinuity(
   baseline: MovementBaseline | null,
@@ -59,7 +120,11 @@ export function checkMovementContinuity(
   const elapsedSec = Math.max(0, (now - baseline.ts) / 1000);
   const allowed = MAX_MOVE_SPEED * elapsedSec + MOVEMENT_MARGIN_TILES;
   const dist = Math.hypot(next.x - baseline.x, next.y - baseline.y);
-  return dist <= allowed ? { ok: true } : { ok: false, reason: "position_jump" };
+  if (dist <= allowed) return { ok: true };
+  // 登録済みワープ対（同一空間内の階段など）: 保管位置からワープ元タイルへ
+  // 歩いて届き、申告位置がその着地点なら正当な不連続として受け入れる。
+  if (isRegisteredWarpJump(baseline, next, allowed)) return { ok: true };
+  return { ok: false, reason: "position_jump" };
 }
 
 /**
@@ -75,7 +140,11 @@ export function checkSaveFallbackContinuity(
   if (!saved) return { ok: true };
   if (saved.space !== next.space) return { ok: true };
   const dist = Math.hypot(next.x - saved.x, next.y - saved.y);
-  return dist <= SAVE_FALLBACK_MAX_TILES ? { ok: true } : { ok: false, reason: "position_jump" };
+  if (dist <= SAVE_FALLBACK_MAX_TILES) return { ok: true };
+  // 登録済みワープ対（同一空間内の階段など）: セーブ位置がワープ元タイルの
+  // 間近にあり、申告位置がその着地点なら受け入れる。
+  if (isRegisteredWarpJump(saved, next, WARP_FALLBACK_SOURCE_REACH_TILES)) return { ok: true };
+  return { ok: false, reason: "position_jump" };
 }
 
 /** プレイヤーがいる空間。ワールドとロビーでプレゼンスは混ざらない。 */

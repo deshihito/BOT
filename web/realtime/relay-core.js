@@ -93,6 +93,45 @@ const MOVEMENT_MARGIN_TILES = 3;
 const MOVEMENT_RESET_MS = 30_000;
 /** 移動連続性: プレゼンスが無いときのセーブ基準の許容距離（タイル）。 */
 const SAVE_FALLBACK_MAX_TILES = 12;
+/** 登録済みワープ対: 着地点の許容誤差（タイル。presence.ts の WARP_LANDING_TOLERANCE_TILES と一致）。 */
+const WARP_LANDING_TOLERANCE_TILES = 2.5;
+/** 登録済みワープ対: セーブ基準でのワープ元タイルへの到達範囲（タイル。presence.ts の WARP_FALLBACK_SOURCE_REACH_TILES と一致）。 */
+const WARP_FALLBACK_SOURCE_REACH_TILES = 5;
+/**
+ * 同一空間内のクライアント駆動ワープ（登録済みワープ対。presence.ts の
+ * SAME_SPACE_WARPS と一致。値の正は lobby.ts の LOBBY_STAIRS_UP /
+ * LOBBY_STAIRS_DOWN / LOBBY_UP_LANDING / LOBBY_DOWN_LANDING）。
+ * 現在はロビーの擬似2F階段の往復のみ。
+ */
+const SAME_SPACE_WARPS = [
+  {
+    space: "lobby",
+    sources: [{ x: 17, y: 29 }, { x: 18, y: 29 }],
+    landing: { x: 17.5, y: 60.5 },
+  },
+  {
+    space: "lobby",
+    sources: [{ x: 17, y: 62 }, { x: 18, y: 62 }],
+    landing: { x: 17.5, y: 27.5 },
+  },
+];
+
+/**
+ * 登録済みワープ対による正当な不連続か（presence.ts の isRegisteredWarpJump
+ * と同じ規則）: 保管位置から到達可能な範囲（reachTiles 以内）にワープ元
+ * タイルがあり、申告位置がそのワープの着地点の近傍にある場合だけ true。
+ */
+function isRegisteredWarpJump(baseline, next, reachTiles) {
+  if (baseline.space !== next.space) return false;
+  for (const warp of SAME_SPACE_WARPS) {
+    if (warp.space !== next.space) continue;
+    if (Math.hypot(next.x - warp.landing.x, next.y - warp.landing.y) > WARP_LANDING_TOLERANCE_TILES) continue;
+    for (const src of warp.sources) {
+      if (Math.hypot(baseline.x - (src.x + 0.5), baseline.y - (src.y + 0.5)) <= reachTiles) return true;
+    }
+  }
+  return false;
+}
 
 /**
  * 移動連続性の判定（時刻基準。presence.ts の checkMovementContinuity と同じ規則）。
@@ -105,7 +144,9 @@ function checkMovementContinuity(baseline, next, now) {
   const elapsedSec = Math.max(0, (now - baseline.ts) / 1000);
   const allowed = MAX_MOVE_SPEED * elapsedSec + MOVEMENT_MARGIN_TILES;
   const dist = Math.hypot(next.x - baseline.x, next.y - baseline.y);
-  return dist <= allowed ? { ok: true } : { ok: false, reason: "position_jump" };
+  if (dist <= allowed) return { ok: true };
+  if (isRegisteredWarpJump(baseline, next, allowed)) return { ok: true };
+  return { ok: false, reason: "position_jump" };
 }
 
 /**
@@ -116,7 +157,9 @@ function checkSaveFallbackContinuity(saved, next) {
   if (!saved) return { ok: true };
   if (saved.space !== next.space) return { ok: true };
   const dist = Math.hypot(next.x - saved.x, next.y - saved.y);
-  return dist <= SAVE_FALLBACK_MAX_TILES ? { ok: true } : { ok: false, reason: "position_jump" };
+  if (dist <= SAVE_FALLBACK_MAX_TILES) return { ok: true };
+  if (isRegisteredWarpJump(saved, next, WARP_FALLBACK_SOURCE_REACH_TILES)) return { ok: true };
+  return { ok: false, reason: "position_jump" };
 }
 
 /** 部屋: 空間ごとのプレイヤー表（id → エントリ）と、pid ごとの現行タブ世代。エントリは PresenceEntry と同じ形。 */
@@ -335,6 +378,10 @@ module.exports = {
   MOVEMENT_MARGIN_TILES,
   MOVEMENT_RESET_MS,
   SAVE_FALLBACK_MAX_TILES,
+  WARP_LANDING_TOLERANCE_TILES,
+  WARP_FALLBACK_SOURCE_REACH_TILES,
+  SAME_SPACE_WARPS,
+  isRegisteredWarpJump,
   checkMovementContinuity,
   checkSaveFallbackContinuity,
   boundsForSpace,
