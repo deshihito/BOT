@@ -66,6 +66,7 @@ const tilesUrl = bundleModule(
     "applyTileAction", "applyPlaceBlock", "applyMineBlock", "applyFlowerAction", "applyToggleGate", "tileView", "actionForTile", "tileKey",
     "applySetSign", "applyDisplayAction", "applyDrawWater",
     "parseTileOverride", "parseTileOverrides", "isOverrideActive", "TREE_REGROW_MS",
+    "TERRAIN_ROCK_HP", "TERRAIN_TREE_HP",
   ],
 );
 const T = await import(tilesUrl);
@@ -218,11 +219,22 @@ const OTHER_KEY = "discord:622222222222222222";
 const withItems = (items) => inv.parseProfile({ items });
 
 test("タイル: 伐採は素手でもでき（収量1）、斧があると収量2、切り株つきで草地になり再生する", () => {
-  const bare = T.applyTileAction(null, withItems({}), map, ME_KEY, "chop", treeAt.x, treeAt.y, undefined, NOW);
+  // HP制（木=30）: 素手（6/ヒット）は5ヒット、倒れるまで収穫は無い
+  let bare = T.applyTileAction(null, withItems({}), map, ME_KEY, "chop", treeAt.x, treeAt.y, undefined, NOW);
   assert.equal(bare.ok, true, "素手でも伐採できる");
+  assert.deepEqual(bare.gained, {});
+  assert.equal(bare.override.hp, T.TERRAIN_TREE_HP - 6, "素手の1ヒットで HP が減る");
+  for (let i = 0; i < 6 && !bare.override?.stump; i++) {
+    bare = T.applyTileAction(bare.override, bare.profile, map, ME_KEY, "chop", treeAt.x, treeAt.y, undefined, NOW);
+  }
   assert.deepEqual(bare.gained, { wood: 1 });
-  const ok = T.applyTileAction(null, withItems({ wooden_axe: 1 }), map, ME_KEY, "chop", treeAt.x, treeAt.y, undefined, NOW);
+  // 木の斧（10/ヒット）は3ヒットで倒れ、収量2
+  let ok = T.applyTileAction(null, withItems({ wooden_axe: 1 }), map, ME_KEY, "chop", treeAt.x, treeAt.y, undefined, NOW);
   assert.equal(ok.ok, true);
+  assert.equal(ok.override.hp, T.TERRAIN_TREE_HP - 10);
+  for (let i = 0; i < 5 && !ok.override?.stump; i++) {
+    ok = T.applyTileAction(ok.override, ok.profile, map, ME_KEY, "chop", treeAt.x, treeAt.y, undefined, NOW);
+  }
   assert.equal(ok.override.tile, T.T_GRASS);
   assert.equal(ok.override.stump, true);
   assert.equal(ok.override.until, NOW + T.TREE_REGROW_MS);
@@ -234,8 +246,11 @@ test("タイル: 伐採は素手でもでき（収量1）、斧があると収�
   const regrown = T.tileView(map, overrides, treeAt.x, treeAt.y, NOW + T.TREE_REGROW_MS + 1, null);
   assert.equal(regrown.tile, T.T_TREE);
   assert.equal(regrown.stump, false);
-  // 雪の木は雪地になる
-  const snow = T.applyTileAction(null, withItems({ stone_axe: 1 }), map, ME_KEY, "chop", snowTreeAt.x, snowTreeAt.y, undefined, NOW);
+  // 雪の木は雪地になる（石の斧 16/ヒット → 2ヒット）
+  let snow = T.applyTileAction(null, withItems({ stone_axe: 1 }), map, ME_KEY, "chop", snowTreeAt.x, snowTreeAt.y, undefined, NOW);
+  for (let i = 0; i < 4 && snow.override?.tile !== T.T_SNOW; i++) {
+    snow = T.applyTileAction(snow.override, snow.profile, map, ME_KEY, "chop", snowTreeAt.x, snowTreeAt.y, undefined, NOW);
+  }
   assert.equal(snow.override.tile, T.T_SNOW);
   // 草地は伐れない
   assert.equal(
@@ -249,11 +264,21 @@ test("タイル: 採掘はツルハシが要り、岩が土になり石材が得
     T.applyTileAction(null, withItems({}), map, ME_KEY, "mine", rockAt.x, rockAt.y, undefined, NOW).error,
     "tool_required",
   );
-  const ok = T.applyTileAction(null, withItems({ wooden_pickaxe: 1 }), map, ME_KEY, "mine", rockAt.x, rockAt.y, undefined, NOW);
+  // HP制（岩=60）: 木ツルハシ（10/ヒット）は6ヒット。ミスリル（40）でも2ヒット
+  let ok = T.applyTileAction(null, withItems({ wooden_pickaxe: 1 }), map, ME_KEY, "mine", rockAt.x, rockAt.y, undefined, NOW);
   assert.equal(ok.ok, true);
+  assert.equal(ok.override.hp, T.TERRAIN_ROCK_HP - 10, "1ヒットでは壊れず HP が減る");
+  assert.equal(ok.override.tile, undefined, "壊れるまで地形は岩のまま");
+  for (let i = 0; i < 8 && ok.override?.tile !== T.T_DIRT; i++) {
+    ok = T.applyTileAction(ok.override, ok.profile, map, ME_KEY, "mine", rockAt.x, rockAt.y, undefined, NOW);
+  }
   assert.equal(ok.override.tile, T.T_DIRT);
   assert.equal(ok.override.until, NOW + 3 * 3600 * 1000, "岩の再成長タイマー（3時間）");
   assert.equal(inv.countItem(ok.profile, "stone"), 2);
+  const mithril1 = T.applyTileAction(null, withItems({ mithril_pickaxe: 1 }), map, ME_KEY, "mine", rockAt.x, rockAt.y, undefined, NOW);
+  assert.equal(mithril1.override.hp, T.TERRAIN_ROCK_HP - 40, "ミスリルでも1発では壊れない");
+  const mithril2 = T.applyTileAction(mithril1.override, mithril1.profile, map, ME_KEY, "mine", rockAt.x, rockAt.y, undefined, NOW);
+  assert.equal(mithril2.override.tile, T.T_DIRT, "ミスリルは2ヒットで壊れる");
   // 土になった場所は掘れない
   assert.equal(
     T.applyTileAction(ok.override, ok.profile, map, ME_KEY, "mine", rockAt.x, rockAt.y, undefined, NOW).error,
@@ -506,19 +531,28 @@ test("API(tiles): 伐採は素手でも適用され（収量1）、斧がある�
     id: (await import(presenceBundleUrl)).presenceIdFor(MY_KEY),
     name: "farm-user", x: treeAt.x, y: treeAt.y, vx: 0, vy: 0, face: 1, space: "world", ts: Date.now(),
   }];
-  // 素手（空のプロフィール）でも伐採できる
-  const bare = await tilesRoute.POST(apiRequest(URL_T, "POST", cookie, { action: "chop", x: treeAt.x, y: treeAt.y }));
-  assert.equal(bare.status, 200);
-  const bareData = await bare.json();
+  // 素手（空のプロフィール）でも伐採できる（HP制: 6/ヒット → 5ヒットで倒れる）
+  let bareData = null;
+  for (let i = 0; i < 6; i++) {
+    const bare = await tilesRoute.POST(apiRequest(URL_T, "POST", cookie, { action: "chop", x: treeAt.x, y: treeAt.y }));
+    assert.equal(bare.status, 200);
+    bareData = await bare.json();
+    if (bareData.tile.tile === T.T_GRASS) break;
+    assert.deepEqual(bareData.gained, {}, "倒れるまでは収穫なし");
+  }
   assert.deepEqual(bareData.gained, { wood: 1 });
   assert.equal(bareData.tile.tile, T.T_GRASS);
   assert.ok(globalThis.__wbFarmTiles.has(`${treeAt.x},${treeAt.y}`), "上書きが保存される");
-  // 斧を持たせると収量2（別の木で確認）
+  // 斧を持たせると収量2（別の木で確認。10/ヒット → 3ヒット）
   globalThis.__wbFarmTiles.clear();
   globalThis.__wbFarmProfiles.set(MY_KEY, inv.serializeProfile(inv.parseProfile({ items: { wooden_axe: 1 } })));
-  const ok = await tilesRoute.POST(apiRequest(URL_T, "POST", cookie, { action: "chop", x: treeAt.x, y: treeAt.y }));
-  assert.equal(ok.status, 200);
-  const data = await ok.json();
+  let data = null;
+  for (let i = 0; i < 4; i++) {
+    const ok = await tilesRoute.POST(apiRequest(URL_T, "POST", cookie, { action: "chop", x: treeAt.x, y: treeAt.y }));
+    assert.equal(ok.status, 200);
+    data = await ok.json();
+    if (data.tile.tile === T.T_GRASS) break;
+  }
   assert.equal(data.tile.tile, T.T_GRASS);
   assert.deepEqual(data.gained, { wood: 2 });
   assert.equal(inv.countItem(data.profile, "wood"), 2);

@@ -78,11 +78,11 @@ import { parseBoardPosts, type BoardPost } from "@/lib/worldbox/board";
 import { parseSave, serializeSave, type SaveSpace } from "@/lib/worldbox/save";
 import { chooseInitialSave } from "@/lib/worldbox/save-source";
 import {
-  actionForTile, blockHpFraction, cropStage, floorSpeedMultiplier, isFloorItem, isFlowerPotItem, isGateItem, isOverrideActive, isSeatItem, isShelfItem, isSignItem, isWellItem, parseTileOverride, placedBlockSolid, placedStationKinds, tileKey, tileView,
+  actionForTile, blockHpFraction, cropStage, floorSpeedMultiplier, isFloorItem, isFlowerPotItem, isGateItem, isOverrideActive, isSeatItem, isShelfItem, isSignItem, isWellItem, parseTileOverride, placedBlockSolid, placedStationKinds, terrainHpFraction, tileKey, tileView,
   type TileActionKind, type TileOverridesMap,
 } from "@/lib/worldbox/tiles";
 import { CROPS, ITEMS, itemById } from "@/lib/worldbox/items";
-import { HP_MAX, HUNGER_MAX, countItem, maxHpFor, type AdventureRoleId, type ItemSlot, type PlayerProfile, type SlotRef } from "@/lib/worldbox/profile";
+import { HP_MAX, HUNGER_MAX, countItem, maxHpFor, toolDurabilityFraction, type AdventureRoleId, type ItemSlot, type PlayerProfile, type SlotRef } from "@/lib/worldbox/profile";
 import { hazardDamageFor, pvpSpaceAllowed, PVP_ATTACK_MAX_DISTANCE } from "@/lib/worldbox/vitals";
 import { isStallItem } from "@/lib/worldbox/stalls";
 import {
@@ -415,7 +415,7 @@ function ItemIcon({ id, size = 22 }: { id: string; size?: number }) {
  * アイコンの無いアイテムは枠だけ、個数は右下のバッジ。
  * 親ボタンは position: relative 前提。
  */
-function SlotContent({ slot }: { slot: ItemSlot }) {
+function SlotContent({ slot, durFrac }: { slot: ItemSlot; durFrac?: number | null }) {
   if (!slot) return null;
   const def = itemById(slot.id);
   return (
@@ -444,6 +444,24 @@ function SlotContent({ slot }: { slot: ItemSlot }) {
       >
         {slot.count}
       </span>
+      {durFrac !== null && durFrac !== undefined && durFrac < 1 && (
+        // 道具の耐久バー（使用中の1本の残量。満タンでは出さない）
+        <span
+          aria-hidden
+          style={{
+            position: "absolute", left: 3, right: 3, bottom: 2, height: 3, borderRadius: 2,
+            background: "rgba(0,0,0,0.65)", pointerEvents: "none", overflow: "hidden",
+          }}
+        >
+          <span
+            style={{
+              display: "block", height: "100%",
+              width: `${Math.round(Math.max(0, Math.min(1, durFrac)) * 100)}%`,
+              background: durFrac > 0.5 ? "#7ed957" : durFrac > 0.25 ? "#f2c53c" : "#e2483a",
+            }}
+          />
+        </span>
+      )}
     </>
   );
 }
@@ -1692,7 +1710,7 @@ export default function WorldBoxClient() {
       });
       const data = (await res.json().catch(() => ({}))) as {
         gained?: Record<string, number>; trapped?: boolean; healed?: number;
-        profile?: PlayerProfile; error?: string;
+        profile?: PlayerProfile; error?: string; broke?: string;
       };
       if (res.ok) {
         surfaceObjStateRef.current.set(`${x},${y}`, Date.now());
@@ -1707,9 +1725,11 @@ export default function WorldBoxClient() {
         const names = Object.entries(data.gained ?? {})
           .map(([id, n]) => `${itemById(id)?.name ?? id}×${n}`)
           .join(" ");
-        if (data.trapped) setTileMsg("罠だった！");
-        else if ((data.healed ?? 0) > 0) setTileMsg(`温泉で回復した${names ? `: ${names}` : ""}`);
-        else setTileMsg(names ? `${def?.name ?? "採取"}: ${names}` : "何も無かった");
+        const baseMsg = data.trapped ? "罠だった！"
+          : (data.healed ?? 0) > 0 ? `温泉で回復した${names ? `: ${names}` : ""}`
+          : names ? `${def?.name ?? "採取"}: ${names}` : "何も無かった";
+        setTileMsg(data.broke ? `${baseMsg}（${itemById(data.broke)?.name ?? "道具"}が壊れた）` : baseMsg);
+        if (data.broke) playWbSe("debris");
         void refreshSurfaceStatesRef.current();
       } else {
         setTileMsg(TILE_ERROR_LABEL[data.error ?? ""] ?? "できない");
@@ -1864,7 +1884,7 @@ export default function WorldBoxClient() {
       });
       const data = (await res.json().catch(() => ({}))) as {
         error?: string; gained?: Record<string, number>; trapped?: boolean; profile?: PlayerProfile;
-        teleport?: { x: number; y: number } | null; kind?: string;
+        teleport?: { x: number; y: number } | null; kind?: string; broke?: string;
       };
       if (!res.ok) {
         if (data.error && TILE_ERROR_LABEL[data.error]) setTileMsg(TILE_ERROR_LABEL[data.error]);
@@ -1876,6 +1896,10 @@ export default function WorldBoxClient() {
         return;
       }
       if (data.profile) setInvProfile(data.profile);
+      if (data.broke) {
+        setTileMsg(`${itemById(data.broke)?.name ?? "道具"}が壊れた`);
+        playWbSe("debris");
+      }
       if (data.teleport) {
         instanceTeleportRef.current?.(data.teleport.x, data.teleport.y);
         playWbSe("warp");
@@ -2030,6 +2054,7 @@ export default function WorldBoxClient() {
       });
       const data = (await res.json().catch(() => ({}))) as {
         error?: string; key?: string; override?: TileOverridesMap[string] | null; profile?: PlayerProfile;
+        broke?: string;
       };
       if (!res.ok) {
         setTileMsg(TILE_ERROR_LABEL[data.error ?? ""] ?? "できませんでした");
@@ -2061,6 +2086,10 @@ export default function WorldBoxClient() {
         syncBlockBlocked();
       }
       if (data.profile) setInvProfile(data.profile);
+      if (data.broke) {
+        setTileMsg(`${itemById(data.broke)?.name ?? "道具"}が壊れた`);
+        playWbSe("debris");
+      }
     } catch {
       setTileMsg("できませんでした");
       fxEventsRef.current.push({ kind: "whiff", x, y });
@@ -2221,6 +2250,7 @@ export default function WorldBoxClient() {
       });
       const data = (await res.json().catch(() => ({}))) as {
         error?: string; hp?: number; dead?: boolean; profile?: PlayerProfile; key?: string; deadUntil?: number;
+        broke?: string;
       };
       if (data.key) key = data.key;
       if (!res.ok) {
@@ -2244,6 +2274,10 @@ export default function WorldBoxClient() {
         stop: data.dead ? HITSTOP_KILL_MS : HITSTOP_HIT_MS,
       });
       if (data.profile) setInvProfile(data.profile);
+      if (data.broke) {
+        setTileMsg(`${itemById(data.broke)?.name ?? "剣"}が壊れた`);
+        playWbSe("debris");
+      }
       // ダンジョンで倒したらセッション進行（フロアボス撃破→階段開放、
       // 番人の鍵は profile 側）を取り直す。従来は自分の画面でも階段が
       // 「ボスを倒すと開く」のまま固まっていた。
@@ -4820,6 +4854,11 @@ export default function WorldBoxClient() {
             const img = farmSprites[`crop${cropStage(ov!.crop, nowMs)}`];
             if (texReady(img)) ctx.drawImage(img, sx, sy, TILE, TILE);
           }
+          if (ov!.hp !== undefined) {
+            // 地形（岩・木）の HP 制: 削れた分だけひび割れを重ねる
+            const frac = terrainHpFraction(ov!, mapTileAt(worldMap, tx, ty));
+            if (frac < 1) drawBlockCracks(ctx, sx, sy, tx, ty, frac);
+          }
           if (ov!.block) {
             // 設置ブロックはアイコンをタイル大で描く（ピクセル固定: 整数座標）
             // 設置直後は出現ポップ（小さく生まれて行き過ぎて収まる）
@@ -6249,7 +6288,7 @@ export default function WorldBoxClient() {
           ...(held ? { background: "rgba(255,210,62,0.30)", borderColor: "rgba(255,210,62,0.85)" } : {}),
         }}
       >
-        <SlotContent slot={slot} />
+        <SlotContent slot={slot} durFrac={slot && invProfile ? toolDurabilityFraction(invProfile, slot.id) : null} />
       </button>
     );
   };
@@ -6272,7 +6311,10 @@ export default function WorldBoxClient() {
           ...(held ? { background: "rgba(255,210,62,0.30)", borderColor: "rgba(255,210,62,0.85)" } : {}),
         }}
       >
-        <SlotContent slot={slot} />
+        <SlotContent
+          slot={slot}
+          durFrac={slot && invProfile && side !== "container" ? toolDurabilityFraction(invProfile, slot.id) : null}
+        />
       </button>
     );
   };
@@ -6830,7 +6872,7 @@ export default function WorldBoxClient() {
                     : {}),
                 }}
               >
-                <SlotContent slot={slot} />
+                <SlotContent slot={slot} durFrac={slot ? toolDurabilityFraction(invProfile, slot.id) : null} />
               </button>
             ))}
             <button

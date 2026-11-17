@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { getRequestSession, publicOrigin, sessionOwnerKey } from "@/lib/auth";
 import { MAP_SEED } from "@/lib/worldbox/mapgen";
 import { loadProfile, storeProfile } from "@/lib/worldbox/profile-online";
-import { addItem } from "@/lib/worldbox/profile";
+import { addItem, wearTool } from "@/lib/worldbox/profile";
 import { itemById } from "@/lib/worldbox/items";
 import { listPresence, putPresence } from "@/lib/worldbox/presence-online";
 import { presenceIdFor } from "@/lib/worldbox/presence";
@@ -455,12 +455,18 @@ async function handleInstancePost(
         }
         next = addMasteryXp(next, "miner", (def.minTier ?? 0) >= 2 ? 4 : 1).profile;
       }
+      // 道具の耐久: 採掘で最良のツルハシが摩耗する
+      const worn = wearTool(next, "pickaxe");
+      next = worn.profile;
       state.veins[vein.key] = now;
       await storeInstanceState(space, state);
       if (!(await storeProfile(ownerKey, next))) {
         return NextResponse.json({ error: "profile_unavailable" }, { status: 503, headers: NO_STORE });
       }
-      return NextResponse.json({ ok: true, gained: loot.gained, profile: next }, { headers: NO_STORE });
+      return NextResponse.json(
+        { ok: true, gained: loot.gained, profile: next, ...(worn.brokeItemId ? { broke: worn.brokeItemId } : {}) },
+        { headers: NO_STORE },
+      );
     }
 
     // open_chest
