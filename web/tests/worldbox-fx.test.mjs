@@ -63,6 +63,10 @@ const fx = await loadBundle(
     "popScale", "popProgress", "SWING_DURATION_MS", "swingProgress", "slashAlpha",
     "spawnMobFx", "mobCountMul", "mobSizeMul", "WHIFF_ALPHA_SCALE",
     "WEATHER_PERIOD_SEC", "weatherAt", "weatherAmbientKind", "phaseKind",
+    "burstPaletteFor",
+    "createHitstop", "startHitstop", "hitstopActiveAt",
+    "HITSTOP_HIT_MS", "HITSTOP_KILL_MS", "HITSTOP_HURT_MS", "HITSTOP_MAX_MS",
+    "WEATHER_BLEND_SEC", "weatherBlendAt",
   ],
 );
 
@@ -289,7 +293,7 @@ test("fx: クライアント配線（イベント→粒/揺れ/ポップ、ス�
   assert.match(client, /attackSwingAngle/, "道具スイングを描く");
   assert.match(client, /spawnAmbient/, "環境パーティクルを出す");
   assert.match(client, /popScaleFor/, "設置/建築に出現ポップを付ける");
-  assert.match(client, /stepFx\(fxSys, dt\)/, "毎フレーム粒を進める");
+  assert.match(client, /stepFx\(fxSys, sdt\)/, "毎フレーム粒を進める（ヒットストップ中は止まる）");
   assert.match(client, /prefers-reduced-motion/, "動きを減らす設定を尊重する");
 });
 
@@ -310,8 +314,115 @@ test("fx2: クライアント配線（空振り・天候・時間帯・モブイ
   assert.match(client, /spawnMobFx\(fxSys, ev\.kind/, "モブイベントを spawnMobFx で出す");
   assert.match(client, /ev\.kind === "death"\) \{\s+shake = startShake/, "死亡時は揺れ（ボス級は大きい）");
   // 天候と時間帯を環境粒に使う
-  assert.match(client, /weatherAt\(nowSec\)/, "天候は決定的サイクルから取る");
+  assert.match(client, /weatherBlendAt\(nowSec\)/, "天候は決定的サイクル＋境界ブレンドから取る");
   assert.match(client, /weatherAmbientKind\(/, "環境粒の種類に天候を反映する");
   assert.match(client, /phaseKind\(phase\)/, "時間帯の切り替わりを検出する");
   assert.match(client, /pk !== lastPhaseKind/, "時間帯が変わったフレームで環境粒を足す");
+});
+
+test("fx3: ヒットストップは窓の間だけ効き、短い指定で縮まず、上限で頭打ちになる", () => {
+  let h = fx.createHitstop();
+  assert.equal(fx.hitstopActiveAt(h, 1000), false, "初期状態は停止していない");
+  h = fx.startHitstop(h, fx.HITSTOP_HIT_MS, 1000);
+  assert.equal(fx.hitstopActiveAt(h, 1000), true);
+  assert.equal(fx.hitstopActiveAt(h, 1000 + fx.HITSTOP_HIT_MS - 1), true);
+  assert.equal(fx.hitstopActiveAt(h, 1000 + fx.HITSTOP_HIT_MS), false, "窓を過ぎたら再開する");
+  // 停止中に短い指定が来ても縮まない（長い方を残す）
+  let h2 = fx.startHitstop(fx.createHitstop(), fx.HITSTOP_KILL_MS, 0);
+  h2 = fx.startHitstop(h2, fx.HITSTOP_HURT_MS, 10);
+  assert.equal(fx.hitstopActiveAt(h2, fx.HITSTOP_KILL_MS - 1), true, "撃破の停止は被弾の短い指定で縮まない");
+  // どれだけ長く指定しても上限を超えない
+  const h3 = fx.startHitstop(fx.createHitstop(), 10000, 0);
+  assert.equal(fx.hitstopActiveAt(h3, fx.HITSTOP_MAX_MS - 1), true);
+  assert.equal(fx.hitstopActiveAt(h3, fx.HITSTOP_MAX_MS), false, "上限で頭打ち");
+  // 0 以下は無効
+  assert.equal(fx.hitstopActiveAt(fx.startHitstop(fx.createHitstop(), 0, 0), 0), false);
+  // 長さの序列: 被弾 < ヒット < 撃破 <= 上限
+  assert.ok(fx.HITSTOP_HURT_MS < fx.HITSTOP_HIT_MS);
+  assert.ok(fx.HITSTOP_HIT_MS < fx.HITSTOP_KILL_MS);
+  assert.ok(fx.HITSTOP_KILL_MS <= fx.HITSTOP_MAX_MS);
+});
+
+test("fx3: 天候ブレンドは境界で線形に混ざり、区間の途中では一定になる", () => {
+  const P = fx.WEATHER_PERIOD_SEC;
+  // 天候が切り替わる境界を探す（決定的なので必ず見つかる）
+  let flipIdx = -1;
+  let cur = null;
+  for (let idx = 1; idx < 500 && flipIdx < 0; idx++) {
+    const prev = fx.weatherAt((idx - 1) * P + 1);
+    const now = fx.weatherAt(idx * P + 1);
+    if (prev !== now) { flipIdx = idx; cur = now; }
+  }
+  assert.ok(flipIdx > 0, "天候の切り替わり境界が存在する");
+  const start = flipIdx * P;
+  const full = cur === "rain" ? 1 : 0;
+  // 境界の瞬間は前区間の強さ（反対側）
+  const at0 = fx.weatherBlendAt(start);
+  assert.equal(at0.weather, cur);
+  assert.ok(Math.abs(at0.rainStrength - (1 - full)) < 1e-9, `境界直後は前区間の強さ (実測 ${at0.rainStrength})`);
+  // ブレンドの中点は 0.5
+  const mid = fx.weatherBlendAt(start + fx.WEATHER_BLEND_SEC / 2);
+  assert.ok(Math.abs(mid.rainStrength - 0.5) < 1e-9, `中点は 0.5 (実測 ${mid.rainStrength})`);
+  // ブレンドを過ぎたら現区間の強さで一定
+  for (const t of [start + fx.WEATHER_BLEND_SEC, start + P / 2, start + P - 1]) {
+    const b = fx.weatherBlendAt(t);
+    assert.equal(b.weather, cur);
+    assert.ok(Math.abs(b.rainStrength - full) < 1e-9, `区間内は一定 (t=${t}, 実測 ${b.rainStrength})`);
+  }
+  // 決定的（同じ時刻は同じ結果）
+  assert.deepEqual(fx.weatherBlendAt(start + 7), fx.weatherBlendAt(start + 7));
+});
+
+test("fx3: 素材パレットは対象 ID から素材色を返し、不明なら null", () => {
+  assert.ok(fx.burstPaletteFor("mithril_vein")?.includes("#7fd4dc"), "ミスリルは水色系");
+  assert.ok(fx.burstPaletteFor("copper_vein")?.includes("#e08a4c"), "銅は橙系");
+  assert.ok(fx.burstPaletteFor("coal_vein")?.includes("#232327"), "石炭は黒系");
+  assert.ok(fx.burstPaletteFor("sulfur_vent")?.includes("#ffe14d"), "硫黄は黄系");
+  assert.ok(fx.burstPaletteFor("crystal_cluster")?.includes("#b79cff"), "水晶は紫系");
+  assert.ok(fx.burstPaletteFor("ruins_chest")?.includes("#ffd23e"), "宝箱は金系");
+  assert.ok(fx.burstPaletteFor("berry_bush")?.includes("#e5484d"), "木の実は赤系");
+  assert.ok(fx.burstPaletteFor("gold_block")?.includes("#ffd23e"), "設置ブロック（金）も引ける");
+  assert.equal(fx.burstPaletteFor("mystery_lump"), null, "不明な素材は既定色に任せる");
+  assert.equal(fx.burstPaletteFor(null), null);
+  assert.equal(fx.burstPaletteFor(undefined), null);
+  // 具体的な素材が汎用より優先される（ミスリル鉱脈が石色にならない）
+  assert.ok(!fx.burstPaletteFor("mithril_vein")?.includes("#55555c"));
+});
+
+test("fx3: バーストのパレット上書きは全粒に効く", () => {
+  const sys = fx.createFxSystem(7);
+  fx.spawnBurst(sys, "mine", 5, 5, { colors: ["#111111", "#222222"] });
+  assert.ok(sys.particles.length > 0);
+  for (const p of sys.particles) {
+    assert.ok(["#111111", "#222222"].includes(p.color), `粒はパレットから選ばれる (実測 ${p.color})`);
+  }
+});
+
+test("fx3: クライアント配線（ヒットストップ・素材パレット・クリックSE・パネル出現）", () => {
+  const client = fs.readFileSync(path.join(rootDir, "app/games/worldbox/WorldBoxClient.tsx"), "utf8");
+  // ヒットストップ: 自分の攻撃に stop が付き、ループが開始し、sdt で世界を止める
+  assert.match(client, /stop: data\.dead \? HITSTOP_KILL_MS : HITSTOP_HIT_MS/, "自分の攻撃命中/撃破でヒットストップを指定する");
+  assert.match(client, /hitstop = startHitstop\(hitstop, ev\.stop, now\)/, "fx イベント消化でヒットストップを開始する");
+  assert.match(client, /hitstopActiveAt\(hitstop, now\) \? 0 : dt/, "停止中はシミュレーション dt を 0 にする");
+  assert.match(client, /stepMove\(activeMap\(\), player, vel, sdt/, "プレイヤー移動も止まる");
+  // 素材パレット: 地表オブジェクト・設置ブロック・洞窟の鉱脈に配線
+  assert.match(client, /burstPaletteFor\(objectId\)/, "地表オブジェクトの破片が素材色になる");
+  assert.match(client, /burstPaletteFor\(prevBlockId\)/, "設置ブロックの破片が素材色になる");
+  assert.match(client, /fxObjectId: vein\.objectId/, "洞窟の鉱脈タップが素材を渡す");
+  assert.match(client, /colors: ev\.colors/, "fx イベントのパレットがバーストへ渡る");
+  // 他者の撃破でも死亡バーストが出る（自分の分とは二重にしない）
+  assert.match(client, /deathFxAt/, "死亡バーストの二重出しを防ぐ記録がある");
+  // クリック SE の一本化（シェルの capture）と固有 SE 領域の除外マーカー
+  assert.match(client, /onClickCapture/, "シェルがボタン押下を捕捉して click SE を鳴らす");
+  assert.match(client, /data-wb-se='self'|data-wb-se="self"/, "固有 SE の領域を除外するマーカーがある");
+  assert.match(client, /playWbSe\("click"\)/, "捕捉側が click SE を鳴らす");
+  // パネル出現アニメーション（globals.css の共通クラス）
+  const css = fs.readFileSync(path.join(rootDir, "app/globals.css"), "utf8");
+  assert.match(css, /@keyframes wb-panel-in/, "パネル出現のキーフレームがある");
+  assert.match(css, /\.wb-shell \.wb-panel \{ animation: wb-panel-in/, "全パネル共通で出現アニメーションが付く");
+  // 固有 SE を持つパネルはマーカーで除外される
+  for (const name of ["WorldBoxEconomyPanel.tsx", "WorldBoxCasinoPanel.tsx", "WorldBoxArcadePanel.tsx"]) {
+    const src = fs.readFileSync(path.join(rootDir, "app/games/worldbox", name), "utf8");
+    assert.match(src, /data-wb-se="self"/, `${name} は固有 SE 側に寄せる`);
+  }
 });

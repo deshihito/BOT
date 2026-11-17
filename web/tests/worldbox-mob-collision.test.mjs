@@ -98,9 +98,9 @@ test("クライアント: 占有が移動判定へ合成され、接触でノッ
   // ノックバックは瞬間移動でなく初速＋減衰（kbVel を stepMove で適用する）
   assert.ok(client.includes("kbVel"), "ノックバックの速度適用が無い");
   assert.ok(!client.includes("const free = findFreeNear(activeMap(), target.x, target.y"), "接触で瞬間移動している");
-  // stepMove の呼び出し形は従来どおり（他テストの前提を壊さない）
+  // stepMove の呼び出し形（時間ステップはヒットストップ対応の sdt）
   assert.ok(
-    client.includes('stepMove(activeMap(), player, vel, dt, activeBlocked(), { swim: space === "world" })'),
+    client.includes('stepMove(activeMap(), player, vel, sdt, activeBlocked(), { swim: space === "world" })'),
     "stepMove の呼び出しが変わっている",
   );
 });
