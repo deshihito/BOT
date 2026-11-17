@@ -492,17 +492,20 @@ test("API(requests): 納品と取消が競合しても払われるのは報酬�
   assert.equal(payouts.length, 1, "報酬と返金が両方払われることはない");
 });
 
-test("API(requests): escrow 未確定の間は納品も取消も進まない（escrow_pending）", async () => {
+test("API(requests): escrow は投稿と同時に確定し、納品・取消が即座に進む", async () => {
   apiReset();
   const id = await apiPost(apiCookie(API_POSTER, "poster"));
-  // escrow は pending のまま（ワーカー未処理）
+  // コイン API 直接化: escrow spend は登録と同時に適用される
+  const escrow = apiFindOps((o) => o.id === `escrow-${id}`);
+  assert.equal(escrow.length, 1);
+  assert.equal(escrow[0].status, "done");
   const f = await apiRequestsRoute.POST(apiReq(apiCookie(API_MEMBER1, "m1"), { action: "fulfill", requestId: id }));
-  assert.equal(f.status, 409);
-  assert.equal((await f.json()).error, "escrow_pending");
-  const c = await apiRequestsRoute.POST(apiReq(apiCookie(API_POSTER, "poster"), { action: "cancel", requestId: id }));
-  assert.equal(c.status, 409);
-  assert.equal((await c.json()).error, "escrow_pending");
-  assert.equal(apiFindOps((o) => o.id === `reward-${id}` || o.id === `refund-${id}`).length, 0);
+  assert.equal(f.status, 200);
+  const reward = apiFindOps((o) => o.id === `reward-${id}`);
+  assert.equal(reward.length, 1);
+  // 報酬は earn: このスタブ環境は原資 DB が無いので従来キュー（pending）に
+  // 落ち、ワーカー適用を待つフォールバックになる
+  assert.equal(reward[0].status, "pending");
 });
 
 test("API(requests): escrow が failed の依頼は納品不可、取消は返金なしで通る", async () => {
