@@ -560,16 +560,24 @@ test("API(casino): ブラックジャックは配ってスタンドすると精�
   const start = await casinoRoute.POST(apiRequest(URL_C, "POST", cookie, { action: "bj_start", bet: 100 }));
   assert.equal(start.status, 200);
   const startData = await start.json();
-  assert.equal(startData.session.kind, "blackjack");
-  assert.equal(startData.session.playerHand.length, 2);
-  assert.equal(startData.session.dealerHand.length, startData.session.phase === "player" ? 1 : 2);
   markPendingSpendsDone();
-  if (startData.session.phase === "player") {
-    const stand = await casinoRoute.POST(apiRequest(URL_C, "POST", cookie, { action: "bj_stand" }));
-    assert.equal(stand.status, 200);
-    const standData = await stand.json();
-    assert.ok(standData.final, "決着した手札が返る");
-    assert.equal(standData.final.dealerHand.length >= 2, true);
+  if (startData.session === null) {
+    // ナチュラル（配った時点で決着）: セッションは作られず final が返り、
+    // そのまま精算される（API の契約。パネルも final を表示に使う）。
+    // この分岐を想定していなかったため、約5%の確率で落ちる flake だった。
+    assert.ok(startData.final, "ナチュラルでは final が返る");
+    assert.equal(startData.final.playerHand.length, 2);
+  } else {
+    assert.equal(startData.session.kind, "blackjack");
+    assert.equal(startData.session.playerHand.length, 2);
+    assert.equal(startData.session.dealerHand.length, startData.session.phase === "player" ? 1 : 2);
+    if (startData.session.phase === "player") {
+      const stand = await casinoRoute.POST(apiRequest(URL_C, "POST", cookie, { action: "bj_stand" }));
+      assert.equal(stand.status, 200);
+      const standData = await stand.json();
+      assert.ok(standData.final, "決着した手札が返る");
+      assert.equal(standData.final.dealerHand.length >= 2, true);
+    }
   }
   const after = await (await casinoRoute.GET(apiRequest(URL_C, "GET", cookie))).json();
   assert.equal(after.session, null, "精算まで終わればセッションは消える");
