@@ -2,7 +2,7 @@ import { addMasteryXp } from "@/lib/worldbox/roles";
 import { NextResponse } from "next/server";
 import { getRequestSession, publicOrigin, sessionOwnerKey } from "@/lib/auth";
 import {
-  buyItem, craftFromInputs, craftItem, eatItem, sellItem,
+  buyItem, craftFromInputs, craftItem, eatItem, resolveSteal, sellItem,
   type CoinMovement, type EconomyError,
 } from "@/lib/worldbox/economy";
 import { buildEconomyOp, type EconomyOp } from "@/lib/worldbox/economy-bridge";
@@ -24,7 +24,7 @@ import { withUserLock } from "@/lib/worldbox/user-lock";
 
 export const runtime = "nodejs";
 
-// AGO WORLD BOX の経済（プロフィール＋かばん＋ショップ＋合成。steal・労働は廃止済み）。
+// AGO WORLD BOX の経済（プロフィール＋かばん＋ショップ＋合成＋steal。労働は廃止済み）。
 // 状態遷移の規則は lib/worldbox/economy（ボット側経済機能の写し）。
 // コインの正は AGO コイン本体: 遷移が返した coin は経済ブリッジの
 // オプとして submitEconomyOp へ渡す。spend は bot-api 経由でその場で
@@ -39,7 +39,7 @@ export const runtime = "nodejs";
 //   サーバー側の照合表のみ。recipeId 形式も互換のため残す）
 //   （場所制約: ロビー鍛冶屋の作業台の前にいること。サーバー側で検証）
 // POST { action: "work" }: 労働は廃止（2026-11-16）。常に拒否する
-// POST { action: "steal", targetId }: steal は一旦廃止（2026-11-16）。常に拒否する
+// POST { action: "steal", targetId }: いま同じ空間にいる相手から steal
 // プロフィールの保存先は bot_kv（名前空間 worldbox_profiles、
 // キー = 所有者キー）。コインが動くアクションは Discord ログイン必須。
 // Bot API 未設定なら 503。
@@ -398,8 +398,87 @@ async function handlePost(request: Request, session: AuthedSession) {
       return errorResponse("work_disabled");
     }
     case "steal": {
-      // steal は一旦廃止（2026-11-16 ユーザー指示）。どの経路からも実行できない。
-      return errorResponse("steal_disabled");
+      // steal（2026-11-16 に一旦廃止、2026-11-18 のユーザー指示で復活）。
+      // 入口はこのアクションだけ: 対象はプレゼンス ID から解決し、
+      // 検証・抽選は economy.ts の resolveSteal、コインの移動は steal
+      // オプ（成功）か罰金の spend オプ（失敗）で確定させる。
+      const gate = coinGate();
+      if ("response" in gate) return gate.response;
+      if (typeof data.targetId !== "string" || !isPresenceEnabled()) {
+        return errorResponse("invalid_action");
+      }
+      const targetKey = await findPresenceOwnerKey(data.targetId);
+      if (!targetKey) return errorResponse("target_protected");
+      if (targetKey === ownerKey) return errorResponse("self_target");
+      // 奪い元は Discord ユーザーでなければブリッジで移せない（保護扱い）
+      const victimId = targetKey.startsWith("discord:") ? targetKey.slice("discord:".length) : null;
+      if (!victimId) return errorResponse("target_protected");
+      const target = await loadProfile(targetKey);
+      const [actorCoins, targetCoins] = await Promise.all([
+        readUserBalance(gate.discordId),
+        readUserBalance(victimId),
+      ]);
+      if (actorCoins === null || targetCoins === null) {
+        return statusError("economy_unavailable", 503);
+      }
+      const result = resolveSteal(current, target, Date.now(), Math.random, { actorCoins, targetCoins });
+      if (!result.ok) return errorResponse(result.error);
+      if (!(await storeProfile(ownerKey, result.actor))) {
+        return NextResponse.json({ error: "store_failed" }, { status: 503, headers: NO_STORE });
+      }
+      if (!(await storeProfile(targetKey, result.target))) {
+        await storeProfile(ownerKey, current);
+        return NextResponse.json({ error: "store_failed" }, { status: 503, headers: NO_STORE });
+      }
+      const rollback = async () => {
+        await storeProfile(ownerKey, current);
+        await storeProfile(targetKey, target);
+      };
+      // コインの移動: 成功は steal オプ（被害者→実行者）、失敗は罰金の spend オプ
+      let op: EconomyOp | null = null;
+      if (result.success) {
+        op = buildEconomyOp(
+          {
+            kind: "steal", userKey: ownerKey, discordId: gate.discordId,
+            amount: result.amount, reason: "steal", fromDiscordId: victimId,
+          },
+          crypto.randomUUID(),
+          Date.now(),
+        );
+      } else if (result.coin) {
+        op = buildCoinOp(ownerKey, gate.discordId, result.coin);
+      }
+      let appliedAmount: number | null = null;
+      if (op) {
+        const submitted = await submitEconomyOp(op);
+        if (submitted.state === "unavailable") {
+          await rollback();
+          return statusError("economy_failed", 503);
+        }
+        const settled = submitted.state === "pending" ? await waitForOpDone(ownerKey, op.id) : submitted.op;
+        if (settled && settled.status === "failed") {
+          await rollback();
+          return NextResponse.json(
+            { error: "economy_failed", opError: settled.error ?? null },
+            { status: 409, headers: NO_STORE },
+          );
+        }
+        if (settled && settled.status === "done") {
+          appliedAmount = settled.appliedAmount ?? null;
+        }
+      }
+      const balance = await readUserBalance(gate.discordId);
+      return NextResponse.json(
+        {
+          profile: result.actor,
+          success: result.success,
+          // 実際に動いた額が分かればそれを返す（被害者の残高が検証時点
+          // から減っていたら steal は移せる分だけになる）
+          amount: appliedAmount ?? result.amount,
+          ...(balance !== null ? { balance } : {}),
+        },
+        { headers: NO_STORE },
+      );
     }
     default:
       return NextResponse.json({ error: "invalid_action" }, { status: 400, headers: NO_STORE });
