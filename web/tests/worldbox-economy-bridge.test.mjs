@@ -172,7 +172,13 @@ export async function kvList(ns) {
   for (const [k, v] of store) if (k.startsWith(ns + " ")) m.set(k.slice(ns.length + 1), v);
   return m;
 }
+const poolState = { pool: 0, treasury: 0, total_recycled: 0, total_house_paid: 0 };
+globalThis.__wbPool = poolState;
 export async function tableSelect(table, columns, filters, limit) {
+  if (table === "economy_pool_state") {
+    if (!globalThis.__wbPoolAvailable) throw new Error("table not applied");
+    return [{ pool: poolState.pool, treasury: poolState.treasury }];
+  }
   if (table !== "users") throw new Error("unexpected table " + table);
   const id = filters.find((f) => f.column === "user_id")?.value;
   if (!users.has(id)) return [];
@@ -194,6 +200,29 @@ export async function tableUpdate(table, values, filters) {
   return [{ user_id: id, balance: values.balance }];
 }
 export async function rpc(name, params) {
+  if (name === "economy_pool_pay_house") {
+    const amount = Math.max(0, params.p_amount);
+    const poolPart = Math.min(poolState.pool, amount);
+    const treasuryPart = Math.min(poolState.treasury, amount - poolPart);
+    poolState.pool -= poolPart;
+    poolState.treasury -= treasuryPart;
+    poolState.total_house_paid += poolPart + treasuryPart;
+    return [{ paid: poolPart + treasuryPart, pool_part: poolPart, treasury_part: treasuryPart }];
+  }
+  if (name === "economy_pool_refund_house") {
+    poolState.pool += params.p_pool_part;
+    poolState.treasury += params.p_treasury_part;
+    poolState.total_house_paid = Math.max(0, poolState.total_house_paid - params.p_pool_part - params.p_treasury_part);
+    return poolState.total_house_paid;
+  }
+  if (name === "economy_pool_add_loss") {
+    const amount = Math.max(0, params.p_amount);
+    const poolPart = Math.floor((amount * 7) / 10);
+    poolState.pool += poolPart;
+    poolState.treasury += amount - poolPart;
+    poolState.total_recycled += amount;
+    return [{ pool_part: poolPart, treasury_part: amount - poolPart }];
+  }
   if (name !== "transfer_coins") throw new Error("unexpected rpc " + name);
   const senderBalance = users.get(params.p_sender_id) ?? 0;
   if (senderBalance < params.p_amount) throw new BotApiError(400, "P0001");
@@ -646,10 +675,12 @@ test("API(bridge): submitEconomyOp は台帳が applying のオプに触らず p
   assert.equal(globalThis.__wbEconomyUsers.get(user), 3000, "成否曖昧なオプは再適用しない");
 });
 
-test("API(bridge): submitEconomyOp は PR1 対象外の earn を従来キューへ積む", async () => {
+test("API(bridge): submitEconomyOp は原資 DB が無い環境では earn を従来キューへ積む", async () => {
   const bridge = await import(economyOnlineUrl);
   const user = "688888888888888888";
   const key = `discord:${user}`;
+  globalThis.__wbPoolAvailable = false; // economy_pool_state 未適用の環境
+  bridge.resetEconomyPoolProbe();
   globalThis.__wbEconomyUsers.set(user, 3000);
   const op = eco.buildEconomyOp(
     { kind: "earn", userKey: key, discordId: user, amount: 500, reason: "harvest" },
@@ -677,4 +708,133 @@ test("API(bridge): submitEconomyOp は transfer の残高不足を failed(insuff
   assert.equal(result.state, "failed");
   assert.equal(result.op.error, "insufficient_funds");
   assert.equal(globalThis.__wbEconomyUsers.get(user), 50);
+});
+
+// ---------- 直接適用（earn / gamble、第2段） ----------
+
+async function setupPool(pool, treasury) {
+  globalThis.__wbPoolAvailable = true;
+  globalThis.__wbPool.pool = pool;
+  globalThis.__wbPool.treasury = treasury;
+  globalThis.__wbPool.total_recycled = 0;
+  globalThis.__wbPool.total_house_paid = 0;
+  const bridge = await import(economyOnlineUrl);
+  bridge.resetEconomyPoolProbe();
+}
+
+test("API(bridge): submitEconomyOp は earn を pay_house 経由で即時適用する（売る）", async () => {
+  const bridge = await import(economyOnlineUrl);
+  const user = "610101010101010101";
+  const key = `discord:${user}`;
+  await setupPool(1000, 500);
+  globalThis.__wbEconomyUsers.set(user, 100);
+  const op = eco.buildEconomyOp(
+    { kind: "earn", userKey: key, discordId: user, amount: 800, reason: "shop_sale" },
+    "op-direct-earn-2", Date.now(),
+  );
+  const historyBefore = (globalThis.__wbHistory ?? []).length;
+  const result = await bridge.submitEconomyOp(op);
+  assert.equal(result.state, "done");
+  assert.equal(result.op.appliedAmount, 800);
+  assert.equal(globalThis.__wbEconomyUsers.get(user), 900);
+  assert.equal(globalThis.__wbPool.pool, 200, "原資はプールから先に引かれる");
+  assert.equal(globalThis.__wbPool.treasury, 500);
+  const history = (globalThis.__wbHistory ?? []).slice(historyBefore);
+  assert.deepEqual(history, [{ sender_id: "WORLD_BOX", receiver_id: user, amount: 800, reason: "shop_sale" }]);
+  // 再提出しても二重に入金されない
+  const again = await bridge.submitEconomyOp(op);
+  assert.equal(again.state, "done");
+  assert.equal(globalThis.__wbEconomyUsers.get(user), 900);
+});
+
+test("API(bridge): submitEconomyOp の earn は原資の残りだけを払う（部分払い）", async () => {
+  const bridge = await import(economyOnlineUrl);
+  const user = "610202020202020202";
+  const key = `discord:${user}`;
+  await setupPool(100, 0);
+  globalThis.__wbEconomyUsers.set(user, 0);
+  const op = eco.buildEconomyOp(
+    { kind: "earn", userKey: key, discordId: user, amount: 800, reason: "harvest" },
+    "op-direct-earn-3", Date.now(),
+  );
+  const result = await bridge.submitEconomyOp(op);
+  assert.equal(result.state, "done");
+  assert.equal(result.op.appliedAmount, 100, "払えた分だけが appliedAmount");
+  assert.equal(globalThis.__wbEconomyUsers.get(user), 100);
+  // 原資が空なら done で 0（発行しない）
+  const op2 = eco.buildEconomyOp(
+    { kind: "earn", userKey: key, discordId: user, amount: 800, reason: "harvest" },
+    "op-direct-earn-4", Date.now(),
+  );
+  const result2 = await bridge.submitEconomyOp(op2);
+  assert.equal(result2.state, "done");
+  assert.equal(result2.op.appliedAmount, 0);
+  assert.equal(globalThis.__wbEconomyUsers.get(user), 100);
+});
+
+test("API(bridge): submitEconomyOp は gamble の勝ちをベット・原資・配当の規則どおり適用する", async () => {
+  const bridge = await import(economyOnlineUrl);
+  const user = "610303030303030303";
+  const key = `discord:${user}`;
+  await setupPool(1000, 0);
+  globalThis.__wbEconomyUsers.set(user, 1000);
+  const op = eco.buildEconomyOp(
+    { kind: "gamble", userKey: key, discordId: user, amount: 100, reason: "casino_dice", payout: 300 },
+    "op-direct-gamble-1", Date.now(),
+  );
+  const result = await bridge.submitEconomyOp(op);
+  assert.equal(result.state, "done");
+  assert.equal(result.op.appliedAmount, 300);
+  assert.equal(globalThis.__wbEconomyUsers.get(user), 1200, "1000 - ベット100 + 配当300");
+  assert.equal(globalThis.__wbPool.pool, 800, "利益分200だけが原資から出る");
+});
+
+test("API(bridge): submitEconomyOp は gamble の負けを還流し、残高不足は原資を戻して failed にする", async () => {
+  const bridge = await import(economyOnlineUrl);
+  const user = "610404040404040404";
+  const key = `discord:${user}`;
+  await setupPool(1000, 0);
+  globalThis.__wbEconomyUsers.set(user, 1000);
+  const lose = eco.buildEconomyOp(
+    { kind: "gamble", userKey: key, discordId: user, amount: 100, reason: "casino_dice", payout: 0 },
+    "op-direct-gamble-2", Date.now(),
+  );
+  const loseResult = await bridge.submitEconomyOp(lose);
+  assert.equal(loseResult.state, "done");
+  assert.equal(loseResult.op.appliedAmount, 0);
+  assert.equal(globalThis.__wbEconomyUsers.get(user), 900);
+  assert.equal(globalThis.__wbPool.pool, 1070, "負け分は 70% がプールへ還流");
+  assert.equal(globalThis.__wbPool.treasury, 30);
+  // 残高不足: 先に確保した原資は refund_house で戻り、残高も原資も動かない
+  const poor = "610505050505050505";
+  const poorKey = `discord:${poor}`;
+  globalThis.__wbEconomyUsers.set(poor, 50);
+  const poolBefore = globalThis.__wbPool.pool;
+  const op = eco.buildEconomyOp(
+    { kind: "gamble", userKey: poorKey, discordId: poor, amount: 100, reason: "casino_dice", payout: 300 },
+    "op-direct-gamble-3", Date.now(),
+  );
+  const result = await bridge.submitEconomyOp(op);
+  assert.equal(result.state, "failed");
+  assert.equal(result.op.error, "insufficient_funds");
+  assert.equal(globalThis.__wbEconomyUsers.get(poor), 50);
+  assert.equal(globalThis.__wbPool.pool, poolBefore, "確保した原資は戻っている");
+});
+
+test("API(bridge): submitEconomyOp は prepaid gamble の部分返しを還流して精算する", async () => {
+  const bridge = await import(economyOnlineUrl);
+  const user = "610606060606060606";
+  const key = `discord:${user}`;
+  await setupPool(1000, 0);
+  globalThis.__wbEconomyUsers.set(user, 500);
+  const op = eco.buildEconomyOp(
+    { kind: "gamble", userKey: key, discordId: user, amount: 100, reason: "casino_slot7", payout: 40, prepaid: true },
+    "op-direct-gamble-4", Date.now(),
+  );
+  const result = await bridge.submitEconomyOp(op);
+  assert.equal(result.state, "done");
+  assert.equal(result.op.appliedAmount, 40);
+  assert.equal(globalThis.__wbEconomyUsers.get(user), 540, "ベットは引かれず返し分だけ入る");
+  assert.equal(globalThis.__wbPool.pool, 1042, "戻らなかった60の70%が還流");
+  assert.equal(globalThis.__wbPool.treasury, 18);
 });
