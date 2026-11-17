@@ -468,6 +468,7 @@ const stallsOnlineStubUrl = dataUrl(`
 export async function loadStall() { return null; }
 export async function storeStall() { return true; }
 `);
+const railsUrl = bundleModule(["worldbox/rails.ts"], ["isSupplyConnected"]);
 const tilesRoute = await import(
   dataUrl(
     transpile("api/worldbox/tiles/route.ts", rootDir + "/app")
@@ -481,6 +482,7 @@ const tilesRoute = await import(
       .replaceAll('"@/lib/worldbox/save-online"', JSON.stringify(saveOnlineStubUrl))
       .replaceAll('"@/lib/worldbox/tiles"', JSON.stringify(tilesUrl))
       .replaceAll('"@/lib/worldbox/tiles-online"', JSON.stringify(tilesOnlineStubUrl))
+      .replaceAll('"@/lib/worldbox/rails"', JSON.stringify(railsUrl))
       .replaceAll('"@/lib/worldbox/containers"', JSON.stringify(containersBundleUrl))
       .replaceAll('"@/lib/worldbox/containers-online"', JSON.stringify(containersOnlineStubUrl))
       .replaceAll('"@/lib/worldbox/machines"', JSON.stringify(machinesUrl))

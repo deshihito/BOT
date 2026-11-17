@@ -22,9 +22,8 @@ import { bumpMetric, recordFirstStep } from "@/lib/worldbox/metrics-online";
 import { appendTileJournal, loadFrozen } from "@/lib/worldbox/ops-online";
 import { loadContainer, storeContainer } from "@/lib/worldbox/containers-online";
 import { withUserLock } from "@/lib/worldbox/user-lock";
-import {
-  isTilesEnabled, loadTileOverride, loadTileOverrides, storeTileOverride,
-} from "@/lib/worldbox/tiles-online";
+import { isTilesEnabled, loadTileOverride, loadTileOverrides, storeTileOverride } from "@/lib/worldbox/tiles-online";
+import { isSupplyConnected } from "@/lib/worldbox/rails";
 
 export const runtime = "nodejs";
 
@@ -270,9 +269,30 @@ export async function POST(request: Request) {
             current, profile, map, ownerKey, fields.x, fields.y, Date.now(),
           );
         } else {
+          // サプライライン: 収穫・採掘のときだけ、自国の首都と線路で
+          // つながっているかを全上書きから判定して渡す（ボーナス用）。
+          let supplyConnected = false;
+          if (fields.action === "harvest" || fields.action === "mine") {
+            const [allOverrides, nationsState] = await Promise.all([
+              loadTileOverrides(),
+              loadNationsState(),
+            ]);
+            const members = nationsState.members ?? {};
+            const myNation = members[ownerKey];
+            const capital = myNation ? (nationsState.nations ?? {})[myNation.nationId]?.capital : undefined;
+            if (capital) {
+              const nowMs = Date.now();
+              const activeOverrides: TileOverridesMap = {};
+              for (const [k, ov] of Object.entries(allOverrides)) {
+                if (isOverrideActive(ov, nowMs)) activeOverrides[k] = ov;
+              }
+              supplyConnected = isSupplyConnected(activeOverrides, capital, tx, ty);
+            }
+          }
           result = applyTileAction(
             current, profile, map, ownerKey,
             fields.action, fields.x, fields.y, fields.seedId, Date.now(),
+            { supplyConnected },
           );
         }
         if (!result.ok) {
