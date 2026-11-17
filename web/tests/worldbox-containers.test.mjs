@@ -503,7 +503,7 @@ test("API(containers): 未ログインは 401、コンテナが無いタイル�
   assert.equal((await notContainer.json()).error, "no_container");
 });
 
-test("API(containers): 本人の樽は空の状態で開け、他人の樽は 403", async () => {
+test("API(containers): 樽の中身は全員共有（他人の設置した樽も開けて出し入れできる）", async () => {
   resetStores();
   seedBarrel(MY_ID);
   const cookie = sessionCookie(ME, "owner");
@@ -516,15 +516,19 @@ test("API(containers): 本人の樽は空の状態で開け、他人の樽は 40
   assert.equal(data.container.slots.length, 10);
   assert.ok(data.container.slots.every((s) => s === null));
 
-  const otherCookie = sessionCookie(OTHER, "intruder");
-  const denied = await containersRoute.GET(apiRequest(`${URL_C}?x=${GRASS.x}&y=${GRASS.y}`, "GET", otherCookie));
-  assert.equal(denied.status, 403);
-  assert.equal((await denied.json()).error, "not_owner");
-  const deniedMove = await containersRoute.POST(apiRequest(URL_C, "POST", otherCookie, {
+  // 設置者以外も開ける（共有）
+  seedProfile(OTHER_KEY, profWith([slot("stone", 3), null, null, null, null], emptySlots(10)));
+  const otherCookie = sessionCookie(OTHER, "guest");
+  const opened = await containersRoute.GET(apiRequest(`${URL_C}?x=${GRASS.x}&y=${GRASS.y}`, "GET", otherCookie));
+  assert.equal(opened.status, 200, "他人の樽も開ける");
+  // 設置者以外も出し入れでき、設置者にも同じ中身が見える
+  const guestMove = await containersRoute.POST(apiRequest(URL_C, "POST", otherCookie, {
     action: "move", x: GRASS.x, y: GRASS.y,
     from: { side: "profile_hotbar", index: 0 }, to: { side: "container", index: 0 },
   }));
-  assert.equal(deniedMove.status, 403, "他人は出し入れもできない");
+  assert.equal(guestMove.status, 200, "他人も出し入れできる");
+  const ownerView = await containersRoute.GET(apiRequest(`${URL_C}?x=${GRASS.x}&y=${GRASS.y}`, "GET", cookie));
+  assert.deepEqual((await ownerView.json()).container.slots[0], { id: "stone", count: 3 }, "中身は共有される");
 });
 
 test("API(containers): 出し入れが保存され、GET に反映される", async () => {
@@ -622,6 +626,47 @@ test("API(tiles): 中身がある樽は掘れず、空にすると回収でき�
   assert.equal(globalThis.__wbContainers.has(CKEY), false, "コンテナ状態も消える");
 });
 
+test("API(tiles): 空の樽は設置者以外でも回収できる（中身があれば誰でも掘れない）", async () => {
+  resetStores();
+  seedBarrel(MY_ID);
+  seedProfile(OTHER_KEY, profWith(emptySlots(5), emptySlots(10)));
+  const otherCookie = sessionCookie(OTHER, "guest");
+  // 中身がある間は設置者以外でも掘れない
+  const filled = C.emptyContainer(MY_ID, "barrel");
+  filled.slots[0] = slot("stone", 1);
+  globalThis.__wbContainers.set(CKEY, C.serializeContainerState(filled));
+  const blocked = await tilesRoute.POST(apiRequest(URL_T, "POST", otherCookie, {
+    action: "mine_block", x: GRASS.x, y: GRASS.y,
+  }));
+  assert.equal(blocked.status, 409);
+  assert.equal((await blocked.json()).error, "not_empty");
+  // 空なら設置者以外でも回収でき、樽は掘った者のものになる
+  globalThis.__wbContainers.set(CKEY, C.serializeContainerState(C.emptyContainer(MY_ID, "barrel")));
+  const hit = await tilesRoute.POST(apiRequest(URL_T, "POST", otherCookie, {
+    action: "mine_block", x: GRASS.x, y: GRASS.y,
+  }));
+  assert.equal(hit.status, 200, "他人の空樽でもヒットできる");
+  const dug = await tilesRoute.POST(apiRequest(URL_T, "POST", otherCookie, {
+    action: "mine_block", x: GRASS.x, y: GRASS.y,
+  }));
+  assert.equal(dug.status, 200);
+  assert.deepEqual((await dug.json()).gained, { barrel: 1 }, "回収した樽は掘った者に入る");
+  assert.equal(globalThis.__wbContainerTiles.has(KEY), false);
+  // 対照: コンテナでない他人のブロックは従来どおり掘れない
+  resetStores();
+  seedProfile(MY_KEY, profWith([slot("dirt_block", 1), null, null, null, null], emptySlots(10)));
+  const cookie = sessionCookie(ME, "owner");
+  const placed = await tilesRoute.POST(apiRequest(URL_T, "POST", cookie, {
+    action: "place_block", x: GRASS.x, y: GRASS.y, itemId: "dirt_block",
+  }));
+  assert.equal(placed.status, 200);
+  const denied = await tilesRoute.POST(apiRequest(URL_T, "POST", otherCookie, {
+    action: "mine_block", x: GRASS.x, y: GRASS.y,
+  }));
+  assert.equal(denied.status, 403);
+  assert.equal((await denied.json()).error, "not_owner");
+});
+
 test("API(tiles, S4): 同じ樽への並行 mine_block でも回収は1回だけ（二重掘りの回帰防止）", async () => {
   resetStores();
   seedProfile(MY_KEY, profWith([slot("barrel", 1), null, null, null, null], emptySlots(10)));
@@ -702,7 +747,7 @@ test("API(containers): テントを拡張しても樽の中身が付いてくる
   assert.deepEqual(data.container.slots[0], { id: "stone", count: 3 }, "拡張前の樽の中身が読める");
 });
 
-test("API(containers): ロビーの備え付け樽が収納として開け、中身はプレイヤー別に保存される", async () => {
+test("API(containers): ロビーの備え付け樽が収納として開け、中身は全員共有で保存される", async () => {
   resetStores();
   // ロビー1Fの備え付け樽は (15, 24)、木箱は (16, 23)
   globalThis.__wbContainerPresence = [
@@ -722,17 +767,17 @@ test("API(containers): ロビーの備え付け樽が収納として開け、中
   }));
   assert.equal(moved.status, 200);
   assert.deepEqual((await moved.json()).container.slots[0], { id: "wood", count: 5 });
-  // 保存キーはプレイヤー別（lobby@<presenceId>|15,24）
-  assert.ok(globalThis.__wbContainers.has(`lobby@${MY_ID}|15,24`), "プレイヤー別のキーで保存される");
-  // 別のプレイヤーが同じ樽を開くと空（共用空間でも中身は混ざらない）
+  // 保存キーは共有（lobby|15,24）
+  assert.ok(globalThis.__wbContainers.has("lobby|15,24"), "共有キーで保存される");
+  // 別のプレイヤーが同じ樽を開くと、入れた物が見える（全員共有）
   globalThis.__wbContainerPresence = [
     { id: T.presenceIdFor(OTHER_KEY), space: "lobby", x: 14, y: 24, ts: Date.now() },
   ];
   seedProfile(OTHER_KEY, profWith(emptySlots(5), emptySlots(10)));
-  const otherCookie = sessionCookie(OTHER, "intruder");
+  const otherCookie = sessionCookie(OTHER, "guest");
   const resB = await containersRoute.GET(apiRequest(`${URL_C}?x=15&y=24&space=lobby`, "GET", otherCookie));
   assert.equal(resB.status, 200);
-  assert.ok((await resB.json()).container.slots.every((s) => s === null), "他人の中身は見えない");
+  assert.deepEqual((await resB.json()).container.slots[0], { id: "wood", count: 5 }, "中身は全員に共有される");
   // 収納でない備え付け（ベンチ）は 404
   globalThis.__wbContainerPresence = [
     { id: MY_ID, space: "lobby", x: 9, y: 6, ts: Date.now() },
@@ -766,7 +811,7 @@ test("クライアント: コンテナのタップ分岐・パネル・回収が
   const containersRouteSrc2 = fs.readFileSync(path.join(rootDir, "app/api/worldbox/containers/route.ts"), "utf8");
   assert.ok(containersRouteSrc2.includes("buildTent"), "コンテナルートがテント内装を解決していない");
   assert.ok(containersRouteSrc2.includes("buildLobby"), "コンテナルートがロビー内装を解決していない");
-  assert.ok(containersRouteSrc2.includes("fixtureStoreSpace"), "ロビー収納のプレイヤー別キーが無い");
+  assert.ok(containersRouteSrc2.includes("fixtureStoreSpace"), "備え付け収納の保存キーが無い");
   assert.ok(client.includes("not_empty"), "not_empty のラベルが無い");
   assert.ok(client.includes("中身が入っている"), "not_empty の文面が無い");
   // 空のときだけ回収ボタンを出し、mine_block を送る

@@ -2,7 +2,7 @@
 // 設置した樽・宝箱に物をしまう仕組み。コンテナは furniture（facility）
 // としてタイルに置かれ、中身はタイル単位で別に持つ（保存は
 // containers-online.ts、bot_kv 名前空間 "worldbox_containers"）。
-// 開ける・出し入れできるのは設置した所有者だけ。スロット移動の意味論は
+// 中身は全員共有（誰でも開けて出し入れできる）。スロット移動の意味論は
 // インベントリ整理（profile.ts の moveSlot）に揃える: 空き枠へは移動、
 // 同種は合算（上限 STACK_MAX、あふれた分は元の枠に残る）、異種は入れ替え。
 import { itemById } from "./items";
