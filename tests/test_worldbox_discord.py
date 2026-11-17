@@ -196,6 +196,44 @@ def test_handle_message_no_link():
     assert asyncio.run(worker.handle_message(snapshot())) is False
 
 
+class SlowBoardKV(FakeKV):
+    """読み書きの間に制御を手放す KV（並行処理の競合を再現する）。"""
+
+    async def load_one(self, key):
+        await asyncio.sleep(0)
+        return self.records.get(key)
+
+    async def set(self, key, value):
+        await asyncio.sleep(0)
+        self.records[key] = value
+
+
+def test_handle_message_concurrent_posts_do_not_lose_entries():
+    # 同時投稿の後勝ちで先のエントリが欠落しない（ギルド単位ロック）。
+    # ロックが無いと両方が同じ旧状態を読んで片方だけが残る。
+    settings = {GID: json.dumps({"mode": "channel", "channelId": CID})}
+    board_kv = SlowBoardKV({f"union:{GID}": json.dumps([])})
+    worker = wd.WorldBoxDiscordWorker(
+        directory_kv=FakeKV(),
+        nations_kv=FakeKV(),
+        settings_kv=FakeKV(settings),
+        board_kv=board_kv,
+        guild_channels_provider=lambda: [],
+        global_channel_ids_provider=lambda: set(),
+    )
+
+    async def run():
+        return await asyncio.gather(
+            worker.handle_message(snapshot(message_id="555555555555555551", content="1通目")),
+            worker.handle_message(snapshot(message_id="555555555555555552", content="2通目")),
+            worker.handle_message(snapshot(message_id="555555555555555553", content="3通目")),
+        )
+
+    assert asyncio.run(run()) == [True, True, True]
+    entries = json.loads(board_kv.records[f"union:{GID}"])
+    assert sorted(e["text"] for e in entries) == ["1通目", "2通目", "3通目"]
+
+
 # --- ディレクトリ公開の失敗吸収（#7 ループ無言死の防止） ---
 
 def test_publish_directory_survives_provider_failure():

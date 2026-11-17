@@ -346,6 +346,8 @@ export type MyGuildView = {
 
 export type NationsResponse = {
   nations: NationView[];
+  /** 戦争中の国のマーク表示（war.ts の warMarksByNation）。国 ID → 状態。 */
+  warMarks: Record<string, { markHp: number | null; markMax: number }>;
   me: { nationId: string; role: NationRole } | null;
   /** プレゼンス ID → 所属国の色（他プレイヤーの名前表示に色ドットを付ける用）。 */
   playerNations: Record<string, { nationId: string; color: string }>;
@@ -390,6 +392,7 @@ export function buildNationsResponse(
   const mine = selfKey ? state.members[selfKey] : undefined;
   return {
     nations: nationViews(state),
+    warMarks: {},
     me: mine ? { nationId: mine.nationId, role: mine.role } : null,
     playerNations: playerNationMap(state),
     loggedIn: selfKey !== null,

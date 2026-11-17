@@ -20,6 +20,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -236,6 +237,12 @@ class WorldBoxDiscordWorker:
         self._remote_down = False
         # guild_id -> (取得時刻ms, link, directory)
         self._link_cache: dict[str, tuple[int, tuple[str, str | None], dict[str, Any] | None]] = {}
+        # 掲示の read-modify-write をギルド単位で直列化するロック。
+        # on_message は投稿ごとに並行して走るため、ロック無しでは
+        # 同時投稿の後勝ちで先のエントリが欠落する（lost-update）。
+        # Web 側も同じキーを書くが bot_kv に CAS が無いため、プロセスを
+        # またぐ同時書きの窓は残る（Web 側も自プロセス内は直列化済み）。
+        self._board_locks: dict[str, asyncio.Lock] = {}
 
     async def publish_directory_once(self) -> int:
         """国が存在する全ギルドのディレクトリを書き直す。公開した件数を返す。"""
@@ -322,10 +329,12 @@ class WorldBoxDiscordWorker:
         if entry["id"] == "discord:":
             return False
         board_key = f"union:{guild_id}"
+        lock = self._board_locks.setdefault(guild_id, asyncio.Lock())
         try:
-            raw = await self._board_kv.load_one(board_key)
-            board = append_board_entry(parse_board(raw), entry, now_ms)
-            await self._board_kv.set(board_key, json.dumps(board))
+            async with lock:
+                raw = await self._board_kv.load_one(board_key)
+                board = append_board_entry(parse_board(raw), entry, now_ms)
+                await self._board_kv.set(board_key, json.dumps(board))
         except Exception:
             logger.warning("worldbox discord: 掲示への取り込みに失敗しました（guild=%s）", guild_id)
             return False

@@ -5,6 +5,7 @@
 // 状態の正はサーバー（/api/worldbox/guild-shop）。購入は区画の近くでのみ。
 import { useCallback, useEffect, useState } from "react";
 import type { PlayerProfile } from "@/lib/worldbox/profile";
+import { onGuildShopChanged } from "@/lib/worldbox/guild-shop-push";
 import { ItemAnnotation, ItemSlot, ItemSlotGrid } from "./ItemSlotGrid";
 
 const panelStyle: React.CSSProperties = {
@@ -23,7 +24,7 @@ const input: React.CSSProperties = {
   background: "rgba(255,255,255,0.08)", color: "#fff", fontSize: 13,
 };
 
-type ListingView = { id: string; itemId: string; name: string; available: number; price: number };
+type ListingView = { id: string; itemId: string; name: string; available: number; price: number; mine: boolean };
 type PlotView = { idx: number; guildId: string; guildName: string; listings: ListingView[] } | null;
 type ShopView = {
   plots: PlotView[];
@@ -58,6 +59,9 @@ export default function WorldBoxGuildShopPanel({
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  // 他人の借り換え・出品・購入が relay の poke で届いたら取り直す
+  useEffect(() => onGuildShopChanged(() => { void refresh(); }), [refresh]);
 
   const post = async (payload: Record<string, unknown>) => {
     setMsg("");
@@ -163,7 +167,7 @@ export default function WorldBoxGuildShopPanel({
                             <button type="button" style={btn} onClick={() => { void post({ action: "buy", listingId: sel.id, count: 1 }); }}>
                               買う（{sel.price}）
                             </button>
-                            {shop.myGuildId === plot.guildId && (
+                            {(sel.mine || (isLeader && shop.myGuildId === plot.guildId)) && (
                               <button type="button" style={btn} onClick={() => { void post({ action: "unlist", listingId: sel.id }); }}>
                                 下げる
                               </button>

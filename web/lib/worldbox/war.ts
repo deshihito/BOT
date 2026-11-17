@@ -112,6 +112,24 @@ export function warLiveAt(war: War, now: number): boolean {
   return war.status === "active" && now <= war.endsAt;
 }
 
+/**
+ * 世界地図のマーク表示用: 戦争中の国 → マークの状態。
+ * 防衛側は自国マークの HP（削られている対象そのもの）、攻撃側は
+ * markHp null（自国マークは削られていない。戦争中であることだけ示す）。
+ * 期限切れ（未精算）の戦争は warLiveAt で除外する（タイル判定と同じ規則）。
+ */
+export type WarMarkView = { markHp: number | null; markMax: number };
+
+export function warMarksByNation(state: WarState, now: number): Record<string, WarMarkView> {
+  const out: Record<string, WarMarkView> = {};
+  for (const war of Object.values(state.wars)) {
+    if (!warLiveAt(war, now)) continue;
+    out[war.defenderId] = { markHp: war.markHp, markMax: war.markMax };
+    if (!(war.attackerId in out)) out[war.attackerId] = { markHp: null, markMax: war.markMax };
+  }
+  return out;
+}
+
 export type DeclareWarResult =
   | { ok: true; state: WarState; war: War }
   | { ok: false; error: string };

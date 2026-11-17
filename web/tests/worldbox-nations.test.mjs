@@ -392,6 +392,13 @@ const nationSettingsUrl = dataUrl(
     .replaceAll('"./nations"', JSON.stringify(nationsUrl)),
 );
 const userLockUrl = dataUrl(transpile("worldbox/user-lock.ts"));
+const warUrl = dataUrl(transpile("worldbox/war.ts"));
+const warOnlineUrl = dataUrl(
+  transpile("worldbox/war-online.ts")
+    .replaceAll('"../bot-api"', JSON.stringify(botApiStubUrl))
+    .replaceAll('"./war"', JSON.stringify(warUrl))
+    .replaceAll('"./user-lock"', JSON.stringify(userLockUrl)),
+);
 const nationSettingsOnlineUrl = dataUrl(
   transpile("worldbox/nation-settings-online.ts")
     .replaceAll('"../bot-api"', JSON.stringify(botApiStubUrl))
@@ -426,7 +433,9 @@ const nationsRoute = await import(
       .replaceAll('"@/lib/worldbox/station-online"', JSON.stringify(stationStubUrl))
       .replaceAll('"@/lib/worldbox/guilds"', JSON.stringify(guildsUrl))
       .replaceAll('"@/lib/worldbox/nation-settings"', JSON.stringify(nationSettingsUrl))
-      .replaceAll('"@/lib/worldbox/nation-settings-online"', JSON.stringify(nationSettingsOnlineUrl)),
+      .replaceAll('"@/lib/worldbox/nation-settings-online"', JSON.stringify(nationSettingsOnlineUrl))
+      .replaceAll('"@/lib/worldbox/war"', JSON.stringify(warUrl))
+      .replaceAll('"@/lib/worldbox/war-online"', JSON.stringify(warOnlineUrl)),
   ),
 );
 const spawnUrl = dataUrl(

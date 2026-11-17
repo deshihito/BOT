@@ -4,7 +4,7 @@ import { playerAttack } from "@/lib/worldbox/arena";
 import { buildEconomyOp, type EconomyOp } from "@/lib/worldbox/economy-bridge";
 import {
   deleteEconomyOp, enqueueEconomyOpOnce, findEconomyOp, isEconomyEnabled, loadMyEconomyOps,
-  readUserBalance, waitForOpsDone,
+  readUserBalance, submitEconomyOp, waitForOpsDone,
 } from "@/lib/worldbox/economy-bridge-online";
 import { loadProfile } from "@/lib/worldbox/profile-online";
 import {
@@ -61,6 +61,30 @@ async function enqueue(userKey: string, discordId: string, input: {
   if (!op) return null;
   const stored = input.id ? await enqueueEconomyOpOnce(op) : false;
   return stored ? op : null;
+}
+
+/**
+ * 参加費 spend の提出（直接適用が正、キューはフォールバック）。
+ * spend は常時直接適用の対象なので通常は done / failed がその場で
+ * 確定し、決闘を作る前に両者の支払いがそろう。pending は直接適用が
+ * 使えなかった場合のみで、その間は従来どおり act/leave の入口で
+ * loadFeeStates が done を待ち、不成立なら settleVoidedFees が精算する。
+ * null は直接もキューも使えなかった。
+ */
+async function submitFee(
+  userKey: string,
+  discordId: string,
+  id: string,
+): Promise<{ op: EconomyOp; state: "done" | "failed" | "pending" } | null> {
+  const op = buildEconomyOp(
+    { kind: "spend", userKey, discordId, amount: PVP_FEE, reason: "arena_pvp_entry" },
+    id,
+    Date.now(),
+  );
+  if (!op) return null;
+  const submitted = await submitEconomyOp(op);
+  if (submitted.state === "unavailable") return null;
+  return { op: submitted.op, state: submitted.state };
 }
 
 async function effectiveBalanceOf(ownerKey: string, discordId: string): Promise<number | null> {
@@ -149,7 +173,10 @@ async function refundFee(duel: PvpDuel, player: PvpPlayer): Promise<void> {
  *   done になっていたら（削除と適用の競合）返金に切り替える。
  * - failed / 読めない: 金は動いていないので何もしない。
  * 渡された状態は待機前のことがあるため、判断は直前の再読で行う。
- * 残る競合窓（削除とワーカー適用のすれ違い）は共有ノート参照。
+ * 参加費は submitFee の直接適用で通常その場で done/failed が確定する
+ * ため、この精算が pending を相手にするのは直接適用が使えずキューへ
+ * 寄せた場合だけ。その場合に限り、削除とワーカー適用のすれ違いで
+ * 返金が漏れる競合窓が残る（共有ノート参照）。
  */
 async function settleVoidedFees(duel: PvpDuel, feeStates: FeeOp[]): Promise<void> {
   for (let i = 0; i < 2; i++) {
@@ -204,19 +231,26 @@ async function handlePost(request: Request, session: AuthedSession) {
         continue;
       }
       const next: PvpDuel = createDuel(a, b, Date.now());
-      const feeA = await enqueue(a.ownerKey, a.discordId, {
-        kind: "spend", amount: PVP_FEE, reason: "arena_pvp_entry", id: next.feeOpIds[0],
-      });
-      const feeB = feeA
-        ? await enqueue(b.ownerKey, b.discordId, {
-            kind: "spend", amount: PVP_FEE, reason: "arena_pvp_entry", id: next.feeOpIds[1],
-          })
-        : null;
+      const feeA = await submitFee(a.ownerKey, a.discordId, next.feeOpIds[0]);
+      if (feeA && feeA.state === "failed") {
+        // 直接適用で確定失敗（残高不足）: 払えない側を待ちから外し、
+        // 残りの並びで組み直す（残高の事前確認で落ちるのと同じ扱い）。
+        queue = queue.filter((e) => e.discordId !== a.discordId);
+        continue;
+      }
+      const feeB = feeA ? await submitFee(b.ownerKey, b.discordId, next.feeOpIds[1]) : null;
+      if (feeB && feeB.state === "failed") {
+        // B は払えなかった。A の参加費を精算し（done は返金、pending は
+        // 取消し）、B を待ちから外して組み直す。
+        await settleVoidedFees(next, [feeA?.op ?? null, feeB.op]);
+        queue = queue.filter((e) => e.discordId !== b.discordId);
+        continue;
+      }
       if (!feeA || !feeB) {
         // 片方の参加費だけが積まれたら決闘は作らない（B3）: もう片方の
         // 参加費を精算し、宙吊りの支払いを残さない。決闘が無いため
         // 参加費はこの場でしか精算できない。
-        await settleVoidedFees(next, [feeA, null]);
+        await settleVoidedFees(next, [feeA?.op ?? null, null]);
         break;
       }
       await savePvpDuel(next);
