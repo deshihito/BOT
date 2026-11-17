@@ -342,6 +342,8 @@ export type MyGuildView = {
   hasNation: boolean;
   /** Discord 権限から導いた、そのサーバーでの自分の役職。 */
   myRole: NationRole;
+  /** 入国料（コイン）。ルートが国家設定から付ける。未設定は 0。 */
+  entryFee?: number;
 };
 
 export type NationsResponse = {

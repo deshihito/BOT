@@ -318,6 +318,10 @@ const NATION_ERROR_LABEL: Record<string, string> = {
   not_in_nation: "国に所属していません",
   king_must_transfer_or_disband: "国民がいる間、王は離脱できません",
   not_at_guild_board: "ギルドボードの前で操作してください",
+  insufficient_coins: "コインが足りません",
+  fee_failed: "手数料の支払いに失敗しました",
+  fee_pending: "手数料の支払いを確認中です",
+  economy_unavailable: "いま支払いができません",
   unauthorized: "ログインが必要です",
   forbidden: "その権限がありません",
 };

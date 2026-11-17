@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getRequestSession, publicOrigin, sessionOwnerKey } from "@/lib/auth";
 import {
-  TAX_RATE_MAX, isPrivateNation, memberKeysOf, normalizeTaxRate, resolveMemberRole,
+  ENTRY_FEE_MAX, EXIT_FEE_RATE_MAX, TAX_RATE_MAX, isPrivateNation, memberKeysOf, normalizeEntryFee, normalizeExitFeeRate, normalizeTaxRate, resolveMemberRole,
   type NationSettings,
 } from "@/lib/worldbox/nation-settings";
 import {
@@ -81,6 +81,9 @@ async function buildView(state: NationsState, guildId: string, settings: NationS
     visibility: settings.visibility,
     isPrivate: isPrivateNation(settings),
     taxCollected: settings.taxCollected,
+    entryFee: settings.entryFee,
+    exitFeeRate: settings.exitFeeRate,
+    feesCollected: settings.feesCollected,
     members,
   };
 }
@@ -112,6 +115,7 @@ export async function POST(request: Request) {
   const fields = (body ?? {}) as {
     action?: unknown; taxRate?: unknown; visibility?: unknown;
     targetKey?: unknown; minister?: unknown;
+    entryFee?: unknown; exitFeeRate?: unknown;
   };
   const ownerKey = sessionOwnerKey(session);
   if ((await loadMyLobbyStation(ownerKey)) !== "guild") return err("not_at_guild_board", 409);
@@ -138,6 +142,20 @@ export async function POST(request: Request) {
     }
     const visibility = fields.visibility;
     next = await updateNationSettings(guildId, (cur) => ({ ...cur, visibility, updatedAt: now }));
+  } else if (fields.action === "set_entry_fee") {
+    const fee = fields.entryFee;
+    if (typeof fee !== "number" || !Number.isFinite(fee) || fee < 0 || fee > ENTRY_FEE_MAX) {
+      return err("invalid_entry_fee", 400);
+    }
+    const entryFee = normalizeEntryFee(fee);
+    next = await updateNationSettings(guildId, (cur) => ({ ...cur, entryFee, updatedAt: now }));
+  } else if (fields.action === "set_exit_fee") {
+    const rate = fields.exitFeeRate;
+    if (typeof rate !== "number" || !Number.isFinite(rate) || rate < 0 || rate > EXIT_FEE_RATE_MAX) {
+      return err("invalid_exit_fee_rate", 400);
+    }
+    const exitFeeRate = normalizeExitFeeRate(rate);
+    next = await updateNationSettings(guildId, (cur) => ({ ...cur, exitFeeRate, updatedAt: now }));
   } else if (fields.action === "set_minister") {
     const targetKey = fields.targetKey;
     if (typeof targetKey !== "string" || typeof fields.minister !== "boolean") {

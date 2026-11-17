@@ -12,9 +12,13 @@ import { loadWorldBoxSave, storeWorldBoxSave } from "@/lib/worldbox/save-online"
 import { putPresence } from "@/lib/worldbox/presence-online";
 import { annotateMyGuilds, getUserGuilds, roleInGuild, type UserGuildsResult } from "@/lib/worldbox/guilds";
 import {
-  isNationHiddenFrom, isPrivateNation, memberKeysOf, resolveMemberRole,
+  entryFeeOf, exitFeeAmount, exitFeeRateOf, isNationHiddenFrom, isPrivateNation, memberKeysOf, resolveMemberRole,
 } from "@/lib/worldbox/nation-settings";
-import { loadNationSettings, loadNationSettingsMap } from "@/lib/worldbox/nation-settings-online";
+import { loadNationSettings, loadNationSettingsMap, updateNationSettings } from "@/lib/worldbox/nation-settings-online";
+import { buildEconomyOp } from "@/lib/worldbox/economy-bridge";
+import {
+  isEconomyEnabled, readUserBalance, submitEconomyOp, waitForOpDone,
+} from "@/lib/worldbox/economy-bridge-online";
 import { warMarksByNation } from "@/lib/worldbox/war";
 import { isWarsEnabled, loadWarState } from "@/lib/worldbox/war-online";
 
@@ -25,8 +29,10 @@ export const runtime = "nodejs";
 //   （誰でも読める。ゲストは国一覧のみ。ログイン中は自分の参加サーバー一覧に
 //   国の有無と役職を付け、所属中の役職は Discord 権限から読み直して直す）
 // POST { action: "found", guildId } : 建国（サーバーオーナーのみ。国名はサーバー名）
-// POST { action: "join", guildId } : 参加（そのサーバーのメンバーのみ。役職は権限由来）
+// POST { action: "join", guildId } : 参加（そのサーバーのメンバーのみ。役職は権限由来）。
+//   移動先が入国料を設定していれば徴収する（払えなければ参加しない）。
 // POST { action: "leave" } : 離脱。王は国民がいる間は離脱できず、一人なら解散。
+//   移動元が出金料率を設定していれば、所持金 × 料率を徴収する（王の解散は免除）。
 // POST { action: "travel" } : 所属国のユニオンマーク（首都）へ移動する。
 //   所属の検証はサーバー側で行い、移動はセーブとプレゼンスに反映する。
 //   料金・クールダウンは当面なし（定数は nations.ts の FAST_TRAVEL_*）。
@@ -98,6 +104,11 @@ export async function GET(request: Request) {
   // 国家設定（公開/非公開・任命大臣）を反映する: 非公開の国は国一覧に
   // 載せない（自国民には自国だけ見える）。自分の役職は任命大臣込みで解決する。
   const settingsMap = await loadNationSettingsMap();
+  // 参加先の入国料を一覧に付ける（0 の国は無料）。
+  response.myGuilds = response.myGuilds.map((g) => ({
+    ...g,
+    entryFee: g.hasNation ? entryFeeOf(settingsMap.get(g.guildId)) : 0,
+  }));
   const myMembership = selfKey ? state.members[selfKey] : undefined;
   response.nations = response.nations.filter(
     (n) => !isNationHiddenFrom(settingsMap.get(n.guildId), n.guildId, myMembership?.nationId ?? null),
@@ -125,6 +136,40 @@ export async function GET(request: Request) {
     if (resolved) response.me = { nationId: myMembership.nationId, role: resolved.role };
   }
   return NextResponse.json(response, { headers: NO_STORE });
+}
+
+type FeeCharge = { ok: true } | { ok: false; error: string; status: number };
+
+/**
+ * 入国料・出金料の徴収（即時 spend。カジノの先払いと同じ交付ゲート）:
+ * done が確定したときだけ ok。残高不足は insufficient_coins、
+ * 経済が使えない状態は economy_unavailable。
+ */
+async function chargeNationFee(
+  ownerKey: string,
+  discordId: string | null,
+  amount: number,
+  reason: string,
+): Promise<FeeCharge> {
+  if (amount <= 0) return { ok: true };
+  if (!discordId || !isEconomyEnabled()) return { ok: false, error: "economy_unavailable", status: 503 };
+  const balance = await readUserBalance(discordId);
+  if (balance === null) return { ok: false, error: "economy_unavailable", status: 503 };
+  if (balance < amount) return { ok: false, error: "insufficient_coins", status: 409 };
+  const op = buildEconomyOp(
+    { kind: "spend", userKey: ownerKey, discordId, amount, reason },
+    crypto.randomUUID(),
+    Date.now(),
+  );
+  if (!op) return { ok: false, error: "fee_failed", status: 409 };
+  const submitted = await submitEconomyOp(op);
+  if (submitted.state === "unavailable") return { ok: false, error: "economy_unavailable", status: 503 };
+  if (submitted.state === "done") return { ok: true };
+  if (submitted.state === "failed") return { ok: false, error: "fee_failed", status: 409 };
+  const done = await waitForOpDone(ownerKey, submitted.op.id);
+  if (done && done.status === "done") return { ok: true };
+  if (done && done.status === "failed") return { ok: false, error: "fee_failed", status: 409 };
+  return { ok: false, error: "fee_pending", status: 409 };
 }
 
 export async function POST(request: Request) {
@@ -209,6 +254,41 @@ export async function POST(request: Request) {
   if (!result.ok) {
     return NextResponse.json({ error: result.error }, { status: errorStatus(result.error), headers: NO_STORE });
   }
+
+  // 移民コントロール（経済仕様書 §7.2）: 参加は移動先の入国料、離脱は
+  // 移動元の出金料率 × 所持金を徴収する。徴収分は当面シンクで、累計を
+  // 国家設定の feesCollected（表示用）へ加算する。徴収できなければ
+  // 所属は変更しない。王の解散（disbanded な離脱）は出金料を免除する。
+  const discordId = session.provider === "discord" ? session.id : null;
+  if (action === "join" && typeof fields.guildId === "string") {
+    const fee = entryFeeOf(await loadNationSettings(fields.guildId));
+    if (fee > 0) {
+      const charged = await chargeNationFee(ownerKey, discordId, fee, "nation_entry_fee");
+      if (!charged.ok) return errorResponse(charged.error, charged.status);
+      await updateNationSettings(fields.guildId, (cur) => ({
+        ...cur, feesCollected: cur.feesCollected + fee,
+      }));
+    }
+  } else if (action === "leave" && !result.disbanded) {
+    const from = state.members[ownerKey];
+    if (from) {
+      const rate = exitFeeRateOf(await loadNationSettings(from.nationId));
+      if (rate > 0) {
+        if (!discordId || !isEconomyEnabled()) return errorResponse("economy_unavailable", 503);
+        const balance = await readUserBalance(discordId);
+        if (balance === null) return errorResponse("economy_unavailable", 503);
+        const fee = exitFeeAmount(balance, rate);
+        if (fee > 0) {
+          const charged = await chargeNationFee(ownerKey, discordId, fee, "nation_exit_fee");
+          if (!charged.ok) return errorResponse(charged.error, charged.status);
+          await updateNationSettings(from.nationId, (cur) => ({
+            ...cur, feesCollected: cur.feesCollected + fee,
+          }));
+        }
+      }
+    }
+  }
+
   const stored = await storeNationsState(result.state);
   if (!stored) {
     return NextResponse.json({ error: "nations_failed" }, { status: 500, headers: NO_STORE });

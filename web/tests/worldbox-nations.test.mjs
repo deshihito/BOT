@@ -419,6 +419,26 @@ export async function loadMyLobbyStation() {
   return globalThis.__wbStationValue ?? null;
 }
 `);
+const economyBridgeStubUrl = dataUrl(`
+export function buildEconomyOp(input, id, now) {
+  return { id, kind: input.kind, userKey: input.userKey, discordId: input.discordId, amount: input.amount, reason: input.reason, status: "pending", createdAt: now };
+}
+`);
+const economyBridgeOnlineStubUrl = dataUrl(`
+export function isEconomyEnabled() {
+  return globalThis.__wbEconomyEnabled ?? false;
+}
+export async function readUserBalance() {
+  return globalThis.__wbBalance ?? null;
+}
+export async function submitEconomyOp(op) {
+  (globalThis.__wbSubmittedOps ??= []).push(op);
+  return globalThis.__wbSubmitResult ?? { state: "done", op };
+}
+export async function waitForOpDone() {
+  return globalThis.__wbWaitedOp ?? null;
+}
+`);
 const nationsRoute = await import(
   dataUrl(
     transpile("api/worldbox/nations/route.ts", rootDir + "/app")
@@ -434,6 +454,8 @@ const nationsRoute = await import(
       .replaceAll('"@/lib/worldbox/guilds"', JSON.stringify(guildsUrl))
       .replaceAll('"@/lib/worldbox/nation-settings"', JSON.stringify(nationSettingsUrl))
       .replaceAll('"@/lib/worldbox/nation-settings-online"', JSON.stringify(nationSettingsOnlineUrl))
+      .replaceAll('"@/lib/worldbox/economy-bridge"', JSON.stringify(economyBridgeStubUrl))
+      .replaceAll('"@/lib/worldbox/economy-bridge-online"', JSON.stringify(economyBridgeOnlineStubUrl))
       .replaceAll('"@/lib/worldbox/war"', JSON.stringify(warUrl))
       .replaceAll('"@/lib/worldbox/war-online"', JSON.stringify(warOnlineUrl)),
   ),
@@ -588,11 +610,11 @@ test("API(nations): 建国はオーナーのみ・国名はサーバー名・参
   // GET の myGuilds 注釈（国の有無・自分の役職）
   const viewB = await (await nationsRoute.GET(nationsRequest("GET", cookieB))).json();
   assert.deepEqual(viewB.myGuilds, [
-    { guildId: ALPHA, name: "あご鯖", owner: false, hasNation: true, myRole: "citizen" },
-    { guildId: BETA, name: "べた鯖", owner: false, hasNation: false, myRole: "minister" },
+    { guildId: ALPHA, name: "あご鯖", owner: false, hasNation: true, myRole: "citizen", entryFee: 0 },
+    { guildId: BETA, name: "べた鯖", owner: false, hasNation: false, myRole: "minister", entryFee: 0 },
   ]);
   const viewA = await (await nationsRoute.GET(nationsRequest("GET", cookieA))).json();
-  assert.deepEqual(viewA.myGuilds[0], { guildId: ALPHA, name: "あご鯖", owner: true, hasNation: true, myRole: "king" });
+  assert.deepEqual(viewA.myGuilds[0], { guildId: ALPHA, name: "あご鯖", owner: true, hasNation: true, myRole: "king", entryFee: 0 });
   assert.equal(viewA.nations[0].members, 2);
 
   // 王は国民がいる間は離脱できない
@@ -862,5 +884,63 @@ test("API(nations): 役職の操作はギルドボードの前でのみ（場所
     assert.equal((await nationsRoute.POST(nationsRequest("POST", cookieJ, { action: "leave" }))).status, 200);
   } finally {
     globalThis.__wbStationValue = "guild";
+  }
+});
+
+test("API(nations): 入国料・出金料（移民コントロール）— 払えなければ所属は変わらない", async () => {
+  const GAMMA = "900000000000000013"; // がま鯖
+  const cookieG = guildUser("200000000000000011", "king-g", "a7", [
+    discordGuild(GAMMA, "がま鯖", true, "0"),
+  ]);
+  const cookieH = guildUser("200000000000000012", "user-h", "b8", [
+    discordGuild(GAMMA, "がま鯖", false, "0"),
+  ]);
+  globalThis.__wbStationValue = "guild";
+  assert.equal((await nationsRoute.POST(nationsRequest("POST", cookieG, { action: "found", guildId: GAMMA }))).status, 200);
+
+  // 国家設定を直接シード: 入国料 500・出金料率 50%
+  const settingsKey = "worldbox_nation_settings " + GAMMA;
+  const seed = { taxRate: 0.05, visibility: "open", ministers: [], taxCollected: 0, entryFee: 500, exitFeeRate: 0.5, feesCollected: 0, updatedAt: 1 };
+  globalThis.__wbNationsStore.set(settingsKey, JSON.stringify(seed));
+
+  globalThis.__wbEconomyEnabled = true;
+  globalThis.__wbSubmittedOps = [];
+  try {
+    // 残高不足では参加できず、所属も付かない
+    globalThis.__wbBalance = 100;
+    const poor = await nationsRoute.POST(nationsRequest("POST", cookieH, { action: "join", guildId: GAMMA }));
+    assert.equal(poor.status, 409);
+    assert.equal((await poor.json()).error, "insufficient_coins");
+    const viewPoor = await (await nationsRoute.GET(nationsRequest("GET", cookieH))).json();
+    assert.equal(viewPoor.me, null);
+    assert.equal(globalThis.__wbSubmittedOps.length, 0);
+
+    // 残高が足りれば入国料 500 が徴収されて参加できる
+    globalThis.__wbBalance = 1000;
+    const join = await nationsRoute.POST(nationsRequest("POST", cookieH, { action: "join", guildId: GAMMA }));
+    assert.equal(join.status, 200);
+    assert.equal(globalThis.__wbSubmittedOps.length, 1);
+    assert.equal(globalThis.__wbSubmittedOps[0].kind, "spend");
+    assert.equal(globalThis.__wbSubmittedOps[0].amount, 500);
+    assert.equal(globalThis.__wbSubmittedOps[0].reason, "nation_entry_fee");
+    let stored = JSON.parse(globalThis.__wbNationsStore.get(settingsKey));
+    assert.equal(stored.feesCollected, 500);
+    // GET の一覧にも入国料が載る
+    const viewH = await (await nationsRoute.GET(nationsRequest("GET", cookieH))).json();
+    assert.equal(viewH.myGuilds.find((g) => g.guildId === GAMMA)?.entryFee, 500);
+
+    // 離脱: 所持金 2000 × 50% = 1000 が出金料として徴収される
+    globalThis.__wbBalance = 2000;
+    const leave = await nationsRoute.POST(nationsRequest("POST", cookieH, { action: "leave" }));
+    assert.equal(leave.status, 200);
+    assert.equal(globalThis.__wbSubmittedOps.length, 2);
+    assert.equal(globalThis.__wbSubmittedOps[1].amount, 1000);
+    assert.equal(globalThis.__wbSubmittedOps[1].reason, "nation_exit_fee");
+    stored = JSON.parse(globalThis.__wbNationsStore.get(settingsKey));
+    assert.equal(stored.feesCollected, 1500);
+  } finally {
+    globalThis.__wbEconomyEnabled = false;
+    globalThis.__wbBalance = null;
+    globalThis.__wbSubmittedOps = [];
   }
 });
