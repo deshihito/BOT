@@ -109,7 +109,11 @@ test("pvp: 参加費の返金オプ ID は1試合・1人で1つに決まる（B3
 test("pvp: ルートは不成立時に参加費を精算する（B3）", () => {
   const route = fs.readFileSync(path.join(rootDir, "app/api/worldbox/pvp/route.ts"), "utf8");
   // マッチ時: 片方の参加費だけ積まれたら決闘を作らず精算する
-  assert.match(route, /settleVoidedFees\(next, \[feeA, null\]\)/);
+  // （参加費は submitFee の直接提出。unavailable 時は提出済み側を精算）
+  assert.match(route, /settleVoidedFees\(next, \[feeA\?\.op \?\? null, null\]\)/);
+  // 直接適用で確定失敗した側は待ちから外して組み直す
+  assert.match(route, /feeA\.state === "failed"/);
+  assert.match(route, /feeB\.state === "failed"/);
   // paying 失敗時: act / forfeit の両方で決闘を消す前に精算する
   assert.equal(route.match(/await settleVoidedFees\(current, feeStates\);/g)?.length, 2);
   // done は返金、pending は削除してから再読で done なら返金

@@ -15,6 +15,8 @@ import {
   isNationHiddenFrom, isPrivateNation, memberKeysOf, resolveMemberRole,
 } from "@/lib/worldbox/nation-settings";
 import { loadNationSettings, loadNationSettingsMap } from "@/lib/worldbox/nation-settings-online";
+import { warMarksByNation } from "@/lib/worldbox/war";
+import { isWarsEnabled, loadWarState } from "@/lib/worldbox/war-online";
 
 export const runtime = "nodejs";
 
@@ -100,6 +102,15 @@ export async function GET(request: Request) {
   response.nations = response.nations.filter(
     (n) => !isNationHiddenFrom(settingsMap.get(n.guildId), n.guildId, myMembership?.nationId ?? null),
   );
+  // 戦争中のマーク表示（世界地図用）: 一覧に出ている国の分だけ付ける
+  // （非公開国の戦争関与を一覧外へ漏らさない）。
+  if (isWarsEnabled()) {
+    const marks = warMarksByNation(await loadWarState(), Date.now());
+    const visible = new Set(response.nations.map((n) => n.guildId));
+    for (const guildId of Object.keys(marks)) {
+      if (visible.has(guildId)) response.warMarks[guildId] = marks[guildId];
+    }
+  }
   if (selfKey && myMembership && response.me) {
     const myNation = state.nations[myMembership.nationId];
     const resolved = myNation

@@ -333,6 +333,10 @@ if (wss) {
       } else if (kind === "requests") {
         // 依頼は所属ギルドで絞った本人向け応答が正なので poke のみ
         sendTo(() => true, { t: "sync", kind: "requests" });
+      } else if (kind === "guildShop") {
+        // 区画の借り手・出品は全員に見える表示（地図のギルド名・パネル）
+        // が正なので poke のみ
+        sendTo(() => true, { t: "sync", kind: "guildShop" });
       } else if (kind === "chat") {
         const scopes = new Map();
         for (const c of changes) {
@@ -419,7 +423,7 @@ if (wss) {
         setInterval(() => void run(), plan.intervalMs);
       }, 500 + idx * 300);
     });
-    console.log("[realtime] kv watch enabled (chat/party/requests/tiles/mobs/board/nations/instances/economy/objects/fishing)");
+    console.log("[realtime] kv watch enabled (chat/party/requests/tiles/mobs/board/nations/instances/economy/objects/fishing/guildShop)");
   } else {
     console.log("[realtime] kv watch disabled (bot api not configured)");
   }

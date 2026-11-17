@@ -41,6 +41,8 @@ import { createPollGuard, type PollGuard } from "@/lib/poll-guard";
 import { isWsHealthy, presencePollDue } from "@/lib/worldbox/realtime-poll";
 import { notifyEconomyApplied } from "@/lib/worldbox/economy-push";
 import { notifyGuildBoardChanged, notifyGuildRequestsChanged } from "@/lib/worldbox/guild-board-push";
+import { notifyGuildShopChanged } from "@/lib/worldbox/guild-shop-push";
+import { GUILD_PLOT_ANCHORS } from "@/lib/worldbox/guild-shop";
 import {
   STAMINA_MAX, canDash, createStamina, createTapTracker, isStickDash, registerKeyTap, rescueStamina,
   staminaGaugeVisible, stepStamina, type StaminaState, type StaminaUse, type TapTracker,
@@ -447,7 +449,7 @@ function SlotContent({ slot }: { slot: ItemSlot }) {
 }
 
 const EMPTY_NATIONS: NationsResponse = {
-  nations: [], me: null, playerNations: {}, loggedIn: false, myGuilds: [], guildsScopeRequired: false,
+  nations: [], warMarks: {}, me: null, playerNations: {}, loggedIn: false, myGuilds: [], guildsScopeRequired: false,
 };
 
 /** 足元に平置きで描くロビースプライト（上に立てるもの）。 */
@@ -728,6 +730,9 @@ export default function WorldBoxClient() {
   const partyGuardRef = useRef<PollGuard>(createPollGuard());
   const boardGuardRef = useRef<PollGuard>(createPollGuard());
   const nationsGuardRef = useRef<PollGuard>(createPollGuard());
+  const guildShopGuardRef = useRef<PollGuard>(createPollGuard());
+  // ギルドショップの借り区画（地図のギルド名表示用。借りている区画だけ）
+  const guildShopPlotsRef = useRef<{ idx: number; guildName: string }[]>([]);
   const invGuardRef = useRef<PollGuard>(createPollGuard());
   const vitalsGuardRef = useRef<PollGuard>(createPollGuard());
   const deathsGuardRef = useRef<PollGuard>(createPollGuard());
@@ -739,6 +744,7 @@ export default function WorldBoxClient() {
   const wsHealthyNow = () => isWsHealthy(rtOpenRef.current, rtLastMsgRef.current, Date.now());
   /** エンジンから呼ぶ再同期用の橋（各 refresh の最新版を毎レンダーで差す）。 */
   const nationsRefreshRef = useRef<(force?: boolean) => Promise<void>>(async () => {});
+  const guildShopRefreshRef = useRef<(force?: boolean) => Promise<void>>(async () => {});
   const boardRefreshRef = useRef<() => Promise<void>>(async () => {});
   const chatReloadRef = useRef<(() => void) | null>(null);
   const invRefreshRef = useRef<() => Promise<void>>(async () => {});
@@ -1189,6 +1195,27 @@ export default function WorldBoxClient() {
   };
   nationsRefreshRef.current = refreshNations;
   boardRefreshRef.current = refreshBoard;
+  // ギルドショップの借り区画（地図のカウンター上にギルド名を出す用）。
+  // 応答の本人向け加工は地図では使わず、借り区画の idx とギルド名だけ持つ。
+  const refreshGuildShopPlots = async (force = false) => {
+    const ticket = guildShopGuardRef.current.begin(force ? { force: true } : undefined);
+    if (ticket === null) return;
+    try {
+      const res = await fetch("/api/worldbox/guild-shop", { headers: { Accept: "application/json" } });
+      if (!res.ok) return;
+      const data = (await res.json()) as {
+        plots?: ({ idx: number; guildName: string } | null)[];
+      };
+      if (!guildShopGuardRef.current.isCurrent(ticket)) return;
+      guildShopPlotsRef.current = (data.plots ?? [])
+        .filter((p): p is { idx: number; guildName: string } => p !== null)
+        .map((p) => ({ idx: p.idx, guildName: p.guildName }));
+    } catch { /* 読めなくても歩き続けられる */ }
+    finally {
+      guildShopGuardRef.current.end(ticket);
+    }
+  };
+  guildShopRefreshRef.current = refreshGuildShopPlots;
   const nationAction = async (body: Record<string, unknown>) => {
     setNationMsg("");
     try {
@@ -2379,6 +2406,7 @@ export default function WorldBoxClient() {
 
   useEffect(() => {
     void refreshNations();
+    void refreshGuildShopPlots();
     void refreshInv();
     void refreshTiles();
     void refreshMobs();
@@ -2390,6 +2418,7 @@ export default function WorldBoxClient() {
         return;
       }
       void refreshNations();
+      void refreshGuildShopPlots();
       void refreshInv();
       void refreshTiles();
       void refreshMobs();
@@ -2984,6 +3013,11 @@ export default function WorldBoxClient() {
             // ギルド依頼が他人の操作で変わった: 開いているギルドボード
             // パネルへ合図する（パネル側が REST で取り直す）
             notifyGuildRequestsChanged();
+          } else if (msg.t === "sync" && msg.kind === "guildShop") {
+            // ギルドショップの区画・出品が変わった: 地図のギルド名表示を
+            // 取り直し、開いているパネルへも合図する
+            void guildShopRefreshRef.current(true);
+            notifyGuildShopChanged();
           } else if (msg.t === "sync" && msg.kind === "chat") {
             // ギルドボードの掲示タブ: HUD の表示チャンネルに関係なく、
             // 自ギルドのユニオン発言が変わったらパネルへ合図する
@@ -3902,6 +3936,26 @@ export default function WorldBoxClient() {
       const nw = c.measureText(nation.name).width;
       c.fillStyle = nation.color;
       c.fillRect(sx - nw / 2, ly + 3, nw, 2.5);
+      // 戦争中: 櫓に赤い枠（脈動）。防衛側はマーク HP バーも出す
+      // （攻撃側は自国マークが削られていないので枠だけ）。
+      const warMark = nationsRef.current.warMarks?.[nation.id];
+      if (warMark) {
+        const pulse = 0.55 + 0.35 * Math.sin(performance.now() / 280);
+        c.strokeStyle = `rgba(255,64,48,${pulse})`;
+        c.lineWidth = 2;
+        c.strokeRect(x0 - 2.5, y0 - 2.5, w + 5, h + 5);
+        if (warMark.markHp !== null && warMark.markMax > 0) {
+          const bw = Math.max(nw, TILE * 0.9);
+          const bx = sx - bw / 2;
+          const by = ly + 8;
+          c.fillStyle = "rgba(10,10,12,0.7)";
+          c.fillRect(bx - 1, by - 1, bw + 2, 5);
+          c.fillStyle = "#5a1512";
+          c.fillRect(bx, by, bw, 3);
+          c.fillStyle = "#ff5040";
+          c.fillRect(bx, by, bw * Math.max(0, Math.min(1, warMark.markHp / warMark.markMax)), 3);
+        }
+      }
     };
 
     // ---- 空間移動（ワープパッド・階段・ハンバーガーメニュー） ----
@@ -5354,6 +5408,25 @@ export default function WorldBoxClient() {
       });
       drawList.sort((a, b) => a.y - b.y);
       for (const d of drawList) d.draw();
+
+      // ギルドショップ区画: 借りている区画はカウンター上にギルド名を出す
+      // （空き区画は汎用カウンターのまま。首都マーカーの国名と同じ流儀）
+      if (space === "lobby") {
+        for (const plot of guildShopPlotsRef.current) {
+          const anchor = GUILD_PLOT_ANCHORS[plot.idx];
+          if (!anchor) continue;
+          const gx = Math.round(lobbyOx + (anchor.x + 0.5) * TILE);
+          const gy = Math.round(lobbyOy + anchor.y * TILE);
+          if (gx < -TILE * 4 || gy < -TILE * 2 || gx > cw + TILE * 4 || gy > ch + TILE * 2) continue;
+          ctx.font = "600 11px sans-serif";
+          ctx.textAlign = "center";
+          ctx.lineWidth = 3;
+          ctx.strokeStyle = "rgba(10,16,10,0.65)";
+          ctx.strokeText(plot.guildName, gx, gy - 5);
+          ctx.fillStyle = "#ffffff";
+          ctx.fillText(plot.guildName, gx, gy - 5);
+        }
+      }
 
       // ---- アフォーダンス（B2）: 近くの「使えるもの」に脈動する輪を出す ----
       // 対象は施設・出入口・宝箱/扉。鉱脈は斥候/採掘者の既存の脈動があるので対象外。
