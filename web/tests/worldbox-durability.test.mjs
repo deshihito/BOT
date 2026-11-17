@@ -60,6 +60,7 @@ const tilesUrl = bundleModule(
     "worldTileSource", "mapTileAt", "T_GRASS", "T_TREE", "T_ROCK", "T_DIRT",
     "applyTileAction", "applyPlaceBlock", "applyMineBlock", "tileView", "actionForTile", "tileKey",
     "TERRAIN_ROCK_HP", "TERRAIN_TREE_HP", "terrainMaxHp", "terrainHpFraction",
+    "tileIvsAt", "purityBonusStone", "purityBonusCoal",
   ],
 );
 const T = await import(tilesUrl);
@@ -124,7 +125,11 @@ test("地形HP: 岩はミスリルでも1発で壊れず、ヒットでツルハ
   assert.equal(inv.toolHpOf(hit.profile, "mithril_pickaxe"), 499, "1ヒットで耐久が1減る");
   const hit2 = T.applyTileAction(hit.override, hit.profile, map, ME_KEY, "mine", rockAt.x, rockAt.y, undefined, NOW);
   assert.equal(hit2.override.tile, T.T_DIRT);
-  assert.deepEqual(hit2.gained, { stone: 2 });
+  // 石材は基本2＋その土地の純度ボーナス（個体値）。石炭も混ざることがある
+  const rockIvs = T.tileIvsAt(rockAt.x, rockAt.y);
+  const expectedGained = { stone: 2 + T.purityBonusStone(rockIvs.purity) };
+  if (T.purityBonusCoal(rockIvs.purity) > 0) expectedGained.coal = 1;
+  assert.deepEqual(hit2.gained, expectedGained);
 });
 
 test("地形HP: 残り耐久1のツルハシは掘った瞬間に壊れて結果に載る", () => {

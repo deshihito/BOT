@@ -77,6 +77,50 @@ export function fbm(x: number, y: number, seed: number, octaves: number): number
   return sum / total;
 }
 
+// ---------------------------------------------------------------- マスの個体値
+/**
+ * マスの個体値（仕様書 §3.1 / §4.2）: 全タイルに生成時に割り振られる
+ * 豊穣度・純度・標高（各 0〜100）。地形と同じく座標と固定シードからの
+ * 決定的な純関数で、保存はしない（誰のクライアントでも同じ値になる）。
+ * - 標高: 地形生成の標高層（maplogic の elevationAt と同じ式）。
+ * - 豊穣度: 独立した土壌層が正（湿度にすると草地の上限が地形に縛られて
+ *   頭打ちになるため）。作物の成長速度と収穫量に効く（tiles.ts の
+ *   fertility* が適用）。
+ * - 純度: 細かいノイズ層と標高の合成。岩の採掘ボーナスに効く
+ *   （tiles.ts の purity* が適用）。
+ */
+export type TileIvs = {
+  fertility: number;
+  purity: number;
+  altitude: number;
+};
+
+// maplogic.ts の elevationAt と同じ定数（生成規則と一致させる）。
+const IV_ELEV_CELLS = 7;
+const IV_SPAN = 1024;
+
+function ivClamp01(v: number): number {
+  return v < 0 ? 0 : v > 1 ? 1 : v;
+}
+
+/** fbm は中央（0.5）に寄るため、裾を広げて 0〜100 の全体を使えるようにする。 */
+function ivStretch(v: number): number {
+  return ivClamp01(0.5 + (v - 0.5) * 1.7);
+}
+
+/** そのタイルの個体値。座標が整数でない場合は切り捨てて扱う。 */
+export function tileIvsAt(x: number, y: number): TileIvs {
+  const tx = Math.floor(x);
+  const ty = Math.floor(y);
+  const altitude = fbm((tx * IV_ELEV_CELLS) / IV_SPAN, (ty * IV_ELEV_CELLS) / IV_SPAN, MAP_SEED, 4);
+  const jitter = latticeHash(tx, ty, MAP_SEED ^ 0x27d4eb2d);
+  const soil = fbm((tx * 15) / IV_SPAN + 71.25, (ty * 15) / IV_SPAN + 13.5, MAP_SEED ^ 0x3f4a5b6, 3);
+  const fertility = Math.round(100 * ivClamp01(0.9 * ivStretch(soil) + 0.1 * jitter));
+  const pureNoise = fbm((tx * 25) / IV_SPAN + 11.75, (ty * 25) / IV_SPAN + 53.5, MAP_SEED ^ 0x51ab3c7, 3);
+  const purity = Math.round(100 * ivClamp01(0.6 * ivStretch(pureNoise) + 0.4 * ivStretch(altitude)));
+  return { fertility, purity, altitude: Math.round(100 * ivClamp01(altitude)) };
+}
+
 /** タイル ID の通行可否（水・木・岩・雪の木は固体）。 */
 export function isSolidMapTile(id: number): boolean {
   return id === T_WATER || id === T_TREE || id === T_ROCK || id === T_SNOW_TREE;
