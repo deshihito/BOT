@@ -5056,7 +5056,7 @@ export default function WorldBoxClient() {
           ctx.ellipse(cxp, cy, sizePx * 0.55, sizePx * 0.45, 0, 0, Math.PI * 2);
           ctx.fill();
         }
-        // 本体: 素材スプライト（16×16、ピクセル固定・足元基準・向き反転）
+        // 本体: 素材スプライト（ピクセル固定・足元基準・向き反転）
         const spriteSrc = MOB_SPRITE[def.id];
         const img = spriteSrc ? mobSprites[def.id] : undefined;
         ctx.imageSmoothingEnabled = false;
