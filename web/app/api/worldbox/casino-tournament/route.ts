@@ -146,6 +146,7 @@ async function handlePost(request: Request, session: AuthedSession) {
       id: casinoTournamentId(now), status: "entry", createdAt: now,
       entryEndsAt: now + CASINO_TOURNAMENT_ENTRY_MS,
       playEndsAt: now + CASINO_TOURNAMENT_ENTRY_MS + CASINO_TOURNAMENT_PLAY_MS,
+      playStartedAt: null,
       entrants: [], scores: {},
       prizesPaid: false, refundPaid: false, closedAt: null,
     };

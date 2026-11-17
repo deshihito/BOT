@@ -185,6 +185,20 @@ test("war: 他者ブロックは戦争中・防衛側首都の12タイル以内�
   assert.equal(W.canBreakOthersBlock(state, C.id, B.id, 100, 100, capital), false);
 });
 
+test("war: 期限切れの戦争では他者ブロックを掘れない（now 付き判定）", () => {
+  const { state } = declared();
+  const capital = { x: 100, y: 100 };
+  const war = Object.values(state.wars)[0];
+  assert.equal(war.endsAt, NOW + W.WAR_DURATION_MS);
+  // 期限内は掘れる（境界は expireWars と同じ: endsAt ちょうどは有効）
+  assert.equal(W.warLiveAt(war, NOW + W.WAR_DURATION_MS), true);
+  assert.equal(W.canBreakOthersBlock(state, A.id, B.id, 100, 100, capital, NOW + 1000), true);
+  assert.equal(W.canBreakOthersBlock(state, A.id, B.id, 100, 100, capital, NOW + W.WAR_DURATION_MS), true);
+  // 期限を過ぎたら、status が "active" のまま（expireWars 未精算）でも掘れない
+  assert.equal(W.warLiveAt(war, NOW + W.WAR_DURATION_MS + 1), false);
+  assert.equal(W.canBreakOthersBlock(state, A.id, B.id, 100, 100, capital, NOW + W.WAR_DURATION_MS + 1), false);
+});
+
 // ---------- 繁栄ランキング ----------
 
 test("war: 繁栄ランキングは繁栄度順、同値は建国順、順位は1始まり", () => {
@@ -277,4 +291,19 @@ test("war: ルート配線（宣言はギルドボード前・王/大臣、破�
   for (const needle of ["canBreakOthersBlock", "warBreakAllowed", "loadWarState"]) {
     assert.ok(tilesRoute.includes(needle), `tiles ルートに ${needle} が無い`);
   }
+});
+
+test("war: ルート配線（state は全体ロックで直列化、解散は冪等回復、タイルは期限を見る）", () => {
+  const route = fs.readFileSync(path.join(rootDir, "app/api/worldbox/war/route.ts"), "utf8");
+  for (const needle of ["withWarLock", "settleDisbands", "loadWarStateSettled", "handlePost"]) {
+    assert.ok(route.includes(needle), `war ルートに ${needle} が無い`);
+  }
+  const warOnline = fs.readFileSync(path.join(libDir, "worldbox/war-online.ts"), "utf8");
+  assert.ok(warOnline.includes("withWarLock"), "war-online に withWarLock が無い");
+  assert.ok(warOnline.includes("withUserLock"), "war-online が全体ロックを使っていない");
+  const tilesRoute = fs.readFileSync(path.join(rootDir, "app/api/worldbox/tiles/route.ts"), "utf8");
+  assert.ok(
+    tilesRoute.includes("defender.capital, Date.now()"),
+    "tiles ルートの略奪判定が現在時刻を渡していない",
+  );
 });

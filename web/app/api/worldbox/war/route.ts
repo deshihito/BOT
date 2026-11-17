@@ -7,7 +7,7 @@ import { listPresence } from "@/lib/worldbox/presence-online";
 import { presenceIdFor } from "@/lib/worldbox/presence";
 import { parseSave } from "@/lib/worldbox/save";
 import { loadWorldBoxSave } from "@/lib/worldbox/save-online";
-import { loadWarState, storeWarState, isWarsEnabled } from "@/lib/worldbox/war-online";
+import { loadWarState, storeWarState, isWarsEnabled, withWarLock } from "@/lib/worldbox/war-online";
 import {
   activeWarFor, attackMark, declareWar, expireWars, prosperityRanking, repairMark,
   warView, WAR_MARK_RANGE, type WarState,
@@ -71,11 +71,46 @@ function disbandNation(state: NationsState, nationId: string): NationsState {
   return { nations, members };
 }
 
+/** 期限切れの戦争を引き分けで閉じる。呼び出し側が withWarLock を取ること。 */
 async function loadExpired(now: number): Promise<WarState> {
   const state = await loadWarState();
   const expired = expireWars(state, now);
   if (expired !== state) await storeWarState(expired);
   return expired;
+}
+
+/**
+ * マーク破壊で終わった戦争のうち、防衛国がまだ残っているものを
+ * 解散させる（冪等な後始末）。attack_mark は戦争の保存→解散の順で
+ * 書くため、解散の保存が失敗すると戦争だけ閉じて国が残る窓がある。
+ * ここで毎リクエスト精算することで、次の war リクエストが必ず
+ * 回復する。戦争終了より後に建国された同 ID の国（再建国）は
+ * 対象にしない。呼び出し側が withWarLock を取ること。
+ */
+async function settleDisbands(warState: WarState): Promise<void> {
+  const targets = Object.values(warState.wars).filter(
+    (w) => w.status === "closed" && w.outcome === "attacker_win",
+  );
+  if (targets.length === 0) return;
+  let nationsState = await loadNationsState();
+  let changed = false;
+  for (const war of targets) {
+    const nation = nationsState.nations[war.defenderId];
+    if (!nation) continue;
+    if (nation.createdAt > (war.endedAt ?? 0)) continue;
+    nationsState = disbandNation(nationsState, war.defenderId);
+    changed = true;
+  }
+  if (changed) await storeNationsState(nationsState);
+}
+
+/** 戦争状態の読み込み（期限精算＋解散の後始末つき）。RMW 全体を直列化する。 */
+async function loadWarStateSettled(now: number): Promise<WarState> {
+  return withWarLock(async () => {
+    const warState = await loadExpired(now);
+    await settleDisbands(warState);
+    return warState;
+  });
 }
 
 export async function GET(request: Request) {
@@ -84,8 +119,9 @@ export async function GET(request: Request) {
   if (!isWarsEnabled()) return err("wars_unavailable", 503);
   const ownerKey = sessionOwnerKey(session);
   const now = Date.now();
-  const [warState, nationsState, settingsMap] = await Promise.all([
-    loadExpired(now), loadNationsState(), loadNationSettingsMap(),
+  const warState = await loadWarStateSettled(now);
+  const [nationsState, settingsMap] = await Promise.all([
+    loadNationsState(), loadNationSettingsMap(),
   ]);
   const views = nationViews(nationsState);
   const mine = nationsState.members[ownerKey];
@@ -133,7 +169,21 @@ export async function POST(request: Request) {
     typeof fields.px === "number" && typeof fields.py === "number" && Number.isFinite(fields.px) && Number.isFinite(fields.py)
       ? { x: fields.px, y: fields.py }
       : null;
+  // 戦争状態は単一キーの RMW で複数ギルドが同時に触るため、期限精算・
+  // 解散の後始末・各アクションの読み書き全体を state 単位で直列化する。
+  return withWarLock(() => handlePost(fields, ownerKey, now, reported));
+}
+
+type WarFields = { action?: unknown; targetId?: unknown; warId?: unknown; px?: unknown; py?: unknown };
+
+async function handlePost(
+  fields: WarFields,
+  ownerKey: string,
+  now: number,
+  reported: { x: number; y: number } | null,
+) {
   const warState = await loadExpired(now);
+  await settleDisbands(warState);
   const nationsState = await loadNationsState();
   const mine = nationsState.members[ownerKey];
   if (!mine) return err("not_in_nation");
@@ -181,6 +231,8 @@ export async function POST(request: Request) {
     if (!(await storeWarState(result.state))) return err("store_failed", 503);
     if (result.destroyed) {
       // マーク破壊 = 防衛国の解散。戦争の記録は既に保存済み。
+      // ここの保存が失敗しても、閉じた戦争と残った国は次回リクエストの
+      // settleDisbands が冪等に解散させる（回復経路）。
       const nationsNext = disbandNation(nationsState, war.defenderId);
       if (!(await storeNationsState(nationsNext))) return err("store_failed", 503);
     }

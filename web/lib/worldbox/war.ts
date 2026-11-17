@@ -101,6 +101,17 @@ export function activeWarBetween(state: WarState, attackerId: string, defenderId
   return null;
 }
 
+/**
+ * その戦争が時刻 now の時点で生きているか（進行中かつ期限内）。
+ * expireWars は war ルートが読むときにしか走らないため、期限切れでも
+ * status が "active" のまま残ることがある。他の経路（タイルの略奪
+ * 判定など）が戦争状態を引くときは、この判定で期限も見ること。
+ * 期限の境界は expireWars と同じ（now > endsAt で失効）。
+ */
+export function warLiveAt(war: War, now: number): boolean {
+  return war.status === "active" && now <= war.endsAt;
+}
+
 export type DeclareWarResult =
   | { ok: true; state: WarState; war: War }
   | { ok: false; error: string };
@@ -241,6 +252,9 @@ export function repairMark(
  * 他者ブロック破壊の可否: 進行中の戦争で、掘る側の国が攻撃側・
  * ブロック所有者の国が防衛側で、ブロックが防衛側の首都の
  * WAR_TERRITORY_RADIUS 以内にある場合だけ可。
+ * now を渡すと期限切れ（status は "active" のまま未精算）の戦争を
+ * 不可として扱う。タイル経路は expireWars を走らせないため、必ず
+ * now を渡すこと。
  */
 export function canBreakOthersBlock(
   state: WarState,
@@ -249,10 +263,12 @@ export function canBreakOthersBlock(
   x: number,
   y: number,
   defenderCapital: { x: number; y: number },
+  now?: number,
 ): boolean {
   if (attackerNationId === defenderNationId) return false;
   const war = activeWarBetween(state, attackerNationId, defenderNationId);
   if (!war) return false;
+  if (now !== undefined && !warLiveAt(war, now)) return false;
   return Math.max(Math.abs(x - defenderCapital.x), Math.abs(y - defenderCapital.y)) <= WAR_TERRITORY_RADIUS;
 }
 
