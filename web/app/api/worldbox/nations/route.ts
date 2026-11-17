@@ -256,9 +256,10 @@ export async function POST(request: Request) {
   }
 
   // 移民コントロール（経済仕様書 §7.2）: 参加は移動先の入国料、離脱は
-  // 移動元の出金料率 × 所持金を徴収する。徴収分は当面シンクで、累計を
-  // 国家設定の feesCollected（表示用）へ加算する。徴収できなければ
-  // 所属は変更しない。王の解散（disbanded な離脱）は出金料を免除する。
+  // 移動元の出金料率 × 所持金を徴収する。徴収分は国庫（treasury）へ
+  // 積み、累計を国家設定の feesCollected（表示用）へ併せて加算する。
+  // 徴収できなければ所属は変更しない。王の解散（disbanded な離脱）は
+  // 出金料を免除する。
   const discordId = session.provider === "discord" ? session.id : null;
   if (action === "join" && typeof fields.guildId === "string") {
     const fee = entryFeeOf(await loadNationSettings(fields.guildId));
@@ -266,7 +267,7 @@ export async function POST(request: Request) {
       const charged = await chargeNationFee(ownerKey, discordId, fee, "nation_entry_fee");
       if (!charged.ok) return errorResponse(charged.error, charged.status);
       await updateNationSettings(fields.guildId, (cur) => ({
-        ...cur, feesCollected: cur.feesCollected + fee,
+        ...cur, feesCollected: cur.feesCollected + fee, treasury: cur.treasury + fee,
       }));
     }
   } else if (action === "leave" && !result.disbanded) {
@@ -282,7 +283,7 @@ export async function POST(request: Request) {
           const charged = await chargeNationFee(ownerKey, discordId, fee, "nation_exit_fee");
           if (!charged.ok) return errorResponse(charged.error, charged.status);
           await updateNationSettings(from.nationId, (cur) => ({
-            ...cur, feesCollected: cur.feesCollected + fee,
+            ...cur, feesCollected: cur.feesCollected + fee, treasury: cur.treasury + fee,
           }));
         }
       }

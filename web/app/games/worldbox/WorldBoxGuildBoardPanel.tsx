@@ -78,6 +78,7 @@ type NationSettingsData = {
   taxRate: number;
   visibility: "open" | "private";
   taxCollected: number;
+  treasury: number;
   entryFee: number;
   exitFeeRate: number;
   feesCollected: number;
@@ -1033,6 +1034,11 @@ export default function WorldBoxGuildBoardPanel({
                 ) : (
                   <span style={{ fontSize: 14 }}>{nsData.visibility === "private" ? "非公開" : "公開"}</span>
                 )}
+              </div>
+              <div style={rowStyle}>
+                <span style={{ fontSize: 13, opacity: 0.8 }}>国庫</span>
+                <span style={{ flex: 1 }} />
+                <span style={{ fontSize: 14 }}>{nsData.treasury.toLocaleString("ja-JP")}</span>
               </div>
               <div style={rowStyle}>
                 <span style={{ fontSize: 13, opacity: 0.8 }}>税収</span>

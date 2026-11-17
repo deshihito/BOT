@@ -4,8 +4,10 @@
 // nation-settings-online.ts、入口は /api/worldbox/nation-settings。
 //
 // 税率: ギルドショップの売り手取り分から差し引く割合。国が未設定なら
-// 既定 5%。税分は従来どおり積まない（国庫シンク相当）で、累計だけを
-// taxCollected に表示用として加算する。
+// 既定 5%。税分は国庫（treasury）へ積む（2026-11-17 バッチE4で
+// シンクから仕様書 §3 の国庫へ変更。ユーザー指示「積まずに消える
+// 部分だけ仕様書に変更」— 税率上限・対象は従来どおり）。累計税収は
+// taxCollected に表示用として併せて加算する。
 // 大臣: 役職解決は「王 > 明示任命（ministers）∪ Discord ADMINISTRATOR
 // 由来 > 国民」。任命は現在の国民にだけ効き、国民でなくなれば自動で
 // 落ちる（解決時に所属と突き合わせる）。Discord 由来の大臣はゲーム内
@@ -14,8 +16,8 @@
 // 載らず、参加（join）もできない。所属員には自国だけは見える。
 // 移民コントロール（2026-11-17、経済仕様書 §7.2）: 入国料（参加時に
 // 徴収する固定額）と出金料率（離脱時に所持金へ掛ける割合）を王が
-// 設定できる。徴収分は当面シンクで、累計だけを feesCollected に
-// 表示用として加算する（国庫への実入金は国庫バッチで扱う）。
+// 設定できる。徴収分は国庫（treasury）へ積み、累計を feesCollected
+// に表示用として併せて加算する（バッチE4）。
 import type { Nation, NationRole, NationsState } from "./nations";
 
 export type NationVisibility = "open" | "private";
@@ -34,6 +36,11 @@ export type NationSettings = {
   exitFeeRate: number;
   /** 累計の入国料・出金料収入（表示用。税収とは別枠）。 */
   feesCollected: number;
+  /**
+   * 国庫残高（経済仕様書 §3 の treasury_coins）。税・入国料・出金料の
+   * 受け皿で、徴収のたびに増える。引き出し等の使い道は未実装。
+   */
+  treasury: number;
   updatedAt: number;
 };
 
@@ -49,7 +56,7 @@ export const EXIT_FEE_RATE_MAX = 0.8;
 export function defaultNationSettings(): NationSettings {
   return {
     taxRate: TAX_RATE_DEFAULT, visibility: "open", ministers: [], taxCollected: 0,
-    entryFee: 0, exitFeeRate: 0, feesCollected: 0, updatedAt: 0,
+    entryFee: 0, exitFeeRate: 0, feesCollected: 0, treasury: 0, updatedAt: 0,
   };
 }
 
@@ -111,6 +118,9 @@ export function parseNationSettings(raw: unknown): NationSettings {
   if (typeof v.feesCollected === "number" && Number.isFinite(v.feesCollected) && v.feesCollected > 0) {
     out.feesCollected = Math.floor(v.feesCollected);
   }
+  if (typeof v.treasury === "number" && Number.isFinite(v.treasury) && v.treasury > 0) {
+    out.treasury = Math.floor(v.treasury);
+  }
   if (typeof v.updatedAt === "number" && Number.isFinite(v.updatedAt) && v.updatedAt > 0) {
     out.updatedAt = Math.floor(v.updatedAt);
   }
@@ -130,6 +140,11 @@ export function entryFeeOf(settings: NationSettings | null | undefined): number 
 /** 国の出金料率（未設定なら 0）。 */
 export function exitFeeRateOf(settings: NationSettings | null | undefined): number {
   return settings ? settings.exitFeeRate : 0;
+}
+
+/** 国庫残高（未設定なら 0）。 */
+export function treasuryOf(settings: NationSettings | null | undefined): number {
+  return settings ? settings.treasury : 0;
 }
 
 /** 出金料の金額: 所持金 × 出金料率（切り捨て）。残高が負なら 0。 */
