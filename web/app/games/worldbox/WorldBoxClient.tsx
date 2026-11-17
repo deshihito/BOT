@@ -25,9 +25,10 @@ import {
 } from "@/lib/worldbox/combat";
 import { advanceWalkPhase, attackSwingAngle, damp, moveLean, stepBeatIndex, walkBob, walkSquashY } from "@/lib/worldbox/anim";
 import {
-  WHIFF_ALPHA_SCALE, createFxSystem, createShake, fxLifeRatio, phaseKind, popProgress, popScale, shakeOffsetAt,
-  slashAlpha, spawnAmbient, spawnBurst, spawnMobFx, startShake, stepFx, swingProgress, weatherAmbientKind, weatherAt,
-  type FxBurstKind, type FxShake, type FxSystem,
+  HITSTOP_HIT_MS, HITSTOP_HURT_MS, HITSTOP_KILL_MS, WHIFF_ALPHA_SCALE, burstPaletteFor, createFxSystem, createHitstop,
+  createShake, fxLifeRatio, hitstopActiveAt, phaseKind, popProgress, popScale, shakeOffsetAt,
+  slashAlpha, spawnAmbient, spawnBurst, spawnMobFx, startHitstop, startShake, stepFx, swingProgress, weatherAmbientKind, weatherBlendAt,
+  type FxBurstKind, type FxShake, type FxSystem, type HitstopState,
 } from "@/lib/worldbox/fx";
 import type { SkillFxEffect } from "@/lib/worldbox/fx";
 import { skillFxProgress, skillFxStage, spawnSkillFx, thunderBoltPoints } from "@/lib/worldbox/fx";
@@ -1268,7 +1269,7 @@ export default function WorldBoxClient() {
   const tilesVersionRef = useRef(0);
   /** 演出イベントの受け渡し（行為の成功/失敗→描画ループでパーティクル/揺れ/ポップに変換）。
    * whiff は空振り（風切りのみ、粒なし）。hit/death/spawn はモブ演出用（sizeTiles/color 任意）。 */
-  const fxEventsRef = useRef<{ kind: FxBurstKind | "whiff"; x: number; y: number; sizeTiles?: number; color?: string }[]>([]);
+  const fxEventsRef = useRef<{ kind: FxBurstKind | "whiff"; x: number; y: number; sizeTiles?: number; color?: string; colors?: string[]; stop?: number }[]>([]);
   /** 無効操作のフィードバック（赤い輪＋揺れ。タップしたタイルと開始時刻）。 */
   const denyFxRef = useRef<{ x: number; y: number; at: number } | null>(null);
   /** 初回誘導を出した施設（セッション内だけ覚える。キー=施設種別/スプライト）。 */
@@ -1664,7 +1665,8 @@ export default function WorldBoxClient() {
           : def?.interaction === "mine" ? "mine"
           : def?.interaction === "rest" ? "splash"
           : def?.tool === "axe" ? "chop" : "harvest";
-        fxEventsRef.current.push({ kind: fxKind, x, y });
+        // 破片は対象の素材色で返す（鉱脈・巣・実など）
+        fxEventsRef.current.push({ kind: fxKind, x, y, colors: burstPaletteFor(objectId) ?? undefined });
         const names = Object.entries(data.gained ?? {})
           .map(([id, n]) => `${itemById(id)?.name ?? id}×${n}`)
           .join(" ");
@@ -1812,7 +1814,7 @@ export default function WorldBoxClient() {
   /** インスタンス内アクション（洞窟の採掘/宝箱/温泉、遺跡の宝箱/扉/罠）。検証と付与はサーバーが担う。 */
   const postInstance = async (
     action: "mine" | "open_chest" | "onsen" | "open_door" | "trap" | "leave",
-    extra?: { veinKey?: string; chestIdx?: number; doorIdx?: number; trapIdx?: number },
+    extra?: { veinKey?: string; chestIdx?: number; doorIdx?: number; trapIdx?: number; fxX?: number; fxY?: number; fxObjectId?: string },
   ) => {
     const space = spaceUi;
     const kindNow = parseInstanceSpace(space)?.kind;
@@ -1841,12 +1843,23 @@ export default function WorldBoxClient() {
         instanceTeleportRef.current?.(data.teleport.x, data.teleport.y);
         playWbSe("warp");
       } else if (data.trapped || data.kind === "damage" || data.kind === "poison") {
-        fxEventsRef.current.push({ kind: "hit", x: playerPosRef.current.x, y: playerPosRef.current.y });
+        fxEventsRef.current.push({ kind: "hit", x: playerPosRef.current.x, y: playerPosRef.current.y, stop: HITSTOP_HURT_MS });
         playWbSe("hit");
       } else if (data.kind === "alarm") {
-        fxEventsRef.current.push({ kind: "hit", x: playerPosRef.current.x, y: playerPosRef.current.y });
+        fxEventsRef.current.push({ kind: "hit", x: playerPosRef.current.x, y: playerPosRef.current.y, stop: HITSTOP_HURT_MS });
         playWbSe("error");
         void refreshMobsRef.current();
+      } else if (extra?.fxX !== undefined && extra?.fxY !== undefined && (action === "mine" || action === "open_chest" || action === "open_door")) {
+        // 対象の位置で素材の粒を返す（従来は全部プレイヤー位置の poof で同じだった）
+        fxEventsRef.current.push({
+          kind: action === "mine" ? "mine" : action === "open_chest" ? "harvest" : "place",
+          x: extra.fxX, y: extra.fxY,
+          colors: burstPaletteFor(extra.fxObjectId ?? (action === "open_chest" ? "chest" : undefined)) ?? undefined,
+        });
+        playWbSe("success");
+      } else if (action === "onsen") {
+        fxEventsRef.current.push({ kind: "splash", x: playerPosRef.current.x, y: playerPosRef.current.y });
+        playWbSe("success");
       } else {
         fxEventsRef.current.push({ kind: "poof", x: playerPosRef.current.x, y: playerPosRef.current.y });
         playWbSe("success");
@@ -1970,6 +1983,8 @@ export default function WorldBoxClient() {
   refreshTilesRef.current = refreshTiles;
   const postTileAction = async (action: TileActionKind, x: number, y: number, seedId?: string, itemId?: string, text?: string) => {
     setTileMsg("");
+    // 掘る前のブロック素材（応答で上書きが差し替わるため先に控える。破片の色に使う）
+    const prevBlockId = action === "mine_block" ? tilesRef.current[tileKey(x, y)]?.block?.itemId : undefined;
     try {
       const res = await fetch("/api/worldbox/tiles", {
         method: "POST",
@@ -1996,7 +2011,10 @@ export default function WorldBoxClient() {
       // ブロック採掘（HP制）: 壊れたら破片（debris）、まだ残るヒットは小さな破片（mine）
       const fxForAction =
         action === "mine_block" && data.override?.block ? "mine" : fxKind[action];
-      fxEventsRef.current.push({ kind: fxForAction, x, y });
+      fxEventsRef.current.push({
+        kind: fxForAction, x, y,
+        colors: action === "mine_block" ? burstPaletteFor(prevBlockId) ?? undefined : undefined,
+      });
       if (data.key) {
         const next = { ...tilesRef.current };
         if (data.override) next[data.key] = data.override;
@@ -2185,6 +2203,8 @@ export default function WorldBoxClient() {
         x: placed.x, y: placed.y,
         sizeTiles: placed.size,
         color: def ? MOB_FX_COLOR[def.id] : undefined,
+        // 命中の一瞬だけ時を止める（自分の攻撃が届いた時だけ）
+        stop: data.dead ? HITSTOP_KILL_MS : HITSTOP_HIT_MS,
       });
       if (data.profile) setInvProfile(data.profile);
       // ダンジョンで倒したらセッション進行（フロアボス撃破→階段開放、
@@ -2220,7 +2240,7 @@ export default function WorldBoxClient() {
       }
       if (data.applied) {
         // ヒット/死亡の粒と音は fx イベント経由で描画ループが出す
-        fxEventsRef.current.push({ kind: data.died ? "death" : "hit", x: tx, y: ty });
+        fxEventsRef.current.push({ kind: data.died ? "death" : "hit", x: tx, y: ty, stop: data.died ? HITSTOP_KILL_MS : HITSTOP_HIT_MS });
       } else {
         fxEventsRef.current.push({ kind: "whiff", x: tx, y: ty });
       }
@@ -2617,6 +2637,10 @@ export default function WorldBoxClient() {
     const fxSys: FxSystem = createFxSystem((Date.now() % 2147483646) + 1);
     if (reducedMotion) fxSys.intensity = 0.35;
     let shake: FxShake = createShake();
+    /** ヒットストップ（命中の一瞬だけ世界の時を止める）。計算は fx.ts。 */
+    let hitstop: HitstopState = createHitstop();
+    /** 死亡バーストを出したモブのアンカー→時刻（自分の攻撃分との二重出し防止）。 */
+    const deathFxAt = new Map<string, number>();
     /** 道具スイング（タップ即時応答）。itemId のアイコンを振る。whiff は空振り（風切りのみ）。 */
     let swing = { startedAt: 0, itemId: null as string | null, face: 1 as 1 | -1, whiff: false };
     /** 出現ポップ中タイル "x,y" → 開始時刻。 */
@@ -3286,7 +3310,7 @@ export default function WorldBoxClient() {
           denyAtTile(t.x, t.y);
           return true;
         }
-        void postInstanceRef.current("open_chest", { chestIdx: chest.idx });
+        void postInstanceRef.current("open_chest", { chestIdx: chest.idx, fxX: chest.x, fxY: chest.y });
         return true;
       }
       const door = dfloor.doors.find((d) => d.x === t.x && d.y === t.y);
@@ -3297,7 +3321,7 @@ export default function WorldBoxClient() {
           denyAtTile(t.x, t.y);
           return true;
         }
-        void postInstanceRef.current("open_door", { doorIdx: door.idx });
+        void postInstanceRef.current("open_door", { doorIdx: door.idx, fxX: door.x, fxY: door.y });
         return true;
       }
       return false;
@@ -3320,7 +3344,7 @@ export default function WorldBoxClient() {
           denyAtTile(t.x, t.y);
           return true;
         }
-        void postInstanceRef.current("open_chest", { chestIdx: chest.idx });
+        void postInstanceRef.current("open_chest", { chestIdx: chest.idx, fxX: chest.x, fxY: chest.y });
         return true;
       }
       const door = ruins.doors.find((d) => d.x === t.x && d.y === t.y);
@@ -3331,7 +3355,7 @@ export default function WorldBoxClient() {
           denyAtTile(t.x, t.y);
           return true;
         }
-        void postInstanceRef.current("open_door", { doorIdx: door.idx });
+        void postInstanceRef.current("open_door", { doorIdx: door.idx, fxX: door.x, fxY: door.y });
         return true;
       }
       return false;
@@ -3356,7 +3380,7 @@ export default function WorldBoxClient() {
           denyAtTile(t.x, t.y);
           return true;
         }
-        void postInstanceRef.current("mine", { veinKey: vein.key });
+        void postInstanceRef.current("mine", { veinKey: vein.key, fxX: vein.x, fxY: vein.y, fxObjectId: vein.objectId });
         return true;
       }
       if (cave.chest && cave.chest.x === t.x && cave.chest.y === t.y) {
@@ -3365,7 +3389,7 @@ export default function WorldBoxClient() {
           denyAtTile(t.x, t.y);
           return true;
         }
-        void postInstanceRef.current("open_chest");
+        void postInstanceRef.current("open_chest", { fxX: cave.chest.x, fxY: cave.chest.y });
         return true;
       }
       return false;
@@ -4185,6 +4209,9 @@ export default function WorldBoxClient() {
       raf = requestAnimationFrame(loop);
       const dt = Math.min(0.05, Math.max(0.001, (now - lastT) / 1000));
       lastT = now;
+      // ヒットストップ中はシミュレーション（移動・モブ・粒）だけを止める。
+      // 壁時計ベースの処理（遷移・タイマー）は dt のまま進める。
+      let sdt = hitstopActiveAt(hitstop, now) ? 0 : dt;
 
       // 遷移の切替: フェードアウトの頂点で1回だけ走る。
       if (transitionStart >= 0 && transitionKind === "warp" && !transitionSwapped && transitionSwapDue(now - transitionStart)) {
@@ -4287,13 +4314,13 @@ export default function WorldBoxClient() {
         vel = { x: 0, y: 0 };
         slideVel = { x: 0, y: 0 };
       } else if (!swimming && onFloor === "ice_block") {
-        const accel = 14 * dt;
+        const accel = 14 * sdt;
         slideVel = {
           x: slideVel.x + Math.max(-accel, Math.min(accel, ix * moveSpeed - slideVel.x)),
           y: slideVel.y + Math.max(-accel, Math.min(accel, iy * moveSpeed - slideVel.y)),
         };
         if (ilen <= 0.01) {
-          const fr = Math.max(0, 1 - 0.8 * dt);
+          const fr = Math.max(0, 1 - 0.8 * sdt);
           slideVel = { x: slideVel.x * fr, y: slideVel.y * fr };
         }
         vel = slideVel;
@@ -4303,15 +4330,15 @@ export default function WorldBoxClient() {
       }
       let prevX = player.x;
       let prevY = player.y;
-      const moved = stepMove(activeMap(), player, vel, dt, activeBlocked(), { swim: space === "world" });
+      const moved = stepMove(activeMap(), player, vel, sdt, activeBlocked(), { swim: space === "world" });
       player.x = moved.x;
       player.y = moved.y;
       // ノックバック: 残り速度を当たり判定つきで適用し、約0.16秒で減衰させる
       if (kbVel.x !== 0 || kbVel.y !== 0) {
-        const kbMoved = stepMove(activeMap(), player, kbVel, dt, activeBlocked(), { swim: space === "world" });
+        const kbMoved = stepMove(activeMap(), player, kbVel, sdt, activeBlocked(), { swim: space === "world" });
         player.x = kbMoved.x;
         player.y = kbMoved.y;
-        const decay = Math.max(0, 1 - dt / 0.16);
+        const decay = Math.max(0, 1 - sdt / 0.16);
         kbVel = { x: kbVel.x * decay, y: kbVel.y * decay };
         if (Math.hypot(kbVel.x, kbVel.y) < 0.5) kbVel = { x: 0, y: 0 };
       }
@@ -4342,7 +4369,7 @@ export default function WorldBoxClient() {
         playWbSe("splash");
         wasSwimming = inWaterNow;
       }
-      const staminaDt = invRef.current?.role === "scout" && staminaUse !== "none" ? dt * SCOUT_STAMINA_MULT : dt;
+      const staminaDt = invRef.current?.role === "scout" && staminaUse !== "none" ? sdt * SCOUT_STAMINA_MULT : sdt;
       stamina = stepStamina(stamina, staminaUse, staminaDt).state;
       if (staminaBoostRef.current) {
         // 噴水・休憩の回復（サーバー許可済み）
@@ -4403,6 +4430,7 @@ export default function WorldBoxClient() {
               x: contact.placed.x, y: contact.placed.y,
               sizeTiles: contact.placed.size,
               color: MOB_FX_COLOR[def.id],
+              stop: HITSTOP_HURT_MS,
             });
             shake = startShake(shake, 2, now);
           }
@@ -4480,11 +4508,14 @@ export default function WorldBoxClient() {
       const speed = Math.hypot(player.vx, player.vy);
       if (player.vx < -0.2) player.face = -1;
       else if (player.vx > 0.2) player.face = 1;
-      player.phase = advanceWalkPhase(player.phase, speed, dt);
+      player.phase = advanceWalkPhase(player.phase, speed, sdt);
       const speedRatio = Math.min(1, speed / WALK_SPEED);
 
       // ---- 演出の更新（行為イベントの消化・粒の前進・移動の副産物） ----
       for (const ev of fxEventsRef.current.splice(0)) {
+        // ヒットストップ: 自分の命中・撃破・被弾のイベントだけが時を止める
+        if (ev.stop && !reducedMotion) hitstop = startHitstop(hitstop, ev.stop, now);
+        if (ev.kind === "death") deathFxAt.set(`${ev.x},${ev.y}`, now);
         if (ev.kind === "whiff") {
           // 空振り: 風切りだけのスイングを再生する（粒も道具アイコンも出さない）
           swing = { startedAt: now, itemId: null, face: player.face, whiff: true };
@@ -4518,13 +4549,15 @@ export default function WorldBoxClient() {
           }
           continue;
         }
-        spawnBurst(fxSys, ev.kind, ev.x + 0.5, ev.y + 0.5);
+        spawnBurst(fxSys, ev.kind, ev.x + 0.5, ev.y + 0.5, { colors: ev.colors });
         playWbSe(seForFxBurst(ev.kind), { distance: Math.max(Math.abs(ev.x + 0.5 - player.x), Math.abs(ev.y + 0.5 - player.y)) });
         if (ev.kind === "chop" || ev.kind === "mine") shake = startShake(shake, 2, now);
         else if (ev.kind === "debris" || ev.kind === "build") shake = startShake(shake, 3, now);
         if (ev.kind === "place" || ev.kind === "build") pops.set(`${ev.x},${ev.y}`, now);
       }
-      stepFx(fxSys, dt);
+      // イベントで始まったヒットストップはこのフレームの粒・モブから効かせる
+      sdt = hitstopActiveAt(hitstop, now) ? 0 : dt;
+      stepFx(fxSys, sdt);
       const beat = stepBeatIndex(player.phase);
       if (beat !== lastBeat) {
         lastBeat = beat;
@@ -4565,9 +4598,9 @@ export default function WorldBoxClient() {
       const nowMs = Date.now();
       const presenceNowMs = presenceNow();
       for (const o of others.values()) {
-        o.track = stepRemoteTrack(o.track, presenceNowMs, dt, activeBounds());
+        o.track = stepRemoteTrack(o.track, presenceNowMs, sdt, activeBounds());
         const ospeed = Math.hypot(o.track.entry.vx, o.track.entry.vy);
-        o.phase = advanceWalkPhase(o.phase, ospeed, dt);
+        o.phase = advanceWalkPhase(o.phase, ospeed, sdt);
       }
 
       // 位置の自動保存（1タイル動いた or 5秒経過で少し動いた）
@@ -5015,6 +5048,16 @@ export default function WorldBoxClient() {
           const key = mobKeyFor(placed);
           const hpNow = mobHpNow(defFor(def), mobStatesRef.current[key] ?? null, nowMs);
           if (!hpNow.alive) {
+            // 見えていた個体が状態だけで死んだ（他者の撃破など）場合は、
+            // 消えっぱなしにせず死亡の粒を出す。自分の攻撃の結果は
+            // attackMob が既に death イベントを積んでいるので二重に出さない。
+            if (mobRenders.has(key) && Math.max(Math.abs(placed.x + 0.5 - player.x), Math.abs(placed.y + 0.5 - player.y)) <= 24) {
+              const akey = `${placed.x},${placed.y}`;
+              if (now - (deathFxAt.get(akey) ?? -Infinity) > 1500) {
+                deathFxAt.set(akey, now);
+                fxEventsRef.current.push({ kind: "death", x: placed.x, y: placed.y, sizeTiles: placed.size, color: MOB_FX_COLOR[def.id] });
+              }
+            }
             // 死んでいる間は見た目状態を捨てる（復活時はアンカーでポップして出る）
             mobRenders.delete(key);
             revealedMobs.delete(key);
@@ -5085,16 +5128,16 @@ export default function WorldBoxClient() {
           const stopAt = r.behavior.mode === "chase" ? 0.85 : 0.03;
           r.lastSpeed = 0;
           if (distT > stopAt && speed > 0) {
-            const step = Math.min(distT - stopAt, speed * dt);
+            const step = Math.min(distT - stopAt, speed * sdt);
             r.wx += (dx / distT) * step;
             r.wy += (dy / distT) * step;
-            r.phase = advanceWalkPhase(r.phase, speed, dt);
+            r.phase = advanceWalkPhase(r.phase, speed, sdt);
             r.lastSpeed = speed;
             if (dx < -0.02) r.face = -1;
             else if (dx > 0.02) r.face = 1;
           }
-          r.kx *= Math.exp(-9 * dt);
-          r.ky *= Math.exp(-9 * dt);
+          r.kx *= Math.exp(-9 * sdt);
+          r.ky *= Math.exp(-9 * sdt);
           mobDrawQueue.push({ placed, r, hpFrac: hpNow.hp / defFor(def).hp, showHp: revealedMobs.has(key) });
         }
         // React 側（攻撃・技の申告）へモブの現在タイルを渡すスナップショット。
@@ -5572,7 +5615,12 @@ export default function WorldBoxClient() {
         const ptile = mapTileAt(worldMap, Math.floor(player.x), Math.floor(player.y));
         const nowSec = nowMs / 1000;
         const phase = phaseAtTime(nowSec);
-        const kind = weatherAmbientKind(weatherAt(nowSec), ptile, ptile === T_TREE || ptile === T_SNOW_TREE, nightAmount(phase));
+        const isTreeTile = ptile === T_TREE || ptile === T_SNOW_TREE;
+        // 天候は区間境界で混ぜる（雨の強さ 0〜1、fx.ts の weatherBlendAt が正）。
+        // 雪バイオームでは従来どおり雪が優先する。
+        const blend = weatherBlendAt(nowSec);
+        const dryKind = weatherAmbientKind("clear", ptile, isTreeTile, nightAmount(phase));
+        const kind = dryKind === "snow" ? "snow" : blend.rainStrength >= 0.5 ? "rain" : dryKind;
         const ax0 = cam.x - cw / TILE / 2 - 1;
         const ax1 = cam.x + cw / TILE / 2 + 1;
         const ay0 = cam.y - ch / TILE / 2 - 1;
@@ -5581,11 +5629,14 @@ export default function WorldBoxClient() {
           for (let i = 0; i < 4; i++) spawnAmbient(fxSys, kind, ax0, ax1, ay0);
         }
         lastPhaseKind = pk;
-        spawnAmbient(fxSys, kind, ax0, ax1, ay0);
-        if (kind === "rain") {
-          // 雨は密度を上げる（速く落ちるので数を足しても上限に触れない）
-          spawnAmbient(fxSys, kind, ax0, ax1, ay0);
-          spawnAmbient(fxSys, kind, ax0, ax1, ay0);
+        if (dryKind === "snow") {
+          spawnAmbient(fxSys, "snow", ax0, ax1, ay0);
+        } else {
+          // 雨の粒数は強さに比例させる（満強度で従来どおり3粒/回）。
+          // 弱い間は通常の環境粒も続けて、空が徐々に移るようにする
+          const rainN = Math.round(3 * blend.rainStrength);
+          for (let i = 0; i < rainN; i++) spawnAmbient(fxSys, "rain", ax0, ax1, ay0);
+          if (blend.rainStrength < 0.5) spawnAmbient(fxSys, dryKind, ax0, ax1, ay0);
         }
       }
       drawParticles(false);
@@ -6234,6 +6285,16 @@ export default function WorldBoxClient() {
     <div
       className="wb-shell"
       onContextMenu={(e) => e.preventDefault()}
+      onClickCapture={(e) => {
+        // UI クリック SE の一本化: シェル内のボタン押下はここで click を鳴らす。
+        // 固有の SE を持つ領域（≡メニュー・経済/カジノ/アーケードのパネル）は
+        // data-wb-se="self" で除外し、二重に鳴らさない。
+        const t = e.target as HTMLElement | null;
+        if (!t || typeof t.closest !== "function") return;
+        if (!t.closest("button")) return;
+        if (t.closest("[data-wb-se='self']")) return;
+        playWbSe("click");
+      }}
       style={{
         display: "flex", flexDirection: "column",
         WebkitTouchCallout: "none",
@@ -6278,6 +6339,7 @@ export default function WorldBoxClient() {
           type="button"
           aria-label="メニュー"
           aria-expanded={menuOpen}
+          data-wb-se="self"
           onClick={() => { playWbSe(menuOpen ? "close" : "open"); setMenuOpen((v) => !v); }}
           style={{
             ...btn, position: "absolute", left: "calc(10px + env(safe-area-inset-left, 0px))", top: "calc(10px + env(safe-area-inset-top, 0px))", minHeight: hud.buttonMinHeight, minWidth: 44, zIndex: 7,
@@ -6302,6 +6364,7 @@ export default function WorldBoxClient() {
         )}
         {menuOpen && (
           <div
+            data-wb-se="self"
             style={{
               position: "absolute", left: "calc(10px + env(safe-area-inset-left, 0px))", top: "calc(58px + env(safe-area-inset-top, 0px))", display: "grid", gap: 6, padding: 8,
               borderRadius: 10, background: "rgba(0,0,0,0.72)", color: "#fff", zIndex: 8,

@@ -382,7 +382,7 @@ export default function WorldBoxEconomyPanel({ space, station, genre, worldStati
     </button>
   );
   const panelHead = (text: string) => (
-    <div style={panel} className="wb-panel">
+    <div style={panel} className="wb-panel" data-wb-se="self">
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
         <span>{text}</span>
         <span style={{ flex: 1 }} />
@@ -434,7 +434,7 @@ export default function WorldBoxEconomyPanel({ space, station, genre, worldStati
   );
 
   return (
-    <div style={panel} className="wb-panel">
+    <div style={panel} className="wb-panel" data-wb-se="self">
       {/* ヘッダー（残高・タブ・閉じる）はスクロールに追随させず常時表示する。
           空腹度・HP はステージ左上の常時バーが正で、このパネルには出さない
           （ショップ利用中に要らない表示としてユーザー指示で撤去）。 */}

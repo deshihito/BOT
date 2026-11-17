@@ -8,6 +8,7 @@
 // arcade-clients.tsx から遅延読み込みしてこの画面に埋め込む。プレイヤーは
 // 筐体の前に立ったまま（プレゼンスも継続する）で、閉じればすぐワールドに戻る。
 import { getWebGame } from "@/lib/games-catalog";
+import { playWbSe } from "@/lib/worldbox/sound";
 import { arcadeClientFor } from "./arcade-clients";
 
 const wrap: React.CSSProperties = {
@@ -48,11 +49,11 @@ export default function WorldBoxArcadePanel({
   const title = game?.title ?? gameId;
   const Client = arcadeClientFor(gameId);
   return (
-    <div style={wrap} role="dialog" aria-label={`${title} の筐体`} className="wb-panel">
+    <div style={wrap} role="dialog" aria-label={`${title} の筐体`} className="wb-panel" data-wb-se="self">
       <div style={header}>
         <h3 style={{ margin: 0, fontSize: 17 }}>{title}</h3>
         {game?.players && <span style={{ fontSize: 12, opacity: 0.75 }}>{game.players}</span>}
-        <button type="button" style={{ ...btn, marginLeft: "auto" }} onClick={onClose}>
+        <button type="button" style={{ ...btn, marginLeft: "auto" }} onClick={() => { playWbSe("click"); onClose(); }}>
           閉じる
         </button>
       </div>

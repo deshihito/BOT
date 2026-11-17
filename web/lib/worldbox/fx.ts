@@ -239,13 +239,19 @@ const BURSTS: Record<FxBurstKind, BurstSpec> = {
   },
 };
 
+/** パレットから決定的乱数で1色選ぶ。空なら白。 */
+function pickPalette(colors: readonly string[], sys: FxSystem): string {
+  if (colors.length === 0) return "#ffffff";
+  return colors[Math.floor(fxRand(sys) * colors.length) % colors.length];
+}
+
 /** バーストの実生成（粒数・大きさ・散らばりを差し替え可能にした共通部）。 */
 function emitBurst(
   sys: FxSystem,
   spec: BurstSpec,
   x: number,
   y: number,
-  opts: { count: number; sizeMul?: number; scatterX?: number; scatterY?: number; dirX?: number; color?: string },
+  opts: { count: number; sizeMul?: number; scatterX?: number; scatterY?: number; dirX?: number; color?: string; colors?: string[] },
 ): number {
   const n = Math.max(0, Math.min(FX_BURST_MAX, Math.round(opts.count * sys.intensity)));
   const sizeMul = opts.sizeMul ?? 1;
@@ -271,7 +277,7 @@ function emitBurst(
       rot: fxRand(sys) * Math.PI * 2,
       vrot: (fxRand(sys) - 0.5) * 2 * spec.vrot,
       shape: spec.shapes[Math.floor(fxRand(sys) * spec.shapes.length) % spec.shapes.length],
-      color: opts.color ?? spec.colors[Math.floor(fxRand(sys) * spec.colors.length) % spec.colors.length],
+      color: opts.color ?? pickPalette(opts.colors ?? spec.colors, sys),
     });
   }
   return n;
@@ -286,10 +292,57 @@ export function spawnBurst(
   kind: FxBurstKind,
   x: number,
   y: number,
-  opts: { dirX?: number; color?: string } = {},
+  opts: { dirX?: number; color?: string; colors?: string[] } = {},
 ): number {
   const spec = BURSTS[kind];
-  return emitBurst(sys, spec, x, y, { count: spec.count, dirX: opts.dirX, color: opts.color });
+  return emitBurst(sys, spec, x, y, { count: spec.count, dirX: opts.dirX, color: opts.color, colors: opts.colors });
+}
+
+// ---- 素材別パレット（対象の素材で破片の色を変える） ----
+
+/**
+ * 対象（鉱脈・設置ブロック・採取物）の ID から破片パレットを引く。
+ * 行為バーストの既定色は「石」「木」の汎用色なので、鉱石・金属・宝石・
+ * 採取物など素材が分かる対象では、その素材らしい色で返す。
+ * 該当が無ければ null（バースト既定色を使う）。判定は部分一致で、
+ * 具体的なもの（ミスリル・宝石種）を汎用（鉄・石）より先に並べる。
+ */
+const MATERIAL_PALETTES: readonly (readonly [string, readonly string[]])[] = [
+  ["mithril", ["#bfeef2", "#7fd4dc", "#e8ffff", "#4fa8b8"]],
+  ["crystal", ["#e6dcff", "#b79cff", "#ffffff", "#8f7fe0"]],
+  ["diamond", ["#e8ffff", "#bfeef2", "#ffffff", "#9fd8e8"]],
+  ["ruby", ["#ff8fa0", "#e5484d", "#ffd3d8", "#a02430"]],
+  ["sapphire", ["#8fb8ff", "#3a6fd8", "#d3e4ff", "#244a96"]],
+  ["emerald", ["#8fe8b0", "#2fae5f", "#d8ffdf", "#1c7a42"]],
+  ["rare", ["#e6dcff", "#ffd23e", "#bfeef2", "#ffffff"]],
+  ["gold", ["#ffd23e", "#f5b921", "#fff3b0", "#c8890a"]],
+  ["copper", ["#e08a4c", "#b05f2a", "#f2c094", "#7a3f1c"]],
+  ["iron", ["#c9cdd4", "#8d939e", "#eef1f5", "#5c626c"]],
+  ["coal", ["#3c3c42", "#232327", "#5c5c64", "#101013"]],
+  ["sulfur", ["#ffe14d", "#f2c41c", "#fff7ae", "#d19a06"]],
+  ["glass", ["#dff6ff", "#a8dcf0", "#ffffff", "#7cc0e8"]],
+  ["chest", ["#ffd23e", "#c89b62", "#fff3b0", "#8a5a2b"]],
+  ["berry", ["#e5484d", "#a8327a", "#ffb3b8", "#7a1f24"]],
+  ["beehive", ["#ffb52e", "#f59e0b", "#ffd97a", "#c87f0a"]],
+  ["honey", ["#ffb52e", "#f59e0b", "#ffd97a", "#c87f0a"]],
+  ["mushroom", ["#e8e0d0", "#c96f4a", "#fff6e8", "#8d5a3a"]],
+  ["flower", ["#ffb7d5", "#ff8fb8", "#fff0f6", "#e56aa0"]],
+  ["herb", ["#69b84a", "#3e7d2c", "#cfe89a", "#8a5a2b"]],
+  ["nest", ["#d8b36a", "#a87f3f", "#f2dda6", "#7a5a24"]],
+  ["driftwood", ["#c9b18a", "#9a7b4f", "#e8dcc2", "#6b543a"]],
+  ["log", ["#8a5a2b", "#5d3a17", "#c89b62", "#2f6121"]],
+  ["wood", ["#8a5a2b", "#5d3a17", "#c89b62", "#2f6121"]],
+  ["stone", ["#8d8d93", "#55555c", "#c9c9cf", "#3c3c42"]],
+  ["rock", ["#8d8d93", "#55555c", "#c9c9cf", "#3c3c42"]],
+];
+
+/** ID から素材パレットを引く（コピーを返す）。無ければ null。 */
+export function burstPaletteFor(id: string | null | undefined): string[] | null {
+  if (!id) return null;
+  for (const [key, palette] of MATERIAL_PALETTES) {
+    if (id.includes(key)) return [...palette];
+  }
+  return null;
 }
 
 // ---- モブ演出（出現/被ダメージ/死亡） ----
@@ -368,6 +421,25 @@ export function weatherAt(unixSec: number): FxWeather {
   h = Math.imul(h, 3266489917);
   h ^= h >>> 16;
   return (h >>> 0) / 4294967296 < 0.35 ? "rain" : "clear";
+}
+
+/** 天候の切り替わりをなだらかにする長さ（秒）。境界の直後は雨の強さが線形に変わる。 */
+export const WEATHER_BLEND_SEC = 30;
+
+/**
+ * 天候と雨の強さ（0〜1）。weatherAt は区間境界でハードに切り替わるため、
+ * 境界から WEATHER_BLEND_SEC の間は前区間の天候と線形に混ぜ、
+ * 雨が突然降り出したり止んだりしないようにする。決定的（全クライアント一致）。
+ */
+export function weatherBlendAt(unixSec: number): { weather: FxWeather; rainStrength: number } {
+  const cur = weatherAt(unixSec);
+  const idx = Math.floor(unixSec / WEATHER_PERIOD_SEC);
+  const elapsed = unixSec - idx * WEATHER_PERIOD_SEC;
+  if (elapsed >= WEATHER_BLEND_SEC) return { weather: cur, rainStrength: cur === "rain" ? 1 : 0 };
+  const prev = weatherAt((idx - 1) * WEATHER_PERIOD_SEC + 1);
+  if (prev === cur) return { weather: cur, rainStrength: cur === "rain" ? 1 : 0 };
+  const k = elapsed / WEATHER_BLEND_SEC;
+  return { weather: cur, rainStrength: cur === "rain" ? k : 1 - k };
 }
 
 /**
@@ -456,6 +528,36 @@ export function shakeOffsetAt(shake: FxShake, nowMs: number): { x: number; y: nu
     x: Math.sin(t * 2.7) * shake.amp * decay,
     y: Math.cos(t * 3.4) * shake.amp * decay * 0.7,
   };
+}
+
+// ---- ヒットストップ（命中の一瞬だけ世界の時を止める） ----
+
+export type HitstopState = { until: number };
+
+/** 通常ヒットの停止（ms）。約3フレーム。 */
+export const HITSTOP_HIT_MS = 45;
+/** 撃破の停止（ms）。ヒットより長く止めて手応えを作る。 */
+export const HITSTOP_KILL_MS = 80;
+/** 被弾の停止（ms）。短く。 */
+export const HITSTOP_HURT_MS = 35;
+/** 停止の上限（ms）。連続ヒットでもここを超えて止め続けない。 */
+export const HITSTOP_MAX_MS = 120;
+
+export function createHitstop(): HitstopState {
+  return { until: 0 };
+}
+
+/** 停止を開始/延長する。今の停止より早く終わる指定では上書きしない。 */
+export function startHitstop(state: HitstopState, durationMs: number, nowMs: number): HitstopState {
+  const d = Math.max(0, Math.min(HITSTOP_MAX_MS, durationMs));
+  if (d <= 0) return state;
+  const until = nowMs + d;
+  return until > state.until ? { until } : state;
+}
+
+/** その時刻が停止中か。描画ループは停止中だけシミュレーション dt を 0 にする。 */
+export function hitstopActiveAt(state: HitstopState, nowMs: number): boolean {
+  return nowMs < state.until;
 }
 
 // ---- 出現ポップ（設置・建築の「収まった」感） ----
