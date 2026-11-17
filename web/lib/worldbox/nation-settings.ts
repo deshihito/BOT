@@ -31,8 +31,6 @@ export type NationSettings = {
 export const TAX_RATE_DEFAULT = 0.05;
 /** 税率の上限。 */
 export const TAX_RATE_MAX = 0.1;
-/** UI で選べる税率の段階。 */
-export const TAX_RATE_STEPS: readonly number[] = [0, 0.01, 0.02, 0.03, 0.05, 0.07, 0.1];
 
 export function defaultNationSettings(): NationSettings {
   return { taxRate: TAX_RATE_DEFAULT, visibility: "open", ministers: [], taxCollected: 0, updatedAt: 0 };

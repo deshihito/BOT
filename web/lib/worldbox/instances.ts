@@ -271,11 +271,6 @@ export function buildCaveLayer(seed: number, entranceX: number, entranceY: numbe
   return result;
 }
 
-/** 鉱脈の定義（段位ゲート・再出現つき）。 */
-export function caveVeinDef(vein: CaveVein): SpecialObjectDef | null {
-  return specialObjectById(vein.objectId);
-}
-
 /** 入口・階段まわりの安全圏か（モブ配置と接触判定の除外に使う）。 */
 export function isCaveSafeTile(cave: CaveLayer, x: number, y: number): boolean {
   const near = (p: { x: number; y: number } | null) => p !== null && Math.hypot(x - p.x, y - p.y) <= 1.5;

@@ -53,9 +53,3 @@ export function resolveLinkedChannelId(
   if (settings.mode === "global") return directory?.globalChatChannelId ?? null;
   return null;
 }
-
-/** チャンネル ID から表示名を引く（ディレクトリに無ければ null）。 */
-export function directoryChannelName(directory: DiscordDirectory | null, channelId: string | null): string | null {
-  if (!directory || !channelId) return null;
-  return directory.channels.find((c) => c.id === channelId)?.name ?? null;
-}

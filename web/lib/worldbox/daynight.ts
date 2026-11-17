@@ -5,15 +5,6 @@
 /** 1 日の長さ（秒）。 */
 export const DAY_CYCLE_SEC = 240;
 
-/** 新規ワールドの開始位相（昼）。 */
-export const START_PHASE = 0.3;
-
-/** 位相を dt 秒進める（0〜1 に正規化）。 */
-export function advancePhase(phase: number, dt: number): number {
-  const next = (phase + dt / DAY_CYCLE_SEC) % 1;
-  return next < 0 ? next + 1 : next;
-}
-
 /**
  * 共有時計（v3）: 位相は unix 時刻から一意に決まる（全員が同じ時刻を生きる）。
  * セーブには位相を持たず、クライアントは毎フレームこれで現在位相を求める。

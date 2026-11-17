@@ -1,6 +1,6 @@
 // AGO WORLD BOX の死亡地点記録（サーバー専用。薬師の蘇生用）。
 // 保存先は bot_kv（名前空間 "worldbox_deaths"、キー = 所有者キー）。
-import { isBotApiConfigured, kvDelete, kvGet, kvList, kvSet } from "../bot-api";
+import { isBotApiConfigured, kvDelete, kvList, kvSet } from "../bot-api";
 
 export const WORLDBOX_DEATHS_NAMESPACE = "worldbox_deaths";
 /** 蘇生できる死亡記録の寿命。 */
@@ -48,17 +48,4 @@ export async function clearDeath(ownerKey: string): Promise<void> {
   try {
     await kvDelete(WORLDBOX_DEATHS_NAMESPACE, ownerKey);
   } catch { /* ベストエフォート */ }
-}
-
-export async function loadDeath(ownerKey: string): Promise<DeathRecord | null> {
-  if (!isBotApiConfigured()) return null;
-  try {
-    const raw = await kvGet(WORLDBOX_DEATHS_NAMESPACE, ownerKey);
-    if (!raw) return null;
-    const v = JSON.parse(typeof raw === "string" ? raw : JSON.stringify(raw)) as Partial<DeathRecord>;
-    if (typeof v.space !== "string" || typeof v.x !== "number" || typeof v.y !== "number" || typeof v.at !== "number") return null;
-    return { ownerKey, name: typeof v.name === "string" ? v.name : "", space: v.space, x: v.x, y: v.y, at: v.at };
-  } catch {
-    return null;
-  }
 }

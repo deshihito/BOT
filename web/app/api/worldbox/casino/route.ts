@@ -151,6 +151,21 @@ async function spendStatusWaited(userKey: string, opId: string): Promise<OpStatu
   return op ? op.status : "missing";
 }
 
+/**
+ * 先払いが done と確定するまで遊ばせない（double_cashout / bj_double と
+ * 同じ規約）。pending は待っても確定しなければ bet_pending、失敗・喪失は
+ * セッションを破棄して bet_failed。null は「進めてよい」。
+ */
+async function prepayGateError(userKey: string, opId: string) {
+  const status = await spendStatusWaited(userKey, opId);
+  if (status === "pending") return errorResponse("bet_pending", 409);
+  if (status !== "done") {
+    await clearCasinoSession(userKey);
+    return errorResponse("bet_failed", 409);
+  }
+  return null;
+}
+
 async function enqueue(userKey: string, discordId: string, input: {
   kind: "spend" | "gamble";
   amount: number;
@@ -476,6 +491,10 @@ async function handlePost(request: Request, session: AuthedSession) {
     const { session: s7, error } = requireSession("slot7");
     if (error || !s7) return error ?? errorResponse("no_session", 409);
     if (s7.remaining <= 0) return errorResponse("no_spins_left", 409);
+    // 先払い（全スピン分）が確定してから回す。未確定のまま遊べると
+    // 後から failed になった場合に無料で回せてしまう。
+    const prepayError = await prepayGateError(ctx.userKey, s7.prepayOpId);
+    if (prepayError) return prepayError;
     const userState = await loadCasinoUserState(ctx.userKey);
     const spin = spinSlot7(userState, s7.bet, rng);
     await saveCasinoUserState(ctx.userKey, userState);
@@ -527,6 +546,9 @@ async function handlePost(request: Request, session: AuthedSession) {
     const { session: dbl, error } = requireSession("double");
     if (error || !dbl) return error ?? errorResponse("no_session", 409);
     if (dbl.busted) return errorResponse("session_finished", 409);
+    // 先払いが確定してから進める（double_cashout と同じ確認を開始側にも）。
+    const prepayError = await prepayGateError(ctx.userKey, dbl.prepayOpId);
+    if (prepayError) return prepayError;
     const userState = await loadCasinoUserState(ctx.userKey);
     const sessionState = { bet: dbl.bet, multiplier: dbl.multiplier, streak: dbl.streak };
     const go = doubleGo(sessionState, userState, rng);

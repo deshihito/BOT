@@ -115,6 +115,31 @@ test("状態機械: 敵対は alert→chase→windup（予兆イベント）→s
   assert.notEqual(out2.state.mode, "windup");
 });
 
+test("状態機械: 凍結中は行動が止まり、解除時は残り時間が繰り越される", () => {
+  const wolf = B.mobById("wolf");
+  let st = B.createBehaviorState(10.5, 10.5);
+  let out = B.stepMobBehavior(st, input(wolf, { now: 0 }));
+  out = B.stepMobBehavior(out.state, input(wolf, { now: 400 }));
+  out = B.stepMobBehavior(out.state, input(wolf, { now: 500 }));
+  assert.equal(out.state.mode, "windup");
+  const windupUntil = out.state.until;
+  // 凍結中: モード不変・速度 0・イベントなし（予兆も突進も進まない）
+  out = B.stepMobBehavior(out.state, input(wolf, { now: 600, frozen: true }));
+  assert.equal(out.state.mode, "windup");
+  assert.equal(out.speed, 0);
+  assert.deepEqual(out.events, []);
+  out = B.stepMobBehavior(out.state, input(wolf, { now: 5000, frozen: true }));
+  assert.equal(out.state.mode, "windup");
+  assert.equal(out.speed, 0);
+  // 解除: 凍結していた 4400ms ぶん windup の終了時刻が後ろへずれる
+  out = B.stepMobBehavior(out.state, input(wolf, { now: 5000, frozen: false }));
+  assert.equal(out.state.mode, "windup");
+  assert.equal(out.state.until, windupUntil + 4400);
+  // ずれた終了時刻を過ぎれば strike へ進む
+  out = B.stepMobBehavior(out.state, input(wolf, { now: windupUntil + 4400 + 1 }));
+  assert.equal(out.state.mode, "strike");
+});
+
 test("状態機械: リーシュで帰還し、アンカー近くで idle に戻る", () => {
   const wolf = B.mobById("wolf");
   let st = B.createBehaviorState(30.5, 10.5);

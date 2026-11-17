@@ -10,8 +10,9 @@
 // 役職まわりの home はここ: ≡ メニューには置かない。
 // コインの正は AGO コイン本体: 依頼の預かり・報酬・返金は API 側が
 // 経済ブリッジのオプとして積む（このパネルは結果を表示するだけ）。
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ITEMS, itemById } from "@/lib/worldbox/items";
+import { onGuildBoardChanged, onGuildRequestsChanged } from "@/lib/worldbox/guild-board-push";
 import { ItemAnnotation, ItemSlot, ItemSlotGrid } from "./ItemSlotGrid";
 import type { NationRole, NationsResponse } from "@/lib/worldbox/nations";
 import type { PlayerProfile } from "@/lib/worldbox/profile";
@@ -52,7 +53,7 @@ const SETTINGS_ERROR_LABEL: Record<string, string> = {
   unauthorized: "ログインが必要です",
 };
 
-/** 国家設定タブで選べる税率（%）。サーバー側 TAX_RATE_STEPS と一致させる。 */
+/** 国家設定タブで選べる税率（%）。サーバー側は 0〜10% の範囲で受ける。 */
 const TAX_RATE_PERCENT_STEPS = [0, 1, 2, 3, 5, 7, 10];
 
 type NationSettingsMember = {
@@ -288,6 +289,35 @@ export default function WorldBoxGuildBoardPanel({
   useEffect(() => {
     if (tab === "board") void refreshUnion();
   }, [tab, refreshUnion]);
+  // 掲示タブからの投稿（ユニオンチャットと同じ API 経路）
+  const [boardText, setBoardText] = useState("");
+  const sendUnionPost = async () => {
+    const text = boardText.trim();
+    if (!text || busy) return;
+    setBusy(true);
+    setMsg("");
+    try {
+      const res = await fetch("/api/worldbox/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ channel: "union", text, space: "lobby" }),
+      });
+      if (res.ok) {
+        setBoardText("");
+        await refreshUnion();
+      } else {
+        setMsg(
+          res.status === 429 ? "少し待ってから送ってください"
+          : res.status === 409 ? "ユニオンに所属していません"
+          : "送れませんでした",
+        );
+      }
+    } catch {
+      setMsg("送れませんでした");
+    } finally {
+      setBusy(false);
+    }
+  };
   const saveUnionLink = async (mode: "global" | "channel" | "none", channelId: string | null) => {
     setBusy(true);
     try {
@@ -337,6 +367,17 @@ export default function WorldBoxGuildBoardPanel({
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  // 他人の変更を relay の push で受けて取り直す（依頼は開いている間、
+  // 掲示は掲示タブの表示中のみ）。push が無い環境では従来どおり自分の
+  // 操作とタブ切替で更新される。
+  const tabRef = useRef(tab);
+  tabRef.current = tab;
+  useEffect(() => onGuildRequestsChanged(() => { void refresh(); }), [refresh]);
+  useEffect(
+    () => onGuildBoardChanged(() => { if (tabRef.current === "board") void refreshUnion(); }),
+    [refreshUnion],
+  );
 
   const act = async (body: Record<string, unknown>, done?: (res: Record<string, unknown>) => void) => {
     setMsg("");
@@ -595,7 +636,7 @@ export default function WorldBoxGuildBoardPanel({
             const cost = profile && !current ? roleChangeCost(profile, r.id) : 0;
             return (
               <div key={r.id} style={{ ...rowStyle, justifyContent: "space-between" }}>
-                <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                   <span
                     aria-hidden
                     style={{
@@ -611,6 +652,9 @@ export default function WorldBoxGuildBoardPanel({
                   <span aria-label={`熟練ランク ${rank}`} style={{ letterSpacing: 2, fontSize: 11 }}>
                     {"●".repeat(rank)}
                     <span style={{ opacity: 0.3 }}>{"●".repeat(5 - rank)}</span>
+                  </span>
+                  <span style={{ flexBasis: "100%", paddingLeft: 34, fontSize: 11, opacity: 0.75 }}>
+                    常時: {r.passiveName} ・ 専門: {r.specialtyName}
                   </span>
                 </span>
                 <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -679,6 +723,24 @@ export default function WorldBoxGuildBoardPanel({
                 </div>
               ))
             )}
+          </div>
+          <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+            <input
+              value={boardText}
+              onChange={(e) => setBoardText(e.target.value)}
+              placeholder="ユニオンへ投稿"
+              maxLength={120}
+              style={{ ...input, flex: 1 }}
+              onKeyDown={(e) => { if (e.key === "Enter") void sendUnionPost(); }}
+            />
+            <button
+              type="button"
+              style={btn}
+              disabled={busy || !boardText.trim()}
+              onClick={() => void sendUnionPost()}
+            >
+              送る
+            </button>
           </div>
           <div style={{ marginTop: 10 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>

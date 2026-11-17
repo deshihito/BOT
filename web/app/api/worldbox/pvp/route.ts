@@ -8,7 +8,7 @@ import {
 } from "@/lib/worldbox/economy-bridge-online";
 import { loadProfile } from "@/lib/worldbox/profile-online";
 import {
-  PVP_FEE, PVP_PRIZE, createDuel, publicPvpView, pvpFeeRefundOpId, pvpPrizeOpId, pvpStep, tryMatch,
+  PVP_FEE, PVP_MAX_LOG, PVP_PRIZE, createDuel, publicPvpView, pvpFeeRefundOpId, pvpPrizeOpId, pvpStep, tryMatch,
   type PvpDuel, type PvpMove, type PvpPlayer, type PvpQueueEntry,
 } from "@/lib/worldbox/pvp";
 import { clearPvpDuel, loadMyPvpDuel, loadPvpQueue, savePvpDuel, savePvpQueue } from "@/lib/worldbox/pvp-online";
@@ -285,7 +285,7 @@ async function handlePost(request: Request, session: AuthedSession) {
     if (!stepped.ok) return errorResponse(stepped.error, 409);
     const next: PvpDuel = {
       ...stepped.result.duel,
-      log: [...stepped.result.events, ...duel.log].slice(0, 6),
+      log: [...stepped.result.events, ...duel.log].slice(0, PVP_MAX_LOG),
     };
     if (stepped.result.winner !== null) {
       await finishDuel(next, stepped.result.winner);

@@ -11,7 +11,7 @@ import { loadWorldBoxSave, storeWorldBoxSave } from "@/lib/worldbox/save-online"
 import { serializeSave } from "@/lib/worldbox/save";
 import {
   buildCaveLayer, buildDungeonFloor, buildRuins, makeInstanceSpace, parseInstanceSpace, ruinsCompleteOpId, weekKeyOf,
-  CAVE_CHEST_RESPAWN_MS, RUINS_COMPLETE_EARN, RUINS_MAIN_CHEST_LOOT,
+  CAVE_CHEST_RESPAWN_MS, DUNGEON_FLOORS, RUINS_COMPLETE_EARN, RUINS_MAIN_CHEST_LOOT,
 } from "@/lib/worldbox/instances";
 import { activeLimitedDungeon, isEventDungeonEntrance } from "@/lib/worldbox/events";
 import { withUserLock } from "@/lib/worldbox/user-lock";
@@ -108,8 +108,17 @@ export async function GET(request: Request) {
     for (const [k, v] of Object.entries(ds.chests)) {
       if (k.startsWith(`${ownerKey}:`)) myChests[k.slice(ownerKey.length + 1)] = v;
     }
+    // 階段の熟練ゲートはサーバー（最新ランクで判定）が正。クライアントは
+    // この結果で表示を決める（結成時スナップショットでは判定しない）。
+    const [gateFloor2, gateBoss] = await Promise.all([
+      dungeonGateSatisfied(ds.members, 2),
+      dungeonGateSatisfied(ds.members, DUNGEON_FLOORS),
+    ]);
     return NextResponse.json(
-      { chests: myChests, doors: ds.doors, floorBossDead: ds.floorBossDead, bossDead: ds.bossDead, size: ds.size },
+      {
+        chests: myChests, doors: ds.doors, floorBossDead: ds.floorBossDead, bossDead: ds.bossDead, size: ds.size,
+        gateFloor2, gateBoss,
+      },
       { headers: NO_STORE },
     );
   }
@@ -145,8 +154,14 @@ async function handleRuins(
     const afterKey = removeItem(profile, "golden_key", 1);
     if (!afterKey) return NextResponse.json({ error: "needs_golden_key" }, { status: 409, headers: NO_STORE });
     personal.doors[String(door.idx)] = true;
-    await storeRuinsPersonal(space, ownerKey, personal);
+    if (!(await storeRuinsPersonal(space, ownerKey, personal))) {
+      return NextResponse.json({ error: "store_failed" }, { status: 503, headers: NO_STORE });
+    }
     if (!(await storeProfile(ownerKey, afterKey))) {
+      // 鍵を消費せず扉だけ開いたままにしない（再試行で "already" になり
+      // 無料開錠になる）。扉の開放を取り消してから失敗を返す。
+      delete personal.doors[String(door.idx)];
+      await storeRuinsPersonal(space, ownerKey, personal);
       return NextResponse.json({ error: "profile_unavailable" }, { status: 503, headers: NO_STORE });
     }
     return NextResponse.json({ ok: true, profile: afterKey, doors: personal.doors }, { headers: NO_STORE });
@@ -292,7 +307,11 @@ async function handleDungeon(
     if (!removed) return NextResponse.json({ error: "no_key" }, { status: 409, headers: NO_STORE });
     const next: DungeonSession = { ...ds, doors: { ...ds.doors, [doorKey]: true } };
     if (!(await storeDungeonSession(floor1, next))) return NextResponse.json({ error: "store_failed" }, { status: 503, headers: NO_STORE });
-    if (!(await storeProfile(ownerKey, removed))) return NextResponse.json({ error: "store_failed" }, { status: 503, headers: NO_STORE });
+    if (!(await storeProfile(ownerKey, removed))) {
+      // 扉だけ開いて鍵が残る（無料開錠）にならないようセッションを戻す
+      await storeDungeonSession(floor1, ds);
+      return NextResponse.json({ error: "store_failed" }, { status: 503, headers: NO_STORE });
+    }
     return NextResponse.json({ ok: true, profile: removed }, { headers: NO_STORE });
   }
 

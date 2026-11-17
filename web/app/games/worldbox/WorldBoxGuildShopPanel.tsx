@@ -23,7 +23,7 @@ const input: React.CSSProperties = {
   background: "rgba(255,255,255,0.08)", color: "#fff", fontSize: 13,
 };
 
-type ListingView = { id: string; sellerKey: string; itemId: string; name: string; available: number; price: number };
+type ListingView = { id: string; itemId: string; name: string; available: number; price: number };
 type PlotView = { idx: number; guildId: string; guildName: string; listings: ListingView[] } | null;
 type ShopView = {
   plots: PlotView[];

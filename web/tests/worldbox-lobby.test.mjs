@@ -560,12 +560,24 @@ test("API(board): 不正な本文は 400、他オリジンは 403、上限30件�
   assert.equal((await boardRoute.POST(apiRequest(url, "POST", cookie, { text: "x".repeat(121) }))).status, 400);
   assert.equal((await boardRoute.POST(apiRequest(url, "POST", cookie, { text: 42 }))).status, 400);
   assert.equal((await boardRoute.POST(apiRequest(url, "POST", cookie, { text: "ok" }, { origin: "http://evil.example" }))).status, 403);
+  // 連投制限（同一ユーザーは 1.5 秒間隔）があるため、上限の検証は
+  // 投稿者を変えながら行う（掲示板の蓄積は全体で数える）。
   for (let i = 0; i < 35; i++) {
-    assert.equal((await boardRoute.POST(apiRequest(url, "POST", cookie, { text: `cap${i}` }))).status, 200);
+    const capCookie = sessionCookie(`65${String(i).padStart(16, "0")}`, `cap-user-${i}`);
+    assert.equal((await boardRoute.POST(apiRequest(url, "POST", capCookie, { text: `cap${i}` }))).status, 200);
   }
   const after = await (await boardRoute.GET(apiRequest(url, "GET", null))).json();
   assert.equal(after.posts.length, wb.BOARD_MAX_POSTS);
   assert.equal(after.posts[0].text, "cap34");
+});
+
+test("API(board): 同一ユーザーの連投は 429（チャットと同じ最小間隔）", async () => {
+  const url = "http://localhost/api/worldbox/board";
+  const cookie = sessionCookie("666666666666666666", "board-user-3");
+  assert.equal((await boardRoute.POST(apiRequest(url, "POST", cookie, { text: "first" }))).status, 200);
+  const second = await boardRoute.POST(apiRequest(url, "POST", cookie, { text: "second" }));
+  assert.equal(second.status, 429);
+  assert.equal((await second.json()).error, "too_fast");
 });
 
 test("API(gate): Discord セッションだけが入場でき、ゲストと Google は不可", async () => {

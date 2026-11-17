@@ -5,10 +5,9 @@
 // 現在の 1024×1024 固定マップでも、将来のチャンク式無制限マップでも
 // 同じロジックが使える（マップ配列に依存しない）。
 import {
-  CHUNK_SIZE, MAP_SEED, T_GRASS, T_ROCK, T_SAND, T_SNOW, T_SNOW_TREE, T_TREE, T_WATER,
-  fbm, mapTileAt, snowBoundaryAt, type TopDownMap,
+  CHUNK_SIZE, MAP_SEED, T_GRASS, T_ROCK, T_SAND, T_SNOW_TREE, T_TREE, T_WATER,
+  fbm, snowBoundaryAt,
 } from "./mapgen";
-import { makeRng } from "./rng";
 
 // チャンク一辺は mapgen の定義が正。利用側（combat 等）がこのモジュール経由で
 // 参照してきた経緯があるため再公開する。
@@ -76,13 +75,6 @@ export function moistureAt(seed: number, x: number, y: number): number {
   );
 }
 
-/** 気温 [0,1]。北（小さい y）ほど低く、ノイズで揺れる。雪原判定の基礎。 */
-export function temperatureAt(seed: number, x: number, y: number): number {
-  const latitude = 1 - Math.min(1, Math.max(0, y / WORLD_SPAN));
-  const wobble = (fbm(x * 0.004, y * 0.004, seed ^ 0x71aa, 2) - 0.5) * 0.2;
-  return Math.min(1, Math.max(0, latitude * 0.75 + 0.25 + wobble - 0.35));
-}
-
 /** その座標が雪原帯か（mapgen の雪原境界と一致）。 */
 export function isSnowZone(seed: number, x: number, y: number): boolean {
   return y < snowBoundaryAt(seed, x);
@@ -108,22 +100,6 @@ export function biomeAt(seed: number, x: number, y: number, tile?: number): Biom
   const m = moistureAt(seed, x, y);
   const t = tile ?? (e < 0.35 ? T_WATER : e < 0.385 ? T_SAND : e > 0.745 ? T_ROCK : m > 0.585 ? T_TREE : T_GRASS);
   return classifyBiome(e, m, isSnowZone(seed, x, y), t);
-}
-
-/** 生成済みマップ上のバイオーム（タイル実値を優先する版）。 */
-export function biomeOnMap(map: TopDownMap, x: number, y: number): BiomeId {
-  const tile = mapTileAt(map, x, y);
-  return classifyBiome(
-    elevationAt(map.seed, x, y),
-    moistureAt(map.seed, x, y),
-    isSnowZone(map.seed, x, y),
-    tile,
-  );
-}
-
-/** バイオームの資源プロファイル（採取・配置の基礎表）。 */
-export function resourceProfileFor(biome: BiomeId): readonly string[] {
-  return biomeById(biome)?.resources ?? [];
 }
 
 // ---------------------------------------------------------------- チャンク
@@ -226,37 +202,6 @@ export function structuresForChunk(seed: number, cx: number, cy: number): Placed
     return [{ structureId: def.id, x, y, biome }];
   }
   return [];
-}
-
-// ---------------------------------------------------------------- スポーン
-/**
- * 決定的ランダムスポーン: seed と salt（プレイヤー識別子など）から
- * 歩ける陸地を探す。初回スポーンのランダム化に使う。
- * 見つからなければ null（呼び出し側が中央スポーンへ落とす）。
- */
-export function findLandSpawn(
-  map: TopDownMap,
-  salt: string,
-  tries: number = 64,
-): { x: number; y: number } | null {
-  let h = 2166136261;
-  for (let i = 0; i < salt.length; i++) {
-    h ^= salt.charCodeAt(i);
-    h = Math.imul(h, 16777619);
-  }
-  const rng = makeRng((map.seed ^ h) >>> 0);
-  // 有限マップはその範囲内、無制限ワールドは原点中心 ±2000 を探す。
-  const spanX = map.width ?? 4000;
-  const spanY = map.height ?? 4000;
-  const offX = map.width ? 0 : -2000;
-  const offY = map.height ? 0 : -2000;
-  for (let i = 0; i < tries; i++) {
-    const x = Math.floor(rng() * spanX) + offX;
-    const y = Math.floor(rng() * spanY) + offY;
-    const tile = mapTileAt(map, x, y);
-    if (tile === T_GRASS) return { x: x + 0.5, y: y + 0.5 };
-  }
-  return null;
 }
 
 /** 既定シードでのバイオーム分布の目安（テスト・調整用に公開）。 */

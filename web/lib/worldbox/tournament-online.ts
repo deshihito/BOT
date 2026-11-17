@@ -41,7 +41,8 @@ export async function saveTournament(t: Tournament): Promise<void> {
 /** 参加者の攻撃力（決闘の作成に使う。所有者キーは `discord:<id>`）。 */
 export async function attackOf(discordId: string): Promise<number> {
   const profile = await loadProfile(`discord:${discordId}`);
-  return playerAttack(profile.items);
+  // 剣の強化レベルも攻撃力に含める（PvP / アリーナと同じ計算に揃える）
+  return playerAttack(profile.items, profile.enhance);
 }
 
 // ---------- 参加費オプの照合 ----------

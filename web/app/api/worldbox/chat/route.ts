@@ -9,8 +9,8 @@ import {
 } from "@/lib/worldbox/chat-online";
 import { resolveLinkedChannelId } from "@/lib/worldbox/discord-directory";
 import { loadDiscordDirectory } from "@/lib/worldbox/discord-directory-online";
-import { listPresence } from "@/lib/worldbox/presence-online";
-import { presenceIdFor, sanitizePresenceSpace } from "@/lib/worldbox/presence";
+import { loadMyPresence } from "@/lib/worldbox/presence-online";
+import { sanitizePresenceSpace } from "@/lib/worldbox/presence";
 import { loadNationsState } from "@/lib/worldbox/nations-online";
 import { bumpMetric } from "@/lib/worldbox/metrics-online";
 
@@ -35,11 +35,12 @@ function sameOrigin(request: Request) {
   return !origin || origin === publicOrigin(request);
 }
 
-/** 本人の現在位置（プレゼンス→無ければ null）。 */
+/** 本人の現在位置（鮮度フィルタ付きプレゼンス→無ければ null）。 */
 async function myPresence(ownerKey: string) {
-  const selfId = presenceIdFor(ownerKey);
-  const entries = await listPresence();
-  return entries.find((e) => e.id === selfId) ?? null;
+  // 鮮度切れのプレゼンスで位置・空間を判定すると、別空間にいる扱いで
+  // 近距離チャットが見えたり union の空間がずれたりする。他ルートと
+  // 同じ loadMyPresence（鮮度内のみ有効）を使う。
+  return loadMyPresence(ownerKey);
 }
 
 export async function GET(request: Request) {

@@ -330,6 +330,9 @@ if (wss) {
         }
       } else if (kind === "nations") {
         sendTo(() => true, { t: "sync", kind: "nations" });
+      } else if (kind === "requests") {
+        // 依頼は所属ギルドで絞った本人向け応答が正なので poke のみ
+        sendTo(() => true, { t: "sync", kind: "requests" });
       } else if (kind === "chat") {
         const scopes = new Map();
         for (const c of changes) {
@@ -416,7 +419,7 @@ if (wss) {
         setInterval(() => void run(), plan.intervalMs);
       }, 500 + idx * 300);
     });
-    console.log("[realtime] kv watch enabled (chat/party/tiles/mobs/board/nations/instances/economy/objects/fishing)");
+    console.log("[realtime] kv watch enabled (chat/party/requests/tiles/mobs/board/nations/instances/economy/objects/fishing)");
   } else {
     console.log("[realtime] kv watch disabled (bot api not configured)");
   }

@@ -68,6 +68,7 @@ test("watch: WATCH_PLAN は対象系統の名前空間と間隔を持つ", () =>
   assert.equal(byKind.get("chat").namespace, "worldbox_chat");
   assert.equal(byKind.get("unionChat").namespace, "worldbox_union_board");
   assert.equal(byKind.get("party").namespace, "worldbox_party");
+  assert.equal(byKind.get("requests").namespace, "worldbox_requests");
   assert.equal(byKind.get("tiles").namespace, "worldbox_tiles");
   assert.equal(byKind.get("mobs").namespace, "worldbox_mobs");
   assert.equal(byKind.get("board").namespace, "worldbox_board");

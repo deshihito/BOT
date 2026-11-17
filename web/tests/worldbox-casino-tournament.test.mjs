@@ -125,6 +125,15 @@ test("casino-tournament: 募集期限を過ぎたら対局時間へ入る", () =
   assert.equal(closed.playStartedAt, NOW + C.CASINO_TOURNAMENT_ENTRY_MS + 1);
 });
 
+test("casino-tournament: 満員の早期締切では対局終了時刻が締切時点から数え直される", () => {
+  const entrants = Array.from({ length: C.CASINO_TOURNAMENT_MAX_ENTRANTS }, (_, i) => `u${i}`);
+  const t = tournament(entrants);
+  const closed = C.closeCasinoEntry(t, NOW + 60_000);
+  assert.equal(closed.status, "running");
+  assert.equal(closed.playStartedAt, NOW + 60_000);
+  assert.equal(closed.playEndsAt, NOW + 60_000 + C.CASINO_TOURNAMENT_PLAY_MS);
+});
+
 test("casino-tournament: 2人未満で締め切られた大会は不成立", () => {
   const t = tournament([A]);
   const closed = C.closeCasinoEntry(t, NOW + C.CASINO_TOURNAMENT_ENTRY_MS + 1);

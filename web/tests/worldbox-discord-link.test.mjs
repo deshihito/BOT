@@ -7,7 +7,7 @@ import { readFile } from "node:fs/promises";
 
 import { parseChatMessage, parseUnionChatSettings } from "../lib/worldbox/chat.ts";
 import {
-  directoryChannelName, parseDiscordDirectory, resolveLinkedChannelId,
+  parseDiscordDirectory, resolveLinkedChannelId,
 } from "../lib/worldbox/discord-directory.ts";
 
 const CID = "222222222222222222";
@@ -62,9 +62,6 @@ test("resolveLinkedChannelId: mode ごとの宛先解決", () => {
   assert.equal(resolveLinkedChannelId({ mode: "global", channelId: null, updatedAt: 0 }, dir), GLOBAL_CID);
   assert.equal(resolveLinkedChannelId({ mode: "global", channelId: null, updatedAt: 0 }, null), null);
   assert.equal(resolveLinkedChannelId({ mode: "none", channelId: null, updatedAt: 0 }, dir), null);
-  assert.equal(directoryChannelName(dir, GLOBAL_CID), "global-chat");
-  assert.equal(directoryChannelName(dir, CID), null);
-  assert.equal(directoryChannelName(null, GLOBAL_CID), null);
 });
 
 test("parseChatMessage: Discord 由来の source を保持する", () => {

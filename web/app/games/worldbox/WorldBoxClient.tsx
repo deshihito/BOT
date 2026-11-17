@@ -39,6 +39,7 @@ import { clockOffsetEstimate, type PresenceEntry } from "@/lib/worldbox/presence
 import { createPollGuard, type PollGuard } from "@/lib/poll-guard";
 import { isWsHealthy, presencePollDue } from "@/lib/worldbox/realtime-poll";
 import { notifyEconomyApplied } from "@/lib/worldbox/economy-push";
+import { notifyGuildBoardChanged, notifyGuildRequestsChanged } from "@/lib/worldbox/guild-board-push";
 import {
   STAMINA_MAX, canDash, createStamina, createTapTracker, isStickDash, registerKeyTap, rescueStamina,
   staminaGaugeVisible, stepStamina, type StaminaState, type StaminaUse, type TapTracker,
@@ -1090,7 +1091,11 @@ export default function WorldBoxClient() {
       });
       const data = (await res.json().catch(() => ({}))) as { posts?: BoardPost[]; error?: string };
       if (!res.ok) {
-        setBoardMsg(data.error === "unauthorized" ? "投稿はログイン後" : "投稿できませんでした");
+        setBoardMsg(
+          data.error === "unauthorized" ? "投稿はログイン後"
+          : data.error === "too_fast" ? "少し待ってから投稿してください"
+          : "投稿できませんでした",
+        );
         return;
       }
       setBoardText("");
@@ -1520,7 +1525,8 @@ export default function WorldBoxClient() {
   const dungeonStateRef = useRef<{
     opened: Record<string, boolean>; doors: Record<string, boolean>;
     floorBossDead: Record<string, boolean>; bossDead: boolean; size: number;
-  }>({ opened: {}, doors: {}, floorBossDead: {}, bossDead: false, size: 1 });
+    gateFloor2: boolean; gateBoss: boolean;
+  }>({ opened: {}, doors: {}, floorBossDead: {}, bossDead: false, size: 1, gateFloor2: false, gateBoss: false });
   const refreshDungeonState = async (space: string) => {
     // 行為直後の明示再取得。古いレスポンスが新しい状態を上書きしない（S6）。
     const ticket = instanceGuardRef.current.begin({ force: true });
@@ -1533,12 +1539,14 @@ export default function WorldBoxClient() {
       const data = (await res.json()) as {
         chests?: Record<string, number>; doors?: Record<string, boolean>;
         floorBossDead?: Record<string, boolean>; bossDead?: boolean; size?: number;
+        gateFloor2?: boolean; gateBoss?: boolean;
       };
       if (!instanceGuardRef.current.isCurrent(ticket)) return;
       dungeonStateRef.current = {
         opened: Object.fromEntries(Object.keys(data.chests ?? {}).map((k) => [k, true])), doors: data.doors ?? {},
         floorBossDead: data.floorBossDead ?? {}, bossDead: data.bossDead ?? false,
         size: data.size ?? 1,
+        gateFloor2: data.gateFloor2 ?? false, gateBoss: data.gateBoss ?? false,
       };
     } catch { /* 読めなくても歩き続けられる */ }
     finally {
@@ -1574,7 +1582,7 @@ export default function WorldBoxClient() {
   showPlayerCardRef.current = showPlayerCard;
   /** チャット（近距離/全体/ユニオン）。サーバーが正、ここは表示と送信だけ。 */
   const [chatChannel, setChatChannel] = useState<"proximity" | "global" | "union">("proximity");
-  const [chatMsgs, setChatMsgs] = useState<{ name: string; text: string; at: number }[]>([]);
+  const [chatMsgs, setChatMsgs] = useState<{ name: string; text: string; at: number; source?: string }[]>([]);
   const [chatText, setChatText] = useState("");
   const chatChannelRef = useRef(chatChannel);
   chatChannelRef.current = chatChannel;
@@ -1593,7 +1601,7 @@ export default function WorldBoxClient() {
           { headers: { Accept: "application/json" } },
         );
         if (!res.ok || disposed) return;
-        const data = (await res.json()) as { messages?: { name: string; text: string; at: number }[] };
+        const data = (await res.json()) as { messages?: { name: string; text: string; at: number; source?: string }[] };
         if (!disposed && chatGuardRef.current.isCurrent(ticket)) setChatMsgs(data.messages ?? []);
       } catch { /* noop */ }
       finally {
@@ -1713,7 +1721,7 @@ export default function WorldBoxClient() {
         body: JSON.stringify({ channel: chatChannel, text, space: spaceUi }),
       });
       if (res.ok) {
-        const data = (await res.json()) as { message?: { name: string; text: string; at: number } };
+        const data = (await res.json()) as { message?: { name: string; text: string; at: number; source?: string } };
         if (data.message) setChatMsgs((prev) => [data.message!, ...prev].slice(0, 50));
       } else if (res.status === 429) {
         setTileMsg("少し待って");
@@ -1738,7 +1746,10 @@ export default function WorldBoxClient() {
       const data = (await res.json()) as {
         party?: PartyViewClient | null; partyKey?: string; isLeader?: boolean;
         invite?: { partyId: string; leaderName: string } | null;
-        dungeon?: { size: number; floorBossDead: Record<string, boolean>; bossDead: boolean } | null;
+        dungeon?: {
+          size: number; floorBossDead: Record<string, boolean>; bossDead: boolean;
+          gateFloor2?: boolean; gateBoss?: boolean;
+        } | null;
       };
       if (!partyGuardRef.current.isCurrent(ticket)) return;
       if (data.dungeon) {
@@ -1750,6 +1761,8 @@ export default function WorldBoxClient() {
           size: data.dungeon.size,
           floorBossDead: data.dungeon.floorBossDead,
           bossDead: data.dungeon.bossDead,
+          gateFloor2: data.dungeon.gateFloor2 ?? dungeonStateRef.current.gateFloor2,
+          gateBoss: data.dungeon.gateBoss ?? dungeonStateRef.current.gateBoss,
         };
       }
       myPartyKeyRef.current = data.partyKey ?? "";
@@ -2933,7 +2946,17 @@ export default function WorldBoxClient() {
             // 経済/カジノ/アリーナパネルへも合図する（金額は push に無い）
             void invRefreshRef.current();
             notifyEconomyApplied();
+          } else if (msg.t === "sync" && msg.kind === "requests") {
+            // ギルド依頼が他人の操作で変わった: 開いているギルドボード
+            // パネルへ合図する（パネル側が REST で取り直す）
+            notifyGuildRequestsChanged();
           } else if (msg.t === "sync" && msg.kind === "chat") {
+            // ギルドボードの掲示タブ: HUD の表示チャンネルに関係なく、
+            // 自ギルドのユニオン発言が変わったらパネルへ合図する
+            if (msg.channel === "union") {
+              const myGuild = nationsRef.current.me?.nationId ?? null;
+              if (!msg.guildId || !myGuild || msg.guildId === myGuild) notifyGuildBoardChanged();
+            }
             // 自分が見ているチャンネル・空間の変更だけ取り直す
             if (msg.channel === chatChannelRef.current) {
               if (msg.channel === "union") {
@@ -4096,10 +4119,14 @@ export default function WorldBoxClient() {
               return;
             }
             {
+              // 熟練ゲートはサーバー判定（最新ランク）が正。結成時の
+              // スナップショットで判定すると、ダンジョン内でランクが
+              // 上がってもここだけ「ランク不足」で遮ってしまう。
               const nextFloor = inst.layer + 2;
-              const need = nextFloor >= 4 ? 3 : 2;
-              const ranks = partyRef.current.party?.members.map((m) => m.rank) ?? [invRef.current ? masteryRankOf(invRef.current, invRef.current.role) : 1];
-              if (!ranks.some((r) => r >= need)) {
+              const gateOk = nextFloor >= 4
+                ? dungeonStateRef.current.gateBoss
+                : dungeonStateRef.current.gateFloor2;
+              if (!gateOk) {
                 setTileMsg("熟練ランクが足りない");
                 return;
               }
@@ -5018,6 +5045,9 @@ export default function WorldBoxClient() {
             player: { x: player.x, y: player.y },
             fleeing: now < r.fleeUntil,
             provoked: now < r.provokedUntil,
+            // 凍結中は状態機械ごと止める（見た目だけ氷色にしても
+            // 追跡・予兆・突進が進んでしまうため）
+            frozen: (mobStatesRef.current[key]?.frozenUntil ?? 0) > Date.now(),
             hpFrac: hpNow.hp / def.hp,
             rng: Math.random,
           });
@@ -6759,6 +6789,11 @@ export default function WorldBoxClient() {
                 }}
               >
                 <strong style={{ marginRight: 5 }}>{m.name}</strong>
+                {m.source === "discord" && (
+                  <span style={{ marginRight: 5, fontSize: 9, padding: "0 4px", borderRadius: 5, border: "1px solid rgba(255,255,255,0.4)" }}>
+                    Discord
+                  </span>
+                )}
                 {m.text}
               </div>
             ))}

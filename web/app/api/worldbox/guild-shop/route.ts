@@ -72,7 +72,6 @@ function view(state: GuildShopState, nations: Awaited<ReturnType<typeof loadNati
             guildName: nations.nations[plot.guildId]?.name ?? plot.guildId,
             listings: plot.listings.map((l) => ({
               id: l.id,
-              sellerKey: l.sellerKey,
               itemId: l.itemId,
               name: itemById(l.itemId)?.name ?? l.itemId,
               available: listingAvailable(l),
@@ -144,9 +143,18 @@ export async function POST(request: Request) {
     const myRole = await resolvedRole(nations, ownerKey);
     const isLeader = myRole === "king" || myRole === "minister";
     const respond = async (next: GuildShopState) => {
-      if (!(await storeGuildShopState(next))) return err("store_failed", 503);
+      // 完売した出品は保存前に取り除く。残しておくとパネルからは
+      // 到達できず（在庫 0 は表示されない）state に溜まり続ける。
+      // 完売時点で売り手への入金は済んでおり、返却すべき在庫も無い。
+      const pruned: GuildShopState = {
+        ...next,
+        plots: next.plots.map((p) =>
+          p ? { ...p, listings: p.listings.filter((l) => listingAvailable(l) > 0) } : p,
+        ),
+      };
+      if (!(await storeGuildShopState(pruned))) return err("store_failed", 503);
       return NextResponse.json(
-        { ok: true, ...view(next, nations), myGuildId: myGuild, myRole },
+        { ok: true, ...view(pruned, nations), myGuildId: myGuild, myRole },
         { headers: NO_STORE },
       );
     };
