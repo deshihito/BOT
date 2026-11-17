@@ -714,7 +714,7 @@ const STATION_LABEL: Record<LobbyStation, string> = {
 };
 
 export default function WorldBoxClient() {
-  const { prefix, embedded, identity } = useGamesNav();
+  const { prefix, embedded, identity, retryIdentity } = useGamesNav();
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const minimapRef = useRef<HTMLCanvasElement | null>(null);
   /** 開拓のコンパスの HUD（矢印と距離は描画ループが直接書き換える）。 */
@@ -877,6 +877,16 @@ export default function WorldBoxClient() {
   useEffect(() => {
     if (identityId) setGateTry((t) => t + 1);
   }, [identityId]);
+  // Activity 経由では Discord にログイン済みなのが前提（SDK 認証が本人
+  // 確認そのもの）。本人情報が届いたらセッション確認を待たずに通す
+  // （ユーザー指示 2026-11-16: Activity では認証はいらないはず）。
+  // Activity の iframe ではセッション Cookie が保持されるとは限らず、
+  // ゲート判定（Cookie のみ）に委ねると認証済みでも「ログインが必要」で
+  // 詰まる。API 側のセッション検証は従来どおり各ルートが担い、
+  // games-auth は引き続きセッション Cookie も張る。
+  useEffect(() => {
+    if (embedded && identityId) setGate("ok");
+  }, [embedded, identityId]);
   // 認証完了の通知を取りこぼした場合の保険: Activity 内で denied の間は
   // しばらく自動で引き直す。
   useEffect(() => {
@@ -6255,7 +6265,12 @@ export default function WorldBoxClient() {
               // ゲートの引き直しだけを置く。
               <button
                 type="button"
-                onClick={() => setGateTry((t) => t + 1)}
+                onClick={() => {
+                  // ゲートの引き直しだけでは、本人情報そのものが届いて
+                  // いない場合は永久に通らない。本人確認も一緒にやり直す。
+                  retryIdentity?.();
+                  setGateTry((t) => t + 1);
+                }}
                 style={{
                   ...btn, display: "inline-flex", alignItems: "center",
                 }}
