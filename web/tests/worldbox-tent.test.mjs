@@ -105,10 +105,16 @@ test("テント内装: 作業台とかまどが smith ステーションで、�
       }
     }
   }
-  // 固体のオブジェクトは blocked に入る
+  // 固体のオブジェクトは blocked に入る（座席は上に乗って座るため除く）
   for (const o of tent.objects) {
-    if (o.solid) assert.ok(tent.blocked.has(`${o.x},${o.y}`), `${o.sprite} が blocked に無い`);
+    if (o.solid && !["bench", "chair", "sofa"].includes(o.sprite)) {
+      assert.ok(tent.blocked.has(`${o.x},${o.y}`), `${o.sprite} が blocked に無い`);
+    }
   }
+  // テントのソファには座れる（blocked に入っていない）
+  const sofa = tent.objects.find((o) => o.sprite === "sofa");
+  assert.ok(sofa, "テントにソファがある");
+  assert.equal(tent.blocked.has(`${sofa.x},${sofa.y}`), false, "ソファは固体でない");
 });
 
 test("セーブ: tent 空間が往復し、範囲外は tent 内へ丸まる", () => {

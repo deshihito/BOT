@@ -10,6 +10,14 @@
 import { T_GRASS, T_ROCK, tilesSource, type TopDownMap } from "./mapgen";
 import type { ShopGenreId } from "./shops";
 
+/** 座れる家具のスプライト（=アイテム ID。タイル側 tiles.ts の SEAT_ITEM_IDS と一致させること）。
+ * 座席は上に乗って座るため、室内の blocked（固体）には入れない。 */
+export const SEAT_SPRITES: ReadonlySet<string> = new Set(["bench", "chair", "sofa"]);
+
+export function isSeatSprite(sprite: string): boolean {
+  return SEAT_SPRITES.has(sprite);
+}
+
 export const LOBBY_W = 126;
 export const LOBBY_H = 64;
 
@@ -413,6 +421,9 @@ export function buildLobby(): LobbyData {
   const blocked = new Set<string>();
   for (const o of LOBBY_OBJECTS) {
     if (!o.solid) continue;
+    // 座席（ベンチ・椅子・ソファ）は上に乗って座るため固体にしない
+    // （ワールドの設置家具＝facility が非固体なのと同じ扱い）。
+    if (isSeatSprite(o.sprite)) continue;
     for (let dy = 0; dy < o.h; dy++) {
       for (let dx = 0; dx < o.w; dx++) blocked.add(`${o.x + dx},${o.y + dy}`);
     }

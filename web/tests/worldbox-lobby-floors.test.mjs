@@ -246,11 +246,12 @@ test("floors: 全オブジェクトは床の上にあり重ならず、スプラ
         }
       }
     }
-    // 固体オブジェクトは blocked に載り、通過可の階段は載らない
+    // 固体オブジェクトは blocked に載り、通過可の階段は載らない（座席は上に乗って座るため固体でも載らない）
     for (const o of data.objects) {
+      const expected = o.solid && !["bench", "chair", "sofa"].includes(o.sprite);
       for (let dy = 0; dy < o.h; dy++) {
         for (let dx = 0; dx < o.w; dx++) {
-          assert.equal(data.blocked.has(`${o.x + dx},${o.y + dy}`), o.solid, `${name} ${o.sprite} の blocked が solid と不一致`);
+          assert.equal(data.blocked.has(`${o.x + dx},${o.y + dy}`), expected, `${name} ${o.sprite} の blocked が想定と不一致`);
         }
       }
     }
