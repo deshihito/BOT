@@ -97,10 +97,16 @@ const lobbyFloorsUrl = dataUrl(
 );
 const itemsUrl = dataUrl(transpile("worldbox/items.ts"));
 const profileUrl = dataUrl(transpile("worldbox/profile.ts").replaceAll('"./items"', JSON.stringify(itemsUrl)));
+const vitalsUrl = dataUrl(
+  transpile("worldbox/vitals.ts")
+    .replaceAll('"./items"', JSON.stringify(itemsUrl))
+    .replaceAll('"./profile"', JSON.stringify(profileUrl)),
+);
 const economyUrl = dataUrl(
   transpile("worldbox/economy.ts")
     .replaceAll('"./items"', JSON.stringify(itemsUrl))
-    .replaceAll('"./profile"', JSON.stringify(profileUrl)),
+    .replaceAll('"./profile"', JSON.stringify(profileUrl))
+    .replaceAll('"./vitals"', JSON.stringify(vitalsUrl)),
 );
 const bridgeUrl = dataUrl(transpile("worldbox/economy-bridge.ts"));
 const bridgeOnlineUrl = dataUrl(

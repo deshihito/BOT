@@ -475,30 +475,36 @@ export async function POST(request: Request) {
     // 環境ハザード（サボテン・マグマ）: 位置は申告させず、サーバー側の現在位置の
     // 当たり円が触れているタイルにハザードブロックがあるときだけダメージ。
     // ハザードは固体ブロックなので「足元」ではなく「接触」で判定する。
-    const pos = await actorWorldPosition(ownerKey, null);
-    if (!pos) {
-      return NextResponse.json({ profile: current, died: false, applied: false }, { headers: NO_STORE });
-    }
-    let dmg = 0;
-    const r = 0.32;
-    for (let ty = Math.floor(pos.y - r); ty <= Math.floor(pos.y + r); ty++) {
-      for (let tx = Math.floor(pos.x - r); tx <= Math.floor(pos.x + r); tx++) {
-        const override = await loadTileOverride(tx, ty);
-        if (override?.block) dmg = Math.max(dmg, hazardDamageFor(override.block.itemId));
+    // sync / damage と同じくユーザー単位ロックで直列化し、ロック内で
+    // 読み直す（ロック外スナップショットの RMW は、並走する sync の
+    // バイタル精算や被弾を巻き戻しうる）。
+    return withUserLock(ownerKey, async () => {
+      const current = await loadProfile(ownerKey);
+      const pos = await actorWorldPosition(ownerKey, null);
+      if (!pos) {
+        return NextResponse.json({ profile: current, died: false, applied: false }, { headers: NO_STORE });
       }
-    }
-    if (dmg <= 0) {
-      return NextResponse.json({ profile: current, died: false, applied: false }, { headers: NO_STORE });
-    }
-    const result = applyHazardDamage(current, dmg, now);
-    if (result.died) return settleDeath(ownerKey, result.profile, now, session.username ?? "");
-    if (result.profile !== current && !(await storeProfile(ownerKey, result.profile))) {
-      return errorResponse("store_failed", 503);
-    }
-    return NextResponse.json(
-      { profile: result.profile, died: false, applied: result.applied },
-      { headers: NO_STORE },
-    );
+      let dmg = 0;
+      const r = 0.32;
+      for (let ty = Math.floor(pos.y - r); ty <= Math.floor(pos.y + r); ty++) {
+        for (let tx = Math.floor(pos.x - r); tx <= Math.floor(pos.x + r); tx++) {
+          const override = await loadTileOverride(tx, ty);
+          if (override?.block) dmg = Math.max(dmg, hazardDamageFor(override.block.itemId));
+        }
+      }
+      if (dmg <= 0) {
+        return NextResponse.json({ profile: current, died: false, applied: false }, { headers: NO_STORE });
+      }
+      const result = applyHazardDamage(current, dmg, now);
+      if (result.died) return settleDeath(ownerKey, result.profile, now, session.username ?? "");
+      if (result.profile !== current && !(await storeProfile(ownerKey, result.profile))) {
+        return errorResponse("store_failed", 503);
+      }
+      return NextResponse.json(
+        { profile: result.profile, died: false, applied: result.applied },
+        { headers: NO_STORE },
+      );
+    });
   }
 
   if (data.action === "set_bed") {

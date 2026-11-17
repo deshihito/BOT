@@ -6123,6 +6123,13 @@ export default function WorldBoxClient() {
             {invProfile.status.some((e) => e.kind === "poison") && (
               <span style={{ color: "#b6f26d", fontSize: 11 }}>毒</span>
             )}
+            {invProfile.status
+              .filter((e) => (e.kind === "warm" || e.kind === "alert") && e.until > gaugeNow)
+              .map((e) => (
+                <span key={e.kind} style={{ color: e.kind === "warm" ? "#ffb37a" : "#9adfff", fontSize: 11 }}>
+                  {e.kind === "warm" ? "温かい食事" : "自然回復"} あと{Math.max(1, Math.ceil((e.until - gaugeNow) / 60000))}分
+                </span>
+              ))}
             {invProfile.role !== "free" && (() => {
               const role = roleById(invProfile.role);
               return (

@@ -363,11 +363,12 @@ test("vitals: 死亡・蘇生の移動先へプレゼンスとセーブをそろ
   assert.equal(route.match(/return NextResponse\.json\(\{ profile, died: false \}, \{ headers: NO_STORE \}\)/g)?.length, 3);
 });
 
-test("vitals: sync / damage / set_bed はユーザー単位ロック内で読み直す（B3）", () => {
+test("vitals: sync / damage / set_bed / hazard はユーザー単位ロック内で読み直す（B3）", () => {
   const route = fs.readFileSync(path.join(rootDir, "app/api/worldbox/vitals/route.ts"), "utf8");
   // ロック外のスナップショットで保存すると、並走する精算・被弾と
   // 上書きし合い、PvP の死亡通知が消えてドロップが復活する。
-  assert.equal(route.match(/withUserLock\(ownerKey, async \(\) => \{/g)?.length, 3);
+  // hazard も同じ RMW のためロック内（2026-11-17 に追加）。
+  assert.equal(route.match(/withUserLock\(ownerKey, async \(\) => \{/g)?.length, 4);
   // 守護への熟練は別ユーザーの書き込みのため、攻撃者のロック外で
   // 守護本人のロックを取る（内側に入れると相互攻撃と循環待ちになる）。
   assert.match(route, /grantGuard = guards\[0\]\.ownerKey;/);

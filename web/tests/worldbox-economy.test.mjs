@@ -44,7 +44,7 @@ function loadBundle(files, names) {
 }
 
 const eco = loadBundle(
-  ["worldbox/items.ts", "worldbox/profile.ts", "worldbox/roles.ts", "worldbox/economy.ts"],
+  ["worldbox/items.ts", "worldbox/profile.ts", "worldbox/roles.ts", "worldbox/vitals.ts", "worldbox/economy.ts"],
   [
     "ITEMS", "itemById", "RECIPES", "recipeById", "sellPrice",
     "DEFAULT_PROFILE", "parseProfile", "serializeProfile", "countItem",

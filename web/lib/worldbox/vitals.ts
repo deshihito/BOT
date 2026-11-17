@@ -11,7 +11,7 @@
 // - 死亡時は道具（tool）を落とさず、それ以外を半分落とす
 // - リスポーン優先順: ベッド → 最後の休憩地点 → 所属国のマーク（首都）
 // 割合・間隔などの数値はユーザー向けに開示しない（探索優先の原則）。
-import { itemById } from "./items";
+import { ITEMS, itemById } from "./items";
 import {
   HP_MAX, HUNGER_MAX, maxHpFor, MEDIC_HEAL_MULT, removeItem,
   type PlayerProfile, type RespawnPoint, type StatusEffect,
@@ -119,10 +119,18 @@ export function curePoison(profile: PlayerProfile): PlayerProfile {
  * VITAL_SETTLE_CAP_MS で頭打ちにする。戻り値の died は精算で HP が 0 に
  * なったことを示す（死亡処理そのものは applyDeath が担う）。
  */
-/** 持続効果（バフ）の長さ（アイテム定義の minutes と一致させる）。 */
+/**
+ * 持続効果（バフ）の長さ。定義の正はアイテム側（ItemDef.buff.minutes）で、
+ * ここは種類ごとの代表アイテムから導出するだけ（二重定義にしない）。
+ * バフ持ちアイテムが無い種類は従来値にフォールバックする。
+ */
+function buffDurationFromCatalog(kind: "warm" | "alert", fallbackMinutes: number): number {
+  const def = ITEMS.find((i) => i.buff?.kind === kind);
+  return (def?.buff?.minutes ?? fallbackMinutes) * 60 * 1000;
+}
 export const BUFF_DURATION_MS: Record<"warm" | "alert", number> = {
-  warm: 10 * 60 * 1000,
-  alert: 5 * 60 * 1000,
+  warm: buffDurationFromCatalog("warm", 10),
+  alert: buffDurationFromCatalog("alert", 5),
 };
 /** warm の間、空腹の減りがこの倍率になる。 */
 export const WARM_HUNGER_MULT = 0.6;

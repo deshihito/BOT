@@ -48,7 +48,7 @@ function bundleModule(files, names) {
 }
 
 const ecoUrl = bundleModule(
-  ["worldbox/items.ts", "worldbox/profile.ts", "worldbox/roles.ts", "worldbox/economy.ts"],
+  ["worldbox/items.ts", "worldbox/profile.ts", "worldbox/roles.ts", "worldbox/vitals.ts", "worldbox/economy.ts"],
   ["RECIPES", "recipeById", "recipeKind", "parseProfile", "countItem", "craftItem"],
 );
 const E = await import(ecoUrl);

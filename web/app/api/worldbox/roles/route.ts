@@ -236,28 +236,51 @@ export async function POST(request: Request) {
   if (!pos) return err("position_unknown", 409);
 
   if (fields.action === "revive") {
-    if (profile.role !== "medic") return err("not_medic", 409);
-    if (profile.reviveMark && profile.reviveMark.space === space && now - profile.reviveMark.at < 30 * 60 * 1000) {
-      return err("revive_used", 409);
-    }
-    const deaths = await listDeaths(now);
-    const target = deaths.find(
-      (d) => d.space === space && d.ownerKey !== ownerKey && Math.hypot(d.x - pos.x, d.y - pos.y) <= 2.5,
-    );
-    if (!target) return err("no_fallen", 409);
-    const targetProfile = await loadProfile(target.ownerKey);
-    if (!targetProfile) return err("no_fallen", 409);
-    const healed: PlayerProfile = {
-      ...targetProfile,
-      hp: Math.max(targetProfile.hp, Math.floor(maxHpFor(targetProfile) * 0.3)),
-      pendingTeleport: { space, x: target.x, y: target.y },
-    };
-    if (!(await storeProfile(target.ownerKey, healed))) return err("store_failed", 503);
-    await clearDeath(target.ownerKey);
-    // ダンジョン内蘇生: セッションの dead から外す。残っていると蘇生後も
-    // 攻撃不可（mobs ルートが dead を弾く）・全滅判定が誤って閉じてしまう（S5）。
-    // セッション保存の失敗は蘇生自体を壊さないため best-effort とする。
-    {
+    // 蘇生は2人のプロフィールを書き換える（対象の HP・pendingTeleport と
+    // 薬師の reviveMark・熟練）。どちらも本人のユーザー単位ロックで
+    // 直列化し、ロック内で読み直す。ロックの入れ子は相互蘇生で循環待ちに
+    // なるため、薬師側（使用権の確保）→ 対象側（回復の適用）の順に別々に
+    // 取り、対象側が失敗したら薬師側の確保を取り消す。
+    // Phase 1: 薬師のロックで使用権を確保する（reviveMark + 熟練）。
+    const claimed = await withUserLock(ownerKey, async () => {
+      const medic = await loadProfile(ownerKey);
+      if (!medic) return { error: err("roles_unavailable", 503) } as const;
+      if (medic.role !== "medic") return { error: err("not_medic", 409) } as const;
+      if (medic.reviveMark && medic.reviveMark.space === space && now - medic.reviveMark.at < 30 * 60 * 1000) {
+        return { error: err("revive_used", 409) } as const;
+      }
+      const deaths = await listDeaths(now);
+      const target = deaths.find(
+        (d) => d.space === space && d.ownerKey !== ownerKey && Math.hypot(d.x - pos.x, d.y - pos.y) <= 2.5,
+      );
+      if (!target) return { error: err("no_fallen", 409) } as const;
+      const medicNext = addMasteryXp(
+        { ...medic, reviveMark: { space, at: now } },
+        "medic",
+        10,
+      ).profile;
+      if (!(await storeProfile(ownerKey, medicNext))) return { error: err("store_failed", 503) } as const;
+      return { target, medicNext, prevMark: medic.reviveMark } as const;
+    });
+    if ("error" in claimed) return claimed.error;
+    const { target, medicNext, prevMark } = claimed;
+    // Phase 2: 対象のロックで回復を適用する。死亡記録が消えていたら
+    // （他の薬師が先に蘇生した等）適用しない。
+    const applied = await withUserLock(target.ownerKey, async () => {
+      const deaths = await listDeaths(now);
+      if (!deaths.some((d) => d.ownerKey === target.ownerKey && d.space === space)) return false;
+      const targetProfile = await loadProfile(target.ownerKey);
+      if (!targetProfile) return false;
+      const healed: PlayerProfile = {
+        ...targetProfile,
+        hp: Math.max(targetProfile.hp, Math.floor(maxHpFor(targetProfile) * 0.3)),
+        pendingTeleport: { space, x: target.x, y: target.y },
+      };
+      if (!(await storeProfile(target.ownerKey, healed))) return false;
+      await clearDeath(target.ownerKey);
+      // ダンジョン内蘇生: セッションの dead から外す。残っていると蘇生後も
+      // 攻撃不可（mobs ルートが dead を弾く）・全滅判定が誤って閉じてしまう（S5）。
+      // セッション保存の失敗は蘇生自体を壊さないため best-effort とする。
       const inst = parseInstanceSpace(space);
       if (inst?.kind === "dungeon") {
         const targetParty = await loadPartyOf(target.ownerKey);
@@ -269,228 +292,264 @@ export async function POST(request: Request) {
           }).catch(() => false);
         }
       }
+      return true;
+    });
+    if (!applied) {
+      // 適用できなかった: 薬師の使用権を取り消す（足した熟練を引き、
+      // reviveMark は自分が立てたままなら元へ戻す）。取り消しの失敗は
+      // 蘇生可否の応答に影響しない。
+      await withUserLock(ownerKey, async () => {
+        const medic = await loadProfile(ownerKey);
+        if (!medic) return;
+        const xp = Math.max(0, (medic.mastery.medic?.xp ?? 0) - 10);
+        const markIsMine = medic.reviveMark && medic.reviveMark.space === space && medic.reviveMark.at === now;
+        await storeProfile(ownerKey, {
+          ...medic,
+          ...(markIsMine ? { reviveMark: prevMark } : {}),
+          mastery: { ...medic.mastery, medic: { xp } },
+        }).catch(() => false);
+      }).catch(() => undefined);
+      return err("no_fallen", 409);
     }
-    const { profile: medicNext } = addMasteryXp(
-      { ...profile, reviveMark: { space, at: now } },
-      "medic",
-      10,
-    );
-    if (!(await storeProfile(ownerKey, medicNext))) return err("store_failed", 503);
     return NextResponse.json({ ok: true, profile: medicNext, revivedName: target.name }, { headers: NO_STORE });
   }
 
   if (fields.action === "skill") {
-    if (!isMobsEnabled()) return err("roles_unavailable", 503);
-    const skillId = typeof fields.skill === "string" ? (fields.skill as SkillId) : null;
-    if (!skillId || !(skillId in SKILLS)) return err("invalid_request", 400);
-    const skill = SKILLS[skillId];
-    const rank = masteryRankOf(profile, profile.role);
-    // 技の所有検証: その役職の技であり、ランクを満たし、現在の発動技と一致する
-    // （守護の挑発だけは自分のタイル専用として別に許可する）。
-    // テレポーターのポーター設置も activeSkillFor では返さない設置専用の技。
-    const active = activeSkillFor(profile);
-    const isTaunt = skillId === "taunt" && profile.role === "guard";
-    const isPorter = skillId === "porter" && profile.role === "teleporter";
-    if (!isTaunt && !isPorter && (!active || active.id !== skillId)) return err("skill_locked", 409);
-    if (isTaunt && rank < SKILLS.taunt.minRank) return err("skill_locked", 409);
-    if (isPorter && rank < SKILLS.porter.minRank) return err("skill_locked", 409);
-    if (skillCooldownLeft(profile, skillId, now) > 0) return err("cooldown", 409);
+    // 技は自分のプロフィール（skillAt・熟練・ドロップ）とモブ状態を
+    // 書き換えるため、ユーザー単位ロックで直列化し、ロック内で読み直した
+    // プロフィールで検証・適用する（set_role と同じ型）。ヒーリングゾーンの
+    // 味方回復だけは、相手のロックを取る後段に分けて適用する。
+    const outcome = await withUserLock(ownerKey, async () => {
+      const profile = await loadProfile(ownerKey);
+      if (!profile) return err("roles_unavailable", 503);
+      if (!isMobsEnabled()) return err("roles_unavailable", 503);
+      const skillId = typeof fields.skill === "string" ? (fields.skill as SkillId) : null;
+      if (!skillId || !(skillId in SKILLS)) return err("invalid_request", 400);
+      const skill = SKILLS[skillId];
+      const rank = masteryRankOf(profile, profile.role);
+      // 技の所有検証: その役職の技であり、ランクを満たし、現在の発動技と一致する
+      // （守護の挑発だけは自分のタイル専用として別に許可する）。
+      // テレポーターのポーター設置も activeSkillFor では返さない設置専用の技。
+      const active = activeSkillFor(profile);
+      const isTaunt = skillId === "taunt" && profile.role === "guard";
+      const isPorter = skillId === "porter" && profile.role === "teleporter";
+      if (!isTaunt && !isPorter && (!active || active.id !== skillId)) return err("skill_locked", 409);
+      if (isTaunt && rank < SKILLS.taunt.minRank) return err("skill_locked", 409);
+      if (isPorter && rank < SKILLS.porter.minRank) return err("skill_locked", 409);
+      if (skillCooldownLeft(profile, skillId, now) > 0) return err("cooldown", 409);
 
-    const tx = typeof fields.tx === "number" && Number.isFinite(fields.tx) ? fields.tx : pos.x;
-    const ty = typeof fields.ty === "number" && Number.isFinite(fields.ty) ? fields.ty : pos.y;
+      const tx = typeof fields.tx === "number" && Number.isFinite(fields.tx) ? fields.tx : pos.x;
+      const ty = typeof fields.ty === "number" && Number.isFinite(fields.ty) ? fields.ty : pos.y;
 
-    // クライアントが見ているモブの現在タイル（キー=アンカー、値=現在位置）。
-    // 対象解決はアンカーでなく実位置で行う（通常攻撃と同じ理由: 見た目が
-    // アンカーから離れて追跡してくるため、アンカー基準だと画面で目の前に
-    // いるモブに技が当たらず no_target になっていた）。
-    const reportedByKey = new Map<string, { x: number; y: number }>();
-    if (Array.isArray(fields.mobs)) {
-      for (const entry of fields.mobs.slice(0, 32)) {
-        const e = (entry ?? {}) as { mobId?: unknown; x?: unknown; y?: unknown; mx?: unknown; my?: unknown };
-        if (typeof e.mobId !== "string" || !mobById(e.mobId)) continue;
-        if (typeof e.x !== "number" || typeof e.y !== "number" || typeof e.mx !== "number" || typeof e.my !== "number") continue;
-        if (![e.x, e.y, e.mx, e.my].every((v) => Number.isFinite(v) && Math.abs(v) <= 1_000_000)) continue;
-        reportedByKey.set(
-          mobKeyOf({ mobId: e.mobId, x: Math.floor(e.x), y: Math.floor(e.y) }),
-          { x: e.mx, y: e.my },
+      // クライアントが見ているモブの現在タイル（キー=アンカー、値=現在位置）。
+      // 対象解決はアンカーでなく実位置で行う（通常攻撃と同じ理由: 見た目が
+      // アンカーから離れて追跡してくるため、アンカー基準だと画面で目の前に
+      // いるモブに技が当たらず no_target になっていた）。
+      const reportedByKey = new Map<string, { x: number; y: number }>();
+      if (Array.isArray(fields.mobs)) {
+        for (const entry of fields.mobs.slice(0, 32)) {
+          const e = (entry ?? {}) as { mobId?: unknown; x?: unknown; y?: unknown; mx?: unknown; my?: unknown };
+          if (typeof e.mobId !== "string" || !mobById(e.mobId)) continue;
+          if (typeof e.x !== "number" || typeof e.y !== "number" || typeof e.mx !== "number" || typeof e.my !== "number") continue;
+          if (![e.x, e.y, e.mx, e.my].every((v) => Number.isFinite(v) && Math.abs(v) <= 1_000_000)) continue;
+          reportedByKey.set(
+            mobKeyOf({ mobId: e.mobId, x: Math.floor(e.x), y: Math.floor(e.y) }),
+            { x: e.mx, y: e.my },
+          );
+        }
+      }
+      /** 対象解決に使う実位置の中心（申告がリーシュ内なら申告、なければアンカー）。 */
+      const effCenter = (m: PlacedMob): { x: number; y: number } => {
+        const eff = resolveMobPosition(m, reportedByKey.get(mobKeyOf(m)));
+        return { x: eff.x + 0.5, y: eff.y + 0.5 };
+      };
+
+      let next: PlayerProfile = {
+        ...profile,
+        skillAt: { ...profile.skillAt, [skillId]: now },
+      };
+
+      if (skillId === "taunt") {
+        next = { ...next, tauntUntil: now + 5000 };
+        // 挑発の使用そのものが守護の専門行為: 熟練を付ける（オーラ軽減の +2 と同水準）
+        next = addMasteryXp(next, "guard", 2).profile;
+        if (!(await storeProfile(ownerKey, next))) return err("store_failed", 503);
+        return NextResponse.json(
+          { ok: true, skill: skillId, profile: next, results: [] },
+          { headers: NO_STORE },
         );
       }
-    }
-    /** 対象解決に使う実位置の中心（申告がリーシュ内なら申告、なければアンカー）。 */
-    const effCenter = (m: PlacedMob): { x: number; y: number } => {
-      const eff = resolveMobPosition(m, reportedByKey.get(mobKeyOf(m)));
-      return { x: eff.x + 0.5, y: eff.y + 0.5 };
-    };
 
-    let next: PlayerProfile = {
-      ...profile,
-      skillAt: { ...profile.skillAt, [skillId]: now },
-    };
-
-    if (skillId === "taunt") {
-      next = { ...next, tauntUntil: now + 5000 };
-      if (!(await storeProfile(ownerKey, next))) return err("store_failed", 503);
-      return NextResponse.json(
-        { ok: true, skill: skillId, profile: next, results: [] },
-        { headers: NO_STORE },
-      );
-    }
-
-    if (skillId === "porter") {
-      // ポーター設置: ワールド空間・ユニオン所属が前提。設置先は自分の
-      // タイルから PORTER_PLACE_RANGE 以内で、通行できるタイルのみ。
-      // 保存はギルド ID キーで1件だけ（置き直し = 移動）。
-      if (space !== "world") return err("not_in_world", 409);
-      if (!isNationsEnabled()) return err("warp_unavailable", 503);
-      const nationsState = await loadNationsState();
-      const mine = nationsState.members[ownerKey];
-      const nation = mine ? nationsState.nations[mine.nationId] : undefined;
-      if (!mine || !nation) return err("not_in_union", 409);
-      const gx = Math.floor(tx);
-      const gy = Math.floor(ty);
-      if (!porterInRange(Math.floor(pos.x), Math.floor(pos.y), gx, gy)) {
-        return err("too_far", 409);
-      }
-      const override = await loadTileOverride(gx, gy);
-      const hasBlock = !!(override && isOverrideActive(override, now) && override.block);
-      const tileError = porterTileError(tileAt(gx, gy, MAP_SEED), hasBlock);
-      if (tileError) return err(tileError, 409);
-      const porter = { x: gx, y: gy, by: ownerKey, at: now };
-      if (!(await storePorter(nation.guildId, porter))) return err("store_failed", 503);
-      next = addMasteryXp(next, "teleporter", 2).profile;
-      if (!(await storeProfile(ownerKey, next))) return err("store_failed", 503);
-      return NextResponse.json(
-        { ok: true, skill: skillId, fx: skill.fx, cx: gx + 0.5, cy: gy + 0.5, profile: next, results: [], porter },
-        { headers: NO_STORE },
-      );
-    }
-
-    if (skillId === "heal_zone") {
-      // 自分と半径内の味方を回復（味方はプレゼンスの所有者解決で特定する）
-      const owners = await listPresenceWithOwners();
-      let healedCount = 0;
-      const selfEntry = owners.find((o) => o.ownerKey === ownerKey);
-      void selfEntry;
-      next = { ...next, hp: Math.min(maxHpFor(next), next.hp + skill.power) };
-      healedCount++;
-      for (const o of owners) {
-        if (o.ownerKey === ownerKey) continue;
-        if (o.entry.space !== space) continue;
-        if (Math.hypot(o.entry.x - pos.x, o.entry.y - pos.y) > skill.radius) continue;
-        const ally = await loadProfile(o.ownerKey);
-        if (!ally || ally.hp <= 0) continue;
-        const healedAlly = { ...ally, hp: Math.min(maxHpFor(ally), ally.hp + skill.power) };
-        if (await storeProfile(o.ownerKey, healedAlly)) healedCount++;
-      }
-      if (!(await storeProfile(ownerKey, next))) return err("store_failed", 503);
-      return NextResponse.json(
-        { ok: true, skill: skillId, profile: next, results: [], healedCount },
-        { headers: NO_STORE },
-      );
-    }
-
-    // 攻撃系: 中心と対象を決める
-    let cx = pos.x;
-    let cy = pos.y;
-    let targets: PlacedMob[] = [];
-    const baseAttack = playerAttack(profile.items, profile.enhance) * (profile.role === "blade" ? 1.25 : 1);
-    if (skillId === "sweep" || skillId === "whirlwind") {
-      targets = await mobsInSpace(ownerKey, space, pos.x, pos.y, skill.radius + 2 + MOB_REPORT_LEASH);
-      targets = targets.filter((m) => {
-        const c = effCenter(m);
-        return Math.hypot(c.x - pos.x, c.y - pos.y) <= skill.radius + m.size * 0.5;
-      });
-    } else if (skillId === "ice_lance" || skillId === "thunder_strike" || skillId === "fireball") {
-      const range = skillId === "ice_lance" ? 4.5 : 5.5;
-      if (Math.hypot(tx - pos.x, ty - pos.y) > range + 1.5) return err("too_far", 409);
-      const near = await mobsInSpace(ownerKey, space, tx, ty, 3 + MOB_REPORT_LEASH);
-      near.sort((a, b) => {
-        const ca = effCenter(a);
-        const cb = effCenter(b);
-        return Math.hypot(ca.x - tx, ca.y - ty) - Math.hypot(cb.x - tx, cb.y - ty);
-      });
-      const primary = near[0];
-      if (!primary) return err("no_target", 409);
-      const pc = effCenter(primary);
-      if (Math.hypot(pc.x - tx, pc.y - ty) > 3.5) return err("no_target", 409);
-      cx = pc.x;
-      cy = pc.y;
-      targets = [primary];
-      if (skillId === "fireball") {
-        const splash = await mobsInSpace(ownerKey, space, cx, cy, skill.radius + 1.5 + MOB_REPORT_LEASH);
-        for (const m of splash) {
-          if (m === primary) continue;
-          const c = effCenter(m);
-          if (Math.hypot(c.x - cx, c.y - cy) <= skill.radius + m.size * 0.5) targets.push(m);
+      if (skillId === "porter") {
+        // ポーター設置: ワールド空間・ユニオン所属が前提。設置先は自分の
+        // タイルから PORTER_PLACE_RANGE 以内で、通行できるタイルのみ。
+        // 保存はギルド ID キーで1件だけ（置き直し = 移動）。
+        if (space !== "world") return err("not_in_world", 409);
+        if (!isNationsEnabled()) return err("warp_unavailable", 503);
+        const nationsState = await loadNationsState();
+        const mine = nationsState.members[ownerKey];
+        const nation = mine ? nationsState.nations[mine.nationId] : undefined;
+        if (!mine || !nation) return err("not_in_union", 409);
+        const gx = Math.floor(tx);
+        const gy = Math.floor(ty);
+        if (!porterInRange(Math.floor(pos.x), Math.floor(pos.y), gx, gy)) {
+          return err("too_far", 409);
         }
+        const override = await loadTileOverride(gx, gy);
+        const hasBlock = !!(override && isOverrideActive(override, now) && override.block);
+        const tileError = porterTileError(tileAt(gx, gy, MAP_SEED), hasBlock);
+        if (tileError) return err(tileError, 409);
+        const porter = { x: gx, y: gy, by: ownerKey, at: now };
+        if (!(await storePorter(nation.guildId, porter))) return err("store_failed", 503);
+        next = addMasteryXp(next, "teleporter", 2).profile;
+        if (!(await storeProfile(ownerKey, next))) return err("store_failed", 503);
+        return NextResponse.json(
+          { ok: true, skill: skillId, fx: skill.fx, cx: gx + 0.5, cy: gy + 0.5, profile: next, results: [], porter },
+          { headers: NO_STORE },
+        );
       }
-    } else {
-      // meteor / arrow_rain / poison_field: タップ地点が中心
-      if (Math.hypot(tx - pos.x, ty - pos.y) > 6.5) return err("too_far", 409);
-      cx = tx;
-      cy = ty;
-      targets = await mobsInSpace(ownerKey, space, tx, ty, skill.radius + 2 + MOB_REPORT_LEASH);
-      targets = targets.filter((m) => {
-        const c = effCenter(m);
-        return Math.hypot(c.x - tx, c.y - ty) <= skill.radius + m.size * 0.5;
-      });
-      if (targets.length === 0) return err("no_target", 409);
-    }
 
-    // ダンジョンのフロアボスは技の対象にしない（進行登録は通常攻撃の経路に一本化）。
-    // 番人（鍵持ち）は対象のままだが、倒した場合は通常攻撃と同じく鍵を落とす
-    // （鍵の付与だけは技経路にも必要。落とさないと再出現まで扉が開けられない）。
-    let dungeonKeyHolder: { mobId: string; x: number; y: number } | null = null;
-    {
-      const instD = parseInstanceSpace(space);
-      if (instD?.kind === "dungeon") {
-        const floorD = buildDungeonFloor(MAP_SEED, instD.entranceX, instD.entranceY, instD.layer);
-        dungeonKeyHolder = floorD.keyHolder;
-        targets = targets.filter((m) => !(m.mobId === floorD.boss.mobId && m.x === floorD.boss.x && m.y === floorD.boss.y));
+      if (skillId === "heal_zone") {
+        // 自分と半径内の味方を回復（味方はプレゼンスの所有者解決で特定する）。
+        // 味方のプロフィールは相手のロックで適用する必要があるため、ここでは
+        // 自分の回復と熟練だけを確定し、味方は対象キーだけを集めてロックの
+        // 外側（skill 分岐の後段）へ返す（ロックの入れ子回避）。
+        const owners = await listPresenceWithOwners();
+        next = { ...next, hp: Math.min(maxHpFor(next), next.hp + skill.power) };
+        // ヒーリングゾーンの使用が薬師の専門行為: 熟練を付ける（食事の +2 と同水準）
+        next = addMasteryXp(next, "medic", 2).profile;
+        if (!(await storeProfile(ownerKey, next))) return err("store_failed", 503);
+        const allyKeys = owners
+          .filter((o) => o.ownerKey !== ownerKey && o.entry.space === space &&
+            Math.hypot(o.entry.x - pos.x, o.entry.y - pos.y) <= skill.radius)
+          .map((o) => o.ownerKey);
+        return { healZone: { profile: next, allyKeys, power: skill.power } };
+      }
+
+      // 攻撃系: 中心と対象を決める
+      let cx = pos.x;
+      let cy = pos.y;
+      let targets: PlacedMob[] = [];
+      const baseAttack = playerAttack(profile.items, profile.enhance) * (profile.role === "blade" ? 1.25 : 1);
+      if (skillId === "sweep" || skillId === "whirlwind") {
+        targets = await mobsInSpace(ownerKey, space, pos.x, pos.y, skill.radius + 2 + MOB_REPORT_LEASH);
+        targets = targets.filter((m) => {
+          const c = effCenter(m);
+          return Math.hypot(c.x - pos.x, c.y - pos.y) <= skill.radius + m.size * 0.5;
+        });
+      } else if (skillId === "ice_lance" || skillId === "thunder_strike" || skillId === "fireball") {
+        const range = skillId === "ice_lance" ? 4.5 : 5.5;
+        if (Math.hypot(tx - pos.x, ty - pos.y) > range + 1.5) return err("too_far", 409);
+        const near = await mobsInSpace(ownerKey, space, tx, ty, 3 + MOB_REPORT_LEASH);
+        near.sort((a, b) => {
+          const ca = effCenter(a);
+          const cb = effCenter(b);
+          return Math.hypot(ca.x - tx, ca.y - ty) - Math.hypot(cb.x - tx, cb.y - ty);
+        });
+        const primary = near[0];
+        if (!primary) return err("no_target", 409);
+        const pc = effCenter(primary);
+        if (Math.hypot(pc.x - tx, pc.y - ty) > 3.5) return err("no_target", 409);
+        cx = pc.x;
+        cy = pc.y;
+        targets = [primary];
+        if (skillId === "fireball") {
+          const splash = await mobsInSpace(ownerKey, space, cx, cy, skill.radius + 1.5 + MOB_REPORT_LEASH);
+          for (const m of splash) {
+            if (m === primary) continue;
+            const c = effCenter(m);
+            if (Math.hypot(c.x - cx, c.y - cy) <= skill.radius + m.size * 0.5) targets.push(m);
+          }
+        }
+      } else {
+        // meteor / arrow_rain / poison_field: タップ地点が中心
+        if (Math.hypot(tx - pos.x, ty - pos.y) > 6.5) return err("too_far", 409);
+        cx = tx;
+        cy = ty;
+        targets = await mobsInSpace(ownerKey, space, tx, ty, skill.radius + 2 + MOB_REPORT_LEASH);
+        targets = targets.filter((m) => {
+          const c = effCenter(m);
+          return Math.hypot(c.x - tx, c.y - ty) <= skill.radius + m.size * 0.5;
+        });
         if (targets.length === 0) return err("no_target", 409);
       }
-    }
 
-    const results: { key: string; hp: number; dead: boolean }[] = [];
-    let gainedAll: Record<string, number> = {};
-    let anyDead = false;
-    for (const placed of targets) {
-      const def = mobById(placed.mobId);
-      if (!def) continue;
-      const key = await keyFor(ownerKey, space, placed);
-      const state = await loadMobState(key);
-      // 凍結中は追加ダメージを受けない（氷の上書き防止ではなく、状態の保護）
-      const effDef = await effectiveDef(ownerKey, space, def);
-      const result = applyMobAttack(effDef, state, baseAttack * skill.power, now, Math.random, key);
-      if ("error" in result) continue;
-      let st: MobState = result.state;
-      if (skillId === "ice_lance" && !result.dead) st = { ...st, frozenUntil: now + 3000 };
-      if (!(await storeMobState(key, st))) return err("store_failed", 503);
-      if (result.dead && parseInstanceSpace(space)?.kind === "ruins") {
-        const personal = await loadRuinsPersonal(space, ownerKey, weekKeyOf(now));
-        personal.summons = personal.summons.filter((m) => !(m.mobId === placed.mobId && m.x === placed.x && m.y === placed.y));
-        await storeRuinsPersonal(space, ownerKey, personal);
-      }
-      results.push({ key, hp: result.hp, dead: result.dead });
-      if (result.dead) {
-        anyDead = true;
-        for (const [id, n] of Object.entries(result.gained)) gainedAll[id] = (gainedAll[id] ?? 0) + n;
-        // 番人を技で倒した場合も通常攻撃と同じくダンジョンの鍵を落とす
-        if (dungeonKeyHolder && dungeonKeyHolder.mobId === placed.mobId && dungeonKeyHolder.x === placed.x && dungeonKeyHolder.y === placed.y) {
-          gainedAll.dungeon_key = (gainedAll.dungeon_key ?? 0) + 1;
+      // ダンジョンのフロアボスは技の対象にしない（進行登録は通常攻撃の経路に一本化）。
+      // 番人（鍵持ち）は対象のままだが、倒した場合は通常攻撃と同じく鍵を落とす
+      // （鍵の付与だけは技経路にも必要。落とさないと再出現まで扉が開けられない）。
+      let dungeonKeyHolder: { mobId: string; x: number; y: number } | null = null;
+      {
+        const instD = parseInstanceSpace(space);
+        if (instD?.kind === "dungeon") {
+          const floorD = buildDungeonFloor(MAP_SEED, instD.entranceX, instD.entranceY, instD.layer);
+          dungeonKeyHolder = floorD.keyHolder;
+          targets = targets.filter((m) => !(m.mobId === floorD.boss.mobId && m.x === floorD.boss.x && m.y === floorD.boss.y));
+          if (targets.length === 0) return err("no_target", 409);
         }
       }
+
+      const results: { key: string; hp: number; dead: boolean }[] = [];
+      let gainedAll: Record<string, number> = {};
+      let anyDead = false;
+      for (const placed of targets) {
+        const def = mobById(placed.mobId);
+        if (!def) continue;
+        const key = await keyFor(ownerKey, space, placed);
+        const state = await loadMobState(key);
+        // 凍結中は追加ダメージを受けない（氷の上書き防止ではなく、状態の保護）
+        const effDef = await effectiveDef(ownerKey, space, def);
+        const result = applyMobAttack(effDef, state, baseAttack * skill.power, now, Math.random, key);
+        if ("error" in result) continue;
+        let st: MobState = result.state;
+        if (skillId === "ice_lance" && !result.dead) st = { ...st, frozenUntil: now + 3000 };
+        if (!(await storeMobState(key, st))) return err("store_failed", 503);
+        if (result.dead && parseInstanceSpace(space)?.kind === "ruins") {
+          const personal = await loadRuinsPersonal(space, ownerKey, weekKeyOf(now));
+          personal.summons = personal.summons.filter((m) => !(m.mobId === placed.mobId && m.x === placed.x && m.y === placed.y));
+          await storeRuinsPersonal(space, ownerKey, personal);
+        }
+        results.push({ key, hp: result.hp, dead: result.dead });
+        if (result.dead) {
+          anyDead = true;
+          for (const [id, n] of Object.entries(result.gained)) gainedAll[id] = (gainedAll[id] ?? 0) + n;
+          // 番人を技で倒した場合も通常攻撃と同じくダンジョンの鍵を落とす
+          if (dungeonKeyHolder && dungeonKeyHolder.mobId === placed.mobId && dungeonKeyHolder.x === placed.x && dungeonKeyHolder.y === placed.y) {
+            gainedAll.dungeon_key = (gainedAll.dungeon_key ?? 0) + 1;
+          }
+        }
+      }
+      if (results.length === 0) return err("no_target", 409);
+      for (const [id, n] of Object.entries(gainedAll)) next = addItem(next, id, n);
+      if (anyDead && profile.role !== "free") {
+        // 技での撃破は全役職の熟練になる（従来は剣士だけだった）
+        next = addMasteryXp(next, profile.role, 3).profile;
+      }
+      if (!(await storeProfile(ownerKey, next))) return err("store_failed", 503);
+      return NextResponse.json(
+        { ok: true, skill: skillId, fx: skill.fx, cx, cy, results, gained: gainedAll, profile: next },
+        { headers: NO_STORE },
+      );
+    });
+    if (typeof outcome === "object" && outcome !== null && "healZone" in outcome) {
+      // ヒーリングゾーンの味方回復: 相手のロックで1人ずつ読み直して適用する
+      const zone = outcome.healZone;
+      let healedCount = 1;
+      for (const allyKey of zone.allyKeys) {
+        const healed = await withUserLock(allyKey, async () => {
+          const ally = await loadProfile(allyKey);
+          if (!ally || ally.hp <= 0) return false;
+          return storeProfile(allyKey, {
+            ...ally, hp: Math.min(maxHpFor(ally), ally.hp + zone.power),
+          });
+        }).catch(() => false);
+        if (healed) healedCount++;
+      }
+      return NextResponse.json(
+        { ok: true, skill: "heal_zone", profile: zone.profile, results: [], healedCount },
+        { headers: NO_STORE },
+      );
     }
-    if (results.length === 0) return err("no_target", 409);
-    for (const [id, n] of Object.entries(gainedAll)) next = addItem(next, id, n);
-    if (anyDead && profile.role === "blade") {
-      next = addMasteryXp(next, "blade", 3).profile;
-    }
-    if (!(await storeProfile(ownerKey, next))) return err("store_failed", 503);
-    return NextResponse.json(
-      { ok: true, skill: skillId, fx: skill.fx, cx, cy, results, gained: gainedAll, profile: next },
-      { headers: NO_STORE },
-    );
+    return outcome;
   }
 
   return err("invalid_request", 400);
