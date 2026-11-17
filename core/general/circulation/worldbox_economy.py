@@ -102,6 +102,7 @@ EARN_REASONS = frozenset({"harvest", "guild_shop_sale", "arena_prize", "arena_pv
 GAMBLE_REASONS = frozenset({
     "casino_slot", "casino_roulette", "casino_dice",
     "casino_slot7", "casino_blackjack", "casino_double",
+    "horse_racing",
 })
 OP_KINDS = frozenset({"spend", "earn", "transfer", "steal", "gamble"})
 AMOUNT_MIN = 1

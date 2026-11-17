@@ -79,6 +79,7 @@ export const GAMBLE_REASONS: ReadonlySet<string> = new Set([
   "casino_slot7",
   "casino_blackjack",
   "casino_double",
+  "horse_racing",
 ]);
 
 /** gamble の配当上限（ベット最大 1,000,000 × スロット最大倍率 300）。 */
