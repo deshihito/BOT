@@ -305,6 +305,7 @@ export async function POST(request: Request) {
             key: tileKey(tx, ty),
             profile: result.profile,
             gained: result.gained,
+            ...(result.broke ? { broke: result.broke } : {}),
           },
           { headers: NO_STORE },
         );

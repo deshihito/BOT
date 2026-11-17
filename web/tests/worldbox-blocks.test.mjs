@@ -214,13 +214,22 @@ test("設置: 畑・作物・既存ブロック・切り株（再生待ち）の
   assert.equal(place(planted.override, farmer, ME_KEY, grassAt, "dirt_block").error, "tile_blocked", "作物");
   const placed = place(null, withItems({ dirt_block: 2 }), ME_KEY, dirtAt, "dirt_block");
   assert.equal(place(placed.override, withItems({ dirt_block: 1 }), ME_KEY, dirtAt, "dirt_block").error, "tile_blocked", "既存ブロック");
-  const chopped = T.applyTileAction(null, withItems({ wooden_axe: 1 }), map, ME_KEY, "chop", treeAt.x, treeAt.y, undefined, NOW);
+  // HP制: 木（HP30）を木の斧（10/ヒット）で倒れるまで叩く
+  let chopped = T.applyTileAction(null, withItems({ wooden_axe: 1 }), map, ME_KEY, "chop", treeAt.x, treeAt.y, undefined, NOW);
+  for (let i = 0; i < 5 && !chopped.override?.stump; i++) {
+    chopped = T.applyTileAction(chopped.override, chopped.profile, map, ME_KEY, "chop", treeAt.x, treeAt.y, undefined, NOW);
+  }
+  assert.equal(chopped.override.stump, true);
   assert.equal(place(chopped.override, withItems({ dirt_block: 1 }), ME_KEY, treeAt, "dirt_block").error, "tile_blocked", "切り株");
 });
 
 test("設置→採掘: 掘った岩跡（土）にも置け、掘り戻すと土だけが残る", () => {
   const miner = withItems({ wooden_pickaxe: 1, stone_block: 1 });
-  const mined = T.applyTileAction(null, miner, map, ME_KEY, "mine", rockAt.x, rockAt.y, undefined, NOW);
+  // HP制: 岩（HP60）を木ツルハシ（10/ヒット）で壊れるまで掘る
+  let mined = T.applyTileAction(null, miner, map, ME_KEY, "mine", rockAt.x, rockAt.y, undefined, NOW);
+  for (let i = 0; i < 10 && mined.override?.tile !== T.T_DIRT; i++) {
+    mined = T.applyTileAction(mined.override, mined.profile, map, ME_KEY, "mine", rockAt.x, rockAt.y, undefined, NOW);
+  }
   assert.equal(mined.override.tile, T.T_DIRT);
   const placed = place(mined.override, mined.profile, ME_KEY, rockAt, "stone_block");
   assert.equal(placed.ok, true);
@@ -633,7 +642,7 @@ test("クライアント: 全パネルはステージ内オーバーレイで、
   assert.ok(panel.includes('position: "absolute"'), "経済パネルがオーバーレイでない");
   // スロットはスプライトのみ（名前テキストを出さない）
   assert.ok(client.includes("SlotContent"), "スロット描画が無い");
-  assert.ok(client.includes("<SlotContent slot={slot} />"), "ホットバーがスプライト表示でない");
+  assert.ok(client.includes("<SlotContent slot={slot} durFrac="), "ホットバーがスプライト表示でない");
   // インベントリ整理: 1グリッドに両ゾーン + move アクション + 持ち上げ状態
   assert.ok(client.includes('renderInvSlot("storage"'), "ストレージ側グリッドが無い");
   assert.ok(client.includes('renderInvSlot("hotbar"'), "ホットバー側グリッドが無い");

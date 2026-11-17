@@ -25,7 +25,7 @@ export function maxHpFor(profile: PlayerProfile): number {
 export function isAdventureRoleId(v: unknown): v is AdventureRoleId {
   return typeof v === "string" && (ADVENTURE_ROLE_IDS as readonly string[]).includes(v);
 }
-import { itemById } from "./items";
+import { ITEMS, itemById, type ItemDef, type ToolKind } from "./items";
 
 /** 空腹度の上限（仕様書 3.3: 0〜100）。 */
 export const HUNGER_MAX = 100;
@@ -100,6 +100,13 @@ export type PlayerProfile = {
   tentTier: number;
   /** 道具の強化レベル（アイテム ID → 0..3）。 */
   enhance: Record<string, number>;
+  /**
+   * 道具の残り耐久（アイテム ID → その種類の「使用中の1本」の残量）。
+   * 所持数はスタック（個数）管理のため、個体ごとの耐久は持たず、
+   * 種類ごとに使用中の1本の残量だけを追う。未記録は満タン扱い。
+   * 0 になったら1本壊れて消え、次の1本が満タンで使用中になる。
+   */
+  toolHp: Record<string, number>;
   /** 自分で発見した合成レシピの ID（自由セット式の合成で完全一致した分だけ。
    * 任意・後方互換: 旧データには無い）。本人の図鑑表示にだけ使う。 */
   discoveredRecipes?: string[];
@@ -127,6 +134,7 @@ export const DEFAULT_PROFILE: PlayerProfile = {
   lastDeath: null,
   tentTier: 0,
   enhance: {},
+  toolHp: {},
   discoveredRecipes: [],
   spawnProtectedUntil: 0,
   coins: STARTING_COINS,
@@ -265,7 +273,7 @@ export function parseProfile(raw: unknown): PlayerProfile {
   }
   const inv = invOf({
     coins: 0, hunger: 0, hp: HP_MAX, status: [], vitalAt: 0, respawn: null, restPoint: null, lastDamageAt: 0, deaths: 0, stealActorAt: 0, stealTargetAt: 0,
-    role: "free", rolePicked: false, mastery: {}, skillAt: {}, tauntUntil: 0, reviveMark: null, pendingTeleport: null, lastDeath: null, tentTier: 0, enhance: {}, spawnProtectedUntil: 0,
+    role: "free", rolePicked: false, mastery: {}, skillAt: {}, tauntUntil: 0, reviveMark: null, pendingTeleport: null, lastDeath: null, tentTier: 0, enhance: {}, toolHp: {}, spawnProtectedUntil: 0,
     items: data.items as Record<string, number>,
     hotbar: data.hotbar as ItemSlot[],
     storage: data.storage as ItemSlot[],
@@ -300,6 +308,7 @@ export function parseProfile(raw: unknown): PlayerProfile {
     lastDeath: parseLastDeath(data.lastDeath),
     tentTier: clampInt(data.tentTier, 0, 2, 0),
     enhance: parseEnhance(data.enhance),
+    toolHp: parseToolHp(data.toolHp),
     discoveredRecipes: parseDiscoveredRecipes(data.discoveredRecipes),
     spawnProtectedUntil: clampInt(data.spawnProtectedUntil, 0, Number.MAX_SAFE_INTEGER, 0),
   };
@@ -377,6 +386,21 @@ export function parseEnhance(raw: unknown): Record<string, number> {
     const lv = Math.floor(level);
     if (lv <= 0) continue;
     out[itemId] = Math.min(ENHANCE_MAX_LEVEL, lv);
+  }
+  return out;
+}
+
+/** 道具の残り耐久の復元（道具以外・満タン以上・0以下は落とす＝満タン扱い）。 */
+export function parseToolHp(raw: unknown): Record<string, number> {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const out: Record<string, number> = {};
+  for (const [itemId, hp] of Object.entries(raw as Record<string, unknown>)) {
+    const def = itemById(itemId);
+    if (!def?.tool || !def.durability) continue;
+    if (typeof hp !== "number" || !Number.isFinite(hp)) continue;
+    const v = Math.floor(hp);
+    if (v <= 0 || v >= def.durability) continue;
+    out[itemId] = v;
   }
   return out;
 }
@@ -464,6 +488,7 @@ export function serializeProfile(profile: PlayerProfile): string {
     lastDeath: parseLastDeath(profile.lastDeath),
     tentTier: clampInt(profile.tentTier, 0, 2, 0),
     enhance: parseEnhance(profile.enhance),
+    toolHp: parseToolHp(profile.toolHp),
     discoveredRecipes: parseDiscoveredRecipes(profile.discoveredRecipes),
     spawnProtectedUntil: clampInt(profile.spawnProtectedUntil, 0, Number.MAX_SAFE_INTEGER, 0),
   });
@@ -570,6 +595,75 @@ export function removeItem(
   if (next > 0) items[itemId] = next;
   else delete items[itemId];
   return withInv(profile, { hotbar, storage, items });
+}
+
+// ---------------------------------------------------------------- 道具の耐久
+/**
+ * その種類で実際に使われる道具（実効ティア = ティア + 強化 が最大の1本）。
+ * 同点ならティアが高い方、次に耐久上限が高い方を優先する（弱い方から
+ * 壊していく誤爆を避け、「一番いい道具で作業する」既存の規則に合わせる）。
+ */
+export function bestToolItem(profile: PlayerProfile, kind: ToolKind): ItemDef | null {
+  let best: ItemDef | null = null;
+  let bestEff = -1;
+  for (const def of ITEMS) {
+    if (def.tool !== kind || countItem(profile, def.id) <= 0) continue;
+    const eff = (def.tier ?? 0) + (profile.enhance?.[def.id] ?? 0);
+    if (
+      eff > bestEff ||
+      (eff === bestEff && best !== null &&
+        ((def.tier ?? 0) > (best.tier ?? 0) ||
+          ((def.tier ?? 0) === (best.tier ?? 0) && (def.durability ?? 0) > (best.durability ?? 0))))
+    ) {
+      best = def;
+      bestEff = eff;
+    }
+  }
+  return best;
+}
+
+/** 使用中の1本の残り耐久（満タンは上限そのもの。持っていなければ 0）。 */
+export function toolHpOf(profile: PlayerProfile, itemId: string): number {
+  const def = itemById(itemId);
+  if (!def?.tool || !def.durability) return 0;
+  if (countItem(profile, itemId) <= 0) return 0;
+  return profile.toolHp?.[itemId] ?? def.durability;
+}
+
+/** 残り耐久の割合（1 = 無傷）。道具でない・持っていない場合は null。 */
+export function toolDurabilityFraction(profile: PlayerProfile, itemId: string): number | null {
+  const def = itemById(itemId);
+  if (!def?.tool || !def.durability) return null;
+  if (countItem(profile, itemId) <= 0) return null;
+  return toolHpOf(profile, itemId) / def.durability;
+}
+
+export type WearResult = {
+  profile: PlayerProfile;
+  /** この使用で壊れた道具のアイテム ID（壊れなければ null）。 */
+  brokeItemId: string | null;
+};
+
+/**
+ * 道具を amount 回ぶん使う（耐久を削る）。尽きたらその種類の最良の1本が
+ * 壊れて所持から消え、残量記録も消える（次に使う1本は満タン）。
+ * 対象の道具を持っていない・耐久が定義されていない場合は無変化。
+ */
+export function wearTool(profile: PlayerProfile, kind: ToolKind, amount = 1): WearResult {
+  const def = bestToolItem(profile, kind);
+  if (!def || !def.durability || amount <= 0) return { profile, brokeItemId: null };
+  const left = toolHpOf(profile, def.id) - amount;
+  if (left > 0) {
+    return {
+      profile: { ...profile, toolHp: { ...(profile.toolHp ?? {}), [def.id]: left } },
+      brokeItemId: null,
+    };
+  }
+  const removed = removeItem(profile, def.id, 1);
+  if (!removed) return { profile, brokeItemId: null };
+  const toolHp = { ...(removed.toolHp ?? {}) };
+  delete toolHp[def.id];
+  return { profile: { ...removed, toolHp }, brokeItemId: def.id };
 }
 
 /** ホットバーとストレージの枠を入れ替える。添字が不正なら null。 */

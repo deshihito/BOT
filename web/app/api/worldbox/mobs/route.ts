@@ -6,7 +6,7 @@ import { listPresence } from "@/lib/worldbox/presence-online";
 import { presenceIdFor } from "@/lib/worldbox/presence";
 import { parseSave } from "@/lib/worldbox/save";
 import { loadWorldBoxSave } from "@/lib/worldbox/save-online";
-import { addItem } from "@/lib/worldbox/profile";
+import { addItem, bestToolItem, wearTool } from "@/lib/worldbox/profile";
 import { playerAttack } from "@/lib/worldbox/arena";
 import { mobById } from "@/lib/worldbox/mobs";
 import { isNightPhase, phaseAtTime } from "@/lib/worldbox/daynight";
@@ -354,12 +354,23 @@ export async function POST(request: Request) {
           await storeRuinsPersonal(caveSpace, ownerKey, personal);
         }
         let updatedProfile = null;
+        let next = profile;
+        let broke: string | null = null;
+        // 道具の耐久: 剣を持っていれば振るたびに最良の剣が摩耗する
+        // （素手の攻撃は摩耗なし）。従来は死亡時しかプロフィールを保存
+        // しなかったが、摩耗を積算するため剣がある場合は毎回保存する。
+        if (bestToolItem(profile, "sword")) {
+          const worn = wearTool(next, "sword");
+          next = worn.profile;
+          broke = worn.brokeItemId;
+        }
         if (result.dead && (Object.keys(result.gained).length > 0 || profile.role === "blade")) {
-          let next = profile;
           for (const [itemId, count] of Object.entries(result.gained)) {
             next = addItem(next, itemId, count);
           }
           if (profile.role === "blade") next = addMasteryXp(next, "blade", 3).profile;
+        }
+        if (next !== profile) {
           if (!(await storeProfile(ownerKey, next))) {
             return NextResponse.json({ error: "mobs_failed" }, { status: 500, headers: NO_STORE });
           }
@@ -377,6 +388,7 @@ export async function POST(request: Request) {
             ...(result.state.deadUntil !== undefined ? { deadUntil: result.state.deadUntil } : {}),
             gained: result.gained,
             ...(updatedProfile ? { profile: updatedProfile } : {}),
+            ...(broke ? { broke } : {}),
           },
           { headers: NO_STORE },
         );
