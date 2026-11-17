@@ -5,7 +5,7 @@
 // 個人空間は拡張段階（tier）で広がる: 0=13x10 / 1=17x13 / 2=22x17。
 // 家具の配置は左上を基準に、右端・下端の物は辺に寄せて再配置する。
 import { T_GRASS, T_ROCK, tilesSource, type TopDownMap } from "./mapgen";
-import { L_WALL, L_WOOD, isSolidLobbyTile, type LobbyData, type LobbyObject } from "./lobby";
+import { L_WALL, L_WOOD, isSeatSprite, isSolidLobbyTile, type LobbyData, type LobbyObject } from "./lobby";
 
 export interface TentTier {
   w: number;
@@ -102,6 +102,7 @@ export function buildTent(tier = 0): LobbyData {
   const blocked = new Set<string>();
   for (const o of objects) {
     if (!o.solid) continue;
+    if (isSeatSprite(o.sprite)) continue; // 座席は上に乗って座るため固体にしない（lobby.ts と同じ）
     for (let dy = 0; dy < o.h; dy++) {
       for (let dx = 0; dx < o.w; dx++) blocked.add(`${o.x + dx},${o.y + dy}`);
     }

@@ -137,10 +137,18 @@ test("lobby: オブジェクトに重なりが無く、全て壁・無効でな�
       }
     }
   }
-  // 固体オブジェクトは blocked と一致する
+  // 固体オブジェクトは blocked と一致する（座席は上に乗って座るため除く）
   let solidTiles = 0;
-  for (const o of wb.LOBBY_OBJECTS) if (o.solid) solidTiles += o.w * o.h;
+  for (const o of wb.LOBBY_OBJECTS) {
+    if (o.solid && !["bench", "chair", "sofa"].includes(o.sprite)) solidTiles += o.w * o.h;
+  }
   assert.equal(lobby.blocked.size, solidTiles);
+  // ベンチ・ソファのマスは blocked に入っていない（座れる）
+  for (const o of wb.LOBBY_OBJECTS) {
+    if (["bench", "chair", "sofa"].includes(o.sprite)) {
+      assert.equal(lobby.blocked.has(`${o.x},${o.y}`), false, `${o.sprite} が固体になっている`);
+    }
+  }
 });
 
 test("lobby: 7つのステーションが全て存在し、隣接で検出できる", () => {
