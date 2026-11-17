@@ -53,8 +53,11 @@ import {
   L_PLAZA, L_SAND, L_VOID,
   LOBBY_ENTRY, LOBBY_FLOOR_FALLBACK, LOBBY_FLOOR_SPRITE, LOBBY_H, LOBBY_STAIRS_DOWN, LOBBY_STAIRS_UP,
   LOBBY_DOWN_LANDING, LOBBY_UP_LANDING, LOBBY_W, LOBBY_WARP_PAD,
-  buildLobby, lobbyTileAt, stationArcadeNear, stationGenreNear, stationNear, type LobbyData, type LobbyObject, type LobbyStation,
+  buildLobby, lobbyTileAt, stationArcadeNear, stationGenreNear, stationNear, RACETRACK, type LobbyData, type LobbyObject, type LobbyStation,
 } from "@/lib/worldbox/lobby";
+import {
+  COAT_COLORS, RACE_DURATION_MS, generateRaceCore, horseTrackPose, scheduleAt, type RaceCore,
+} from "@/lib/worldbox/racing";
 import {
   LOBBY2_H, LOBBY2_W, LOBBY3_H, LOBBY3_W,
   buildLobby2, buildLobby3, floorWarpAt, lobby2TileAt, lobby3TileAt, type LobbyFloorSpace,
@@ -103,6 +106,7 @@ import {
 } from "@/lib/worldbox/sound";
 import { useGamesNav } from "../GamesShell";
 import WorldBoxCasinoPanel from "./WorldBoxCasinoPanel";
+import WorldBoxRacingPanel from "./WorldBoxRacingPanel";
 import WorldBoxArenaPanel from "./WorldBoxArenaPanel";
 import WorldBoxArcadePanel from "./WorldBoxArcadePanel";
 import { getWebGame } from "@/lib/games-catalog";
@@ -1033,6 +1037,7 @@ export default function WorldBoxClient() {
   const respawnActionRef = useRef<(point: { x: number; y: number }) => void>(() => {});
   const bedKeyRef = useRef<string>("");
   const [casinoOpen, setCasinoOpen] = useState(false);
+  const [racingOpen, setRacingOpen] = useState(false);
   const [arenaOpen, setArenaOpen] = useState(false);
   const [plazaMsg, setPlazaMsg] = useState("");
   const staminaBoostRef = useRef(false);
@@ -2609,6 +2614,8 @@ export default function WorldBoxClient() {
     let telescopeCam: { x: number; y: number } | null = null;
     let telescopeDrag: { pointerId: number; lastX: number; lastY: number } | null = null;
     let telescopeCenterSeen = 0;
+    /** 競馬の観戦アニメ用キャッシュ（発走中のレースの中核は1回だけ作る）。 */
+    let raceAnimCache: { postMs: number; core: RaceCore } | null = null;
     // 空間（ワールド / ロビー）。ロビーでは国家・ミニマップは扱わない。
     let space: SaveSpace = "world";
     let worldReturn: { x: number; y: number } | null = null;
@@ -5538,6 +5545,44 @@ export default function WorldBoxClient() {
             null, sitTileRef.current !== null,
           ),
       });
+      // 競馬: 発走中のレースはトラック上に馬を描く（位置は見せ方専用、
+      // 真値はサーバーの着順。pose が脚質の隊列→最終着順へ補間する）。
+      if (space === "lobby") {
+        const sched = scheduleAt(Date.now());
+        if (sched.runningPostMs !== null) {
+          if (!raceAnimCache || raceAnimCache.postMs !== sched.runningPostMs) {
+            raceAnimCache = { postMs: sched.runningPostMs, core: generateRaceCore(sched.runningPostMs) };
+          }
+          const core = raceAnimCache.core;
+          const progress = Math.min(1, Math.max(0, (Date.now() - sched.runningPostMs) / RACE_DURATION_MS));
+          for (const e of core.entries) {
+            const pose = horseTrackPose(core, e.horse.id, progress, RACETRACK);
+            const coat = COAT_COLORS[e.horse.coat] ?? "#8a5a2b";
+            const gate = e.gate;
+            drawList.push({
+              y: pose.y + 0.3,
+              draw: () => {
+                const sx = Math.round(lobbyOx + pose.x * TILE);
+                const sy = Math.round(lobbyOy + pose.y * TILE);
+                ctx.beginPath();
+                ctx.arc(sx, sy, TILE * 0.3, 0, Math.PI * 2);
+                ctx.fillStyle = coat;
+                ctx.fill();
+                ctx.lineWidth = 2;
+                ctx.strokeStyle = "rgba(0,0,0,0.45)";
+                ctx.stroke();
+                ctx.fillStyle = e.horse.coat === "芦毛" || e.horse.coat === "白毛" ? "#222" : "#fff";
+                ctx.font = `700 ${Math.round(TILE * 0.34)}px sans-serif`;
+                ctx.textAlign = "center";
+                ctx.textBaseline = "middle";
+                ctx.fillText(String(gate), sx, sy + 1);
+              },
+            });
+          }
+        } else {
+          raceAnimCache = null;
+        }
+      }
       drawList.sort((a, b) => a.y - b.y);
       for (const d of drawList) d.draw();
 
@@ -6762,6 +6807,15 @@ export default function WorldBoxClient() {
                 {telescopeOpen ? "閉じる" : "覗く"}
               </button>
             )}
+            {stationUi === "race" && (
+              <button
+                type="button"
+                style={{ ...btn, minHeight: hud.buttonMinHeight, padding: "2px 10px" }}
+                onClick={() => setRacingOpen((v) => !v)}
+              >
+                {racingOpen ? "閉じる" : "馬券"}
+              </button>
+            )}
             {stationUi === "fountain" && (
               <button
                 type="button"
@@ -7537,6 +7591,9 @@ export default function WorldBoxClient() {
             </button>
           </div>
         </div>
+      )}
+      {racingOpen && spaceUi === "lobby" && (
+        <WorldBoxRacingPanel onClose={() => setRacingOpen(false)} />
       )}
       {casinoOpen && spaceUi === "lobby" && (
         <WorldBoxCasinoPanel onClose={() => setCasinoOpen(false)} />
