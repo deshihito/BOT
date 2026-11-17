@@ -81,6 +81,7 @@ async function buildView(state: NationsState, guildId: string, settings: NationS
     visibility: settings.visibility,
     isPrivate: isPrivateNation(settings),
     taxCollected: settings.taxCollected,
+    treasury: settings.treasury,
     entryFee: settings.entryFee,
     exitFeeRate: settings.exitFeeRate,
     feesCollected: settings.feesCollected,
