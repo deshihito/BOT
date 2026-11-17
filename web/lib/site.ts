@@ -372,6 +372,12 @@ export const FOOTER_GROUPS: { label: string; links: SiteLink[] }[] = [
       { href: "/privacy", label: "プライバシーポリシー" },
     ],
   },
+  {
+    label: "テスト公開",
+    links: [
+      { href: "https://takasumi-worldbox-test.vercel.app/games/worldbox", label: "WORLD BOX（Takasumi版）", external: true },
+    ],
+  },
 ];
 
 /** 現在地判定。配下のページ（/commands/… など）でも親の導線を現在地とする。 */
