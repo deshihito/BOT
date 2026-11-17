@@ -62,7 +62,11 @@ async function lobbyPosition(ownerKey: string): Promise<{ x: number; y: number }
   return null;
 }
 
-function view(state: GuildShopState, nations: Awaited<ReturnType<typeof loadNationsState>>) {
+function view(
+  state: GuildShopState,
+  nations: Awaited<ReturnType<typeof loadNationsState>>,
+  viewerKey: string,
+) {
   return {
     plots: state.plots.map((plot) =>
       plot
@@ -76,6 +80,9 @@ function view(state: GuildShopState, nations: Awaited<ReturnType<typeof loadNati
               name: itemById(l.itemId)?.name ?? l.itemId,
               available: listingAvailable(l),
               price: l.price,
+              // 閲覧者本人の出品か（売り手の生キーは出さない）。
+              // 「下げる」の表示条件をサーバーの unlist 権限と一致させる用。
+              mine: l.sellerKey === viewerKey,
             })),
           }
         : null,
@@ -109,7 +116,7 @@ export async function GET(request: Request) {
   const membership = nations.members[ownerKey];
   return NextResponse.json(
     {
-      ...view(state, nations),
+      ...view(state, nations, ownerKey),
       myGuildId: membership?.nationId ?? null,
       myRole: await resolvedRole(nations, ownerKey),
     },
@@ -154,7 +161,7 @@ export async function POST(request: Request) {
       };
       if (!(await storeGuildShopState(pruned))) return err("store_failed", 503);
       return NextResponse.json(
-        { ok: true, ...view(pruned, nations), myGuildId: myGuild, myRole },
+        { ok: true, ...view(pruned, nations, ownerKey), myGuildId: myGuild, myRole },
         { headers: NO_STORE },
       );
     };

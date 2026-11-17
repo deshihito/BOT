@@ -9,6 +9,7 @@ import {
   parseChatMessage, parseUnionChatSettings, pruneChatMessages,
   type ChatChannel, type ChatMessage, type UnionChatSettings,
 } from "./chat";
+import { withUserLock } from "./user-lock";
 
 export const WORLDBOX_CHAT_NAMESPACE = "worldbox_chat";
 export const WORLDBOX_UNION_BOARD_NAMESPACE = "worldbox_union_board";
@@ -63,10 +64,16 @@ export async function loadChatMessages(
 /** 投稿を追記し、間引き後の配列で保存する。保存できたら true。 */
 export async function appendChatMessage(message: ChatMessage): Promise<boolean> {
   const key = listKey(message.channel, message.space, message.guildId);
-  const all = await loadList(message.channel, key);
-  const next = pruneChatMessages([...all, message], message.channel, message.at);
-  // prune は新しい順。保存もその順でよい（読み側で再整形する）
-  return storeList(message.channel, key, next);
+  // 読み→追記→書きはリスト単位で直列化する（同時投稿の後勝ちで
+  // 先の投稿が消える lost-update を防ぐ）。Bot 側の受信リレーも同じ
+  // キーを書くが、bot_kv に CAS が無いためプロセスをまたぐ同時書きは
+  // 原理的に残る（ワーカー側もギルド単位ロックで自プロセス内は直列化）。
+  return withUserLock(`chat-list:${namespaceFor(message.channel)}:${key}`, async () => {
+    const all = await loadList(message.channel, key);
+    const next = pruneChatMessages([...all, message], message.channel, message.at);
+    // prune は新しい順。保存もその順でよい（読み側で再整形する）
+    return storeList(message.channel, key, next);
+  });
 }
 
 /** ユニオンの Discord 連携設定（mode 形式。旧 chatChannelId は移行読込）。 */

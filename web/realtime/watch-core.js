@@ -36,6 +36,10 @@ const WATCH_PLAN = [
   // 表示状態そのものなので tiles / mobs と同じ差分配信にする
   { namespace: "worldbox_objects", kind: "objects", intervalMs: 2_000 },
   { namespace: "worldbox_fishing", kind: "fishing", intervalMs: 2_000 },
+  // ギルドショップは単一ドキュメントで応答に本人向け加工（役職・mine）
+  // を含むため、nations と同じ全体 poke 方式にする（地図の区画名表示と
+  // パネルの追随が用途）
+  { namespace: "worldbox_guild_shop", kind: "guildShop", intervalMs: 5_000 },
 ];
 
 /** 差分比較用の正規化（文字列はそのまま、オブジェクトは JSON 化）。 */

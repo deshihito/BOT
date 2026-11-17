@@ -22,7 +22,7 @@ import { reconcileCasinoTournamentScores } from "@/lib/worldbox/casino-tournamen
 import { buildEconomyOp, ECONOMY_AMOUNT_MAX, GAMBLE_PAYOUT_MAX, type EconomyOp } from "@/lib/worldbox/economy-bridge";
 import {
   enqueueEconomyOp, findEconomyOp, isEconomyEnabled, loadMyEconomyOps, readUserBalance,
-  waitForOpDone, waitForOpsDone,
+  submitEconomyOp, waitForOpDone, waitForOpsDone,
 } from "@/lib/worldbox/economy-bridge-online";
 import { buildLobby } from "@/lib/worldbox/lobby";
 import { isPresenceEnabled, loadMyPresence } from "@/lib/worldbox/presence-online";
@@ -188,6 +188,29 @@ async function enqueue(userKey: string, discordId: string, input: {
   // pending で、ワーカー側で後から failed になりうるため、スコアは
   // done 確定後の照合（reconcileCasinoTournamentScores）でだけ加える。
   return stored ? op : null;
+}
+
+/**
+ * セッションの先払い spend の提出（直接適用が正、キューは
+ * フォールバック）。spend は常時直接適用の対象なので通常は
+ * done / failed がその場で確定し、failed なら開始自体を止められる。
+ * pending は直接適用が使えなかった場合のみで、その間は従来どおり
+ * 各プレイのゲート（prepayGateError 等）が done を待つ。
+ * null は直接もキューも使えなかった（economy_failed）。
+ */
+async function submitSpend(userKey: string, discordId: string, input: {
+  amount: number;
+  reason: string;
+}): Promise<{ op: EconomyOp; state: "done" | "failed" | "pending" } | null> {
+  const op = buildEconomyOp(
+    { kind: "spend", userKey, discordId, amount: input.amount, reason: input.reason },
+    crypto.randomUUID(),
+    Date.now(),
+  );
+  if (!op) return null;
+  const submitted = await submitEconomyOp(op);
+  if (submitted.state === "unavailable") return null;
+  return { op: submitted.op, state: submitted.state };
 }
 
 /**
@@ -473,12 +496,13 @@ async function handlePost(request: Request, session: AuthedSession) {
     const total = bet * spins;
     if (total > ECONOMY_AMOUNT_MAX) return errorResponse("invalid_bet", 400);
     if (total > effectiveBalance) return errorResponse("not_enough_coins", 409);
-    const prepay = await enqueue(ctx.userKey, ctx.discordId, {
-      kind: "spend", amount: total, reason: CASINO_SESSION_REASONS.slot7Prepay,
+    const prepay = await submitSpend(ctx.userKey, ctx.discordId, {
+      amount: total, reason: CASINO_SESSION_REASONS.slot7Prepay,
     });
     if (!prepay) return errorResponse("economy_failed", 503);
+    if (prepay.state === "failed") return errorResponse("bet_failed", 409);
     const next: CasinoSession = {
-      kind: "slot7", bet, total: spins, remaining: spins, prepayOpId: prepay.id,
+      kind: "slot7", bet, total: spins, remaining: spins, prepayOpId: prepay.op.id,
       pendingReward: 0, pendingPenalty: 0, lastReels: null, lastEvents: [], createdAt: Date.now(),
     };
     await saveCasinoSession(ctx.userKey, next);
@@ -529,12 +553,13 @@ async function handlePost(request: Request, session: AuthedSession) {
     const bet = validateCasinoBet(fields.bet);
     if (bet === null) return errorResponse("invalid_bet", 400);
     if (bet > effectiveBalance) return errorResponse("not_enough_coins", 409);
-    const prepay = await enqueue(ctx.userKey, ctx.discordId, {
-      kind: "spend", amount: bet, reason: CASINO_SESSION_REASONS.doubleBet,
+    const prepay = await submitSpend(ctx.userKey, ctx.discordId, {
+      amount: bet, reason: CASINO_SESSION_REASONS.doubleBet,
     });
     if (!prepay) return errorResponse("economy_failed", 503);
+    if (prepay.state === "failed") return errorResponse("bet_failed", 409);
     const next: CasinoSession = {
-      kind: "double", bet, multiplier: 1, streak: 0, prepayOpId: prepay.id, createdAt: Date.now(),
+      kind: "double", bet, multiplier: 1, streak: 0, prepayOpId: prepay.op.id, createdAt: Date.now(),
     };
     await saveCasinoSession(ctx.userKey, next);
     return NextResponse.json({ ok: true, session: sessionJson(next) }, { headers: NO_STORE });
@@ -598,14 +623,15 @@ async function handlePost(request: Request, session: AuthedSession) {
     const bet = validateCasinoBet(fields.bet);
     if (bet === null) return errorResponse("invalid_bet", 400);
     if (bet > effectiveBalance) return errorResponse("not_enough_coins", 409);
-    const prepay = await enqueue(ctx.userKey, ctx.discordId, {
-      kind: "spend", amount: bet, reason: CASINO_SESSION_REASONS.blackjackBet,
+    const prepay = await submitSpend(ctx.userKey, ctx.discordId, {
+      amount: bet, reason: CASINO_SESSION_REASONS.blackjackBet,
     });
     if (!prepay) return errorResponse("economy_failed", 503);
+    if (prepay.state === "failed") return errorResponse("bet_failed", 409);
     const seed = Math.floor(rng() * 0x7fffffff);
     const bj = startRound(createBlackjackGame(seed, effectiveBalance), bet);
     const next: CasinoSession = {
-      kind: "blackjack", bet, spendOpIds: [prepay.id], bj, createdAt: Date.now(),
+      kind: "blackjack", bet, spendOpIds: [prepay.op.id], bj, createdAt: Date.now(),
     };
     await saveCasinoSession(ctx.userKey, next);
     const finalView = bj.phase === "settled" ? publicSessionView(next) : null;
@@ -623,6 +649,16 @@ async function handlePost(request: Request, session: AuthedSession) {
     const { session: bjs, error } = requireSession("blackjack");
     if (error || !bjs) return error ?? errorResponse("no_session", 409);
     if (bjs.bj.phase !== "player") return errorResponse("not_in_play", 409);
+    // 先払いが done と確定してから手を進める（slot7/double と同じ
+    // 規約）。未確定のまま打てると、後から failed になった場合に
+    // ベットの無い勝負が成立してしまう。pending は予算内で待ち、
+    // 失敗・喪失はセッションを破棄する。
+    const bjStatuses = await spendStatuses(ctx.userKey, bjs.spendOpIds);
+    if (bjStatuses.some((s) => s === "pending")) return errorResponse("bet_pending", 409);
+    if (bjStatuses.some((s) => s !== "done")) {
+      await clearCasinoSession(ctx.userKey);
+      return errorResponse("bet_failed", 409);
+    }
     const bj = action === "bj_hit" ? hit(bjs.bj) : stand(bjs.bj);
     const next: CasinoSession = { ...bjs, bj };
     const finalView = bj.phase === "settled" ? publicSessionView(next) : null;
@@ -651,12 +687,13 @@ async function handlePost(request: Request, session: AuthedSession) {
     // 返金オプも作れずセッションが固着する。総ベットが上限に収まる
     // ときだけダブルを許可する。
     if (bjs.bet * 2 > ECONOMY_AMOUNT_MAX) return errorResponse("bet_too_large_to_double", 409);
-    const second = await enqueue(ctx.userKey, ctx.discordId, {
-      kind: "spend", amount: bjs.bet, reason: CASINO_SESSION_REASONS.blackjackBet,
+    const second = await submitSpend(ctx.userKey, ctx.discordId, {
+      amount: bjs.bet, reason: CASINO_SESSION_REASONS.blackjackBet,
     });
     if (!second) return errorResponse("economy_failed", 503);
+    if (second.state === "failed") return errorResponse("bet_failed", 409);
     const bj = doubleDown(bjs.bj);
-    const next: CasinoSession = { ...bjs, bj, spendOpIds: [...bjs.spendOpIds, second.id] };
+    const next: CasinoSession = { ...bjs, bj, spendOpIds: [...bjs.spendOpIds, second.op.id] };
     await saveCasinoSession(ctx.userKey, next);
     return NextResponse.json(
       { ok: true, session: sessionJson(next), final: publicSessionView(next) },
