@@ -121,7 +121,7 @@ export function placedStationKinds(itemId: unknown): readonly StationKind[] {
 
 /** 床ブロック: 固体にせず、上に乗ると効果がある（橋は水上に置けて渡れる）。 */
 export const FLOOR_ITEM_IDS: ReadonlySet<string> = new Set([
-  "path_block", "ice_block", "honey_block", "slime_block", "bridge_block",
+  "path_block", "ice_block", "honey_block", "slime_block", "bridge_block", "rail",
 ]);
 
 export function isFloorItem(itemId: string): boolean {
@@ -355,6 +355,7 @@ export function applyTileAction(
   yRaw: unknown,
   seedIdRaw: unknown,
   now: number,
+  opts?: { supplyConnected?: boolean },
 ): TileActionResult {
   if (action !== "chop" && action !== "mine" && action !== "till" && action !== "plant" && action !== "harvest") {
     return { ok: false, error: "invalid_action" };
@@ -419,9 +420,10 @@ export function applyTileAction(
       }
       // 掘った岩は一定時間で戻る（資源の再成長。until を過ぎれば地形どおり岩になる）
       const next: TileOverride = { tile: T_DIRT, ownerId: selfId, until: now + ROCK_REGROW_MS };
-      // 純度が高い岩場は石材が多く、特に純度が高いと石炭も混ざる（個体値の効果）
+      // 純度が高い岩場は石材が多く、特に純度が高いと石炭も混ざる（個体値の効果）。
+      // 首都と線路でつながった岩場は補給ボーナスで石材+1（サプライライン）。
       const ivs = tileIvsAt(x, y);
-      const stoneCount = MINE_STONE_COUNT + purityBonusStone(ivs.purity);
+      const stoneCount = MINE_STONE_COUNT + purityBonusStone(ivs.purity) + (opts?.supplyConnected ? 1 : 0);
       const coalCount = purityBonusCoal(ivs.purity);
       let nextProfile = addItem(worn.profile, "stone", stoneCount);
       const gained: Record<string, number> = { stone: stoneCount };
@@ -473,8 +475,9 @@ export function applyTileAction(
       const cropDef = cropById(crop.cropId);
       if (!cropDef) return { ok: false, error: "no_crop" };
       const next: TileOverride = { ...active, farmland: true, crop: null, ownerId: selfId };
-      // 豊穣な土地は収穫量が増える（個体値の効果）
-      const total = cropDef.produceCount + fertilityBonusYield(tileIvsAt(x, y).fertility);
+      // 豊穣な土地は収穫量が増える（個体値の効果）。
+      // 首都と線路でつながった畑は補給ボーナスで収穫+1（サプライライン）。
+      const total = cropDef.produceCount + fertilityBonusYield(tileIvsAt(x, y).fertility) + (opts?.supplyConnected ? 1 : 0);
       return done(
         next,
         addItem(profile, cropDef.produceId, total),
