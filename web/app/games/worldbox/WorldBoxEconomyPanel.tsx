@@ -5,8 +5,8 @@
 // かばんには売却ボタンを置かない（ショップでかばんを開く手順をなくす）。
 // Discord ボット側の経済機能（items / workshop craft）の規則をそのまま使い、
 // かばん・空腹度は /api/worldbox/profile が正とする。
-// steal は一旦廃止（2026-11-16）: タブ・ルート・オプ生成・ワーカー適用の
-// すべてで止めてある（履歴表示のラベルだけ残る）。
+// steal は 2026-11-16 に一旦廃止したが、2026-11-18 のユーザー指示で
+// 復活した（入口はこのパネルの steal タブ → profile ルートのみ）。
 // 労働も廃止（2026-11-16）: ボタン・ルート・earn 許可リストから外してある。
 // コインの正は AGO コイン本体: 残高と移動履歴は経済ブリッジ
 // （/api/worldbox/economy）が返し、移動は Bot 本体が数十秒で適用する。
@@ -29,17 +29,22 @@ const ACTION_SE: Record<string, WbSeName> = {
   craft: "craft",
   eat: "harvest",
   enhance: "success",
+  steal: "coin",
 };
 
-type Tab = "bag" | "shop" | "sell" | "craft" | "bank";
+type Tab = "bag" | "shop" | "sell" | "craft" | "steal" | "bank";
 type LoadState = "loading" | "ready" | "guest" | "unavailable";
+type StealTarget = { id: string; name: string };
 
 const ERROR_LABEL: Record<string, string> = {
   not_enough_coins: "コインが足りません",
   not_enough_items: "アイテムが足りません",
   hunger_full: "もう満腹です",
   work_disabled: "労働は廃止されました",
-  steal_disabled: "steal は廃止されました",
+  steal_cooldown: "steal はクールダウン中です",
+  target_protected: "その相手からは盗めません",
+  target_recently_stolen: "その相手は最近盗まれたばかりで保護されています",
+  self_target: "自分からは盗めません",
   unauthorized: "ログインが必要です",
   discord_required: "コインの移動には Discord ログインが必要です",
   economy_unavailable: "いま経済ブリッジを使えません",
@@ -134,6 +139,7 @@ export default function WorldBoxEconomyPanel({ space, station, genre, worldStati
   const [profile, setProfile] = useState<PlayerProfile | null>(null);
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [tab, setTab] = useState<Tab>("bag");
+  const [targets, setTargets] = useState<StealTarget[]>([]);
   const [msg, setMsg] = useState("");
   const [busy, setBusy] = useState(false);
   const [balance, setBalance] = useState<number | null>(null);
@@ -198,10 +204,24 @@ export default function WorldBoxEconomyPanel({ space, station, genre, worldStati
     }
   }, []);
 
+  const refreshTargets = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/worldbox/presence?space=${encodeURIComponent(space)}`, {
+        headers: { Accept: "application/json" },
+      });
+      if (!res.ok) return;
+      const data = (await res.json()) as { players?: StealTarget[] };
+      if (aliveRef.current && Array.isArray(data.players)) {
+        setTargets(data.players.map((p) => ({ id: p.id, name: p.name })));
+      }
+    } catch { /* 対象が読めなくても他の機能は使える */ }
+  }, [space]);
+
   useEffect(() => {
     aliveRef.current = true;
     void refreshProfile();
     void refreshBridge();
+    void refreshTargets();
     // 経済オプ確定の push で残高・履歴を即時更新する
     const off = onEconomyApplied(() => { void refreshProfile(); void refreshBridge(); });
     return () => {
@@ -212,7 +232,7 @@ export default function WorldBoxEconomyPanel({ space, station, genre, worldStati
       for (const t of enhanceFlashTimersRef.current) window.clearTimeout(t);
       enhanceFlashTimersRef.current = [];
     };
-  }, [refreshProfile, refreshBridge]);
+  }, [refreshProfile, refreshBridge, refreshTargets]);
 
   const act = async (payload: Record<string, unknown>, describe: (data: Record<string, unknown>) => string) => {
     setBusy(true);
@@ -457,6 +477,7 @@ export default function WorldBoxEconomyPanel({ space, station, genre, worldStati
           {atShop && shopItems.length > 0 && tabBtn("shop", shopGenre ? (genreById(shopGenre)?.name ?? "ショップ") : "ショップ")}
           {atSellShop && tabBtn("sell", "売却")}
           {atWorkbench && tabBtn("craft", "合成")}
+          {tabBtn("steal", "steal")}
           {atBank && tabBtn("bank", "銀行")}
         </div>
       </div>
@@ -758,6 +779,41 @@ export default function WorldBoxEconomyPanel({ space, station, genre, worldStati
               );
             })()}
           </div>
+        </div>
+      )}
+
+      {activeTab === "steal" && (
+        <div style={{ marginTop: 6 }}>
+          <div style={row}>
+            <strong>steal</strong>
+            <span style={{ flex: 1 }} />
+            <button type="button" style={btn} disabled={busy} onClick={() => void refreshTargets()}>
+              対象を更新
+            </button>
+          </div>
+          {targets.length === 0 && <p className="muted">いま対象にできる相手がいません</p>}
+          {targets.map((t) => (
+            <div key={t.id} style={row}>
+              <span>{t.name}</span>
+              <span style={{ flex: 1 }} />
+              <button
+                type="button"
+                style={btn}
+                disabled={busy}
+                onClick={() =>
+                  void act({ action: "steal", targetId: t.id }, (d) => {
+                    const amount = typeof d.amount === "number" ? d.amount : 0;
+                    if (d.success === true) {
+                      return amount > 0 ? `${t.name} から ${amount} コインを steal しました` : `${t.name} への steal は成功しましたが、奪えるコインがありませんでした`;
+                    }
+                    return amount > 0 ? `steal は失敗しました（罰金 ${amount} コイン）` : "steal は失敗しました";
+                  })
+                }
+              >
+                steal
+              </button>
+            </div>
+          ))}
         </div>
       )}
 

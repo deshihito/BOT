@@ -4,9 +4,8 @@
 // ワーカーが既存の経済機構（pay_house / wallet / transfer_coins）で
 // 適用して結果を書き戻す（設計: ago-coin-connection-design.md 案B）。
 // ここはオプの形・検証・解釈だけを持ち、保存は economy-bridge-online.ts。
-// steal は一旦廃止（2026-11-16）: buildEconomyOp は steal を作らず、
-// Bot 側ワーカーも steal オプを failed(steal_disabled) で終端化する。
-// 型と解釈（parseEconomyOp）は既存レコードの表示のために残す。
+// steal は 2026-11-16 に一旦廃止したが、2026-11-18 のユーザー指示で
+// 復活した（入口は経済パネルの steal タブ → profile ルートに限る）。
 // 労働も廃止（2026-11-16）: earn の許可リストから "work" を外し、
 // 新規の work オプは作れない（過去オプの parse は壊さない）。
 // なお lib/worldbox/economy.ts はプロフィール側の状態遷移（かばん・
@@ -145,9 +144,6 @@ export function buildEconomyOp(input: BuildEconomyOpInput, id: string, now: numb
   if (reason === null) return null;
   if (input.kind === "earn" && !EARN_REASONS.has(reason)) return null;
   if (input.kind === "gamble" && !GAMBLE_REASONS.has(reason)) return null;
-  // steal は一旦廃止（2026-11-16 ユーザー指示）。新規オプはどの経路からも作れない
-  // （保存済みオプの解釈は parseEconomyOp 側に残し、ワーカーが終端化する）。
-  if (input.kind === "steal") return null;
   const op: EconomyOp = {
     id,
     kind: input.kind,
@@ -162,6 +158,11 @@ export function buildEconomyOp(input: BuildEconomyOpInput, id: string, now: numb
     const to = validateDiscordId(input.toDiscordId);
     if (to === null || to === discordId) return null;
     op.toDiscordId = to;
+  }
+  if (input.kind === "steal") {
+    const from = validateDiscordId(input.fromDiscordId);
+    if (from === null || from === discordId) return null;
+    op.fromDiscordId = from;
   }
   if (input.kind === "gamble") {
     const payout = validateGamblePayout(input.payout);

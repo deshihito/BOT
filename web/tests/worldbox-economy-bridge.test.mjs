@@ -106,9 +106,19 @@ test("economy: buildEconomyOp は種類ごとの制約を守る", () => {
     "12345678-abcd-4abc-8abc-1234567890ab", 1,
   );
   assert.equal(spend?.kind, "spend");
-  // steal は一旦廃止（2026-11-16）: 形が正しくても作れない
-  assert.equal(eco.buildEconomyOp(
+  // steal は fromDiscordId が必須で、自分自身からは作れない
+  const steal = eco.buildEconomyOp(
     { kind: "steal", userKey: MY_KEY, discordId: ME, amount: 20, reason: "steal", fromDiscordId: OTHER },
+    "12345678-abcd-4abc-8abc-1234567890ab", 1,
+  );
+  assert.equal(steal?.kind, "steal");
+  assert.equal(steal?.fromDiscordId, OTHER);
+  assert.equal(eco.buildEconomyOp(
+    { kind: "steal", userKey: MY_KEY, discordId: ME, amount: 20, reason: "steal" },
+    "12345678-abcd-4abc-8abc-1234567890ab", 1,
+  ), null);
+  assert.equal(eco.buildEconomyOp(
+    { kind: "steal", userKey: MY_KEY, discordId: ME, amount: 20, reason: "steal", fromDiscordId: ME },
     "12345678-abcd-4abc-8abc-1234567890ab", 1,
   ), null);
 });
@@ -565,21 +575,55 @@ test("API(profile): eat はオプを積まない", async () => {
   assert.equal(globalThis.__wbBridge.ops.length, 0);
 });
 
-test("API(profile): steal は廃止され、オプもプロフィールも動かない", async () => {
+test("API(profile): steal は対象の残高からオプを積み、両者の時刻を刻む", async () => {
   resetBridgeState();
   globalThis.__wbPresence.set("pres-1", `discord:${OTHER}`);
   globalThis.__wbBridge.balances.set(ME, 100);
   globalThis.__wbBridge.balances.set(OTHER, 400);
   const cookie = sessionCookie(ME, "eco-user");
   const res = await profileRoute.POST(apiRequest(URL_P, "POST", cookie, { action: "steal", targetId: "pres-1" }));
-  assert.equal(res.status, 409);
-  assert.equal((await res.json()).error, "steal_disabled");
-  assert.equal(globalThis.__wbBridge.ops.length, 0);
-  assert.equal(globalThis.__wbProfiles.get(MY_KEY)?.stealActorAt ?? 0, 0);
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  const ops = globalThis.__wbBridge.ops;
+  assert.equal(ops.length, 1);
+  if (body.success) {
+    // 成功: 対象残高 400 の 5% = 20（上限 50）を steal オプで移す
+    assert.equal(body.amount, 20);
+    assert.equal(ops[0].kind, "steal");
+    assert.equal(ops[0].fromDiscordId, OTHER);
+    assert.equal(ops[0].amount, 20);
+  } else {
+    // 失敗: 罰金 20（自分の残高 100 が上限）の spend オプ
+    assert.equal(body.amount, 20);
+    assert.equal(ops[0].kind, "spend");
+    assert.equal(ops[0].reason, "steal_fine");
+    assert.equal(ops[0].amount, 20);
+  }
+  assert.ok((globalThis.__wbProfiles.get(MY_KEY)?.stealActorAt ?? 0) > 0);
+  assert.ok((globalThis.__wbProfiles.get(`discord:${OTHER}`)?.stealTargetAt ?? 0) > 0);
   const google = sessionCookie("633333333333333333", "g-user", "google");
   const denied = await profileRoute.POST(apiRequest(URL_P, "POST", google, { action: "buy", itemId: "wood" }));
   assert.equal(denied.status, 403);
   assert.equal((await denied.json()).error, "discord_required");
+});
+
+test("API(profile): steal は保護対象とクールダウンを拒否する", async () => {
+  resetBridgeState();
+  globalThis.__wbPresence.set("pres-1", `discord:${OTHER}`);
+  globalThis.__wbBridge.balances.set(ME, 100);
+  globalThis.__wbBridge.balances.set(OTHER, 10); // 50 未満は保護
+  const cookie = sessionCookie(ME, "eco-user");
+  const res = await profileRoute.POST(apiRequest(URL_P, "POST", cookie, { action: "steal", targetId: "pres-1" }));
+  assert.equal(res.status, 409);
+  assert.equal((await res.json()).error, "target_protected");
+  assert.equal(globalThis.__wbBridge.ops.length, 0);
+  // クールダウン中は残高があっても実行できない
+  globalThis.__wbBridge.balances.set(OTHER, 400);
+  globalThis.__wbProfiles.set(MY_KEY, { coins: 100, hunger: 100, items: {}, stealActorAt: Date.now(), stealTargetAt: 0 });
+  const cooled = await profileRoute.POST(apiRequest(URL_P, "POST", cookie, { action: "steal", targetId: "pres-1" }));
+  assert.equal(cooled.status, 409);
+  assert.equal((await cooled.json()).error, "steal_cooldown");
+  assert.equal(globalThis.__wbBridge.ops.length, 0);
 });
 
 // ---------- クライアント配線 ----------
