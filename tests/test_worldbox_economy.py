@@ -416,20 +416,46 @@ class TestSteal(WorkerCase):
         # discordId = 実行者（受け手）、fromDiscordId = 被害者
         return self.add_op(kind="steal", amount=amount, reason="steal", fromDiscordId=OTHER)
 
-    async def test_steal_is_disabled_and_moves_nothing(self):
-        # steal は一旦廃止（2026-11-16）: キューに残ったオプは金を動かさず
-        # failed(steal_disabled) で終端化される
+    async def test_steal_moves_from_victim_to_actor(self):
         self.wallet.balances[OTHER] = 400
         self.wallet.balances[ME] = 100
         op = self.add_steal(50)
         self.assertEqual(await self.worker.poll_once(), 1)
         record = self.record(op["id"])
-        self.assertEqual(record["status"], "failed")
-        self.assertEqual(record["error"], "steal_disabled")
-        self.assertEqual(self.wallet.balances[OTHER], 400)
-        self.assertEqual(self.wallet.balances[ME], 100)
+        self.assertEqual(record["status"], "done")
+        self.assertEqual(record["appliedAmount"], 50)
+        self.assertEqual(self.wallet.balances[OTHER], 350)
+        self.assertEqual(self.wallet.balances[ME], 150)
+        self.assertEqual(self.history, [(OTHER, ME, 50, "steal")])
+
+    async def test_steal_capped_by_victim_balance(self):
+        self.wallet.balances[OTHER] = 30
+        self.wallet.balances[ME] = 100
+        op = self.add_steal(50)
+        await self.worker.poll_once()
+        record = self.record(op["id"])
+        self.assertEqual(record["status"], "done")
+        self.assertEqual(record["appliedAmount"], 30, "被害者の残高が上限")
+        self.assertEqual(self.wallet.balances[OTHER], 0)
+        self.assertEqual(self.wallet.balances[ME], 130)
+        self.assertEqual(self.history, [(OTHER, ME, 30, "steal")])
+
+    async def test_steal_zero_balance_records_zero(self):
+        op = self.add_steal(50)
+        await self.worker.poll_once()
+        record = self.record(op["id"])
+        self.assertEqual(record["status"], "done")
+        self.assertEqual(record["appliedAmount"], 0)
         self.assertEqual(self.wallet.change_calls, [])
         self.assertEqual(self.history, [])
+
+    async def test_steal_actor_created_with_starting_balance(self):
+        self.wallet.balances[OTHER] = 400
+        op = self.add_steal(50)
+        await self.worker.poll_once()
+        # 実行者が新規なら初期残高 + 奪った額
+        self.assertEqual(self.wallet.balances[ME], NEW_USER_BALANCE + 50)
+        self.assertEqual(self.record(op["id"])["appliedAmount"], 50)
 
 
 class TestGamble(WorkerCase):
