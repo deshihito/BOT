@@ -1056,6 +1056,56 @@ export default function WorldBoxClient() {
       setTileMsg("テレポートできない");
     }
   };
+  /** 線路パネル: 線路の上に立つと、同じ路線の行き先を選んで移動できる。 */
+  const [railOpen, setRailOpen] = useState(false);
+  const [railStops, setRailStops] = useState<{ x: number; y: number; capital: boolean }[]>([]);
+  const [railCapital, setRailCapital] = useState(false);
+  const [railMsg, setRailMsg] = useState("");
+  const openRailPanel = async () => {
+    setRailOpen(true);
+    setRailMsg("");
+    setRailStops([]);
+    setRailCapital(false);
+    try {
+      const res = await fetch("/api/worldbox/rails");
+      const data = (await res.json().catch(() => ({}))) as {
+        onRail?: boolean;
+        capitalConnected?: boolean;
+        stops?: { x: number; y: number; capital: boolean }[];
+      };
+      if (!res.ok || !data.onRail) {
+        setRailMsg("線路の上にいない");
+        return;
+      }
+      setRailStops(data.stops ?? []);
+      setRailCapital(data.capitalConnected === true);
+      if ((data.stops ?? []).length === 0) setRailMsg("行き先なし");
+    } catch {
+      setRailMsg("失敗しました");
+    }
+  };
+  const rideRail = async (x: number, y: number) => {
+    try {
+      const res = await fetch("/api/worldbox/rails", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "ride", x, y }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { error?: string; x?: number; y?: number };
+      if (res.ok && typeof data.x === "number" && typeof data.y === "number") {
+        setRailOpen(false);
+        teleportActionRef.current(data.x, data.y);
+        return;
+      }
+      setRailMsg(
+        data.error === "not_on_rail" ? "線路の上にいない"
+        : data.error === "not_connected" ? "つながっていない"
+        : "移動できない",
+      );
+    } catch {
+      setRailMsg("移動できない");
+    }
+  };
   const respawnActionRef = useRef<(point: { x: number; y: number }) => void>(() => {});
   const bedKeyRef = useRef<string>("");
   const [casinoOpen, setCasinoOpen] = useState(false);
@@ -6551,6 +6601,12 @@ export default function WorldBoxClient() {
       run: () => { void travelToNation(); },
     },
     {
+      id: "rail",
+      label: "線路",
+      show: spaceUi === "world",
+      run: () => { void openRailPanel(); },
+    },
+    {
       id: "map",
       label: showMap ? "マップを隠す" : "マップを出す",
       show: spaceUi === "world",
@@ -7727,6 +7783,29 @@ export default function WorldBoxClient() {
             <button type="button" style={btn} disabled={!reportText.trim()} onClick={() => { void sendReport(); }}>
               送る
             </button>
+          </div>
+        </div>
+      )}
+      {railOpen && (
+        <div className="wb-panel" style={{ ...panelOverlay, width: "min(330px, calc(100% - 20px))" }}>
+          <div style={{ ...stickyPanelHead, display: "flex", alignItems: "center", gap: 8 }}>
+            <strong>線路</strong>
+            {railCapital && <span style={{ fontSize: 12, opacity: 0.85 }}>首都と接続</span>}
+            <span style={{ flex: 1 }} />
+            <button type="button" style={btn} onClick={() => setRailOpen(false)}>閉じる</button>
+          </div>
+          {railMsg && <div style={{ fontSize: 13, marginTop: 8 }}>{railMsg}</div>}
+          <div style={{ display: "grid", gap: 6, marginTop: 8, maxHeight: 260, overflowY: "auto" }}>
+            {railStops.map((s) => (
+              <button
+                key={`${s.x},${s.y}`}
+                type="button"
+                style={{ ...btn, background: "rgba(255,255,255,0.10)", color: "#fff", textAlign: "left" }}
+                onClick={() => { void rideRail(s.x, s.y); }}
+              >
+                X {s.x} / Y {s.y}{s.capital ? "（首都）" : ""}
+              </button>
+            ))}
           </div>
         </div>
       )}
