@@ -101,12 +101,13 @@ import {
   nudgeBobPx, nudgeRingAlpha, stickKnobRadius,
 } from "@/lib/worldbox/affordance";
 import {
-  bgmSceneFor, footstepMaterialFor, loadWbSoundSettings, playWbSe, playWbStep, saveWbSoundSettings, seForFxBurst, setWbBgmScene,
+  bgmSceneFor, footstepMaterialFor, loadWbSoundSettings, playPianoNotes, playWbSe, playWbStep, saveWbSoundSettings, seForFxBurst, setWbBgmScene,
   setWbBgmTension, stopWbBgm, tensionFor, unlockWbAudio, type WbSoundSettings,
 } from "@/lib/worldbox/sound";
 import { useGamesNav } from "../GamesShell";
 import WorldBoxCasinoPanel from "./WorldBoxCasinoPanel";
 import WorldBoxRacingPanel from "./WorldBoxRacingPanel";
+import WorldBoxPianoPanel from "./WorldBoxPianoPanel";
 import WorldBoxArenaPanel from "./WorldBoxArenaPanel";
 import WorldBoxArcadePanel from "./WorldBoxArcadePanel";
 import { getWebGame } from "@/lib/games-catalog";
@@ -734,6 +735,7 @@ const STATION_LABEL: Record<LobbyStation, string> = {
   rest: "休憩",
   arcade: "アーケード",
   race: "競馬場",
+  piano: "ピアノ",
   sell: "売却専用ショップ",
   telescope: "望遠鏡",
 };
@@ -962,6 +964,26 @@ export default function WorldBoxClient() {
   }, [telescopeOpen]);
   /** 望遠鏡の視点をプレイヤー位置へ戻す合図（増えるたびにループ側が再センタリング）。 */
   const telescopeCenterRef = useRef(0);
+  /** ロビーのピアノ（鍵盤パネル）。音は中継でロビー全員に届く。 */
+  const [pianoOpen, setPianoOpen] = useState(false);
+  useEffect(() => {
+    if (stationUi !== "piano") setPianoOpen(false);
+  }, [stationUi]);
+  /** ピアノ音の送信口（リアルタイム接続が張る）。 */
+  const pianoSendRef = useRef<((notes: number[]) => void) | null>(null);
+  const pianoPendingRef = useRef<number[]>([]);
+  const pianoFlushTimerRef = useRef<number | undefined>(undefined);
+  /** 鍵盤の打鍵: 自分に即鳴らし、30ms 以内の打鍵をまとめて中継へ送る。 */
+  const playPianoNote = (semi: number) => {
+    playPianoNotes([semi]);
+    pianoPendingRef.current.push(semi);
+    if (pianoFlushTimerRef.current !== undefined) return;
+    pianoFlushTimerRef.current = window.setTimeout(() => {
+      pianoFlushTimerRef.current = undefined;
+      const notes = pianoPendingRef.current.splice(0, 8);
+      if (notes.length > 0) pianoSendRef.current?.(notes);
+    }, 30);
+  };
   useEffect(() => {
     setTelescopeOpen(false);
   }, [spaceUi]);
@@ -2987,6 +3009,12 @@ export default function WorldBoxClient() {
         const proto = location.protocol === "https:" ? "wss:" : "ws:";
         const ws = new WebSocket(`${proto}//${location.host}/api/worldbox/realtime?t=${encodeURIComponent(rtToken)}&tab=${encodeURIComponent(tabSession.tab)}&tabAt=${tabSession.tabAt}`);
         rtSocket = ws;
+        pianoSendRef.current = (notes: number[]) => {
+          if (ws.readyState !== WebSocket.OPEN) return;
+          try {
+            ws.send(JSON.stringify({ t: "note", notes }));
+          } catch { /* noop */ }
+        };
         ws.onopen = () => {
           rtBackoffMs = 1000;
           lastWsMsgAt = Date.now();
@@ -3023,6 +3051,7 @@ export default function WorldBoxClient() {
             t?: string; now?: number; p?: PresenceEntry; players?: PresenceEntry[]; id?: string;
             x?: number; y?: number;
             kind?: string; changes?: { key: string; value: unknown }[]; value?: unknown;
+            notes?: number[];
             channel?: string; space?: string; guildId?: string;
             agg?: number; on?: boolean;
           };
@@ -3038,6 +3067,9 @@ export default function WorldBoxClient() {
             rtAggOn = true;
           } else if (msg.t === "agg") {
             rtAggOn = msg.on === true;
+          } else if (msg.t === "note" && Array.isArray(msg.notes)) {
+            // ロビーのピアノ: 誰かが弾いた音をそのまま鳴らす（中継はロビー内だけに配る）
+            if (space === "lobby") playPianoNotes(msg.notes);
           } else if (msg.t === "jump" && typeof msg.x === "number" && typeof msg.y === "number" && typeof msg.space === "string") {
             // 中継に却下された位置申告: サーバー保管の正規位置へ戻す
             snapBackToServer(msg.x, msg.y, msg.space);
@@ -6861,6 +6893,15 @@ export default function WorldBoxClient() {
                 {telescopeOpen ? "閉じる" : "覗く"}
               </button>
             )}
+            {stationUi === "piano" && (
+              <button
+                type="button"
+                style={{ ...btn, minHeight: hud.buttonMinHeight, padding: "2px 10px" }}
+                onClick={() => setPianoOpen((v) => !v)}
+              >
+                {pianoOpen ? "閉じる" : "弾く"}
+              </button>
+            )}
             {stationUi === "race" && (
               <button
                 type="button"
@@ -7648,6 +7689,9 @@ export default function WorldBoxClient() {
       )}
       {racingOpen && spaceUi === "lobby" && (
         <WorldBoxRacingPanel onClose={() => setRacingOpen(false)} />
+      )}
+      {pianoOpen && spaceUi === "lobby" && (
+        <WorldBoxPianoPanel onClose={() => setPianoOpen(false)} onPlay={playPianoNote} />
       )}
       {casinoOpen && spaceUi === "lobby" && (
         <WorldBoxCasinoPanel onClose={() => setCasinoOpen(false)} />

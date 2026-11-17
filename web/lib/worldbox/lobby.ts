@@ -158,7 +158,7 @@ function floorAt(x: number, y: number): number {
 
 // ---------- オブジェクト配置 ----------
 
-export type LobbyStation = "board" | "shop" | "bank" | "casino" | "arena" | "smith" | "guild" | "fountain" | "rest" | "arcade" | "race" | "sell" | "telescope";
+export type LobbyStation = "board" | "shop" | "bank" | "casino" | "arena" | "smith" | "guild" | "fountain" | "rest" | "arcade" | "race" | "sell" | "telescope" | "piano";
 
 export type LobbyObject = {
   sprite: string;
@@ -257,7 +257,7 @@ put("table_round", 44, 22);
 put("sofa", 51, 24);
 put("sofa", 51, 25);
 put("table_round", 50, 22);
-put("piano", 39, 26);
+put("piano", 39, 26, { station: "piano" }); // ロビーのピアノ（弾ける・音はロビー全体に届く）
 put("hedge", 44, 21);
 put("hedge", 44, 27);
 put("planter", 52, 19);
