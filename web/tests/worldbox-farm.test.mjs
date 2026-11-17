@@ -65,6 +65,7 @@ const tilesUrl = bundleModule(
     "parseProfile", "addItem", "countItem",
     "applyTileAction", "applyPlaceBlock", "applyMineBlock", "applyFlowerAction", "applyToggleGate", "tileView", "actionForTile", "tileKey",
     "applySetSign", "applyDisplayAction", "applyDrawWater",
+    "tileIvsAt", "fertilityGrowthFactor", "fertilityBonusYield", "purityBonusStone", "purityBonusCoal",
     "parseTileOverride", "parseTileOverrides", "isOverrideActive", "TREE_REGROW_MS",
     "TERRAIN_ROCK_HP", "TERRAIN_TREE_HP",
   ],
@@ -274,7 +275,8 @@ test("タイル: 採掘はツルハシが要り、岩が土になり石材が得
   }
   assert.equal(ok.override.tile, T.T_DIRT);
   assert.equal(ok.override.until, NOW + 3 * 3600 * 1000, "岩の再成長タイマー（3時間）");
-  assert.equal(inv.countItem(ok.profile, "stone"), 2);
+  // 石材は基本2＋その土地の純度ボーナス（個体値）
+  assert.equal(inv.countItem(ok.profile, "stone"), 2 + T.purityBonusStone(T.tileIvsAt(rockAt.x, rockAt.y).purity));
   const mithril1 = T.applyTileAction(null, withItems({ mithril_pickaxe: 1 }), map, ME_KEY, "mine", rockAt.x, rockAt.y, undefined, NOW);
   assert.equal(mithril1.override.hp, T.TERRAIN_ROCK_HP - 40, "ミスリルでも1発では壊れない");
   const mithril2 = T.applyTileAction(mithril1.override, mithril1.profile, map, ME_KEY, "mine", rockAt.x, rockAt.y, undefined, NOW);
@@ -320,8 +322,8 @@ test("タイル: 耕す→植える→育つ→所有者だけが収穫できる
   const planted = T.applyTileAction(tilled.override, farmer, map, ME_KEY, "plant", grassAt.x, grassAt.y, "wheat_seed", NOW);
   assert.equal(planted.ok, true);
   assert.equal(planted.override.crop.cropId, "wheat");
-  // NOW は秋: 小麦（適季=春）の反対の季節なので ×1.4 で遅く育つ
-  assert.equal(planted.override.crop.readyAt, NOW + Math.round(10 * 60_000 * 1.4));
+  // NOW は秋: 小麦（適季=春）の反対の季節なので ×1.4 で遅く育つ。さらに土地の豊穣度倍率が掛かる
+  assert.equal(planted.override.crop.readyAt, NOW + Math.round(10 * 60_000 * 1.4 * T.fertilityGrowthFactor(T.tileIvsAt(grassAt.x, grassAt.y).fertility)));
   assert.equal(inv.countItem(planted.profile, "wheat_seed"), 1, "種を1つ消費する");
   // 育つ前は収穫できない
   assert.equal(
@@ -337,7 +339,8 @@ test("タイル: 耕す→植える→育つ→所有者だけが収穫できる
   // 所有者は収穫できる（畑は残る）
   const harvested = T.applyTileAction(planted.override, planted.profile, map, ME_KEY, "harvest", grassAt.x, grassAt.y, undefined, readyAt);
   assert.equal(harvested.ok, true);
-  assert.deepEqual(harvested.gained, { wheat: 2 });
+  // 収穫は基本2＋その土地の豊穣度ボーナス（個体値）
+  assert.deepEqual(harvested.gained, { wheat: 2 + T.fertilityBonusYield(T.tileIvsAt(grassAt.x, grassAt.y).fertility) });
   assert.equal(inv.countItem(harvested.profile, "wheat"), 2);
   assert.equal(harvested.override.crop, null);
   assert.equal(harvested.override.farmland, true);

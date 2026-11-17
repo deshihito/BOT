@@ -6,7 +6,7 @@
 import { ITEMS, cropById, cropBySeedId, itemById, type ItemDef, type ToolKind } from "./items";
 import {
   T_DIRT, T_GRASS, T_ROCK, T_SAND, T_SNOW, T_SNOW_TREE, T_TREE, T_WATER, WORLD_COORD_LIMIT,
-  mapTileAt, type TopDownMap,
+  mapTileAt, tileIvsAt, type TileIvs, type TopDownMap,
 } from "./mapgen";
 import {
   addItem, bestToolItem, countItem, removeItem, wearTool, type PlayerProfile,
@@ -30,6 +30,34 @@ export const MINE_STONE_COUNT = 2;
  */
 export const TERRAIN_ROCK_HP = 60;
 export const TERRAIN_TREE_HP = 30;
+
+// ---------------------------------------------------------------- マスの個体値の効果
+/**
+ * 個体値（mapgen の tileIvsAt）のゲームへの効き方（仕様書 §4.2）。
+ * すべて決定的で乱数は使わない（良い土地を選ぶ「厳選」がそのまま報われる）。
+ */
+/** 豊穣度 → 作物の成長時間の倍率（0: 1.25倍遅い / 50: 等倍 / 100: 0.75倍速い）。 */
+export function fertilityGrowthFactor(fertility: number): number {
+  const f = Math.max(0, Math.min(100, fertility));
+  return 1 - (f - 50) / 200;
+}
+
+/** 豊穣度 → 収穫時の追加収量（65以上で+1、85以上で+2）。 */
+export function fertilityBonusYield(fertility: number): number {
+  if (fertility >= 85) return 2;
+  if (fertility >= 65) return 1;
+  return 0;
+}
+
+/** 純度 → 岩の採掘時の追加の石材（70以上で+1）。 */
+export function purityBonusStone(purity: number): number {
+  return purity >= 70 ? 1 : 0;
+}
+
+/** 純度 → 岩の採掘時の追加の石炭（85以上で+1）。 */
+export function purityBonusCoal(purity: number): number {
+  return purity >= 85 ? 1 : 0;
+}
 
 /** 地形タイルの最大 HP（HP制の対象でなければ 0）。 */
 export function terrainMaxHp(tile: number): number {
@@ -206,6 +234,8 @@ export type TileView = {
   block: { itemId: string; mine: boolean; hpFrac: number; gateOpen?: boolean; signText?: string; display?: string } | null;
   /** 地形（岩・木）の残り HP 割合（1 = 無傷。HP制の対象でないタイルは 1）。 */
   hpFrac: number;
+  /** マスの個体値（豊穣度・純度・標高。決定的生成で保存はしない）。 */
+  ivs: TileIvs;
   /** 自分の作物・作業かどうか。 */
   mine: boolean;
 };
@@ -236,6 +266,7 @@ export function tileView(
     y,
     tile: effTile,
     hpFrac: terrainHpFraction(active, effTile),
+    ivs: tileIvsAt(x, y),
     farmland: active?.farmland === true,
     stump: active?.stump === true,
     crop: crop
@@ -388,7 +419,17 @@ export function applyTileAction(
       }
       // 掘った岩は一定時間で戻る（資源の再成長。until を過ぎれば地形どおり岩になる）
       const next: TileOverride = { tile: T_DIRT, ownerId: selfId, until: now + ROCK_REGROW_MS };
-      return done(next, addItem(worn.profile, "stone", MINE_STONE_COUNT), { stone: MINE_STONE_COUNT }, worn.brokeItemId);
+      // 純度が高い岩場は石材が多く、特に純度が高いと石炭も混ざる（個体値の効果）
+      const ivs = tileIvsAt(x, y);
+      const stoneCount = MINE_STONE_COUNT + purityBonusStone(ivs.purity);
+      const coalCount = purityBonusCoal(ivs.purity);
+      let nextProfile = addItem(worn.profile, "stone", stoneCount);
+      const gained: Record<string, number> = { stone: stoneCount };
+      if (coalCount > 0) {
+        nextProfile = addItem(nextProfile, "coal", coalCount);
+        gained.coal = coalCount;
+      }
+      return done(next, nextProfile, gained, worn.brokeItemId);
     }
     case "till": {
       if (eff !== T_GRASS && eff !== T_DIRT) return { ok: false, error: "tile_blocked" };
@@ -417,7 +458,8 @@ export function applyTileAction(
         crop: {
           cropId: cropDef.id,
           plantedAt: now,
-          readyAt: now + Math.round(cropDef.growthMinutes * 60_000 * seasonGrowthMult(cropDef.season, now)),
+          // 成長時間は季節倍率に加えて土地の豊穣度で変わる（個体値の効果）
+          readyAt: now + Math.round(cropDef.growthMinutes * 60_000 * seasonGrowthMult(cropDef.season, now) * fertilityGrowthFactor(tileIvsAt(x, y).fertility)),
         },
         ownerId: selfId,
       };
@@ -431,10 +473,12 @@ export function applyTileAction(
       const cropDef = cropById(crop.cropId);
       if (!cropDef) return { ok: false, error: "no_crop" };
       const next: TileOverride = { ...active, farmland: true, crop: null, ownerId: selfId };
+      // 豊穣な土地は収穫量が増える（個体値の効果）
+      const total = cropDef.produceCount + fertilityBonusYield(tileIvsAt(x, y).fertility);
       return done(
         next,
-        addItem(profile, cropDef.produceId, cropDef.produceCount),
-        { [cropDef.produceId]: cropDef.produceCount },
+        addItem(profile, cropDef.produceId, total),
+        { [cropDef.produceId]: total },
       );
     }
   }

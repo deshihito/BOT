@@ -12,7 +12,7 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import {
   CHUNK_SIZE, MAP_SEED, T_DIRT, T_GRASS, T_ROCK, T_SAND, T_SNOW, T_SNOW_TREE, T_TREE, T_WATER,
-  generateChunk, mapTileAt, rectBounds, tileAt, worldBounds, type TopDownMap,
+  generateChunk, mapTileAt, rectBounds, tileAt, tileIvsAt, worldBounds, type TopDownMap,
 } from "@/lib/worldbox/mapgen";
 import { pickRandomSpawn } from "@/lib/worldbox/spawn";
 import { DASH_SPEED, PLAYER_RADIUS, SWIM_DASH_SPEED, SWIM_SPEED, WALK_SPEED, circleHitsSolid, findFreeNear, isWaterAt, stepMove } from "@/lib/worldbox/move";
@@ -2106,6 +2106,11 @@ export default function WorldBoxClient() {
       if (data.broke) {
         setTileMsg(`${itemById(data.broke)?.name ?? "道具"}が壊れた`);
         playWbSe("debris");
+      } else if (action === "till" || action === "plant") {
+        // 土地の豊穣度だけを断片で出す（個体値の手がかり）
+        setTileMsg(`豊穣度 ${tileIvsAt(x, y).fertility}`);
+      } else if (action === "mine") {
+        setTileMsg(`純度 ${tileIvsAt(x, y).purity}`);
       }
     } catch {
       setTileMsg("できませんでした");
