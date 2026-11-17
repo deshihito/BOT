@@ -562,6 +562,9 @@ export function applyPlaceBlock(
  * 防衛側の首都の WAR_TERRITORY_RADIUS 以内にある他者ブロックを掘れる
  * （ルート側が戦争状態を検証して warBreakAllowed を渡す。掘ったブロックは
  * 掘った者の所持品に入る＝略奪ルール）。硬いブロックは道具が要る。
+ * 収納コンテナ（樽・木箱・宝箱）は中身が全員共有の仕様に合わせて、回収も
+ * 誰でもできる（ルート側がコンテナ判定して containerBreakAllowed を渡す。
+ * 中身が空のときだけ、はルート側の not_empty 検証が担保する）。
  * HP制: 1回 = 1ヒットで、ダメージは道具のティアで変わる。HP が残れば
  * ブロックは残り（アイテムは得られない）、0 以下で壊れてアイテムに戻る。
  * 戦争破壊も同じ HP 経路を通る（1ヒット即消しにはしない）。
@@ -569,6 +572,8 @@ export function applyPlaceBlock(
 export type MineBlockContext = {
   /** 戦争中の他者ブロック破壊がこの1回で許可されているか。 */
   warBreakAllowed?: boolean;
+  /** 収納コンテナの回収（中身は共有仕様のため所有者以外も可）。 */
+  containerBreakAllowed?: boolean;
 };
 
 export function applyMineBlock(
@@ -589,7 +594,7 @@ export function applyMineBlock(
   const block = active?.block;
   if (!active || !block) return { ok: false, error: "no_block" };
   const selfId = presenceIdFor(ownerKey);
-  if (block.ownerId !== selfId && !ctx.warBreakAllowed) return { ok: false, error: "not_owner" };
+  if (block.ownerId !== selfId && !ctx.warBreakAllowed && !ctx.containerBreakAllowed) return { ok: false, error: "not_owner" };
   const def = itemById(block.itemId);
   if (!def) return { ok: false, error: "no_block" };
   const tool = blockMineTool(def);

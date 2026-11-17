@@ -236,7 +236,13 @@ export async function POST(request: Request) {
             );
           }
           result = applyMineBlock(
-            current, profile, map, ownerKey, fields.x, fields.y, Date.now(), { warBreakAllowed },
+            current, profile, map, ownerKey, fields.x, fields.y, Date.now(),
+            {
+              warBreakAllowed,
+              // 収納コンテナは中身が全員共有の仕様に合わせ、回収も誰でも可
+              // （中身が空のときだけ、は上の not_empty 検証が担保する）
+              containerBreakAllowed: Boolean(blockItemId && isContainerItem(blockItemId)),
+            },
           );
         } else if (fields.action === "set_sign") {
           // 看板テキストの設定（所有者だけ、サーバー検証）

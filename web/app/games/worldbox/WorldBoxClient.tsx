@@ -3583,13 +3583,9 @@ export default function WorldBoxClient() {
         };
       }
       if (view.block && isContainerItem(view.block.itemId)) {
-        // 自分の樽・宝箱は採掘ではなく収納を開く。他人の収納は開けない。
-        if (view.block.mine) {
-          void openContainerRef.current(t.x, t.y, view.block.itemId);
-        } else {
-          setTileMsg(TILE_ERROR_LABEL.not_owner);
-          denyAtTile(t.x, t.y);
-        }
+        // 樽・宝箱は採掘ではなく収納を開く。中身は全員共有（誰でも開けて
+        // 出し入れできる）。回収もパネルのボタンから誰でもできる。
+        void openContainerRef.current(t.x, t.y, view.block.itemId);
         return true;
       }
       if (view.block && isMachineItem(view.block.itemId)) {
