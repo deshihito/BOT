@@ -40,6 +40,9 @@ const REQUEST_ERROR_LABEL: Record<string, string> = {
   discord_required: "Discord ログインが必要です",
 };
 
+/** 国庫の引き出し額の候補（バッチE6）。 */
+const TREASURY_WITHDRAW_STEPS = [100, 500, 1000, 5000, 10000, 50000] as const;
+
 const SETTINGS_ERROR_LABEL: Record<string, string> = {
   king_only: "王だけができます",
   not_at_guild_board: "ギルドボードの前で操作してください",
@@ -48,6 +51,10 @@ const SETTINGS_ERROR_LABEL: Record<string, string> = {
   invalid_tax_rate: "税率が不正です",
   invalid_visibility: "公開設定が不正です",
   invalid_target: "対象が不正です",
+  invalid_amount: "金額が不正です",
+  insufficient_treasury: "国庫が足りません",
+  withdraw_failed: "引き出しに失敗しました",
+  economy_unavailable: "いま引き出せません",
   store_failed: "保存に失敗しました",
   nation_settings_unavailable: "いま使えません",
   unauthorized: "ログインが必要です",
@@ -1040,6 +1047,31 @@ export default function WorldBoxGuildBoardPanel({
                 <span style={{ flex: 1 }} />
                 <span style={{ fontSize: 14 }}>{nsData.treasury.toLocaleString("ja-JP")}</span>
               </div>
+              {nsData.role === "king" && nsData.treasury > 0 ? (
+                <div style={rowStyle}>
+                  <span style={{ fontSize: 13, opacity: 0.8 }}>引き出し</span>
+                  <span style={{ flex: 1 }} />
+                  {TREASURY_WITHDRAW_STEPS.filter((a) => a <= nsData.treasury).map((a) => (
+                    <button
+                      key={a}
+                      type="button"
+                      style={tabBtn}
+                      disabled={busy}
+                      onClick={() => void settingsAct({ action: "withdraw_treasury", amount: a })}
+                    >
+                      {a.toLocaleString("ja-JP")}
+                    </button>
+                  ))}
+                  <button
+                    type="button"
+                    style={tabBtn}
+                    disabled={busy}
+                    onClick={() => void settingsAct({ action: "withdraw_treasury", amount: nsData.treasury })}
+                  >
+                    全額
+                  </button>
+                </div>
+              ) : null}
               <div style={rowStyle}>
                 <span style={{ fontSize: 13, opacity: 0.8 }}>税収</span>
                 <span style={{ flex: 1 }} />

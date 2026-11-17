@@ -38,7 +38,8 @@ export type NationSettings = {
   feesCollected: number;
   /**
    * 国庫残高（経済仕様書 §3 の treasury_coins）。税・入国料・出金料の
-   * 受け皿で、徴収のたびに増える。引き出し等の使い道は未実装。
+   * 受け皿で、徴収のたびに増える。王はギルドボード前で自分の残高へ
+   * 引き出せる（バッチE6、earn 理由 nation_treasury_withdraw）。
    */
   treasury: number;
   updatedAt: number;

@@ -69,6 +69,7 @@ export const EARN_REASONS: ReadonlySet<string> = new Set([
   "guild_request_refund",
   "ruins_complete",
   "dungeon_clear",
+  "nation_treasury_withdraw",
 ]);
 
 /** gamble の理由ホワイトリスト（Bot 側でも同じ集合で検証する）。 */
