@@ -670,6 +670,28 @@ export type WbSeOptions = {
   material?: FootstepMaterial;
 };
 
+/** ピアノの音（半音オフセット列、C5=0）。和音と速い連打のために playWbSe の
+ * 名前単位スロットルを通さず、音ごとに sePitch を切り替えて note レシピを鳴らす。 */
+export function playPianoNotes(semitones: readonly number[]): void {
+  loadWbSoundSettings();
+  if (!settings.se || !ctx || !seBus) return;
+  const notes = semitones.filter((n) => Number.isInteger(n) && n >= -24 && n <= 24).slice(0, 12);
+  if (notes.length === 0) return;
+  try {
+    if (ctx.state === "suspended") void ctx.resume().catch(() => {});
+    seGain = 1;
+    for (const n of notes) {
+      sePitch = Math.pow(2, n / 12);
+      SE_RECIPES.note(ctx.currentTime + 0.01);
+    }
+  } catch {
+    // 音が出ない環境でもゲームは止めない
+  } finally {
+    sePitch = 1;
+    seGain = 1;
+  }
+}
+
 export function playWbSe(name: WbSeName, opts: WbSeOptions = {}): void {
   loadWbSoundSettings();
   if (!settings.se || !ctx || !seBus) return;

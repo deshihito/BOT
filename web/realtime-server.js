@@ -191,6 +191,14 @@ if (wss) {
       } catch {
         return;
       }
+      if (msg && msg.t === "note") {
+        // ピアノの音: ロビーにいる奏者の音だけを、同じロビーの全員へ中継する
+        const notes = core.sanitizePianoNotes(msg.notes);
+        if (notes && info.space === "lobby") {
+          broadcast("lobby", ws, { t: "note", notes, id: info.pid });
+        }
+        return;
+      }
       if (!msg || msg.t !== "hb") return;
       // 外部基準が未解決ならためておき、解決後に受信時刻つきで処理する
       if (info.baseline === undefined) {

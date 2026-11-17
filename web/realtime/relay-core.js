@@ -163,6 +163,18 @@ function checkSaveFallbackContinuity(saved, next) {
 }
 
 /** 部屋: 空間ごとのプレイヤー表（id → エントリ）と、pid ごとの現行タブ世代。エントリは PresenceEntry と同じ形。 */
+/** ピアノ音の共有メッセージ検証: 半音オフセット（C5=0）の配列だけを通す。 */
+function sanitizePianoNotes(raw) {
+  if (!Array.isArray(raw)) return null;
+  const notes = [];
+  for (const n of raw) {
+    if (typeof n !== "number" || !Number.isInteger(n) || n < -24 || n > 24) return null;
+    notes.push(n);
+    if (notes.length > 8) return null;
+  }
+  return notes.length > 0 ? notes : null;
+}
+
 function createRoom() {
   return { spaces: new Map(), gens: new Map() };
 }
@@ -401,4 +413,5 @@ module.exports = {
   createAggregator,
   planPresenceWrite,
   forgetPresenceWrite,
+  sanitizePianoNotes,
 };
