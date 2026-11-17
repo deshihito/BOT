@@ -352,6 +352,11 @@ function routeImport(file, replacements) {
   return import(dataUrl(code));
 }
 const userLockUrl = dataUrl(transpile("worldbox/user-lock.ts"));
+const tentUrl = bundleModule(
+  ["worldbox/rng.ts", "worldbox/mapgen.ts", "worldbox/items.ts", "worldbox/profile.ts", "worldbox/presence.ts", "worldbox/seasons.ts", "worldbox/tiles.ts", "worldbox/lobby.ts", "worldbox/tent.ts"],
+  ["buildTent", "TENT_H", "SEAT_SPRITES"],
+);
+const tentMod = await import(tentUrl);
 const containersRoute = await routeImport("api/worldbox/containers/route.ts", [
   ['"next/server"', nextServerStubUrl],
   ['"@/lib/auth"', authUrl],
@@ -365,6 +370,7 @@ const containersRoute = await routeImport("api/worldbox/containers/route.ts", [
   ['"@/lib/worldbox/tiles-online"', tilesOnlineStubUrl],
   ['"@/lib/worldbox/containers"', containersUrl],
   ['"@/lib/worldbox/containers-online"', containersOnlineStubUrl],
+  ['"@/lib/worldbox/tent"', tentUrl],
   ['"@/lib/worldbox/user-lock"', userLockUrl],
 ]);
 const machinesUrl = bundleModule(["worldbox/items.ts", "worldbox/machines.ts"], ["isMachineItem", "machineBufferCount"]);
@@ -626,6 +632,74 @@ test("API(tiles, S4): 同じ樽への並行 mine_block でも回収は1回だけ
   assert.equal(bodies.find((b) => b.status === 409).body.error, "no_block", "掘られた後のブロックは無い");
 });
 
+test("API(containers): テントの備え付け樽が収納として開け、出し入れできる", async () => {
+  resetStores();
+  // tier 0 のテント内装: 樽は (2, 8)、木箱は (1, 8)
+  globalThis.__wbContainerPresence = [
+    { id: MY_ID, space: "tent", x: 2, y: 7, ts: Date.now() },
+  ];
+  seedProfile(MY_KEY, profWith([slot("wood", 5), null, null, null, null], emptySlots(10)));
+  const cookie = sessionCookie(ME, "owner");
+  const res = await containersRoute.GET(apiRequest(`${URL_C}?x=2&y=8&space=tent`, "GET", cookie));
+  assert.equal(res.status, 200);
+  const data = await res.json();
+  assert.equal(data.itemId, "barrel");
+  assert.equal(data.capacity, 10);
+  assert.equal(data.container.slots.length, 10);
+  // 木箱も開ける（容量 8）
+  const crate = await containersRoute.GET(apiRequest(`${URL_C}?x=1&y=8&space=tent`, "GET", cookie));
+  assert.equal(crate.status, 200);
+  assert.equal((await crate.json()).itemId, "crate");
+  // 収納でない家具（ソファ）は 404（隣に立って確認する）
+  globalThis.__wbContainerPresence = [
+    { id: MY_ID, space: "tent", x: 11, y: 7, ts: Date.now() },
+  ];
+  const sofa = await containersRoute.GET(apiRequest(`${URL_C}?x=11&y=8&space=tent`, "GET", cookie));
+  assert.equal(sofa.status, 404);
+  globalThis.__wbContainerPresence = [
+    { id: MY_ID, space: "tent", x: 2, y: 7, ts: Date.now() },
+  ];
+  // space 無し（world 扱い）ではテントの位置が無いので開けない
+  const asWorld = await containersRoute.GET(apiRequest(`${URL_C}?x=2&y=8`, "GET", cookie));
+  assert.equal(asWorld.status, 409);
+  assert.equal((await asWorld.json()).error, "position_unknown");
+  // 出し入れは tent キーで保存される
+  const moved = await containersRoute.POST(apiRequest(URL_C, "POST", cookie, {
+    action: "move", space: "tent", x: 2, y: 8,
+    from: { side: "profile_hotbar", index: 0 }, to: { side: "container", index: 0 },
+  }));
+  assert.equal(moved.status, 200);
+  assert.deepEqual((await moved.json()).container.slots[0], { id: "wood", count: 5 });
+  assert.ok(globalThis.__wbContainers.has("tent|2,8"), "tent キーで保存される");
+});
+
+test("API(containers): テントを拡張しても樽の中身が付いてくる（保存キーの正規化）", async () => {
+  resetStores();
+  const seeded = C.emptyContainer(MY_ID, "barrel");
+  seeded.slots[0] = slot("stone", 3);
+  globalThis.__wbContainers.set("tent|2,8", C.serializeContainerState(seeded));
+  const prof2 = profWith(emptySlots(5), emptySlots(10));
+  prof2.tentTier = 2; // tier 2 では樽は (2, 15) に移る
+  seedProfile(MY_KEY, prof2);
+  globalThis.__wbContainerPresence = [
+    { id: MY_ID, space: "tent", x: 2, y: 14, ts: Date.now() },
+  ];
+  const cookie = sessionCookie(ME, "owner");
+  const res = await containersRoute.GET(apiRequest(`${URL_C}?x=2&y=15&space=tent`, "GET", cookie));
+  assert.equal(res.status, 200);
+  const data = await res.json();
+  assert.equal(data.itemId, "barrel");
+  assert.deepEqual(data.container.slots[0], { id: "stone", count: 3 }, "拡張前の樽の中身が読める");
+});
+
+test("座席リスト: 室内（lobby の SEAT_SPRITES）とタイル側（tiles の SEAT_ITEM_IDS）が一致する", () => {
+  const tilesSrc = fs.readFileSync(path.join(libDir, "worldbox/tiles.ts"), "utf8");
+  const m = tilesSrc.match(/SEAT_ITEM_IDS[^=]*=\s*\[([^\]]+)\]/);
+  assert.ok(m, "SEAT_ITEM_IDS が見つからない");
+  const ids = [...m[1].matchAll(/"([^"]+)"/g)].map((x) => x[1]).sort();
+  assert.deepEqual([...tentMod.SEAT_SPRITES].sort(), ids);
+});
+
 // ---------- クライアント配線 ----------
 
 test("クライアント: コンテナのタップ分岐・パネル・回収が配線されている", () => {
@@ -636,6 +710,12 @@ test("クライアント: コンテナのタップ分岐・パネル・回収が
   assert.ok(client.includes("containerPanel"), "コンテナパネルが無い");
   assert.ok(client.includes("renderPanelSlot"), "コンテナパネルのグリッドが無い");
   assert.ok(client.includes("tapPanelSlot"), "パネルのスロットタップが無い");
+  // 室内タップ: 座席に座る配線と、テント収納を開く配線
+  assert.ok(client.includes("handleIndoorTap"), "室内タップ処理が無い");
+  assert.ok(client.includes('openContainerRef.current(t.x, t.y, obj.sprite, "tent")'), "テント収納を開く導線が無い");
+  assert.ok(client.includes("&space=tent"), "コンテナ取得に tent が渡っていない");
+  const containersRouteSrc2 = fs.readFileSync(path.join(rootDir, "app/api/worldbox/containers/route.ts"), "utf8");
+  assert.ok(containersRouteSrc2.includes("buildTent"), "コンテナルートがテント内装を解決していない");
   assert.ok(client.includes("not_empty"), "not_empty のラベルが無い");
   assert.ok(client.includes("中身が入っている"), "not_empty の文面が無い");
   // 空のときだけ回収ボタンを出し、mine_block を送る

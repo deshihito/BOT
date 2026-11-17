@@ -22,6 +22,7 @@ import {
   type LobbyData,
   type LobbyObject,
   type LobbyStation,
+  isSeatSprite,
 } from "./lobby";
 import type { ShopGenreId } from "./shops";
 
@@ -197,6 +198,7 @@ export function buildLobby2(): LobbyData {
       }
     }
     if (!o.solid) continue;
+    if (isSeatSprite(o.sprite)) continue; // 座席は上に乗って座るため固体にしない（lobby.ts と同じ）
     for (let dy = 0; dy < o.h; dy++) {
       for (let dx = 0; dx < o.w; dx++) blocked.add(`${o.x + dx},${o.y + dy}`);
     }
@@ -360,6 +362,7 @@ export function buildLobby3(): LobbyData {
       }
     }
     if (!o.solid) continue;
+    if (isSeatSprite(o.sprite)) continue; // 座席は上に乗って座るため固体にしない（lobby.ts と同じ）
     for (let dy = 0; dy < o.h; dy++) {
       for (let dx = 0; dx < o.w; dx++) blocked.add(`${o.x + dx},${o.y + dy}`);
     }
