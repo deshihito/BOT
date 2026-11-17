@@ -228,9 +228,11 @@ export async function POST(request: Request) {
               }
             }
             const defender = ownerNationId ? (nationsState.nations ?? {})[ownerNationId] : undefined;
+            // 期限も見る: この経路は expireWars を走らせないため、期限切れで
+            // status が "active" のまま残った戦争でも掘れてしまう。
             warBreakAllowed = Boolean(
               mine && defender &&
-              canBreakOthersBlock(warState, mine.nationId, defender.guildId, tx, ty, defender.capital),
+              canBreakOthersBlock(warState, mine.nationId, defender.guildId, tx, ty, defender.capital, Date.now()),
             );
           }
           result = applyMineBlock(

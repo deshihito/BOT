@@ -18,7 +18,7 @@ import {
   clearCasinoSession, loadCasinoSession, loadCasinoUserState, saveCasinoSession,
   saveCasinoUserState,
 } from "@/lib/worldbox/casino-session-online";
-import { recordCasinoTournamentScore } from "@/lib/worldbox/casino-tournament-online";
+import { reconcileCasinoTournamentScores } from "@/lib/worldbox/casino-tournament-online";
 import { buildEconomyOp, ECONOMY_AMOUNT_MAX, GAMBLE_PAYOUT_MAX, type EconomyOp } from "@/lib/worldbox/economy-bridge";
 import {
   enqueueEconomyOp, findEconomyOp, isEconomyEnabled, loadMyEconomyOps, readUserBalance,
@@ -169,12 +169,9 @@ async function enqueue(userKey: string, discordId: string, input: {
   );
   if (!op) return null;
   const stored = await enqueueEconomyOp(op);
-  if (stored && input.kind === "gamble") {
-    // カジノ大会のスコア（純益 = 配当 - ベット）を加える。大会が
-    // 対局時間中で、遊んだ人が参加者のときだけ記録される。
-    // スコア記録の失敗はこのプレイの決済を変えない。
-    await recordCasinoTournamentScore(discordId, input.amount, input.payout ?? 0);
-  }
+  // カジノ大会のスコアはここでは加えない。gamble オプは登録時点では
+  // pending で、ワーカー側で後から failed になりうるため、スコアは
+  // done 確定後の照合（reconcileCasinoTournamentScores）でだけ加える。
   return stored ? op : null;
 }
 
@@ -339,6 +336,8 @@ async function handleGet(session: AuthedSession) {
     loadSessionFor(ctx, GET_WAIT_MS),
     loadCasinoUserState(ctx.userKey),
   ]);
+  // カジノ大会のスコア照合（確定した gamble オプだけが数えられる）
+  await reconcileCasinoTournamentScores(ctx.userKey, ctx.discordId, ops);
   if (balance === null) return errorResponse("economy_unavailable", 503);
   const gambleOps = ops.filter((op) => op.kind === "gamble");
   return NextResponse.json(
@@ -381,6 +380,8 @@ async function handlePost(request: Request, session: AuthedSession) {
     loadMyEconomyOps(ctx.userKey),
   ]);
   if (balance === null) return errorResponse("economy_unavailable", 503);
+  // カジノ大会のスコア照合（前回までのプレイの確定分を反映する）
+  await reconcileCasinoTournamentScores(ctx.userKey, ctx.discordId, ops);
   const effectiveBalance = balance - pendingCasinoTotal(ops);
   const activeSession = await loadSessionFor(ctx);
 

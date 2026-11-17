@@ -217,8 +217,12 @@ const casinoSessionOnlineUrl = dataUrl(
 );
 const casinoTournamentOnlineUrl = dataUrl(`
 globalThis.__wbCasinoTournamentScores ??= [];
-export async function recordCasinoTournamentScore(discordId, bet, payout) {
-  globalThis.__wbCasinoTournamentScores.push({ discordId, bet, payout });
+export async function reconcileCasinoTournamentScores(userKey, discordId, ops) {
+  for (const op of ops) {
+    if (op.kind === "gamble" && op.status === "done") {
+      globalThis.__wbCasinoTournamentScores.push({ discordId, bet: op.amount, payout: op.payout ?? 0 });
+    }
+  }
 }
 `);
 const nextServerStubUrl = dataUrl(`
@@ -332,13 +336,20 @@ test("API(casino): スロットを回すと gamble オプが積まれ、残高�
   assert.equal(after.ops[0].id, data.opId);
 });
 
-test("API(casino): スロットを回すと大会スコア（ベット・配当）が記録される", async () => {
+test("API(casino): 大会スコアは gamble オプの確定後にだけ記録される", async () => {
   globalThis.__wbCasinoUsers.set(ME, 10000);
   globalThis.__wbCasinoTournamentScores.length = 0;
   setPresence(39.5, 20.5, "lobby");
   const res = await casinoRoute.POST(apiRequest(URL_C, "POST", cookie, { game: "slot", bet: 100 }));
   assert.equal(res.status, 200);
   const data = await res.json();
+  // 登録直後（pending）ではスコアは記録されない。後から failed に
+  // なりうるオプの純益を順位に入れないため。
+  assert.equal(globalThis.__wbCasinoTournamentScores.length, 0);
+  // ワーカーが適用して done になった後の照合で初めて記録される
+  const stored = globalThis.__wbCasinoStore.get(`worldbox_economy ${data.opId}`);
+  stored.status = "done";
+  await casinoRoute.GET(apiRequest(URL_C, "GET", cookie));
   assert.equal(globalThis.__wbCasinoTournamentScores.length, 1);
   assert.deepEqual(globalThis.__wbCasinoTournamentScores[0], {
     discordId: ME, bet: 100, payout: data.payout,
