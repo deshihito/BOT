@@ -739,13 +739,49 @@ class WorldBoxEconomyWorker:
         return credit_amount
 
     async def _apply_steal(self, wallet: Any, op: dict[str, Any]) -> int:
-        """steal は一旦廃止（2026-11-16 ユーザー指示）。
+        """被害者 → 実行者へ、被害者の現在残高を上限に移す。
 
-        Web 側も新規オプを作らないが、既にキューに残っている steal オプが
-        金を動かさずに終端化されるよう、ここでも即座に failed にする。
-        （旧実装は git 履歴に残る。）
+        Web 側で検証・抽選・額の算出まで済んでいる。検証時点から残高が
+        減っていたら移せる分だけ移す（二段フォールバックのみを使う:
+        RPC は要求額ちょうどの移転しかできず、min の意味論に合わない）。
+        steal は 2026-11-16 に一旦廃止したが、2026-11-18 のユーザー
+        指示で復活した（入口は経済パネルの steal タブに限る）。
         """
-        raise _OpFailed("steal_disabled")
+        if self._balance_reader is None:
+            raise _OpFailed("balance_unavailable")
+        victim = op["fromDiscordId"]
+        actor = op["discordId"]
+        amount = op["amount"]
+        applied = 0
+        for _ in range(2):
+            try:
+                balance = int(await self._balance_reader(victim))
+            except Exception:
+                raise _OpFailed("balance_unavailable")
+            applied = max(0, min(amount, balance))
+            if applied <= 0:
+                return 0
+            debit = await wallet._change_balance(victim, -applied, require_funds=True)
+            if debit is self._marker():
+                continue  # 読んだ後に残高が動いた。読み直して1回だけ再試行
+            if debit is None:
+                raise _OpFailed("transfer_failed")
+            break
+        else:
+            return 0  # 再試行しても引き落とせない = 移せる分が無い
+        credit = await wallet._change_balance(
+            actor, applied, create_with=self._initial_balance(),
+        )
+        if credit is None or credit is self._marker():
+            refund = await wallet._change_balance(victim, applied)
+            if refund is None:
+                logger.critical(
+                    "worldbox economy: steal の返金に失敗しました（victim=%s amount=%s）",
+                    victim, applied,
+                )
+            raise _OpFailed("transfer_failed")
+        await self._record_history(victim, actor, applied, op["reason"])
+        return applied
 
     async def _apply_spend(self, wallet: Any, op: dict[str, Any]) -> int:
         result = await wallet._change_balance(
