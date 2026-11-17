@@ -81,7 +81,7 @@ import { parseBoardPosts, type BoardPost } from "@/lib/worldbox/board";
 import { parseSave, serializeSave, type SaveSpace } from "@/lib/worldbox/save";
 import { chooseInitialSave } from "@/lib/worldbox/save-source";
 import {
-  actionForTile, blockHpFraction, cropStage, floorSpeedMultiplier, isFloorItem, isFlowerPotItem, isGateItem, isOverrideActive, isSeatItem, isShelfItem, isSignItem, isWellItem, parseTileOverride, placedBlockSolid, placedStationKinds, terrainHpFraction, tileKey, tileView,
+  actionForTile, blockHpFraction, cropStage, floorSpeedMultiplier, FORTIFY_COST, FORTIFY_HP_STEP, FORTIFY_MAX_BONUS, isFloorItem, isFlowerPotItem, isGateItem, isOverrideActive, isSeatItem, isShelfItem, isSignItem, isWellItem, parseTileOverride, placedBlockSolid, placedStationKinds, terrainHpFraction, tileKey, tileView,
   type TileActionKind, type TileOverridesMap,
 } from "@/lib/worldbox/tiles";
 import { CROPS, ITEMS, itemById } from "@/lib/worldbox/items";
@@ -389,6 +389,11 @@ const TILE_ERROR_LABEL: Record<string, string> = {
   no_block: "ブロックがない",
   on_capital: "首都には置けない",
   not_enough_items: "足りない",
+  fortify_max: "要塞化は上限です",
+  insufficient_coins: "コインが足りない",
+  fee_failed: "支払いに失敗した",
+  fee_pending: "支払いを確認中",
+  economy_unavailable: "いま支払いができない",
   world_frozen: "いまは変更できない（凍結中）",
   too_far: "遠すぎる",
   depleted: "もう無い",
@@ -1388,6 +1393,7 @@ export default function WorldBoxClient() {
   const [seedPicker, setSeedPicker] = useState<{ x: number; y: number } | null>(null);
   /** 看板テキストの編集対象（自分の看板をタップしたとき）。 */
   const [signEdit, setSignEdit] = useState<{ x: number; y: number; text: string } | null>(null);
+  const [fortifyPanel, setFortifyPanel] = useState<{ x: number; y: number; itemId: string; fort: number } | null>(null);
   /** 屋台パネル: 対象タイルと、開いた時点で選択していたアイテム（出品候補）と自分の屋台か。 */
   const [stallPanel, setStallPanel] = useState<{ x: number; y: number; selItemId: string | null; mine: boolean } | null>(null);
   /** 屋台の出品（サーバーが正）。undefined は読み込み中。 */
@@ -2165,6 +2171,7 @@ export default function WorldBoxClient() {
         plant_flower: "plant", remove_flower: "harvest",
         toggle_gate: "place",
         set_sign: "place", set_display: "place", clear_display: "harvest", draw_water: "splash",
+        fortify: "place",
       };
       // ブロック採掘（HP制）: 壊れたら破片（debris）、まだ残るヒットは小さな破片（mine）
       const fxForAction =
@@ -3848,6 +3855,11 @@ export default function WorldBoxClient() {
         blockId: selItem && (selItem.category === "block" || selItem.facility || selItem.placesBlock) ? selItem.id : undefined,
       });
       if (!act) {
+        // 自分のブロックを素手（何も選んでいない状態）でタップしたら要塞化パネルを開く
+        if (view.block?.mine && !selItem) {
+          setFortifyPanel({ x: t.x, y: t.y, itemId: view.block.itemId, fort: view.block.fort });
+          return true;
+        }
         // 隣接タップで何も起きない場合は理由を出す（素材は置けない・その地形には置けない等）。
         // 剣の空振りは通常の応答なので理由は出さない
         if (selItem && selItem.tool !== "sword") {
@@ -7583,6 +7595,43 @@ export default function WorldBoxClient() {
               }}
             >
               書く
+            </button>
+          </div>
+        </div>
+      )}
+      {fortifyPanel && (
+        <div style={panelOverlay} className="wb-panel">
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <strong>要塞化</strong>
+            <span style={{ flex: 1 }} />
+            <button type="button" style={btn} onClick={() => setFortifyPanel(null)}>
+              閉じる
+            </button>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10, fontSize: 13 }}>
+            <ItemIcon id={fortifyPanel.itemId} size={20} />
+            <span>{itemById(fortifyPanel.itemId)?.name ?? fortifyPanel.itemId}</span>
+            <span>耐久 +{fortifyPanel.fort}</span>
+          </div>
+          <div style={{ marginTop: 10 }}>
+            <button
+              type="button"
+              style={btn}
+              disabled={fortifyPanel.fort >= FORTIFY_MAX_BONUS}
+              onClick={() => {
+                const p = fortifyPanel;
+                void (async () => {
+                  await postTileAction("fortify", p.x, p.y);
+                  const ov = tilesRef.current[tileKey(p.x, p.y)];
+                  if (ov?.block) {
+                    setFortifyPanel({ ...p, fort: ov.block.fort ?? 0 });
+                  }
+                })();
+              }}
+            >
+              {fortifyPanel.fort >= FORTIFY_MAX_BONUS
+                ? "上限"
+                : `強化 +${FORTIFY_HP_STEP}（${FORTIFY_COST}コイン）`}
             </button>
           </div>
         </div>
