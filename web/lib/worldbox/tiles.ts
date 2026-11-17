@@ -417,13 +417,17 @@ export function blockHpFraction(block: PlacedBlock): number {
   return Math.max(0, Math.min(1, hp / max));
 }
 
-/** その種類の道具の所持最高ティア（持っていなければ 0）。 */
+/**
+ * その種類の道具の所持最高ティア（持っていなければ 0）。
+ * 強化レベルはティアに加算する（剣の playerAttack と同じ実効ティアの規則:
+ * ティア + 強化レベル）。ツルハシ・斧の強化はここを通して採掘ダメージに効く。
+ */
 export function bestToolTier(profile: PlayerProfile, kind: ToolKind): number {
   let best = 0;
   for (const i of ITEMS) {
-    if (i.tool === kind && (i.tier ?? 0) > best && countItem(profile, i.id) > 0) {
-      best = i.tier ?? 0;
-    }
+    if (i.tool !== kind || countItem(profile, i.id) <= 0) continue;
+    const effective = (i.tier ?? 0) + (profile.enhance?.[i.id] ?? 0);
+    if (effective > best) best = effective;
   }
   return best;
 }

@@ -49,12 +49,19 @@ function sameOrigin(request: Request) {
   return !origin || origin === publicOrigin(request);
 }
 
-function bestToolTier(profile: { items: Record<string, number> }, tool: string): number {
+function bestToolTier(
+  profile: { items: Record<string, number>; enhance?: Record<string, number> },
+  tool: string,
+): number {
   let best = 0;
   for (const [id, count] of Object.entries(profile.items)) {
     if (count <= 0) continue;
     const def = itemById(id);
-    if (def?.tool === tool && (def.tier ?? 0) > best) best = def.tier ?? 0;
+    if (def?.tool !== tool) continue;
+    // 実効ティア = ティア + 強化レベル（剣の playerAttack と同じ規則）。
+    // ツルハシ強化は洞窟鉱脈のティアゲートにも効く。
+    const effective = (def.tier ?? 0) + (profile.enhance?.[id] ?? 0);
+    if (effective > best) best = effective;
   }
   return best;
 }
@@ -301,7 +308,9 @@ async function handleDungeon(
     const rng = makeRng((now ^ chest.x * 131 ^ chest.y * 17 ^ inst.layer * 7) >>> 0);
     const loot = rollObjectLoot(def, rng);
     // ボス宝箱では罠は無効（倒した報酬を汚さない）
-    const trapped = chest.bossChest ? false : loot.trapped;
+    let trapped = chest.bossChest ? false : loot.trapped;
+    // 斥候の専門: 宝箱の罠率を半減する（遺跡と同じ）
+    if (trapped && profile.role === "scout" && rng() < 0.5) trapped = false;
     let next = profile;
     for (const [id, count] of Object.entries(loot.gained)) next = addItem(next, id, count);
     if (trapped) next = { ...next, hp: Math.max(0, next.hp - 10) };
@@ -427,12 +436,14 @@ async function handleInstancePost(
     }
     const def = specialObjectById("cave_chest");
     if (!def) return NextResponse.json({ error: "no_chest" }, { status: 404, headers: NO_STORE });
-    const loot = rollObjectLoot(def, makeRng((now ^ cave.chest.x * 71 ^ cave.chest.y) >>> 0));
+    const rng = makeRng((now ^ cave.chest.x * 71 ^ cave.chest.y) >>> 0);
+    const loot = rollObjectLoot(def, rng);
     let next = profile;
     for (const [id, count] of Object.entries(loot.gained)) next = addItem(next, id, count);
-    let trapped = false;
-    if (loot.trapped) {
-      trapped = true;
+    let trapped = loot.trapped;
+    // 斥候の専門: 宝箱の罠率を半減する（遺跡と同じ）
+    if (trapped && profile.role === "scout" && rng() < 0.5) trapped = false;
+    if (trapped) {
       next = { ...next, hp: Math.max(0, next.hp - 10) };
     }
     state.chest = now;

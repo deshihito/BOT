@@ -14,8 +14,9 @@ import {
   RECIPES, itemById, recipeById, sellPrice, type ItemDef, type Recipe,
 } from "./items";
 import {
-  HP_MAX, HUNGER_MAX, maxHpFor, MEDIC_HEAL_MULT, addItem, countItem, removeItem, type PlayerProfile,
+  HP_MAX, HUNGER_MAX, maxHpFor, addItem, countItem, removeItem, type PlayerProfile,
 } from "./profile";
+import { consumeEffect } from "./vitals";
 
 
 export type EconomyError =
@@ -78,44 +79,32 @@ export function sellItem(profile: PlayerProfile, itemId: unknown, countRaw?: unk
   };
 }
 
-/** かばんの食事・飲み物を消費して空腹度を回復する。 */
+/**
+ * かばんの食事・飲み物を消費して空腹度を回復する。
+ * 効果の数式（hunger / heal / 解毒 / バフ）は vitals.consumeEffect が正で、
+ * ここは消費・容器返却・満腹ゲートだけを持つ（二重実装にしない）。
+ * 満腹ゲートの HP 判定は役職込みの最大 HP（守護は 120）で見る: 素の
+ * HP_MAX で判定すると、守護が HP 100〜119・満腹のときに回復食が
+ * 常時 hunger_full で弾かれる。
+ */
 export function eatItem(profile: PlayerProfile, itemId: unknown, now: number = Date.now()): Transition<{ item: ItemDef }> {
   const item = itemById(itemId);
   if (!item || (!item.hunger && !item.heal && !item.curePoison && !item.buff)) return { ok: false, error: "unknown_item" };
   const poisoned = Array.isArray(profile.status) && profile.status.some((e) => e.kind === "poison");
   if (
     profile.hunger >= HUNGER_MAX
-    && (!item.heal || (typeof profile.hp === "number" ? profile.hp : HP_MAX) >= HP_MAX)
+    && (!item.heal || (typeof profile.hp === "number" ? profile.hp : HP_MAX) >= maxHpFor(profile))
     && (!item.curePoison || !poisoned)
   ) {
     return { ok: false, error: "hunger_full" };
   }
   const removed = removeItem(profile, item.id, 1);
   if (!removed) return { ok: false, error: "not_enough_items" };
+  const effected = consumeEffect(removed, item.id, now);
+  if (!effected) return { ok: false, error: "unknown_item" };
   // 容器入りの飲食物は、飲み終えた容器が手元に戻る（水入りバケツ→バケツ）
-  const withContainer = item.containerReturn ? addItem(removed, item.containerReturn, 1) : removed;
-  let status = item.curePoison && Array.isArray(removed.status) ? removed.status.filter((e) => e.kind !== "poison") : removed.status;
-  if (item.buff) {
-    const base = Array.isArray(status) ? status : [];
-    status = [
-      ...base.filter((e) => e.kind !== item.buff!.kind),
-      { kind: item.buff.kind, until: now + item.buff.minutes * 60_000 },
-    ];
-  }
-  return {
-    ok: true,
-    item,
-    profile: {
-      ...withContainer,
-      hunger: Math.min(HUNGER_MAX, withContainer.hunger + (item.hunger ?? 0)),
-      hp: Math.min(
-        maxHpFor(withContainer),
-        (typeof withContainer.hp === "number" ? withContainer.hp : HP_MAX) +
-          (item.heal ?? 0) * (withContainer.role === "medic" ? MEDIC_HEAL_MULT : 1),
-      ),
-      status,
-    },
-  };
+  const withContainer = item.containerReturn ? addItem(effected.profile, item.containerReturn, 1) : effected.profile;
+  return { ok: true, item, profile: withContainer };
 }
 
 /** 労働する（空腹度を消費する。報酬は earn オプ）。 */

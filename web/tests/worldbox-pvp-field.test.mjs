@@ -171,8 +171,8 @@ test("pvp: 被害者の書き込みは被害者本人のロックで直列化す
   // ドロップした所持品が復活する。
   assert.match(route, /withUserLock\(target\.ownerKey, async \(\) => \{/);
   assert.doesNotMatch(route, /vitals-pvp:/);
-  // sync / damage / set_bed も同じ鍵で直列化し、ロック内で読み直す
-  assert.equal(route.match(/withUserLock\(ownerKey, async \(\) => \{/g)?.length, 3);
+  // sync / damage / set_bed / hazard も同じ鍵で直列化し、ロック内で読み直す
+  assert.equal(route.match(/withUserLock\(ownerKey, async \(\) => \{/g)?.length, 4);
   assert.match(route, /const current = await loadProfile\(ownerKey\);/);
 });
 

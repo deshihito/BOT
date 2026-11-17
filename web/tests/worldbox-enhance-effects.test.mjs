@@ -99,7 +99,7 @@ test("buffs: warm slows hunger drain, alert regenerates while fed", () => {
 });
 
 const E = await loadBundle(
-  ["worldbox/items.ts", "worldbox/profile.ts", "worldbox/economy.ts"],
+  ["worldbox/items.ts", "worldbox/profile.ts", "worldbox/vitals.ts", "worldbox/economy.ts"],
   ["eatItem", "sellItem", "parseProfile"],
 );
 

@@ -400,7 +400,7 @@ function bundleModule(files, names) {
   return dataUrl(`${code}\nexport { ${names.join(", ")} };`);
 }
 const profileEcoUrl = bundleModule(
-  ["worldbox/items.ts", "worldbox/profile.ts", "worldbox/economy.ts"],
+  ["worldbox/items.ts", "worldbox/profile.ts", "worldbox/vitals.ts", "worldbox/economy.ts"],
   ["buyItem", "sellItem", "eatItem", "doWork", "craftItem", "craftFromInputs", "resolveSteal"],
 );
 const bridgeOnlineStubUrl = dataUrl(`

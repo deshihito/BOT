@@ -44,7 +44,7 @@ function loadBundle(files, names) {
 }
 
 const rq = loadBundle(
-  ["worldbox/items.ts", "worldbox/profile.ts", "worldbox/economy.ts", "worldbox/requests.ts"],
+  ["worldbox/items.ts", "worldbox/profile.ts", "worldbox/vitals.ts", "worldbox/economy.ts", "worldbox/requests.ts"],
   [
     "itemById", "parseProfile", "countItem",
     "emptyRequestsState", "postRequest", "fulfillRequest", "cancelRequest",
