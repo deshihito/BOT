@@ -631,13 +631,47 @@ async function applyTransferDirect(op: EconomyOp): Promise<number> {
   return op.amount;
 }
 
+/** steal の直接適用（ワーカーの _apply_steal と同じ規則）。
+ * 被害者 → 実行者へ、被害者の現在残高を上限に移す。検証時点から
+ * 残高が減っていたら移せる分だけ移す（RPC は要求額ちょうどの
+ * 移転しかできず min の意味論に合わないため、二段の残高操作で組む）。 */
+async function applyStealDirect(op: EconomyOp): Promise<number> {
+  if (!op.fromDiscordId) throw new DirectFailure("invalid_op");
+  const victim = op.fromDiscordId;
+  const actor = op.discordId;
+  let applied = 0;
+  let debited = false;
+  for (let attempt = 0; attempt < 2 && !debited; attempt++) {
+    const balance = await readUserBalance(victim);
+    if (balance === null) throw new DirectFailure("balance_unavailable");
+    applied = Math.max(0, Math.min(op.amount, balance));
+    if (applied <= 0) return 0;
+    const debit = await changeBalanceDirect(victim, -applied, { requireFunds: true });
+    if (debit.ok) {
+      debited = true;
+    } else if (debit.error === "balance_update_failed") {
+      throw new DirectFailure("transfer_failed");
+    }
+    // insufficient_funds は読んだ後に残高が動いたケース。読み直して1回だけ再試行
+  }
+  if (!debited) return 0; // 再試行しても引き落とせない = 移せる分が無い
+  const credit = await changeBalanceDirect(actor, applied, { createWith: NEW_USER_BALANCE });
+  if (!credit.ok) {
+    // 実行者へ入れられなかったら被害者へ戻す（ワーカーと同じ規則）
+    await changeBalanceDirect(victim, applied);
+    throw new DirectFailure("transfer_failed");
+  }
+  await recordHistoryDirect(victim, actor, applied, op.reason);
+  return applied;
+}
+
 /**
- * 直接適用の対象種別か。spend / transfer は常時。earn / gamble は
+ * 直接適用の対象種別か。spend / transfer / steal は常時。earn / gamble は
  * 原資（economy_pool_state）が DB 化されている環境でのみ対象にし、
  * 使えない環境では従来キューへ寄せる（判定は金を動かす前に行う）。
  */
 async function isDirectKind(op: EconomyOp): Promise<boolean> {
-  if (op.kind === "spend" || op.kind === "transfer") return true;
+  if (op.kind === "spend" || op.kind === "transfer" || op.kind === "steal") return true;
   if (op.kind === "earn" || op.kind === "gamble") return isPoolDbAvailable();
   return false;
 }
@@ -645,6 +679,7 @@ async function isDirectKind(op: EconomyOp): Promise<boolean> {
 async function applyDirectByKind(op: EconomyOp): Promise<number> {
   if (op.kind === "spend") return applySpendDirect(op);
   if (op.kind === "transfer") return applyTransferDirect(op);
+  if (op.kind === "steal") return applyStealDirect(op);
   if (op.kind === "earn") return applyEarnDirect(op);
   if (op.kind === "gamble") return applyGambleDirect(op);
   throw new DirectFailure("invalid_op");
