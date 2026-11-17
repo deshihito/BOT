@@ -101,7 +101,6 @@ const ERROR_LABEL: Record<string, string> = {
   not_at_casino: "カジノの機器の前にいません",
   wrong_machine: "その機器では遊べません",
   invalid_bet: "ベット額が不正です",
-  invalid_spins: "回数が不正です",
   invalid_dice_range: "範囲が不正です",
   invalid_dice_number: "予想が不正です",
   session_active: "進行中のゲームがあります",
@@ -131,7 +130,6 @@ const REASON_LABEL: Record<string, string> = {
   casino_double: "ダブル",
 };
 
-const SLOT7_SPIN_CHOICES = [10, 50, 100];
 const BJ_OUTCOME_LABEL: Record<string, string> = {
   blackjack: "ブラックジャック",
   dealer_blackjack: "ディーラーのブラックジャック",
@@ -299,7 +297,6 @@ export default function WorldBoxCasinoPanel({ onClose }: { onClose: () => void }
   const [busy, setBusy] = useState(false);
   const [spinReels, setSpinReels] = useState<[number, number, number]>([1, 2, 3]);
   const [msg, setMsg] = useState("");
-  const [spins, setSpins] = useState<number>(SLOT7_SPIN_CHOICES[0]);
   const [diceRange, setDiceRange] = useState<number>(DICE_RANGES[0]);
   const [diceNumber, setDiceNumber] = useState<number>(1);
   const [bjFinal, setBjFinal] = useState<SessionView | null>(null);
@@ -753,17 +750,8 @@ export default function WorldBoxCasinoPanel({ onClose }: { onClose: () => void }
                   <div key={i} style={{ ...digitBox, color: "#ffd23e" }}>{d}</div>
                 ))}
               </div>
-              <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 12, flexWrap: "wrap" }}>
-                <span>回数</span>
-                {SLOT7_SPIN_CHOICES.map((n) => (
-                  <button key={n} type="button" style={{ ...btn, ...(spins === n ? chipOn : {}) }}
-                    onClick={() => setSpins(n)} aria-pressed={spins === n}>
-                    {n}
-                  </button>
-                ))}
-              </div>
-              {betRow(startBtn("始める", () => void act({ action: "slot7_start", bet, spins })))}
-              <p style={{ margin: "8px 0 0", fontSize: 12, opacity: 0.8 }}>先払い {bet * spins} コイン</p>
+              {betRow(startBtn("始める", () => void act({ action: "slot7_start", bet })))}
+              <p style={{ margin: "8px 0 0", fontSize: 12, opacity: 0.8 }}>先払い {bet} コイン</p>
             </>
           )}
         </div>
