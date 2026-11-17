@@ -4,7 +4,7 @@ import { MAP_SEED } from "@/lib/worldbox/mapgen";
 import { loadProfile, storeProfile } from "@/lib/worldbox/profile-online";
 import { addItem } from "@/lib/worldbox/profile";
 import { itemById } from "@/lib/worldbox/items";
-import { listPresence } from "@/lib/worldbox/presence-online";
+import { listPresence, putPresence } from "@/lib/worldbox/presence-online";
 import { presenceIdFor } from "@/lib/worldbox/presence";
 import { parseSave } from "@/lib/worldbox/save";
 import { loadWorldBoxSave, storeWorldBoxSave } from "@/lib/worldbox/save-online";
@@ -196,6 +196,22 @@ async function handleRuins(
     await storeRuinsPersonal(space, ownerKey, personal);
     if (next !== profile && !(await storeProfile(ownerKey, next))) {
       return NextResponse.json({ error: "profile_unavailable" }, { status: 503, headers: NO_STORE });
+    }
+    if (teleport) {
+      // 転移先はサーバーが決めた移動: ワープ/蘇生と同じく、プレゼンスと
+      // セーブの両方を転移先へそろえる（B4 の連続性検証の新しい基準にする）。
+      // クライアントの申告だけに任せると同一空間内の跳躍として却下され、
+      // 転移が巻き戻ってしまう（ロビー擬似2F階段バグと同じ構図）。
+      const prevSave = parseSave(await loadWorldBoxSave(ownerKey));
+      await storeWorldBoxSave(
+        ownerKey,
+        serializeSave({ space, x: teleport.x, y: teleport.y, worldReturn: prevSave?.worldReturn ?? null }),
+      );
+      await putPresence(
+        ownerKey,
+        { name: session.username?.trim() || "プレイヤー", x: teleport.x, y: teleport.y, vx: 0, vy: 0, face: 1, space },
+        now,
+      );
     }
     return NextResponse.json(
       { ok: true, kind: trap.kind, teleport, summons: personal.summons, profile: next },
