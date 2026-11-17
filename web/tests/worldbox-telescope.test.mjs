@@ -55,15 +55,19 @@ const wb = await loadBundle(
   ["buildLobby", "stationNear", "buildLobby3", "LOBBY3_ENTRY"],
 );
 
-test("望遠鏡: ロビー1Fの競馬場北スタンドに配置され、隣で station が返る", () => {
+test("望遠鏡: ロビー1Fの競馬場北スタンドと中央広場に配置され、隣で station が返る", () => {
   const lobby = wb.buildLobby();
   const scopes = lobby.objects.filter((o) => o.sprite === "telescope");
-  assert.equal(scopes.length, 1);
-  assert.equal(scopes[0].station, "telescope");
-  assert.equal(scopes[0].x, 93);
-  assert.equal(scopes[0].y, 6);
+  assert.equal(scopes.length, 2);
+  const stand = scopes.find((o) => o.x === 93 && o.y === 6);
+  assert.ok(stand);
+  assert.equal(stand.station, "telescope");
   // 望遠鏡の南隣（スタンド側）に立つと station "telescope"
   assert.equal(wb.stationNear(lobby.objects, 93, 7), "telescope");
+  const plaza = scopes.find((o) => o.x === 28 && o.y === 27);
+  assert.ok(plaza);
+  assert.equal(plaza.station, "telescope");
+  assert.equal(wb.stationNear(lobby.objects, 28, 28), "telescope");
 });
 
 test("望遠鏡: 3F展望デッキに配置され、隣で station が返る", () => {
