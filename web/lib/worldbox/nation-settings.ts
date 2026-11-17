@@ -12,6 +12,10 @@
 // からは解除できない。
 // 公開/非公開: private の国は繁栄ランキングと国一覧（参加先候補）に
 // 載らず、参加（join）もできない。所属員には自国だけは見える。
+// 移民コントロール（2026-11-17、経済仕様書 §7.2）: 入国料（参加時に
+// 徴収する固定額）と出金料率（離脱時に所持金へ掛ける割合）を王が
+// 設定できる。徴収分は当面シンクで、累計だけを feesCollected に
+// 表示用として加算する（国庫への実入金は国庫バッチで扱う）。
 import type { Nation, NationRole, NationsState } from "./nations";
 
 export type NationVisibility = "open" | "private";
@@ -24,6 +28,12 @@ export type NationSettings = {
   ministers: string[];
   /** 累計税収（表示用）。 */
   taxCollected: number;
+  /** 入国料（コイン、0〜100,000。参加時に徴収。経済仕様書 §7.2）。 */
+  entryFee: number;
+  /** 出金料率（0〜0.80。離脱時に所持金へ掛けて徴収。経済仕様書 §7.2）。 */
+  exitFeeRate: number;
+  /** 累計の入国料・出金料収入（表示用。税収とは別枠）。 */
+  feesCollected: number;
   updatedAt: number;
 };
 
@@ -31,9 +41,16 @@ export type NationSettings = {
 export const TAX_RATE_DEFAULT = 0.05;
 /** 税率の上限。 */
 export const TAX_RATE_MAX = 0.1;
+/** 入国料の上限（コイン）。 */
+export const ENTRY_FEE_MAX = 100_000;
+/** 出金料率の上限（仕様書 §7.2 の最大 80%）。 */
+export const EXIT_FEE_RATE_MAX = 0.8;
 
 export function defaultNationSettings(): NationSettings {
-  return { taxRate: TAX_RATE_DEFAULT, visibility: "open", ministers: [], taxCollected: 0, updatedAt: 0 };
+  return {
+    taxRate: TAX_RATE_DEFAULT, visibility: "open", ministers: [], taxCollected: 0,
+    entryFee: 0, exitFeeRate: 0, feesCollected: 0, updatedAt: 0,
+  };
 }
 
 function asRecord(raw: unknown): Record<string, unknown> | null {
@@ -56,6 +73,20 @@ export function normalizeTaxRate(raw: unknown): number {
   return Math.round(raw * 1000) / 1000;
 }
 
+/** 入国料として有効な値に丸める（整数コイン、範囲外は 0 = 無料）。 */
+export function normalizeEntryFee(raw: unknown): number {
+  if (typeof raw !== "number" || !Number.isFinite(raw)) return 0;
+  if (raw < 0 || raw > ENTRY_FEE_MAX) return 0;
+  return Math.floor(raw);
+}
+
+/** 出金料率として有効な値に丸める（0〜0.80、0.1% 単位。範囲外は 0）。 */
+export function normalizeExitFeeRate(raw: unknown): number {
+  if (typeof raw !== "number" || !Number.isFinite(raw)) return 0;
+  if (raw < 0 || raw > EXIT_FEE_RATE_MAX) return 0;
+  return Math.round(raw * 1000) / 1000;
+}
+
 /** 保存値を検証して復元する。壊れた要素は既定に落とす。 */
 export function parseNationSettings(raw: unknown): NationSettings {
   const out = defaultNationSettings();
@@ -75,6 +106,11 @@ export function parseNationSettings(raw: unknown): NationSettings {
   if (typeof v.taxCollected === "number" && Number.isFinite(v.taxCollected) && v.taxCollected > 0) {
     out.taxCollected = Math.floor(v.taxCollected);
   }
+  out.entryFee = normalizeEntryFee(v.entryFee);
+  out.exitFeeRate = normalizeExitFeeRate(v.exitFeeRate);
+  if (typeof v.feesCollected === "number" && Number.isFinite(v.feesCollected) && v.feesCollected > 0) {
+    out.feesCollected = Math.floor(v.feesCollected);
+  }
   if (typeof v.updatedAt === "number" && Number.isFinite(v.updatedAt) && v.updatedAt > 0) {
     out.updatedAt = Math.floor(v.updatedAt);
   }
@@ -84,6 +120,23 @@ export function parseNationSettings(raw: unknown): NationSettings {
 /** 国の税率（未設定なら既定 5%）。 */
 export function taxRateOf(settings: NationSettings | null | undefined): number {
   return settings ? settings.taxRate : TAX_RATE_DEFAULT;
+}
+
+/** 国の入国料（未設定なら 0 = 無料）。 */
+export function entryFeeOf(settings: NationSettings | null | undefined): number {
+  return settings ? settings.entryFee : 0;
+}
+
+/** 国の出金料率（未設定なら 0）。 */
+export function exitFeeRateOf(settings: NationSettings | null | undefined): number {
+  return settings ? settings.exitFeeRate : 0;
+}
+
+/** 出金料の金額: 所持金 × 出金料率（切り捨て）。残高が負なら 0。 */
+export function exitFeeAmount(balance: number, rate: number): number {
+  if (!Number.isFinite(balance) || balance <= 0) return 0;
+  const r = normalizeExitFeeRate(rate);
+  return Math.floor(balance * r);
 }
 
 /** 非公開の国か。 */
