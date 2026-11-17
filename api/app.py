@@ -29,6 +29,7 @@ TABLES = frozenset({
     "party_game_ranking", "party_game_monthly_ranking",
     "luna_ai_memories", "luna_ai_turns",
     "lll_profiles", "lll_battles",
+    "economy_pool_state",
 })
 
 # Callers may invoke only these known public functions and named arguments.
@@ -42,8 +43,21 @@ RPC_ARGUMENTS = {
     "get_bump_rta_global_combined_slowest_ranking": frozenset({"p_limit"}),
     "get_bump_rta_record_ranks": frozenset({"p_guild_id", "p_event_type", "p_elapsed_ms"}),
     "party_game_record_win": frozenset({"p_guild_id", "p_user_id", "p_game"}),
+    "economy_pool_seed": frozenset({
+        "p_pool", "p_treasury", "p_total_recycled", "p_total_paid",
+        "p_total_released", "p_total_boosted", "p_lottery_boost_pending",
+        "p_total_house_paid", "p_last_release_date",
+    }),
+    "economy_pool_pay_house": frozenset({"p_amount"}),
+    "economy_pool_refund_house": frozenset({"p_pool_part", "p_treasury_part"}),
+    "economy_pool_add_loss": frozenset({"p_amount"}),
+    "economy_pool_pay": frozenset({"p_amount"}),
+    "economy_pool_refund": frozenset({"p_amount"}),
 }
-RPC_SCALAR_RESULTS = frozenset({"transfer_coins", "party_game_record_win"})
+RPC_SCALAR_RESULTS = frozenset({
+    "transfer_coins", "party_game_record_win",
+    "economy_pool_refund_house", "economy_pool_pay", "economy_pool_refund",
+})
 
 FILTER_OPERATORS = frozenset({"eq", "neq", "gt", "gte", "lt", "lte", "like", "ilike", "contains", "is", "in"})
 MAX_LIMIT = 10_000

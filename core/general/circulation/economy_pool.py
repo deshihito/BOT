@@ -116,7 +116,19 @@ def default_path() -> Path:
 
 
 class EconomyPoolStore(DirtyFlushMixin):
-    """採掘プールと国庫の残高（同期 API、メモリ主体＋バッチフラッシュ）。"""
+    """採掘プールと国庫の残高（同期 API）。
+
+    既定は従来どおりメモリ主体＋JSON バッチフラッシュ。ただし保存先が
+    既定パス（＝本番の共有ストア）の場合は Postgres バックエンドを
+    自動で試みる（コイン API 直接化 第2段）: 初回利用時に
+    economy_pool_seed RPC が使えれば、その時点の JSON 状態を初期値と
+    して DB を正に切り替え、以後は全操作を RPC/テーブル経由にする。
+    RPC が使えない環境（SQL 未適用など）では従来の JSON 経路のまま
+    動き続ける。一度 DB 経路へ切り替えた後に RPC が失敗しても JSON へ
+    は戻さない（二重の正を作らないため。支払い系は 0 を返して安全側）。
+    環境変数 ECONOMY_POOL_BACKEND=json で DB 経路を明示的に無効化、
+    =db で（既定パス以外でも）試行を強制できる。
+    """
 
     def __init__(
         self,
@@ -124,6 +136,7 @@ class EconomyPoolStore(DirtyFlushMixin):
         *,
         flush_every: int = FLUSH_EVERY_EVENTS,
         flush_interval: float = FLUSH_INTERVAL_SECONDS,
+        backend: str | None = None,
     ):
         self._path = Path(path) if path is not None else default_path()
         self._flush_every = max(1, int(flush_every))
@@ -132,6 +145,18 @@ class EconomyPoolStore(DirtyFlushMixin):
         self._dirty = 0
         self._last_flush = time.monotonic()
         self._state = self._load()
+        env_backend = os.environ.get("ECONOMY_POOL_BACKEND", "").strip().lower()
+        chosen = backend or env_backend
+        if chosen == "json":
+            self._db_requested = False
+        elif chosen == "db":
+            self._db_requested = True
+        else:
+            # 自動: 既定パス（本番共有ストア）のときだけ DB を試す。
+            # 明示パス（テスト等）は従来どおり JSON 専用。
+            self._db_requested = path is None
+        self._db_mode: bool | None = None
+        self._db_client: Any = None
 
     # ------------------------------------------------------------------ 保存
     def _load(self) -> dict[str, Any]:
@@ -149,7 +174,128 @@ class EconomyPoolStore(DirtyFlushMixin):
             return data_paths.load_migrated(self._path, _STRAY_PATH, fill=False)
         return data_paths.read_json(self._path)
 
+    # ---------------------------------------------------------- DB 経路
+    def _get_db_client(self) -> Any:
+        try:
+            import config
+
+            return getattr(config, "db_api", None)
+        except Exception:
+            return None
+
+    @staticmethod
+    def _first_row(data: Any) -> dict[str, Any] | None:
+        if isinstance(data, dict):
+            return data
+        if isinstance(data, list) and data and isinstance(data[0], dict):
+            return data[0]
+        return None
+
+    def _use_db(self) -> bool:
+        """DB 経路を使うか（初回に seed RPC で判定し、結果を固定する）。"""
+        if self._db_mode is not None:
+            return self._db_mode
+        if not self._db_requested:
+            self._db_mode = False
+            return False
+        client = self._get_db_client()
+        if client is None:
+            self._db_mode = False
+            return False
+        try:
+            response = client.rpc("economy_pool_seed", {
+                "p_pool": int(self._state["pool"]),
+                "p_treasury": int(self._state["treasury"]),
+                "p_total_recycled": int(self._state["total_recycled"]),
+                "p_total_paid": int(self._state["total_paid"]),
+                "p_total_released": int(self._state["total_released"]),
+                "p_total_boosted": int(self._state["total_boosted"]),
+                "p_lottery_boost_pending": int(self._state["lottery_boost_pending"]),
+                "p_total_house_paid": int(self._state["total_house_paid"]),
+                "p_last_release_date": self._state.get("last_release_date"),
+            }).execute()
+            row = self._first_row(getattr(response, "data", None))
+            if row is None:
+                raise ValueError("economy_pool_seed returned no row")
+            # DB の現在値（seed 済みなら DB 側）を正として取り込む。
+            self._state = _clean_state(row)
+            self._db_client = client
+            self._db_mode = True
+            logger.info(
+                "economy_pool: DB バックエンドで開始しました (pool=%s treasury=%s)",
+                self._state["pool"], self._state["treasury"],
+            )
+        except Exception:
+            logger.warning(
+                "economy_pool: DB バックエンドを利用できないため JSON 経路で継続します",
+                exc_info=True,
+            )
+            self._db_mode = False
+        return bool(self._db_mode)
+
+    def _rpc(self, name: str, params: dict[str, Any]) -> Any:
+        response = self._db_client.rpc(name, params).execute()
+        return getattr(response, "data", None)
+
+    def _db_read_state(self) -> dict[str, Any] | None:
+        """DB の現在行を読み、ミラーへ取り込んで返す。失敗したら None。"""
+        try:
+            response = (
+                self._db_client.table("economy_pool_state")
+                .select("*")
+                .eq("id", 1)
+                .execute()
+            )
+            row = self._first_row(getattr(response, "data", None))
+            if row is None:
+                return None
+            state = _clean_state(row)
+            self._state = state
+            return state
+        except Exception:
+            logger.warning("economy_pool: DB 状態の読み取りに失敗しました", exc_info=True)
+            return None
+
+    def _db_cas_state(self, mutate: Any) -> tuple[bool, int]:
+        """DB の現在行に mutate(state)->int を適用し、CAS で書き戻す。
+
+        mutate は渡した状態 dict を直接書き換え、戻り値（移した額など）
+        を返す。競合で書き戻せなければ (False, 0)（次回周期で再試行
+        される前提の出口系操作専用）。
+        """
+        current = self._db_read_state()
+        if current is None:
+            return False, 0
+        working = copy.deepcopy(current)
+        result = int(mutate(working))
+        changed = {
+            key: working[key]
+            for key in working
+            if working[key] != current[key]
+        }
+        if not changed:
+            return True, result
+        try:
+            query = self._db_client.table("economy_pool_state").update(changed).eq("id", 1)
+            for key in (
+                "pool", "treasury", "total_recycled", "total_paid",
+                "total_released", "total_boosted", "lottery_boost_pending",
+                "total_house_paid", "last_release_date",
+            ):
+                query = query.eq(key, current[key])
+            response = query.execute()
+            rows = getattr(response, "data", None)
+            if not rows:
+                return False, 0
+        except Exception:
+            logger.warning("economy_pool: DB 状態の CAS 書き戻しに失敗しました", exc_info=True)
+            return False, 0
+        self._state = working
+        return True, result
+
     def flush(self) -> None:
+        if self._db_mode:
+            return  # DB 経路では操作ごとに永続化されるため保存不要
         with self._lock:
             payload = copy.deepcopy(self._state)
             self._dirty = 0
@@ -174,6 +320,10 @@ class EconomyPoolStore(DirtyFlushMixin):
 
     def snapshot(self) -> dict[str, Any]:
         with self._lock:
+            if self._use_db():
+                # 表示・集計用は DB の現在値を読み直す（Web 直接適用など
+                # 他経路の変更もここで取り込む）。失敗時はミラーで返す。
+                self._db_read_state()
             result: dict[str, Any] = {
                 key: int(self._state[key]) for key in _INT_KEYS}
             result["last_release_date"] = self._state.get("last_release_date")
@@ -189,9 +339,24 @@ class EconomyPoolStore(DirtyFlushMixin):
         amount = int(amount)
         if amount <= 0:
             return {"pool": 0, "treasury": 0}
-        pool_part = int(amount * POOL_SHARE)
-        treasury_part = amount - pool_part
         with self._lock:
+            if self._use_db():
+                try:
+                    row = self._first_row(self._rpc("economy_pool_add_loss", {"p_amount": amount}))
+                    if row is None:
+                        raise ValueError("economy_pool_add_loss returned no row")
+                    pool_part = int(row["pool_part"])
+                    treasury_part = int(row["treasury_part"])
+                    self._state["pool"] = int(self._state["pool"]) + pool_part
+                    self._state["treasury"] = int(self._state["treasury"]) + treasury_part
+                    self._state["total_recycled"] = int(self._state["total_recycled"]) + amount
+                    return {"pool": pool_part, "treasury": treasury_part}
+                except Exception:
+                    # 還流の取りこぼしは記録だけに留める（JSON へは戻さない）。
+                    logger.exception("economy_pool: add_loss の DB 適用に失敗しました amount=%s", amount)
+                    return {"pool": 0, "treasury": 0}
+            pool_part = int(amount * POOL_SHARE)
+            treasury_part = amount - pool_part
             self._state["pool"] = int(self._state["pool"]) + pool_part
             self._state["treasury"] = int(self._state["treasury"]) + treasury_part
             self._state["total_recycled"] = (
@@ -205,6 +370,16 @@ class EconomyPoolStore(DirtyFlushMixin):
         if amount <= 0:
             return 0
         with self._lock:
+            if self._use_db():
+                try:
+                    paid = int(self._rpc("economy_pool_pay", {"p_amount": amount}) or 0)
+                except Exception:
+                    logger.exception("economy_pool: pay の DB 適用に失敗しました amount=%s", amount)
+                    return 0
+                if paid > 0:
+                    self._state["pool"] = int(self._state["pool"]) - paid
+                    self._state["total_paid"] = int(self._state["total_paid"]) + paid
+                return paid
             paid = min(amount, int(self._state["pool"]))
             if paid <= 0:
                 return 0
@@ -219,6 +394,15 @@ class EconomyPoolStore(DirtyFlushMixin):
         if amount <= 0:
             return
         with self._lock:
+            if self._use_db():
+                try:
+                    self._rpc("economy_pool_refund", {"p_amount": amount})
+                    self._state["pool"] = int(self._state["pool"]) + amount
+                    self._state["total_paid"] = max(
+                        0, int(self._state["total_paid"]) - amount)
+                except Exception:
+                    logger.exception("economy_pool: refund の DB 適用に失敗しました amount=%s", amount)
+                return
             self._state["pool"] = int(self._state["pool"]) + amount
             self._state["total_paid"] = max(
                 0, int(self._state["total_paid"]) - amount)
@@ -239,6 +423,24 @@ class EconomyPoolStore(DirtyFlushMixin):
         if amount <= 0:
             return {"paid": 0, "pool": 0, "treasury": 0}
         with self._lock:
+            if self._use_db():
+                try:
+                    row = self._first_row(self._rpc("economy_pool_pay_house", {"p_amount": amount}))
+                    if row is None:
+                        raise ValueError("economy_pool_pay_house returned no row")
+                    breakdown = {
+                        "paid": int(row["paid"]),
+                        "pool": int(row["pool_part"]),
+                        "treasury": int(row["treasury_part"]),
+                    }
+                    self._state["pool"] = int(self._state["pool"]) - breakdown["pool"]
+                    self._state["treasury"] = int(self._state["treasury"]) - breakdown["treasury"]
+                    self._state["total_house_paid"] = int(self._state["total_house_paid"]) + breakdown["paid"]
+                    return breakdown
+                except Exception:
+                    # 原資を確保できなかった扱いにし、新規創出はしない。
+                    logger.exception("economy_pool: pay_house の DB 適用に失敗しました amount=%s", amount)
+                    return {"paid": 0, "pool": 0, "treasury": 0}
             pool_part = min(amount, int(self._state["pool"]))
             treasury_part = min(
                 amount - pool_part, int(self._state["treasury"]))
@@ -268,6 +470,19 @@ class EconomyPoolStore(DirtyFlushMixin):
         if pool_part <= 0 and treasury_part <= 0:
             return
         with self._lock:
+            if self._use_db():
+                try:
+                    self._rpc("economy_pool_refund_house", {
+                        "p_pool_part": pool_part,
+                        "p_treasury_part": treasury_part,
+                    })
+                    self._state["pool"] = int(self._state["pool"]) + pool_part
+                    self._state["treasury"] = int(self._state["treasury"]) + treasury_part
+                    self._state["total_house_paid"] = max(
+                        0, int(self._state["total_house_paid"]) - pool_part - treasury_part)
+                except Exception:
+                    logger.exception("economy_pool: refund_house の DB 適用に失敗しました")
+                return
             self._state["pool"] = int(self._state["pool"]) + pool_part
             self._state["treasury"] = (
                 int(self._state["treasury"]) + treasury_part)
@@ -277,6 +492,30 @@ class EconomyPoolStore(DirtyFlushMixin):
             self._mark_dirty()
 
     # ------------------------------------------------------------------ 国庫の出口（S1）
+    @staticmethod
+    def _weekly_release_state(state: dict[str, Any], today: date) -> int:
+        """週次還流の状態遷移（純粋に dict を書き換え、移した額を返す）。"""
+        last_raw = state.get("last_release_date")
+        last: date | None = None
+        if isinstance(last_raw, str):
+            try:
+                last = date.fromisoformat(last_raw)
+            except ValueError:
+                last = None
+        if last is None:
+            state["last_release_date"] = today.isoformat()
+            return 0
+        if (today - last).days < TREASURY_RELEASE_INTERVAL_DAYS:
+            return 0
+        treasury = int(state["treasury"])
+        amount = int(treasury * TREASURY_RELEASE_RATE)
+        state["last_release_date"] = today.isoformat()
+        if amount > 0:
+            state["treasury"] = treasury - amount
+            state["pool"] = int(state["pool"]) + amount
+            state["total_released"] = int(state["total_released"]) + amount
+        return amount
+
     def maybe_weekly_release(self, now: datetime | None = None) -> int:
         """週次還流: 前回から間隔が空いていれば国庫の 20% をプールへ移す。
 
@@ -288,29 +527,30 @@ class EconomyPoolStore(DirtyFlushMixin):
         now = now or datetime.now(JST)
         today = now.astimezone(JST).date()
         with self._lock:
-            last_raw = self._state.get("last_release_date")
-            last: date | None = None
-            if isinstance(last_raw, str):
-                try:
-                    last = date.fromisoformat(last_raw)
-                except ValueError:
-                    last = None
-            if last is None:
-                self._state["last_release_date"] = today.isoformat()
+            if self._use_db():
+                ok, amount = self._db_cas_state(
+                    lambda state: self._weekly_release_state(state, today))
+                return amount if ok else 0
+            before = copy.deepcopy(self._state)
+            amount = self._weekly_release_state(self._state, today)
+            if self._state != before:
                 self._mark_dirty()
-                return 0
-            if (today - last).days < TREASURY_RELEASE_INTERVAL_DAYS:
-                return 0
-            treasury = int(self._state["treasury"])
-            amount = int(treasury * TREASURY_RELEASE_RATE)
-            self._state["last_release_date"] = today.isoformat()
-            if amount > 0:
-                self._state["treasury"] = treasury - amount
-                self._state["pool"] = int(self._state["pool"]) + amount
-                self._state["total_released"] = (
-                    int(self._state["total_released"]) + amount)
-            self._mark_dirty()
             return amount
+
+    @staticmethod
+    def _lottery_boost_state(state: dict[str, Any]) -> int:
+        """宝くじブースト確保の状態遷移（純粋に dict を書き換える）。"""
+        treasury = int(state["treasury"])
+        excess = treasury - TREASURY_BOOST_THRESHOLD
+        if excess <= 0:
+            return 0
+        amount = int(excess * TREASURY_BOOST_RATE)
+        if amount <= 0:
+            return 0
+        state["treasury"] = treasury - amount
+        state["lottery_boost_pending"] = int(state["lottery_boost_pending"]) + amount
+        state["total_boosted"] = int(state["total_boosted"]) + amount
+        return amount
 
     def lottery_boost_amount(self, now: datetime | None = None) -> int:
         """宝くじブースト: 国庫が閾値を超えたら超過分の 50% を確保する。
@@ -319,24 +559,30 @@ class EconomyPoolStore(DirtyFlushMixin):
         take_lottery_boost で宝くじ側へ渡す。閾値未満なら何もしない。
         """
         with self._lock:
-            treasury = int(self._state["treasury"])
-            excess = treasury - TREASURY_BOOST_THRESHOLD
-            if excess <= 0:
-                return 0
-            amount = int(excess * TREASURY_BOOST_RATE)
-            if amount <= 0:
-                return 0
-            self._state["treasury"] = treasury - amount
-            self._state["lottery_boost_pending"] = (
-                int(self._state["lottery_boost_pending"]) + amount)
-            self._state["total_boosted"] = (
-                int(self._state["total_boosted"]) + amount)
-            self._mark_dirty()
+            if self._use_db():
+                ok, amount = self._db_cas_state(self._lottery_boost_state)
+                return amount if ok else 0
+            before = copy.deepcopy(self._state)
+            amount = self._lottery_boost_state(self._state)
+            if self._state != before:
+                self._mark_dirty()
             return amount
+
+    @staticmethod
+    def _take_boost_state(state: dict[str, Any]) -> int:
+        amount = int(state["lottery_boost_pending"])
+        if amount > 0:
+            state["lottery_boost_pending"] = 0
+        return amount
 
     def take_lottery_boost(self) -> int:
         """確保済みの宝くじブーストを取り出す（取り出した分は消える）。"""
         with self._lock:
+            if self._use_db():
+                ok, amount = self._db_cas_state(self._take_boost_state)
+                # CAS で負けたら保留は DB に残っている。0 を返し、
+                # 次回の呼び出しで取り直される（消えた扱いにしない）。
+                return amount if ok else 0
             amount = int(self._state["lottery_boost_pending"])
             if amount > 0:
                 self._state["lottery_boost_pending"] = 0

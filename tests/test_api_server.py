@@ -8,6 +8,9 @@ from api.app import app
 
 
 class _FakeCursor:
+    # _execute_rpc が参照する結果列の説明（固定行 user_id/balance に対応）
+    description = [("user_id",), ("balance",)]
+
     def __init__(self, connection):
         self.connection = connection
         self.rows = []
@@ -121,6 +124,43 @@ class APIServerSecurityTest(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 404)
         self.assertEqual(response.json()["detail"]["code"], "RPC_NOT_ALLOWED")
+
+    def test_query_allows_economy_pool_state_table(self):
+        response = self.client.post(
+            "/v1/query",
+            headers={"Authorization": "Bearer test-secret"},
+            json={"table": "economy_pool_state", "action": "select"},
+        )
+        self.assertEqual(response.status_code, 200)
+
+    def test_rpc_allows_economy_pool_pay_house(self):
+        response = self.client.post(
+            "/v1/rpc",
+            headers={"Authorization": "Bearer test-secret"},
+            json={"name": "economy_pool_pay_house", "params": {"p_amount": 100}},
+        )
+        self.assertEqual(response.status_code, 200)
+        # 表関数は行の配列がそのまま返る
+        self.assertEqual(response.json()["data"], [{"user_id": "user-1", "balance": 42}])
+
+    def test_rpc_economy_pool_pay_is_scalar(self):
+        response = self.client.post(
+            "/v1/rpc",
+            headers={"Authorization": "Bearer test-secret"},
+            json={"name": "economy_pool_pay", "params": {"p_amount": 100}},
+        )
+        self.assertEqual(response.status_code, 200)
+        # スカラー関数は先頭行の先頭列だけが返る
+        self.assertEqual(response.json()["data"], "user-1")
+
+    def test_rpc_economy_pool_rejects_unknown_arguments(self):
+        response = self.client.post(
+            "/v1/rpc",
+            headers={"Authorization": "Bearer test-secret"},
+            json={"name": "economy_pool_pay_house", "params": {"p_amount": 100, "p_extra": 1}},
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["detail"]["code"], "INVALID_RPC_PARAMS")
 
 
 if __name__ == "__main__":
