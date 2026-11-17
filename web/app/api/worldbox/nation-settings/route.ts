@@ -12,6 +12,10 @@ import type { NationsState } from "@/lib/worldbox/nations";
 import { listPresence } from "@/lib/worldbox/presence-online";
 import { presenceIdFor } from "@/lib/worldbox/presence";
 import { loadMyLobbyStation } from "@/lib/worldbox/station-online";
+import { buildEconomyOp, ECONOMY_AMOUNT_MAX } from "@/lib/worldbox/economy-bridge";
+import {
+  isEconomyEnabled, submitEconomyOp, waitForOpDone,
+} from "@/lib/worldbox/economy-bridge-online";
 
 export const runtime = "nodejs";
 
@@ -23,6 +27,8 @@ export const runtime = "nodejs";
 //   { action: "set_minister", targetKey, minister } 任命/解除。対象は
 //   現在の国民のみで、Discord 由来の大臣はここでは外せない（任命一覧
 //   に載っていないため、解除は任命分だけに効く）。
+//   { action: "withdraw_treasury", amount } 国庫から王の残高へ引き出す
+//   （バッチE6）。先に国庫から差し引き、earn オプの結果で確定させる。
 // 保存先は bot_kv（名前空間 worldbox_nation_settings、キー = ギルド ID）。
 
 const NO_STORE = { "Cache-Control": "no-store, max-age=0" };
@@ -116,7 +122,7 @@ export async function POST(request: Request) {
   const fields = (body ?? {}) as {
     action?: unknown; taxRate?: unknown; visibility?: unknown;
     targetKey?: unknown; minister?: unknown;
-    entryFee?: unknown; exitFeeRate?: unknown;
+    entryFee?: unknown; exitFeeRate?: unknown; amount?: unknown;
   };
   const ownerKey = sessionOwnerKey(session);
   if ((await loadMyLobbyStation(ownerKey)) !== "guild") return err("not_at_guild_board", 409);
@@ -128,6 +134,73 @@ export async function POST(request: Request) {
   if (!nation) return err("no_union", 409);
   if (ownerKey !== nation.kingKey) return err("king_only", 403);
   const now = Date.now();
+
+  if (fields.action === "withdraw_treasury") {
+    // 国庫の引き出し（バッチE6、経済仕様書 §3）: 王が国庫から自分の
+    // 残高へ移す。先に国庫から差し引き、earn オプ（理由
+    // nation_treasury_withdraw）の結果で確定させる。失敗と部分払い
+    // （pay_house は原資のある分だけ払う）は差額を国庫へ戻す。
+    // pending のままなら国庫は差し引いた状態で確定扱いにする
+    // （ワーカーが後から払う。徴収ゲートと違い、ここは払う側なので
+    // 止める理由がない）。
+    const amount = fields.amount;
+    if (typeof amount !== "number" || !Number.isInteger(amount) || amount < 1 || amount > ECONOMY_AMOUNT_MAX) {
+      return err("invalid_amount", 400);
+    }
+    const discordId = session.provider === "discord" ? session.id : null;
+    if (!discordId || !isEconomyEnabled()) return err("economy_unavailable", 503);
+    let took = false;
+    const afterDeduct = await updateNationSettings(guildId, (cur) => {
+      if (cur.treasury < amount) return null;
+      took = true;
+      return { ...cur, treasury: cur.treasury - amount, updatedAt: now };
+    });
+    if (!afterDeduct) return err("store_failed", 503);
+    if (!took) return err("insufficient_treasury", 409);
+    const refund = async (yen: number) => {
+      if (yen > 0) {
+        await updateNationSettings(guildId, (cur) => ({
+          ...cur, treasury: cur.treasury + yen, updatedAt: Date.now(),
+        }));
+      }
+    };
+    const op = buildEconomyOp(
+      { kind: "earn", userKey: ownerKey, discordId, amount, reason: "nation_treasury_withdraw" },
+      crypto.randomUUID(),
+      Date.now(),
+    );
+    if (!op) {
+      await refund(amount);
+      return err("economy_unavailable", 503);
+    }
+    const submitted = await submitEconomyOp(op);
+    if (submitted.state === "unavailable") {
+      await refund(amount);
+      return err("economy_unavailable", 503);
+    }
+    let paid: number | null = null;
+    if (submitted.state === "done") {
+      paid = submitted.op.appliedAmount ?? amount;
+    } else if (submitted.state === "failed") {
+      await refund(amount);
+      return err("withdraw_failed", 409);
+    } else {
+      const done = await waitForOpDone(ownerKey, op.id);
+      if (done && done.status === "done") {
+        paid = done.appliedAmount ?? amount;
+      } else if (done && done.status === "failed") {
+        await refund(amount);
+        return err("withdraw_failed", 409);
+      }
+      // pending のまま: 上のコメントのとおり確定扱い（paid は予定額）
+    }
+    if (paid !== null && paid < amount) await refund(amount - paid);
+    const withdrawn = paid ?? amount;
+    if (withdrawn <= 0) return err("withdraw_failed", 409);
+    const latest = await loadNationSettings(guildId);
+    const view = await buildView(state, guildId, latest, ownerKey);
+    return NextResponse.json({ ok: true, ...view, withdrawn }, { headers: NO_STORE });
+  }
 
   let next: NationSettings | null;
   if (fields.action === "set_tax") {
