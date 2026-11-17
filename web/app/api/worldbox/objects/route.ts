@@ -10,7 +10,7 @@ import {
 } from "@/lib/worldbox/objects-online";
 import { listPresence } from "@/lib/worldbox/presence-online";
 import { presenceIdFor } from "@/lib/worldbox/presence";
-import { addItem, maxHpFor } from "@/lib/worldbox/profile";
+import { addItem, maxHpFor, wearTool } from "@/lib/worldbox/profile";
 import { loadProfile, storeProfile } from "@/lib/worldbox/profile-online";
 import { addMasteryXp, MINER_BONUS_CHANCE } from "@/lib/worldbox/roles";
 import { bestToolTier } from "@/lib/worldbox/tiles";
@@ -156,10 +156,17 @@ export async function POST(request: Request) {
       healed = Math.min(maxHpFor(next), next.hp + def.heal) - next.hp;
       next = { ...next, hp: next.hp + healed };
     }
+    // 道具の耐久: 道具を使う行為（鉱脈・倒木など）は最良の1本が摩耗する
+    let broke: string | null = null;
+    if (def.tool) {
+      const worn = wearTool(next, def.tool);
+      next = worn.profile;
+      broke = worn.brokeItemId;
+    }
     if (!(await storeProfile(ownerKey, next))) return err("store_failed", 503);
     await storeHarvestedAt(x, y, now);
     return NextResponse.json(
-      { ok: true, gained: loot.gained, trapped, healed, profile: next },
+      { ok: true, gained: loot.gained, trapped, healed, profile: next, ...(broke ? { broke } : {}) },
       { headers: NO_STORE },
     );
   });
