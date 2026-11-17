@@ -3,7 +3,7 @@ import { getRequestSession, publicOrigin, sessionOwnerKey } from "@/lib/auth";
 import { MAP_SEED, WORLD_COORD_LIMIT } from "@/lib/worldbox/mapgen";
 import { isNightPhase, phaseAtTime } from "@/lib/worldbox/daynight";
 import { mobById } from "@/lib/worldbox/mobs";
-import { mobDistance, mobExistsAt, MOB_ATTACK_MAX_DISTANCE } from "@/lib/worldbox/combat";
+import { mobDistance, mobExistsAt, resolveMobPosition, MOB_ATTACK_MAX_DISTANCE } from "@/lib/worldbox/combat";
 import { isProfileEnabled, loadProfile, storeProfile } from "@/lib/worldbox/profile-online";
 import { listPresence } from "@/lib/worldbox/presence-online";
 import { presenceIdFor } from "@/lib/worldbox/presence";
@@ -37,8 +37,9 @@ export const runtime = "nodejs";
 // POST { action: "sync", px?, py?, space? }: 時間経過の精算（空腹・毒・飢え）。
 //   空腹の活動クラスは現在位置と前回精算位置の平均速度からサーバー側で判定する。
 //   死亡したら死亡処理まで行う
-// POST { action: "damage", mobId, x, y, px?, py? }: モブ接触ダメージ。
-//   配置の再計算で実在を検証し、距離は mobs ルートと同じ方式（プレゼンス→申告→セーブ）
+// POST { action: "damage", mobId, x, y, px?, py?, mx?, my? }: モブ接触ダメージ。
+//   配置の再計算で実在を検証し、距離は mobs ルートと同じ方式（プレゼンス→申告→セーブ）。
+//   モブの位置も攻撃と同じ実位置ルール（mx/my の申告をリーシュ内でのみ採用）
 // POST { action: "pvp", target, px?, py? }: プレイヤーへの攻撃。
 //   相手はプレゼンス ID で解決し、空間（ワールド/洞窟/遺跡のみ）・距離を検証する。
 //   被害者が死亡したら被害者側の死亡処理を行い、通知は被害者の次回 sync で配送する
@@ -212,7 +213,7 @@ export async function POST(request: Request) {
   }
   const data = (body ?? {}) as {
     action?: unknown; mobId?: unknown; x?: unknown; y?: unknown; px?: unknown; py?: unknown; space?: unknown;
-    target?: unknown;
+    mx?: unknown; my?: unknown; target?: unknown;
   };
   const ownerKey = sessionOwnerKey(session);
   const now = Date.now();
@@ -342,7 +343,19 @@ export async function POST(request: Request) {
       const pos = await actorWorldPosition(ownerKey, reported, (inCave || inRuins || inDungeon) && typeof data.space === "string" ? data.space : "world");
       if (!pos) return errorResponse("position_unknown", 409);
       {
-        const dist = mobDistance(Math.floor(pos.x), Math.floor(pos.y), { x, y, size: def.size });
+        // 距離はアンカーでなく、クライアントが見ているモブの現在タイルで
+        // 測る（攻撃と同じ実位置ルール: mx/my の申告はリーシュ内でのみ
+        // 採用する）。アンカー基準だと、追跡してきたモブが画面では足元に
+        // いても too_far になり接触ダメージが無効化されていた。申告の無い
+        // 旧クライアントはアンカー検証のまま。
+        const reportedMob =
+          typeof data.mx === "number" && typeof data.my === "number" &&
+          Number.isFinite(data.mx) && Number.isFinite(data.my) &&
+          Math.abs(data.mx) <= WORLD_COORD_LIMIT && Math.abs(data.my) <= WORLD_COORD_LIMIT
+            ? { x: data.mx, y: data.my }
+            : null;
+        const effPlaced = resolveMobPosition({ mobId: def.id, x, y, size: def.size }, reportedMob);
+        const dist = mobDistance(Math.floor(pos.x), Math.floor(pos.y), effPlaced);
         if (dist > MOB_ATTACK_MAX_DISTANCE) return errorResponse("too_far", 409);
       }
       // 凍結中のモブは接触ダメージを与えない
