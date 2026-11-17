@@ -322,7 +322,7 @@ if (wss) {
     };
     const routeWatchChanges = (kind, changes, prev) => {
       if (changes.length === 0) return;
-      if (kind === "tiles" || kind === "mobs") {
+      if (kind === "tiles" || kind === "mobs" || kind === "objects" || kind === "fishing") {
         sendTo(() => true, { t: "kv", kind, changes });
       } else if (kind === "board") {
         for (const c of changes) {
@@ -416,7 +416,7 @@ if (wss) {
         setInterval(() => void run(), plan.intervalMs);
       }, 500 + idx * 300);
     });
-    console.log("[realtime] kv watch enabled (chat/party/tiles/mobs/board/nations/instances/economy)");
+    console.log("[realtime] kv watch enabled (chat/party/tiles/mobs/board/nations/instances/economy/objects/fishing)");
   } else {
     console.log("[realtime] kv watch disabled (bot api not configured)");
   }

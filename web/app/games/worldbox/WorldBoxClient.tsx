@@ -66,7 +66,9 @@ import { EVENT_DUNGEON_ENTRANCE } from "@/lib/worldbox/events";
 import { SEASON_NAMES, seasonDaysLeft, seasonOf } from "@/lib/worldbox/seasons";
 import { biomeAt, structureById, structuresForChunk, type PlacedStructure } from "@/lib/worldbox/maplogic";
 import { nearestEntrances, type CompassTarget } from "@/lib/worldbox/compass";
-import { objectsForChunk, specialObjectById } from "@/lib/worldbox/objects";
+import {
+  objectRespawned, objectsForChunk, specialObjectById, surfaceObjectAt, surfaceSolidTilesInRect,
+} from "@/lib/worldbox/objects";
 import { fishingSpotAt } from "@/lib/worldbox/fishing";
 import { parseBoardPosts, type BoardPost } from "@/lib/worldbox/board";
 import { parseSave, serializeSave, type SaveSpace } from "@/lib/worldbox/save";
@@ -448,6 +450,250 @@ const EMPTY_NATIONS: NationsResponse = {
 
 /** 足元に平置きで描くロビースプライト（上に立てるもの）。 */
 const FLAT_LOBBY_SPRITES = new Set(["warp_pad", "stairs", "tapestry"]);
+
+/** 地表オブジェクトの鉱脈の色（洞窟内の描画と同じ色づかい）。 */
+const SURFACE_VEIN_COLORS: Record<string, string> = {
+  copper_vein: "#c47b4a",
+  coal_vein: "#3a3a42",
+  rare_vein: "#e8c85a",
+  crystal_cluster: "#9fe8ff",
+};
+
+/**
+ * 地表オブジェクトをタイル内にフラットな形で描く（洞窟の鉱脈・宝箱と
+ * 同じ様式: 単色＋簡単な形）。sx/sy はタイル左上、tile は一辺 px。
+ * spent=true（一回きりを使い終わった）は薄く描いて「残っているが
+ * 恵みは無い」ことを示す。
+ */
+function drawSurfaceObject(
+  ctx: CanvasRenderingContext2D,
+  objectId: string,
+  sx: number,
+  sy: number,
+  tile: number,
+  spent: boolean,
+  now: number,
+) {
+  const u = tile / 44;
+  ctx.save();
+  if (spent) ctx.globalAlpha = 0.45;
+  const cx = sx + tile / 2;
+  const ground = sy + tile * 0.82;
+  switch (objectId) {
+    case "berry_bush":
+    case "herb_patch":
+    case "mushroom_patch":
+    case "flower_meadow": {
+      if (objectId === "flower_meadow") {
+        const cols = ["#e87aa8", "#ffd23e", "#ffffff", "#b48ce8"];
+        for (let i = 0; i < 7; i++) {
+          const fx = sx + tile * (0.18 + 0.64 * ((i * 37) % 10) / 10);
+          const fy = sy + tile * (0.3 + 0.5 * ((i * 53) % 10) / 10);
+          ctx.fillStyle = "#3e7d2c";
+          ctx.fillRect(fx - 1, fy, 2, tile * 0.14);
+          ctx.fillStyle = cols[i % cols.length];
+          ctx.beginPath();
+          ctx.arc(fx, fy - 2, 3 * u, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        break;
+      }
+      if (objectId === "mushroom_patch") {
+        ctx.fillStyle = "#e8dcc4";
+        ctx.fillRect(cx - 7 * u, ground - 9 * u, 4 * u, 9 * u);
+        ctx.fillRect(cx + 3 * u, ground - 7 * u, 4 * u, 7 * u);
+        ctx.fillStyle = "#b0483e";
+        ctx.beginPath();
+        ctx.arc(cx - 5 * u, ground - 9 * u, 6 * u, Math.PI, 0);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(cx + 5 * u, ground - 7 * u, 5 * u, Math.PI, 0);
+        ctx.fill();
+        break;
+      }
+      // 茂み・群生: 緑の塊＋実や葉の差し色
+      ctx.fillStyle = objectId === "berry_bush" ? "#2f6121" : "#3e7d2c";
+      ctx.beginPath();
+      ctx.arc(cx - 8 * u, ground - 6 * u, 8 * u, 0, Math.PI * 2);
+      ctx.arc(cx + 8 * u, ground - 6 * u, 8 * u, 0, Math.PI * 2);
+      ctx.arc(cx, ground - 12 * u, 9 * u, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = objectId === "berry_bush" ? "#e5484d" : "#a8c256";
+      for (let i = 0; i < 5; i++) {
+        ctx.beginPath();
+        ctx.arc(cx + (i - 2) * 6 * u, ground - (6 + (i % 3) * 4) * u, 2.2 * u, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      break;
+    }
+    case "beehive": {
+      ctx.fillStyle = "#d9a441";
+      ctx.beginPath();
+      ctx.ellipse(cx, ground - 12 * u, 9 * u, 11 * u, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = "#a87c2a";
+      ctx.lineWidth = 2;
+      for (const dy of [-16, -10, -4]) {
+        ctx.beginPath();
+        ctx.moveTo(cx - 8 * u, ground + dy * u);
+        ctx.lineTo(cx + 8 * u, ground + dy * u);
+        ctx.stroke();
+      }
+      ctx.fillStyle = "#5d3a17";
+      ctx.beginPath();
+      ctx.arc(cx, ground - 6 * u, 2.6 * u, 0, Math.PI * 2);
+      ctx.fill();
+      break;
+    }
+    case "bird_nest": {
+      ctx.strokeStyle = "#8a5a2b";
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.ellipse(cx, ground - 6 * u, 11 * u, 5 * u, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.strokeStyle = "#6b4423";
+      ctx.beginPath();
+      ctx.ellipse(cx, ground - 5 * u, 8 * u, 3.6 * u, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.fillStyle = "#e8eef2";
+      ctx.beginPath();
+      ctx.ellipse(cx - 3 * u, ground - 7 * u, 3 * u, 2.4 * u, 0, 0, Math.PI * 2);
+      ctx.ellipse(cx + 3.4 * u, ground - 7 * u, 3 * u, 2.4 * u, 0, 0, Math.PI * 2);
+      ctx.fill();
+      break;
+    }
+    case "sulfur_vent": {
+      ctx.fillStyle = "#8d8d93";
+      ctx.beginPath();
+      ctx.moveTo(cx - 11 * u, ground);
+      ctx.lineTo(cx - 4 * u, ground - 9 * u);
+      ctx.lineTo(cx + 4 * u, ground - 9 * u);
+      ctx.lineTo(cx + 11 * u, ground);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = "#ffd23e";
+      ctx.beginPath();
+      ctx.ellipse(cx, ground - 8 * u, 4 * u, 2 * u, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "rgba(240,240,230,0.5)";
+      const rise = (now / 900 + cx) % 1;
+      ctx.beginPath();
+      ctx.arc(cx, ground - (12 + rise * 10) * u, (2 + rise * 3) * u, 0, Math.PI * 2);
+      ctx.fill();
+      break;
+    }
+    case "copper_vein":
+    case "coal_vein":
+    case "rare_vein":
+    case "crystal_cluster": {
+      ctx.fillStyle = "#55565f";
+      ctx.beginPath();
+      ctx.moveTo(sx + tile * 0.14, ground);
+      ctx.lineTo(sx + tile * 0.3, sy + tile * 0.3);
+      ctx.lineTo(sx + tile * 0.58, sy + tile * 0.18);
+      ctx.lineTo(sx + tile * 0.86, ground);
+      ctx.closePath();
+      ctx.fill();
+      const mineral = SURFACE_VEIN_COLORS[objectId] ?? "#c9c9cf";
+      if (objectId === "crystal_cluster") {
+        ctx.fillStyle = mineral;
+        for (const [dx, h] of [[0.34, 0.34], [0.5, 0.46], [0.64, 0.3]] as const) {
+          ctx.beginPath();
+          ctx.moveTo(sx + tile * (dx - 0.06), ground - tile * 0.08);
+          ctx.lineTo(sx + tile * dx, ground - tile * h);
+          ctx.lineTo(sx + tile * (dx + 0.06), ground - tile * 0.08);
+          ctx.closePath();
+          ctx.fill();
+        }
+      } else {
+        ctx.fillStyle = mineral;
+        for (const [dx, dy, r] of [[0.36, 0.52, 0.07], [0.56, 0.4, 0.06], [0.66, 0.6, 0.05]] as const) {
+          ctx.beginPath();
+          ctx.arc(sx + tile * dx, sy + tile * dy, tile * r, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+      break;
+    }
+    case "ruins_chest":
+    case "cave_chest":
+    case "dungeon_chest": {
+      const body = spent ? "#5d4020" : objectId === "dungeon_chest" ? "#5e4632" : "#8a5a2b";
+      ctx.fillStyle = body;
+      ctx.fillRect(sx + tile * 0.2, sy + tile * 0.34, tile * 0.6, tile * 0.44);
+      ctx.fillStyle = spent ? "#4a3319" : objectId === "dungeon_chest" ? "#4c3826" : "#77501f";
+      ctx.fillRect(sx + tile * 0.2, sy + tile * 0.34, tile * 0.6, tile * 0.14);
+      ctx.fillStyle = objectId === "dungeon_chest" ? "#6b6f7a" : "#e8c85a";
+      ctx.fillRect(sx + tile * 0.46, sy + tile * 0.34, tile * 0.08, tile * 0.44);
+      break;
+    }
+    case "hot_spring": {
+      ctx.fillStyle = "#7cc0e8";
+      ctx.beginPath();
+      ctx.ellipse(cx, ground - 4 * u, 15 * u, 7 * u, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "#a8d4f0";
+      ctx.beginPath();
+      ctx.ellipse(cx, ground - 4 * u, 10 * u, 4.4 * u, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "#8d8d93";
+      ctx.beginPath();
+      ctx.arc(sx + tile * 0.1, ground - 2 * u, 4 * u, 0, Math.PI * 2);
+      ctx.arc(sx + tile * 0.9, ground - 2 * u, 4 * u, 0, Math.PI * 2);
+      ctx.fill();
+      if (!spent) {
+        ctx.fillStyle = "rgba(255,255,255,0.55)";
+        const rise = (now / 1100 + cx) % 1;
+        ctx.beginPath();
+        ctx.arc(cx - 5 * u, ground - (10 + rise * 9) * u, 2.4 * u, 0, Math.PI * 2);
+        ctx.arc(cx + 6 * u, ground - (8 + ((rise + 0.5) % 1) * 9) * u, 2 * u, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      break;
+    }
+    case "ancient_pillar": {
+      ctx.fillStyle = "#9aa0a6";
+      ctx.fillRect(cx - 5 * u, ground - 26 * u, 10 * u, 26 * u);
+      ctx.fillStyle = "#7d838a";
+      ctx.fillRect(cx - 7 * u, ground - 29 * u, 14 * u, 4 * u);
+      ctx.fillRect(cx - 7 * u, ground - 3 * u, 14 * u, 3 * u);
+      ctx.strokeStyle = "#6b7076";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(cx - 5 * u, ground - 18 * u);
+      ctx.lineTo(cx + 1 * u, ground - 13 * u);
+      ctx.lineTo(cx - 2 * u, ground - 8 * u);
+      ctx.stroke();
+      break;
+    }
+    case "fallen_log":
+    case "driftwood": {
+      ctx.fillStyle = objectId === "fallen_log" ? "#8a5a2b" : "#b59a72";
+      ctx.beginPath();
+      ctx.ellipse(cx, ground - 5 * u, 16 * u, 5.5 * u, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = objectId === "fallen_log" ? "#c89b62" : "#cdb894";
+      ctx.beginPath();
+      ctx.ellipse(sx + tile * 0.16, ground - 5 * u, 3.4 * u, 5 * u, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = objectId === "fallen_log" ? "#8a5a2b" : "#a8906a";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.ellipse(sx + tile * 0.16, ground - 5 * u, 1.8 * u, 3 * u, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      if (objectId === "fallen_log") {
+        ctx.fillStyle = "#3e7d2c";
+        ctx.beginPath();
+        ctx.arc(cx + 9 * u, ground - 10 * u, 3.4 * u, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      break;
+    }
+    default:
+      break;
+  }
+  ctx.restore();
+}
 
 /** ステーションの名前札（近づくと下部チップに出る）。 */
 const STATION_LABEL: Record<LobbyStation, string> = {
@@ -1130,6 +1376,16 @@ export default function WorldBoxClient() {
       if (placedBlockSolid(ov.block.itemId)) next.add(key);
       else if (isGateItem(ov.block.itemId) && ov.gateOpen !== true) next.add(key);
     }
+    // 地表の固体オブジェクト（鉱脈・巣・宝箱・石柱・倒木）も歩行を塞ぐ。
+    // 読み込み済みタイル窓（中心 ±64）の範囲で決定的配置から合成する
+    // （枯渇しても物体そのものは残るため採取状態には依存しない）。
+    const center = tilesCenterRef.current
+      ?? { x: Math.floor(playerPosRef.current.x), y: Math.floor(playerPosRef.current.y) };
+    for (const key of surfaceSolidTilesInRect(
+      MAP_SEED, center.x - 64, center.y - 64, center.x + 64, center.y + 64,
+    )) {
+      next.add(key);
+    }
     blockedRef.current = next;
   };
 
@@ -1378,6 +1634,74 @@ export default function WorldBoxClient() {
   };
   const postCatchRef = useRef(postCatch);
   postCatchRef.current = postCatch;
+  /** 地表オブジェクトの枯渇状態（サーバー共有が正、ここは表示用キャッシュ）。 */
+  const surfaceObjStateRef = useRef(new Map<string, number>());
+  /** 地表オブジェクトへの行為: 検証・付与・枯渇記録はサーバーが正。 */
+  const postSurfaceObject = async (x: number, y: number, objectId: string) => {
+    try {
+      const res = await fetch("/api/worldbox/objects", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ x, y }),
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        gained?: Record<string, number>; trapped?: boolean; healed?: number;
+        profile?: PlayerProfile; error?: string;
+      };
+      if (res.ok) {
+        surfaceObjStateRef.current.set(`${x},${y}`, Date.now());
+        if (data.profile) setInvProfile(data.profile);
+        const def = specialObjectById(objectId);
+        const fxKind = data.trapped ? "hit"
+          : def?.interaction === "mine" ? "mine"
+          : def?.interaction === "rest" ? "splash"
+          : def?.tool === "axe" ? "chop" : "harvest";
+        fxEventsRef.current.push({ kind: fxKind, x, y });
+        const names = Object.entries(data.gained ?? {})
+          .map(([id, n]) => `${itemById(id)?.name ?? id}×${n}`)
+          .join(" ");
+        if (data.trapped) setTileMsg("罠だった！");
+        else if ((data.healed ?? 0) > 0) setTileMsg(`温泉で回復した${names ? `: ${names}` : ""}`);
+        else setTileMsg(names ? `${def?.name ?? "採取"}: ${names}` : "何も無かった");
+        void refreshSurfaceStatesRef.current();
+      } else {
+        setTileMsg(TILE_ERROR_LABEL[data.error ?? ""] ?? "できない");
+        if (data.error === "depleted") void refreshSurfaceStatesRef.current();
+      }
+    } catch { /* noop */ }
+  };
+  const postSurfaceObjectRef = useRef(postSurfaceObject);
+  postSurfaceObjectRef.current = postSurfaceObject;
+  /**
+   * 枯渇状態と釣果時刻をサーバーから取り直す（読み込み済みタイル窓の範囲）。
+   * 他プレイヤーの行為は WS の kv 差分でも届くため、これは初期表示と
+   * WS 不健全時のフォールバック。マージは新しい時刻を優先する。
+   */
+  const refreshSurfaceStates = async () => {
+    const c = tilesCenterRef.current
+      ?? { x: Math.floor(playerPosRef.current.x), y: Math.floor(playerPosRef.current.y) };
+    const q = `x0=${c.x - 64}&y0=${c.y - 64}&x1=${c.x + 64}&y1=${c.y + 64}`;
+    try {
+      const [objRes, fishRes] = await Promise.all([
+        fetch(`/api/worldbox/objects?${q}`, { headers: { Accept: "application/json" } }),
+        fetch(`/api/worldbox/fishing?${q}`, { headers: { Accept: "application/json" } }),
+      ]);
+      if (objRes.ok) {
+        const data = (await objRes.json()) as { states?: Record<string, number> };
+        for (const [k, v] of Object.entries(data.states ?? {})) {
+          if (v > (surfaceObjStateRef.current.get(k) ?? 0)) surfaceObjStateRef.current.set(k, v);
+        }
+      }
+      if (fishRes.ok) {
+        const data = (await fishRes.json()) as { caught?: Record<string, number> };
+        for (const [k, v] of Object.entries(data.caught ?? {})) {
+          if (v > (fishCaughtRef.current.get(k) ?? 0)) fishCaughtRef.current.set(k, v);
+        }
+      }
+    } catch { /* 読めなくても歩き続けられる */ }
+  };
+  const refreshSurfaceStatesRef = useRef(refreshSurfaceStates);
+  refreshSurfaceStatesRef.current = refreshSurfaceStates;
   const sendChat = async () => {
     const text = chatText.trim();
     if (!text) return;
@@ -1444,6 +1768,13 @@ export default function WorldBoxClient() {
     void refreshParty();
     // WS push が健全な間はパーティ変更が poke で届くため定期取得しない
     const timer = window.setInterval(() => { if (!wsHealthyNow()) void refreshPartyRef.current(); }, 4000);
+    return () => window.clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => {
+    void refreshSurfaceStates();
+    // WS push が健全な間は枯渇・釣果の差分が kv で届くため定期取得しない
+    const timer = window.setInterval(() => { if (!wsHealthyNow()) void refreshSurfaceStatesRef.current(); }, 5000);
     return () => window.clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -1610,6 +1941,8 @@ export default function WorldBoxClient() {
         tilesVersionRef.current += 1;
         tilesCenterRef.current = { x: px, y: py };
         syncBlockBlocked();
+        // タイル窓が動いたら地表オブジェクトの枯渇・釣果も同じ窓で取り直す
+        void refreshSurfaceStatesRef.current();
       }
     } catch { /* 読めなくても歩き続けられる */ }
     finally {
@@ -2559,6 +2892,22 @@ export default function WorldBoxClient() {
             }
             mobStatesRef.current = nextMobs;
             mobsVersionRef.current += 1;
+          } else if (msg.t === "kv" && msg.kind === "objects" && Array.isArray(msg.changes)) {
+            // 地表オブジェクトの枯渇差分（他人の採取を自分の画面へ即反映）
+            for (const c of msg.changes) {
+              if (!c || typeof c.key !== "string") continue;
+              const n = c.value == null ? NaN : Number(c.value);
+              if (Number.isFinite(n) && n > 0) surfaceObjStateRef.current.set(c.key, n);
+              else surfaceObjStateRef.current.delete(c.key);
+            }
+          } else if (msg.t === "kv" && msg.kind === "fishing" && Array.isArray(msg.changes)) {
+            // 他人の釣果差分（釣られた魚影を自分の画面からも消す）
+            for (const c of msg.changes) {
+              if (!c || typeof c.key !== "string") continue;
+              const n = c.value == null ? NaN : Number(c.value);
+              if (Number.isFinite(n) && n > 0) fishCaughtRef.current.set(c.key, n);
+              else fishCaughtRef.current.delete(c.key);
+            }
           } else if (msg.t === "kv" && msg.kind === "board") {
             // 掲示板は単一キーなので全文を差し替える（進行中の REST 取得を無効化）
             const ticket = boardGuardRef.current.begin({ force: true });
@@ -3036,6 +3385,32 @@ export default function WorldBoxClient() {
         fishingRef.current = { x: t.x, y: t.y, biteAt: nowMs + 1200 + Math.random() * 2500 };
         playWbSe("splash");
         return true;
+      }
+      // 地表オブジェクト（採取・採掘・宝箱・温泉・探索）: 検証・付与・
+      // 枯渇の記録は専用 API が担う。枯渇中は理由を出し、ブロックが
+      // 置かれている場合だけ通常のタイル操作へ流す。
+      if (space === "world") {
+        const sobj = surfaceObjectAt(MAP_SEED, t.x, t.y);
+        if (sobj && sobj.objectId !== "fishing_spot") {
+          const sdef = specialObjectById(sobj.objectId);
+          const harvestedAt = surfaceObjStateRef.current.get(`${t.x},${t.y}`) ?? null;
+          if (sdef && objectRespawned(sdef, harvestedAt, Date.now())) {
+            if (sdef.tool && !Object.keys(prof.items).some((id) => itemById(id)?.tool === sdef.tool)) {
+              setTileMsg(TILE_ERROR_LABEL.tool_required);
+              denyAtTile(t.x, t.y);
+              return true;
+            }
+            swing = { startedAt: performance.now(), itemId: selItem?.id ?? null, face: player.face, whiff: false };
+            playWbSe("swing");
+            void postSurfaceObjectRef.current(t.x, t.y, sobj.objectId);
+            return true;
+          }
+          if (!tilesRef.current[tileKey(t.x, t.y)]?.block) {
+            setTileMsg(TILE_ERROR_LABEL.depleted);
+            denyAtTile(t.x, t.y);
+            return true;
+          }
+        }
       }
       const view = tileView(terrainMap, tilesRef.current, t.x, t.y, Date.now(), null);
       // 自分のブロックかどうかは、サーバーが返した自分の ID で判定する
@@ -4986,6 +5361,28 @@ export default function WorldBoxClient() {
               ctx.lineTo(sx + TILE * 0.44, sy + TILE * 0.08 + bob);
               ctx.closePath();
               ctx.fill();
+            }
+          }
+        }
+        // 地表オブジェクト（採取・採掘・宝箱・温泉・探索）。再出現する
+        // ものは枯渇中は隠し、一回きりは使い終わりの姿で残す。近くの
+        // 使えるものにはアフォーダンスの輪（B2 と同じ様式）を出す。
+        for (let fcy = fcy0; fcy <= fcy1; fcy++) {
+          for (let fcx = fcx0; fcx <= fcx1; fcx++) {
+            for (const o of objectsForChunk(MAP_SEED, fcx, fcy)) {
+              if (o.objectId === "fishing_spot") continue;
+              const odef = specialObjectById(o.objectId);
+              if (!odef) continue;
+              const harvestedAt = surfaceObjStateRef.current.get(`${o.x},${o.y}`) ?? null;
+              const ready = objectRespawned(odef, harvestedAt, now);
+              if (!ready && odef.respawnMs > 0) continue;
+              drawSurfaceObject(ctx, o.objectId, toScreenX(o.x), toScreenY(o.y), TILE, !ready, now);
+              if (ready && Math.max(Math.abs(o.x + 0.5 - player.x), Math.abs(o.y + 0.5 - player.y)) <= 2) {
+                const alpha = reducedMotion ? 0.3 : 0.28 + 0.14 * Math.sin(now / 300);
+                ctx.strokeStyle = `rgba(${AFFORDANCE_RING_RGB},${alpha.toFixed(3)})`;
+                ctx.lineWidth = 2;
+                ctx.strokeRect(toScreenX(o.x) + 2.5, toScreenY(o.y) + 2.5, TILE - 5, TILE - 5);
+              }
             }
           }
         }
