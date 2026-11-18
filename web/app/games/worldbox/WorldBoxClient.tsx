@@ -3504,6 +3504,22 @@ export default function WorldBoxClient() {
     };
     window.addEventListener("keydown", onKeyDown);
     window.addEventListener("keyup", onKeyUp);
+    // タブ切替・フォーカス喪失では keyup / pointerup がページへ届かず、
+    // 押下状態が残って移動し続けるため、隠れた・フォーカスを失った時点で
+    // 移動入力をすべて落とす（戻ってきたら押し直しになる）。
+    const clearMoveInput = () => {
+      keys.clear();
+      dashKey = null;
+      joy.active = false;
+      joy.pointerId = -1;
+      joy.dx = 0;
+      joy.dy = 0;
+    };
+    const onVisibilityChange = () => {
+      if (document.hidden) clearMoveInput();
+    };
+    window.addEventListener("blur", clearMoveInput);
+    document.addEventListener("visibilitychange", onVisibilityChange);
 
     const canvasPos = (e: PointerEvent) => {
       const rect = canvas.getBoundingClientRect();
@@ -6561,6 +6577,8 @@ export default function WorldBoxClient() {
       rtSocket = null;
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("keyup", onKeyUp);
+      window.removeEventListener("blur", clearMoveInput);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
       window.removeEventListener("resize", resize);
       window.removeEventListener("pagehide", onPageHide);
       canvas.removeEventListener("pointerdown", onPointerDown);
