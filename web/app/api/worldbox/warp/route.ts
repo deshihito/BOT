@@ -73,9 +73,10 @@ export async function POST(request: Request) {
   const prev = parseSave(await loadWorldBoxSave(ownerKey));
   if (prev && prev.space !== "world") return err("not_in_world", 409);
   const dest = porterDestination(worldTileSource(), porter);
+  const now = Date.now();
   await storeWorldBoxSave(
     ownerKey,
-    serializeSave({ space: "world", x: dest.x, y: dest.y, worldReturn: prev?.worldReturn ?? null }),
+    serializeSave({ space: "world", x: dest.x, y: dest.y, worldReturn: prev?.worldReturn ?? null }, { tpAt: now }),
   );
   await putPresence(
     ownerKey,
@@ -83,7 +84,8 @@ export async function POST(request: Request) {
       name: session.username?.trim() || "プレイヤー",
       x: dest.x, y: dest.y, vx: 0, vy: 0, face: 1, space: "world",
     },
-    Date.now(),
+    now,
+    { tpTs: now },
   );
   return NextResponse.json(
     { ok: true, x: dest.x, y: dest.y, guildId: mine.nationId },

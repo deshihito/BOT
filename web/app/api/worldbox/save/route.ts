@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 import { getRequestSession, publicOrigin, sessionOwnerKey } from "@/lib/auth";
-import { parseSave, serializeSave } from "@/lib/worldbox/save";
+import { parseSave, parseSaveTpAt, serializeSave } from "@/lib/worldbox/save";
 import { MAX_SAVE_JSON_LENGTH, isOnlineSaveEnabled, loadWorldBoxSave, storeWorldBoxSave } from "@/lib/worldbox/save-online";
 import { loadMyPresence } from "@/lib/worldbox/presence-online";
-import { checkMovementContinuity, checkSaveFallbackContinuity } from "@/lib/worldbox/presence";
+import { checkMovementContinuity, checkSaveFallbackContinuity, MOVEMENT_RESET_MS } from "@/lib/worldbox/presence";
 import { pickRandomSpawn } from "@/lib/worldbox/spawn";
 
 export const runtime = "nodejs";
@@ -80,16 +80,28 @@ export async function PUT(request: Request) {
   // 空間が変われば受け入れる（入退室・階段・階層移動の正当な不連続）。
   const ownerKey = sessionOwnerKey(session);
   const now = Date.now();
+  const rawSave = await loadWorldBoxSave(ownerKey);
+  let recoveredTpAt = 0;
   const freshPresence = await loadMyPresence(ownerKey);
   if (freshPresence) {
     if (!checkMovementContinuity(freshPresence, parsed, now).ok) {
-      return NextResponse.json(
-        { error: "position_jump", x: freshPresence.x, y: freshPresence.y, space: freshPresence.space },
-        { status: 409, headers: NO_STORE },
-      );
+      const saveTp = parseSaveTpAt(rawSave);
+      const saved = saveTp > (freshPresence.tpTs ?? 0) && saveTp >= freshPresence.ts && now - saveTp < MOVEMENT_RESET_MS ? parseSave(rawSave) : null;
+      const tpOk = saved !== null && checkMovementContinuity(
+        { x: saved.x, y: saved.y, space: saved.space, ts: saveTp },
+        parsed,
+        now,
+      ).ok;
+      if (!tpOk) {
+        return NextResponse.json(
+          { error: "position_jump", x: freshPresence.x, y: freshPresence.y, space: freshPresence.space },
+          { status: 409, headers: NO_STORE },
+        );
+      }
+      recoveredTpAt = saveTp;
     }
   } else {
-    const storedSave = parseSave(await loadWorldBoxSave(ownerKey));
+    const storedSave = parseSave(rawSave);
     if (storedSave && !checkSaveFallbackContinuity(storedSave, parsed).ok) {
       return NextResponse.json(
         { error: "position_jump", x: storedSave.x, y: storedSave.y, space: storedSave.space },
@@ -97,7 +109,8 @@ export async function PUT(request: Request) {
       );
     }
   }
-  const stored = await storeWorldBoxSave(ownerKey, save);
+  const toStore = recoveredTpAt > 0 ? serializeSave(parsed, { tpAt: recoveredTpAt }) : save;
+  const stored = await storeWorldBoxSave(ownerKey, toStore);
   if (!stored) {
     return NextResponse.json({ error: "save_failed" }, { status: 500, headers: NO_STORE });
   }

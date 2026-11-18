@@ -5,10 +5,10 @@ import { LOBBY_H, LOBBY_W } from "@/lib/worldbox/lobby";
 import { LOBBY2_H, LOBBY2_W, LOBBY3_H, LOBBY3_W } from "@/lib/worldbox/lobby-floors";
 import { TENT_MAX_H, TENT_MAX_W } from "@/lib/worldbox/tent";
 import { isPresenceEnabled, listPresence, loadStoredPresence, putPresenceTabGuarded, removePresence } from "@/lib/worldbox/presence-online";
-import { parseSave } from "@/lib/worldbox/save";
+import { parseSave, parseSaveTpAt } from "@/lib/worldbox/save";
 import { loadWorldBoxSave } from "@/lib/worldbox/save-online";
 import { recordFirstStep, recordPresenceMetric } from "@/lib/worldbox/metrics-online";
-import { checkMovementContinuity, checkSaveFallbackContinuity, presenceIdFor, sanitizeHeartbeat, sanitizePresenceSpace, selectVisiblePlayers, thinPresenceNear } from "@/lib/worldbox/presence";
+import { checkMovementContinuity, checkSaveFallbackContinuity, MOVEMENT_RESET_MS, presenceIdFor, sanitizeHeartbeat, sanitizePresenceSpace, selectVisiblePlayers, thinPresenceNear } from "@/lib/worldbox/presence";
 
 export const runtime = "nodejs";
 
@@ -94,13 +94,27 @@ export async function PUT(request: Request) {
   // プレゼンス（時刻基準）、無ければサーバー保存のセーブ（固定距離）。
   // 却下されたハートビートは保存せず、保管位置は最後の正規位置のまま。
   // 応答に保管位置を載せるので、クライアントはそこへ戻れる。
+  let recoveredTpTs: number | undefined;
   const prev = await loadStoredPresence(ownerKey);
   if (prev) {
     if (!checkMovementContinuity(prev, heartbeat, now).ok) {
-      return NextResponse.json(
-        { error: "position_jump", x: prev.x, y: prev.y, space: prev.space },
-        { status: 409, headers: NO_STORE },
-      );
+      // サーバー転移（ワープ/蘇生/救助等）直後に古いプレゼンスだけが残っている場合は
+      // セーブ側の tpAt が新しく且つ転移先から連続なら通す。
+      const rawSave = await loadWorldBoxSave(ownerKey);
+      const saveTp = parseSaveTpAt(rawSave);
+      const saved = saveTp > (prev.tpTs ?? 0) && saveTp >= prev.ts && now - saveTp < MOVEMENT_RESET_MS ? parseSave(rawSave) : null;
+      const tpOk = saved !== null && checkMovementContinuity(
+        { x: saved.x, y: saved.y, space: saved.space, ts: saveTp },
+        heartbeat,
+        now,
+      ).ok;
+      if (!tpOk) {
+        return NextResponse.json(
+          { error: "position_jump", x: prev.x, y: prev.y, space: prev.space },
+          { status: 409, headers: NO_STORE },
+        );
+      }
+      recoveredTpTs = saveTp;
     }
   } else {
     const saved = parseSave(await loadWorldBoxSave(ownerKey));
@@ -112,7 +126,7 @@ export async function PUT(request: Request) {
     }
   }
   // タブ世代（分身防止）: 新しい世代のタブだけが保存できる。旧タブは 409。
-  const stored = await putPresenceTabGuarded(ownerKey, { ...heartbeat, name }, now);
+  const stored = await putPresenceTabGuarded(ownerKey, { ...heartbeat, name }, now, recoveredTpTs ? { tpTs: recoveredTpTs } : undefined);
   if (stored === "rejected") {
     return NextResponse.json({ error: "tab_superseded" }, { status: 409, headers: NO_STORE });
   }

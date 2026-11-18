@@ -112,18 +112,23 @@ async function queueDungeonExitTeleport(memberKey: string, entrance: { x: number
  */
 async function settleDungeonSessionOnLeave(party: Party, ownerKey: string, disbanded: boolean): Promise<void> {
   const floor1 = makeInstanceSpace("dungeon", party.entrance.x, party.entrance.y, 0);
-  const ds = await loadDungeonSession(floor1, party.id);
-  if (!ds) return;
-  const inSession = ds.members.includes(ownerKey);
-  let session: DungeonSession = ds;
-  if (inSession && !ds.departed.includes(ownerKey)) {
-    session = { ...ds, departed: [...ds.departed, ownerKey] };
-  }
-  if (disbanded || dungeonSessionClosed(session)) {
-    await deleteDungeonSession(floor1, party.id);
-  } else if (session !== ds) {
-    await storeDungeonSession(floor1, session);
-  }
+  const settled = await withUserLock(`instance:${floor1}`, async () => {
+    const ds = await loadDungeonSession(floor1, party.id);
+    if (!ds) return null;
+    const inSession = ds.members.includes(ownerKey);
+    let session: DungeonSession = ds;
+    if (inSession && !ds.departed.includes(ownerKey)) {
+      session = { ...ds, departed: [...ds.departed, ownerKey] };
+    }
+    if (disbanded || dungeonSessionClosed(session)) {
+      await deleteDungeonSession(floor1, party.id);
+    } else if (session !== ds) {
+      await storeDungeonSession(floor1, session);
+    }
+    return { ds, session, inSession };
+  });
+  if (!settled) return;
+  const { ds, session, inSession } = settled;
   const targets = new Set<string>();
   if (inSession && !ds.dead.includes(ownerKey)) targets.add(ownerKey);
   if (disbanded) {
@@ -201,120 +206,124 @@ export async function POST(request: Request) {
   const name = session.username ?? "";
   const pos = await myPresence(ownerKey);
 
-  if (fields.action === "create") {
-    if (!pos || pos.space !== "world") return err("not_at_entrance", 409);
-    const entrance = dungeonEntranceNear(pos.x, pos.y, ENTRANCE_RANGE);
-    if (!entrance) return err("not_at_entrance", 409);
-    const existing = await loadPartyOf(ownerKey);
-    if (existing) return NextResponse.json({ ok: true, party: partyView(existing) }, { headers: NO_STORE });
-    const me = await memberOf(ownerKey, name);
-    const party = createParty(makePartyId(ownerKey, now), me, entrance, now);
-    if (!(await storeParty(party))) return err("store_failed", 503);
-    return NextResponse.json({ ok: true, party: partyView(party) }, { headers: NO_STORE });
-  }
-
-  if (fields.action === "invite") {
-    const party = await loadPartyOf(ownerKey);
-    if (!party) return err("no_party", 409);
-    if (!isPartyLeader(party, ownerKey)) return err("not_leader", 409);
-    if (party.members.length >= 4) return err("party_full", 409);
-    if (!pos || pos.space !== "world") return err("not_at_entrance", 409);
-    const targetId = typeof fields.targetId === "string" ? fields.targetId : "";
-    const owners = await listPresenceWithOwners();
-    const target = owners.find((o) => o.entry.id === targetId && o.entry.space === "world" && now - o.entry.ts <= 15_000);
-    if (!target) return err("target_not_near", 409);
-    if (Math.hypot(target.entry.x - pos.x, target.entry.y - pos.y) > INVITE_RANGE) return err("target_not_near", 409);
-    if (target.ownerKey === ownerKey) return err("invalid_request", 400);
-    const next = addInvite(party, { toKey: target.ownerKey, name: target.entry.name ?? "", at: now });
-    if (!(await storeParty(next))) return err("store_failed", 503);
-    return NextResponse.json({ ok: true, party: partyView(next) }, { headers: NO_STORE });
-  }
-
-  if (fields.action === "accept") {
-    const invited = await loadInvitedParty(ownerKey);
-    if (!invited || !inviteFor(invited, ownerKey, now)) return err("no_invite", 409);
-    // 既に別のパーティに所属している場合は受け入れない。所属の索引だけ
-    // 上書きすると旧パーティに幽霊メンバーが残り、人数とダンジョンの
-    // セッションに数えられ続ける。所属の変更は leave を明示的に挟む
-    // （create が既存パーティを返すのと同じ方針）。
-    const existing = await loadPartyOf(ownerKey);
-    if (existing && existing.id !== invited.id) return err("already_in_party", 409);
-    if (!pos || pos.space !== "world") return err("not_at_entrance", 409);
-    if (Math.hypot(invited.entrance.x + 0.5 - pos.x, invited.entrance.y + 0.5 - pos.y) > ENTRANCE_RANGE + 2) {
-      return err("not_at_entrance", 409);
+  return withUserLock("worldbox:party", async () => {
+    if (fields.action === "create") {
+      if (!pos || pos.space !== "world") return err("not_at_entrance", 409);
+      const entrance = dungeonEntranceNear(pos.x, pos.y, ENTRANCE_RANGE);
+      if (!entrance) return err("not_at_entrance", 409);
+      const existing = await loadPartyOf(ownerKey);
+      if (existing) return NextResponse.json({ ok: true, party: partyView(existing) }, { headers: NO_STORE });
+      const me = await memberOf(ownerKey, name);
+      const party = createParty(makePartyId(ownerKey, now), me, entrance, now);
+      if (!(await storeParty(party))) return err("store_failed", 503);
+      return NextResponse.json({ ok: true, party: partyView(party) }, { headers: NO_STORE });
     }
-    const me = await memberOf(ownerKey, name);
-    const joined = joinParty(invited, me);
-    if ("error" in joined) return err(joined.error === "full" ? "party_full" : "already_member", 409);
-    if (!(await storeParty(joined.party))) return err("store_failed", 503);
-    await clearInviteIndex(ownerKey);
-    return NextResponse.json({ ok: true, party: partyView(joined.party) }, { headers: NO_STORE });
-  }
 
-  if (fields.action === "decline") {
-    const invited = await loadInvitedParty(ownerKey);
-    if (invited) {
-      const next = { ...invited, invites: invited.invites.filter((i) => i.toKey !== ownerKey) };
-      await storeParty(next);
+    if (fields.action === "invite") {
+      const party = await loadPartyOf(ownerKey);
+      if (!party) return err("no_party", 409);
+      if (!isPartyLeader(party, ownerKey)) return err("not_leader", 409);
+      if (party.members.length >= 4) return err("party_full", 409);
+      if (!pos || pos.space !== "world") return err("not_at_entrance", 409);
+      const targetId = typeof fields.targetId === "string" ? fields.targetId : "";
+      const owners = await listPresenceWithOwners();
+      const target = owners.find((o) => o.entry.id === targetId && o.entry.space === "world" && now - o.entry.ts <= 15_000);
+      if (!target) return err("target_not_near", 409);
+      if (Math.hypot(target.entry.x - pos.x, target.entry.y - pos.y) > INVITE_RANGE) return err("target_not_near", 409);
+      if (target.ownerKey === ownerKey) return err("invalid_request", 400);
+      const next = addInvite(party, { toKey: target.ownerKey, name: target.entry.name ?? "", at: now });
+      if (!(await storeParty(next))) return err("store_failed", 503);
+      return NextResponse.json({ ok: true, party: partyView(next) }, { headers: NO_STORE });
     }
-    await clearInviteIndex(ownerKey);
-    return NextResponse.json({ ok: true }, { headers: NO_STORE });
-  }
 
-  if (fields.action === "leave") {
-    const party = await loadPartyOf(ownerKey);
-    if (!party) return NextResponse.json({ ok: true }, { headers: NO_STORE });
-    const next = leaveParty(party, ownerKey);
-    // ダンジョンのセッションを畳む（中にいる人を入口前へ戻す予約込み）。
-    // パーティの削除・保存より先に、partyKey が生きているうちに行う。
-    await settleDungeonSessionOnLeave(party, ownerKey, next === null);
-    if (!next) {
-      await deleteParty(party);
-    } else {
-      await storeParty(next);
-      await clearMemberIndex(ownerKey);
+    if (fields.action === "accept") {
+      const invited = await loadInvitedParty(ownerKey);
+      if (!invited || !inviteFor(invited, ownerKey, now)) return err("no_invite", 409);
+      // 既に別のパーティに所属している場合は受け入れない。所属の索引だけ
+      // 上書きすると旧パーティに幽霊メンバーが残り、人数とダンジョンの
+      // セッションに数えられ続ける。所属の変更は leave を明示的に挟む
+      // （create が既存パーティを返すのと同じ方針）。
+      const existing = await loadPartyOf(ownerKey);
+      if (existing && existing.id !== invited.id) return err("already_in_party", 409);
+      if (!pos || pos.space !== "world") return err("not_at_entrance", 409);
+      if (Math.hypot(invited.entrance.x + 0.5 - pos.x, invited.entrance.y + 0.5 - pos.y) > ENTRANCE_RANGE + 2) {
+        return err("not_at_entrance", 409);
+      }
+      const me = await memberOf(ownerKey, name);
+      const joined = joinParty(invited, me);
+      if ("error" in joined) return err(joined.error === "full" ? "party_full" : "already_member", 409);
+      if (!(await storeParty(joined.party))) return err("store_failed", 503);
+      await clearInviteIndex(ownerKey);
+      return NextResponse.json({ ok: true, party: partyView(joined.party) }, { headers: NO_STORE });
     }
-    return NextResponse.json({ ok: true, party: partyView(next) }, { headers: NO_STORE });
-  }
 
-  if (fields.action === "enter") {
-    if (!pos || pos.space !== "world") return err("not_at_entrance", 409);
-    const entrance = dungeonEntranceNear(pos.x, pos.y, ENTRANCE_RANGE);
-    if (!entrance) return err("not_at_entrance", 409);
-    const party = await loadPartyOf(ownerKey);
-    const inParty = party && isPartyMember(party, ownerKey) ? party : null;
-    if (inParty && (inParty.entrance.x !== entrance.x || inParty.entrance.y !== entrance.y)) {
-      return err("wrong_entrance", 409);
+    if (fields.action === "decline") {
+      const invited = await loadInvitedParty(ownerKey);
+      if (invited) {
+        const next = { ...invited, invites: invited.invites.filter((i) => i.toKey !== ownerKey) };
+        if (!(await storeParty(next))) return err("store_failed", 503);
+      }
+      await clearInviteIndex(ownerKey);
+      return NextResponse.json({ ok: true }, { headers: NO_STORE });
     }
-    const partyKey = partyKeyOf(inParty, ownerKey);
-    const floor1 = makeInstanceSpace("dungeon", entrance.x, entrance.y, 0);
-    let ds = await loadDungeonSession(floor1, partyKey);
-    if (!ds) {
-      // セッション作成はリーダー（またはソロ）だけ。メンバーはリーダーの入場を待つ。
-      if (inParty && !isPartyLeader(inParty, ownerKey)) return err("leader_not_entered", 409);
-      const members = inParty ? inParty.members.map((m) => m.ownerKey) : [ownerKey];
-      ds = {
-        partyKey,
-        entrance,
-        size: members.length,
-        members,
-        departed: [],
-        dead: [],
-        floorBossDead: {},
-        bossDead: false,
-        doors: {},
-        chests: {},
-        startedAt: now,
-      } satisfies DungeonSession;
-      if (!(await storeDungeonSession(floor1, ds))) return err("store_failed", 503);
-    }
-    if (!ds.members.includes(ownerKey)) return err("not_member", 409);
-    if (ds.departed.includes(ownerKey) || ds.dead.includes(ownerKey)) return err("already_left", 409);
-    return NextResponse.json(
-      { ok: true, space: floor1, partyKey, size: ds.size },
-      { headers: NO_STORE },
-    );
-  }
 
-  return err("invalid_request", 400);
+    if (fields.action === "leave") {
+      const party = await loadPartyOf(ownerKey);
+      if (!party) return NextResponse.json({ ok: true }, { headers: NO_STORE });
+      const next = leaveParty(party, ownerKey);
+      // ダンジョンのセッションを畳む（中にいる人を入口前へ戻す予約込み）。
+      // パーティの削除・保存より先に、partyKey が生きているうちに行う。
+      await settleDungeonSessionOnLeave(party, ownerKey, next === null);
+      if (!next) {
+        await deleteParty(party);
+      } else {
+        if (!(await storeParty(next))) return err("store_failed", 503);
+        await clearMemberIndex(ownerKey);
+      }
+      return NextResponse.json({ ok: true, party: partyView(next) }, { headers: NO_STORE });
+    }
+
+    if (fields.action === "enter") {
+      if (!pos || pos.space !== "world") return err("not_at_entrance", 409);
+      const entrance = dungeonEntranceNear(pos.x, pos.y, ENTRANCE_RANGE);
+      if (!entrance) return err("not_at_entrance", 409);
+      const party = await loadPartyOf(ownerKey);
+      const inParty = party && isPartyMember(party, ownerKey) ? party : null;
+      if (inParty && (inParty.entrance.x !== entrance.x || inParty.entrance.y !== entrance.y)) {
+        return err("wrong_entrance", 409);
+      }
+      const partyKey = partyKeyOf(inParty, ownerKey);
+      const floor1 = makeInstanceSpace("dungeon", entrance.x, entrance.y, 0);
+      return withUserLock(`instance:${floor1}`, async () => {
+        let ds = await loadDungeonSession(floor1, partyKey);
+        if (!ds) {
+          // セッション作成はリーダー（またはソロ）だけ。メンバーはリーダーの入場を待つ。
+          if (inParty && !isPartyLeader(inParty, ownerKey)) return err("leader_not_entered", 409);
+          const members = inParty ? inParty.members.map((m) => m.ownerKey) : [ownerKey];
+          ds = {
+            partyKey,
+            entrance,
+            size: members.length,
+            members,
+            departed: [],
+            dead: [],
+            floorBossDead: {},
+            bossDead: false,
+            doors: {},
+            chests: {},
+            startedAt: now,
+          } satisfies DungeonSession;
+          if (!(await storeDungeonSession(floor1, ds))) return err("store_failed", 503);
+        }
+        if (!ds.members.includes(ownerKey)) return err("not_member", 409);
+        if (ds.departed.includes(ownerKey) || ds.dead.includes(ownerKey)) return err("already_left", 409);
+        return NextResponse.json(
+          { ok: true, space: floor1, partyKey, size: ds.size },
+          { headers: NO_STORE },
+        );
+      });
+    }
+
+    return err("invalid_request", 400);
+  });
 }

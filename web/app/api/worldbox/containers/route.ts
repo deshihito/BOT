@@ -141,6 +141,9 @@ export async function GET(request: Request) {
   const url = new URL(request.url);
   const xRaw = url.searchParams.get("x");
   const yRaw = url.searchParams.get("y");
+  if ((xRaw !== null && xRaw.trim() === "") || (yRaw !== null && yRaw.trim() === "")) {
+    return errorJson("invalid_tile", 400);
+  }
   const coord = checkedCoord(
     xRaw === null ? NaN : Number(xRaw),
     yRaw === null ? NaN : Number(yRaw),
@@ -203,7 +206,8 @@ export async function POST(request: Request) {
   // 同一ユーザーへの並行リクエストを直列化する（S4）: コンテナと
   // プロフィールの両方を読み書きするため、ロック無しだと二重移動や
   // lost update が起きる（タイル側と同じ型、S1 の横展開）。
-  return withUserLock(ownerKey, async () => {
+  return withUserLock(`container:${space}:${coord.x},${coord.y}`, () =>
+    withUserLock(ownerKey, async () => {
         const resolved = await resolveContainer(ownerKey, space, coord.x, coord.y);
         if (!resolved.ok) return errorJson(resolved.error, resolved.status);
 
@@ -214,11 +218,13 @@ export async function POST(request: Request) {
           return errorJson("containers_failed", 500);
         }
         if (!(await storeProfile(ownerKey, moved.profile))) {
+          await storeContainer(resolved.storeSpace, resolved.storeX, resolved.storeY, resolved.state);
           return errorJson("containers_failed", 500);
         }
         return NextResponse.json(
           { ok: true, profile: moved.profile, container: moved.container },
           { headers: NO_STORE },
         );
-  });
+    }),
+  );
 }

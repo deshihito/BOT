@@ -406,6 +406,17 @@ const TILE_ERROR_LABEL: Record<string, string> = {
   not_empty: "中身が入っている",
   no_container: "収納がない",
   containers_unavailable: "いま使えない",
+  already_listed: "すでに出品されています",
+  not_listed: "出品されていません",
+  own_stall: "自分の屋台です",
+  insufficient_balance: "コインが足りない",
+  not_enough_balance: "コインが足りない",
+  no_stall: "屋台がない",
+  stalls_unavailable: "いま使えない",
+  stalls_failed: "失敗しました",
+  economy_failed: "支払いに失敗した",
+  store_failed: "保存に失敗した",
+  invalid_coord: "座標が不正",
 };
 
 /** アイテムのドット絵アイコン（無いアイテムは名前ラベルのみで出す）。 */
@@ -1253,6 +1264,7 @@ export default function WorldBoxClient() {
     if (stationUi !== "guild") setGuildBoardOpen(false);
     if (stationUi !== "arena") setArenaOpen(false);
     if (stationUi !== "arcade") setArcadeOpen(false);
+    if (stationUi !== "race") setRacingOpen(false);
     setPlazaMsg("");
   }, [stationUi]);
 
@@ -1396,6 +1408,7 @@ export default function WorldBoxClient() {
   const [fortifyPanel, setFortifyPanel] = useState<{ x: number; y: number; itemId: string; fort: number } | null>(null);
   /** 屋台パネル: 対象タイルと、開いた時点で選択していたアイテム（出品候補）と自分の屋台か。 */
   const [stallPanel, setStallPanel] = useState<{ x: number; y: number; selItemId: string | null; mine: boolean } | null>(null);
+  const stallReqRef = useRef(0);
   /** 屋台の出品（サーバーが正）。undefined は読み込み中。 */
   const [stallInfo, setStallInfo] = useState<{ itemId: string; name: string; price: number; count: number; mine: boolean } | null | undefined>(undefined);
   const [stallPriceText, setStallPriceText] = useState("100");
@@ -1418,10 +1431,32 @@ export default function WorldBoxClient() {
       setSeedPicker(null);
       setContainerPanel(null);
       setHeldPanelSlot(null);
+      setArenaOpen(false);
+      setArcadeOpen(false);
+      setRacingOpen(false);
+      setPianoOpen(false);
+      setGuildShopOpen(false);
+      setReportOpen(false);
+      setRailOpen(false);
+      setMachinePanel(null);
+      setSignEdit(null);
+      setFortifyPanel(null);
+      setStallPanel(null);
+      setTelescopeOpen(false);
     };
     window.addEventListener("keydown", onEsc);
     return () => window.removeEventListener("keydown", onEsc);
   }, []);
+  useEffect(() => {
+    setStallPanel(null);
+    setSignEdit(null);
+    setFortifyPanel(null);
+    setSeedPicker(null);
+    setMachinePanel(null);
+    setContainerPanel(null);
+    setHeldPanelSlot(null);
+    setRailOpen(false);
+  }, [spaceUi]);
   const tilesRef = useRef<TileOverridesMap>({});
   const tilesVersionRef = useRef(0);
   /** 演出イベントの受け渡し（行為の成功/失敗→描画ループでパーティクル/揺れ/ポップに変換）。
@@ -1738,6 +1773,10 @@ export default function WorldBoxClient() {
   };
   const showPlayerCardRef = useRef(showPlayerCard);
   showPlayerCardRef.current = showPlayerCard;
+  useEffect(() => () => {
+    if (pianoFlushTimerRef.current !== undefined) window.clearTimeout(pianoFlushTimerRef.current);
+    if (playerCardTimerRef.current !== null) window.clearTimeout(playerCardTimerRef.current);
+  }, []);
   /** チャット（近距離/全体/ユニオン）。サーバーが正、ここは表示と送信だけ。 */
   const [chatChannel, setChatChannel] = useState<"proximity" | "global" | "union">("proximity");
   const [chatMsgs, setChatMsgs] = useState<{ name: string; text: string; at: number; source?: string }[]>([]);
@@ -2207,6 +2246,7 @@ export default function WorldBoxClient() {
   postTileActionRef.current = postTileAction;
   /** 屋台の操作（出品・取り下げ・購入）。結果の出品とプロフィールで表示を更新する。 */
   const postStallAction = async (action: "list_item" | "unlist" | "buy", x: number, y: number, extra?: { itemId?: string; price?: number; count?: number }) => {
+    const reqId = ++stallReqRef.current;
     try {
       const res = await fetch("/api/worldbox/stalls", {
         method: "POST",
@@ -2222,6 +2262,7 @@ export default function WorldBoxClient() {
         setTileMsg(TILE_ERROR_LABEL[data.error ?? ""] ?? "できませんでした");
         return;
       }
+      if (stallReqRef.current !== reqId) return;
       setStallInfo(data.stall ?? null);
       if (data.profile) setInvProfile(data.profile);
     } catch {
@@ -2862,6 +2903,7 @@ export default function WorldBoxClient() {
     let dashKey: string | null = null;
     /** 最後に立っていた陸の位置（水中で力尽きた際の帰還先）。 */
     let lastLand = { x: spawn.x, y: spawn.y };
+    let rescueSyncUntil = 0;
     let wasSwimming = false;
     /** 今フレームの泳ぎ状態（描画の沈み・波紋用）。 */
     let playerSwimming = false;
@@ -2992,6 +3034,9 @@ export default function WorldBoxClient() {
         const free = findFreeNear(activeMap(), choice.state.x, choice.state.y, activeBlocked(), { swim: space === "world" });
         player.x = free.x;
         player.y = free.y;
+        if (space === "world" && !isWaterAt(worldMap, free.x, free.y)) {
+          lastLand = { x: free.x, y: free.y };
+        }
         cam.x = free.x;
         cam.y = free.y;
         setSpaceUi(space);
@@ -3303,6 +3348,7 @@ export default function WorldBoxClient() {
      * findFreeNear を通さない（着地のずれで再却下の連鎖になるため）。
      * 次回ハートビートは保管位置と一致し、受け入れられる。 */
     const snapBackToServer = (x: number, y: number, targetSpace: string) => {
+      if (Date.now() < rescueSyncUntil) return;
       if (targetSpace !== space) return;
       player.x = x;
       player.y = y;
@@ -3396,6 +3442,7 @@ export default function WorldBoxClient() {
       if (!loggedIn) return;
       // 中継が未接続なら再接続を試みる（再試行時刻を過ぎたときだけ）
       if (!rtSocket && Date.now() >= rtRetryAt) void connectRealtime();
+      if (Date.now() < rescueSyncUntil) return;
       const now = performance.now();
       const movedDist = Math.hypot(player.x - lastHeartbeatPos.x, player.y - lastHeartbeatPos.y);
       const moving = Math.hypot(player.vx, player.vy) > 0.1 || movedDist > 0.05;
@@ -3771,12 +3818,15 @@ export default function WorldBoxClient() {
         // 屋台: タップでパネルを開く（出品の確認・出品・取り下げ・購入）
         setStallInfo(undefined);
         setStallPanel({ x: t.x, y: t.y, selItemId: selItem && !selItem.tool ? selItem.id : null, mine: view.block.mine });
+        const reqId = ++stallReqRef.current;
         void (async () => {
           try {
             const res = await fetch(`/api/worldbox/stalls?x=${t.x}&y=${t.y}`, { headers: { Accept: "application/json" } });
             const data = (await res.json().catch(() => ({}))) as { stall?: typeof stallInfo };
+            if (stallReqRef.current !== reqId) return;
             setStallInfo(res.ok ? (data.stall ?? null) : null);
           } catch {
+            if (stallReqRef.current !== reqId) return;
             setStallInfo(null);
           }
         })();
@@ -4232,6 +4282,9 @@ export default function WorldBoxClient() {
       const free = findFreeNear(activeMap(), x, y, activeBlocked(), { swim: space === "world" });
       player.x = free.x;
       player.y = free.y;
+      if (space === "world" && !isWaterAt(worldMap, free.x, free.y)) {
+        lastLand = { x: free.x, y: free.y };
+      }
       player.vx = 0;
       player.vy = 0;
       cam.x = free.x;
@@ -4712,7 +4765,7 @@ export default function WorldBoxClient() {
       const floorOvNow = space === "world" ? tilesRef.current[tileKey(Math.floor(player.x), Math.floor(player.y))] : undefined;
       const onBridgeNow = floorOvNow?.block?.itemId === "bridge_block" && isOverrideActive(floorOvNow, Date.now());
       const inWaterNow = space === "world" && !onBridgeNow && isWaterAt(worldMap, player.x, player.y);
-      if (space === "world" && !inWaterNow) lastLand = { x: player.x, y: player.y };
+      if (space === "world" && !inWaterNow && !onBridgeNow) lastLand = { x: player.x, y: player.y };
       if (inWaterNow !== wasSwimming) {
         splashes.push({ x: player.x, y: player.y, at: now });
         spawnBurst(fxSys, "splash", player.x, player.y);
@@ -4728,6 +4781,10 @@ export default function WorldBoxClient() {
       }
       playerSwimming = inWaterNow;
       if (inWaterNow && stamina.value <= 0) {
+        const px = player.x;
+        const py = player.y;
+        const lx = lastLand.x;
+        const ly = lastLand.y;
         stamina = rescueStamina(stamina);
         player.x = lastLand.x;
         player.y = lastLand.y;
@@ -4740,7 +4797,37 @@ export default function WorldBoxClient() {
         splashes.push({ x: player.x, y: player.y, at: now });
         spawnBurst(fxSys, "warp", player.x, player.y - 0.3);
         playWbSe("warp");
-        saveNow();
+        saveLocal();
+        if (loggedIn && !tabSuperseded) {
+          rescueSyncUntil = Date.now() + 3000;
+          void fetch("/api/worldbox/vitals", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Accept: "application/json" },
+            body: JSON.stringify({ action: "swim_rescue", px, py, lx, ly }),
+          })
+            .then(async (res) => {
+              if (!res.ok || disposed) return;
+              const data = (await res.json()) as { rescue?: { x: number; y: number } };
+              if (!disposed && data.rescue && space === "world") {
+                player.x = data.rescue.x;
+                player.y = data.rescue.y;
+                lastLand = { x: data.rescue.x, y: data.rescue.y };
+                cam.x = data.rescue.x;
+                cam.y = data.rescue.y;
+                lastTileKey = `world:${Math.floor(data.rescue.x)},${Math.floor(data.rescue.y)}`;
+                lastHeartbeatPos = { x: data.rescue.x, y: data.rescue.y };
+                lastSaved = { x: data.rescue.x, y: data.rescue.y, at: performance.now() };
+                lastRestHeartbeatAt = performance.now();
+                lastHeartbeatAt = performance.now();
+                saveLocal();
+                rescueSyncUntil = 0;
+                sendWsHeartbeat();
+                if (!rtAggOn) sendHeartbeat();
+              }
+            })
+            .catch(() => { /* noop */ })
+            .finally(() => { rescueSyncUntil = 0; });
+        }
       }
       // モブ接触: 占有範囲までチェビシェフ距離1以内を接触とする。
       // 敵対は接触開始時（継続中は1秒間隔）だけ軽いノックバック＋hit バーストを出し、
@@ -7481,12 +7568,14 @@ export default function WorldBoxClient() {
 
       {stallPanel && (
         <div style={panelOverlay} className="wb-panel">
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <strong>屋台</strong>
-            <span style={{ flex: 1 }} />
-            <button type="button" style={btn} onClick={() => setStallPanel(null)}>
-              閉じる
-            </button>
+          <div style={stickyPanelHead}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <strong>屋台</strong>
+              <span style={{ flex: 1 }} />
+              <button type="button" style={btn} onClick={() => setStallPanel(null)}>
+                閉じる
+              </button>
+            </div>
           </div>
           {stallInfo === undefined ? (
             <div style={{ marginTop: 10, fontSize: 13 }}>…</div>
@@ -7569,12 +7658,14 @@ export default function WorldBoxClient() {
       )}
       {signEdit && (
         <div style={panelOverlay} className="wb-panel">
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <strong>看板</strong>
-            <span style={{ flex: 1 }} />
-            <button type="button" style={btn} onClick={() => setSignEdit(null)}>
-              閉じる
-            </button>
+          <div style={stickyPanelHead}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <strong>看板</strong>
+              <span style={{ flex: 1 }} />
+              <button type="button" style={btn} onClick={() => setSignEdit(null)}>
+                閉じる
+              </button>
+            </div>
           </div>
           <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
             <input
@@ -7601,12 +7692,14 @@ export default function WorldBoxClient() {
       )}
       {fortifyPanel && (
         <div style={panelOverlay} className="wb-panel">
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <strong>要塞化</strong>
-            <span style={{ flex: 1 }} />
-            <button type="button" style={btn} onClick={() => setFortifyPanel(null)}>
-              閉じる
-            </button>
+          <div style={stickyPanelHead}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <strong>要塞化</strong>
+              <span style={{ flex: 1 }} />
+              <button type="button" style={btn} onClick={() => setFortifyPanel(null)}>
+                閉じる
+              </button>
+            </div>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10, fontSize: 13 }}>
             <ItemIcon id={fortifyPanel.itemId} size={20} />

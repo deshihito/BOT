@@ -174,7 +174,14 @@ export default function WorldBoxRacingPanel({ onClose }: { onClose: () => void }
   };
 
   const header = (
-    <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+    <div
+      style={{
+        display: "flex", alignItems: "center", gap: 10,
+        position: "sticky", top: -16, zIndex: 2,
+        background: "rgba(12,14,22,0.98)", margin: "-16px -16px 10px", padding: "12px 16px 10px",
+        borderBottom: "1px solid rgba(255,255,255,0.1)",
+      }}
+    >
       <div style={{ fontSize: 17, fontWeight: 700 }}>競馬場</div>
       {state && <div style={{ marginLeft: "auto", fontSize: 13, opacity: 0.9 }}>{state.balance.toLocaleString()} コイン</div>}
       <button type="button" style={{ ...btn, minHeight: 36, padding: "4px 12px" }} onClick={onClose}>閉じる</button>
@@ -183,7 +190,7 @@ export default function WorldBoxRacingPanel({ onClose }: { onClose: () => void }
 
   if (load !== "ready" || !state) {
     return (
-      <div style={wrap}>
+      <div style={wrap} className="wb-panel" role="dialog" aria-label="競馬場">
         {header}
         <div style={{ fontSize: 14, opacity: 0.85, padding: "12px 0" }}>
           {load === "guest" ? "Discord ログインが必要です" : load === "unavailable" ? "いま競馬場を使えません" : "読み込み中…"}
@@ -201,7 +208,7 @@ export default function WorldBoxRacingPanel({ onClose }: { onClose: () => void }
   const selOdds = selected ? (selType === "win" ? selected.odds.win : selected.odds.place) : 0;
 
   return (
-    <div style={wrap}>
+    <div style={wrap} className="wb-panel" role="dialog" aria-label="競馬場">
       {header}
 
       <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>

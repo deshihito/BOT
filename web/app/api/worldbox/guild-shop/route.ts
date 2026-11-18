@@ -149,6 +149,7 @@ export async function POST(request: Request) {
     const myGuild = membership?.nationId ?? null;
     const myRole = await resolvedRole(nations, ownerKey);
     const isLeader = myRole === "king" || myRole === "minister";
+    let rollbackOnFail: (() => Promise<void>) | null = null;
     const respond = async (next: GuildShopState) => {
       // 完売した出品は保存前に取り除く。残しておくとパネルからは
       // 到達できず（在庫 0 は表示されない）state に溜まり続ける。
@@ -159,7 +160,14 @@ export async function POST(request: Request) {
           p ? { ...p, listings: p.listings.filter((l) => listingAvailable(l) > 0) } : p,
         ),
       };
-      if (!(await storeGuildShopState(pruned))) return err("store_failed", 503);
+      if (rollbackOnFail) {
+        if (!(await storeGuildShopState(pruned))) {
+          await rollbackOnFail();
+          return err("store_failed", 503);
+        }
+      } else {
+        if (!(await storeGuildShopState(pruned))) return err("store_failed", 503);
+      }
       return NextResponse.json(
         { ok: true, ...view(pruned, nations, ownerKey), myGuildId: myGuild, myRole },
         { headers: NO_STORE },
@@ -193,14 +201,26 @@ export async function POST(request: Request) {
       const plot = plotOfGuild(state, myGuild);
       if (!plot) return err("no_plot", 409);
       // 残っている出品は各売り手へ返却する
+      const restored: { sellerKey: string; prev: Awaited<ReturnType<typeof loadProfile>> }[] = [];
       for (const listing of plot.listings) {
         const left = listingAvailable(listing);
         if (left <= 0) continue;
-        const sellerProfile = await loadProfile(listing.sellerKey);
-        await storeProfile(listing.sellerKey, addItem(sellerProfile, listing.itemId, left));
+        const prev = await withUserLock(listing.sellerKey, async () => {
+          const sellerProfile = await loadProfile(listing.sellerKey);
+          const ok = await storeProfile(listing.sellerKey, addItem(sellerProfile, listing.itemId, left));
+          return ok ? sellerProfile : null;
+        });
+        if (!prev) {
+          for (const r of restored) await withUserLock(r.sellerKey, () => storeProfile(r.sellerKey, r.prev));
+          return err("store_failed", 503);
+        }
+        restored.push({ sellerKey: listing.sellerKey, prev });
       }
       const plots = [...state.plots];
       plots[plot.idx] = null;
+      rollbackOnFail = async () => {
+        for (const r of restored) await withUserLock(r.sellerKey, () => storeProfile(r.sellerKey, r.prev));
+      };
       return respond({ ...state, plots });
     }
 
@@ -218,17 +238,22 @@ export async function POST(request: Request) {
       if (!def || count <= 0 || count > 999 || price <= 0 || price > 1_000_000) {
         return err("invalid_listing", 400);
       }
-      const profile = await loadProfile(ownerKey);
-      if (countItem(profile, itemId) < count) return err("not_enough_items", 409);
-      const removed = removeItem(profile, itemId, count);
-      if (!removed) return err("not_enough_items", 409);
-      if (!(await storeProfile(ownerKey, removed))) return err("store_failed", 503);
-      const seq = state.listingSeq + 1;
-      const listing = { id: `l${seq}`, sellerKey: ownerKey, itemId, count, sold: 0, price };
-      const plots = state.plots.map((p) =>
-        p && p.idx === plot.idx ? { ...p, listings: [...p.listings, listing] } : p,
-      );
-      return respond({ ...state, plots, listingSeq: seq });
+      return withUserLock(ownerKey, async () => {
+        const profile = await loadProfile(ownerKey);
+        if (countItem(profile, itemId) < count) return err("not_enough_items", 409);
+        const removed = removeItem(profile, itemId, count);
+        if (!removed) return err("not_enough_items", 409);
+        if (!(await storeProfile(ownerKey, removed))) return err("store_failed", 503);
+        const seq = state.listingSeq + 1;
+        const listing = { id: `l${seq}`, sellerKey: ownerKey, itemId, count, sold: 0, price };
+        const plots = state.plots.map((p) =>
+          p && p.idx === plot.idx ? { ...p, listings: [...p.listings, listing] } : p,
+        );
+        rollbackOnFail = async () => {
+          await storeProfile(ownerKey, profile);
+        };
+        return respond({ ...state, plots, listingSeq: seq });
+      });
     }
 
     if (fields.action === "unlist") {
@@ -238,15 +263,25 @@ export async function POST(request: Request) {
       const leaderOfPlot = myGuild === found.plot.guildId && isLeader;
       if (!mine && !leaderOfPlot) return err("not_seller", 403);
       const left = listingAvailable(found.listing);
+      let prevSellerProfile: Awaited<ReturnType<typeof loadProfile>> | null = null;
       if (left > 0) {
-        const sellerProfile = await loadProfile(found.listing.sellerKey);
-        await storeProfile(found.listing.sellerKey, addItem(sellerProfile, found.listing.itemId, left));
+        prevSellerProfile = await withUserLock(found.listing.sellerKey, async () => {
+          const sellerProfile = await loadProfile(found.listing.sellerKey);
+          const ok = await storeProfile(found.listing.sellerKey, addItem(sellerProfile, found.listing.itemId, left));
+          return ok ? sellerProfile : null;
+        });
+        if (!prevSellerProfile) return err("store_failed", 503);
       }
       const plots = state.plots.map((p) =>
         p && p.idx === found.plot.idx
           ? { ...p, listings: p.listings.filter((l) => l.id !== found.listing.id) }
           : p,
       );
+      rollbackOnFail = async () => {
+        if (prevSellerProfile) {
+          await withUserLock(found.listing.sellerKey, () => storeProfile(found.listing.sellerKey, prevSellerProfile));
+        }
+      };
       return respond({ ...state, plots });
     }
 
@@ -301,18 +336,23 @@ export async function POST(request: Request) {
           ...cur, taxCollected: cur.taxCollected + tax, treasury: cur.treasury + tax,
         }));
       }
-      const profile = await loadProfile(ownerKey);
-      await storeProfile(ownerKey, addItem(profile, found.listing.itemId, count));
-      void bumpMetric("guildShopVolume", cost, Date.now());
-      const plots = state.plots.map((p) =>
-        p && p.idx === found.plot.idx
-          ? {
-              ...p,
-              listings: p.listings.map((l) => (l.id === found.listing.id ? { ...l, sold: newSold } : l)),
-            }
-          : p,
-      );
-      return respond({ ...state, plots });
+      return withUserLock(ownerKey, async () => {
+        const profile = await loadProfile(ownerKey);
+        await storeProfile(ownerKey, addItem(profile, found.listing.itemId, count));
+        void bumpMetric("guildShopVolume", cost, Date.now());
+        const plots = state.plots.map((p) =>
+          p && p.idx === found.plot.idx
+            ? {
+                ...p,
+                listings: p.listings.map((l) => (l.id === found.listing.id ? { ...l, sold: newSold } : l)),
+              }
+            : p,
+        );
+        rollbackOnFail = async () => {
+          await storeProfile(ownerKey, profile);
+        };
+        return respond({ ...state, plots });
+      });
     }
 
     return err("invalid_action", 400);

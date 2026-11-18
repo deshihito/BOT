@@ -232,7 +232,8 @@ const boardRoute = await import(
       .replaceAll('"@/lib/auth"', JSON.stringify(authUrl))
       .replaceAll('"@/lib/worldbox/board"', JSON.stringify(boardUrl))
       .replaceAll('"@/lib/worldbox/board-online"', JSON.stringify(boardOnlineUrl))
-      .replaceAll('"@/lib/worldbox/station-online"', JSON.stringify(stationOnlineUrl)),
+      .replaceAll('"@/lib/worldbox/station-online"', JSON.stringify(stationOnlineUrl))
+      .replaceAll('"@/lib/worldbox/user-lock"', JSON.stringify(userLockUrl)),
   ),
 );
 

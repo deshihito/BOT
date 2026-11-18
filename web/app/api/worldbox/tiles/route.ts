@@ -96,6 +96,7 @@ async function chargeFortifyFee(
 }
 
 function intParam(raw: string | null, fallback: number): number {
+  if (raw !== null && raw.trim() === "") return fallback;
   const n = raw === null ? NaN : Number(raw);
   if (!Number.isFinite(n)) return fallback;
   return Math.max(-WORLD_COORD_LIMIT, Math.min(WORLD_COORD_LIMIT, Math.floor(n)));
@@ -175,6 +176,9 @@ export async function POST(request: Request) {
   // 隣接検証。位置がサーバー側で分からない場合は検証を素通りさせず
   // 拒否する（釣り・マシンと同じ規則）。素通しだと、セーブの空間を
   // world 以外にしておくだけで距離検証が消え、遠隔で掘る/置けた。
+  if ((typeof fields.x === "number" && !Number.isFinite(fields.x)) || (typeof fields.y === "number" && !Number.isFinite(fields.y))) {
+    return NextResponse.json({ error: "invalid_request" }, { status: 400, headers: NO_STORE });
+  }
   if (typeof fields.x === "number" && typeof fields.y === "number") {
     const pos = await actorWorldPosition(ownerKey);
     if (!pos) {
@@ -349,13 +353,14 @@ export async function POST(request: Request) {
         if (!(await storeTileOverride(tx, ty, result.override))) {
           return NextResponse.json({ error: "tiles_failed" }, { status: 500, headers: NO_STORE });
         }
+        if (!(await storeProfile(ownerKey, result.profile))) {
+          await storeTileOverride(tx, ty, current);
+          return NextResponse.json({ error: "tiles_failed" }, { status: 500, headers: NO_STORE });
+        }
         // 差分ジャーナル（巻き戻し用、ベストエフォート）
         void appendTileJournal({
           key: tileKey(tx, ty), prev: current, next: result.override, actor: ownerKey, at: Date.now(),
         });
-        if (!(await storeProfile(ownerKey, result.profile))) {
-          return NextResponse.json({ error: "tiles_failed" }, { status: 500, headers: NO_STORE });
-        }
         // 計測（ベストエフォート）: 設置数・収穫数・初回ステップ
         if (fields.action === "place_block") {
           void bumpMetric("blocksPlaced", 1, Date.now());

@@ -3,6 +3,7 @@ import { getRequestSession, publicOrigin, sessionOwnerKey } from "@/lib/auth";
 import { appendBoardPost, sanitizeBoardText } from "@/lib/worldbox/board";
 import { isBoardEnabled, loadBoardPosts, storeBoardPosts } from "@/lib/worldbox/board-online";
 import { loadMyLobbyStation } from "@/lib/worldbox/station-online";
+import { withUserLock } from "@/lib/worldbox/user-lock";
 
 export const runtime = "nodejs";
 
@@ -65,11 +66,13 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "not_at_board" }, { status: 409, headers: NO_STORE });
   }
   const name = session.username?.trim() || "プレイヤー";
-  const posts = appendBoardPost(await loadBoardPosts(), { name, text, at: now });
-  const stored = await storeBoardPosts(posts);
-  if (!stored) {
-    return NextResponse.json({ error: "board_failed" }, { status: 500, headers: NO_STORE });
-  }
-  lastPostAt.set(ownerKey, now);
-  return NextResponse.json({ ok: true, posts }, { headers: NO_STORE });
+  return withUserLock("worldbox:board", async () => {
+    const posts = appendBoardPost(await loadBoardPosts(), { name, text, at: now });
+    const stored = await storeBoardPosts(posts);
+    if (!stored) {
+      return NextResponse.json({ error: "board_failed" }, { status: 500, headers: NO_STORE });
+    }
+    lastPostAt.set(ownerKey, now);
+    return NextResponse.json({ ok: true, posts }, { headers: NO_STORE });
+  });
 }

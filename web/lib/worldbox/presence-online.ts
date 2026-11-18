@@ -15,10 +15,20 @@ export function isPresenceEnabled(): boolean {
 }
 
 /** 自分のハートビートを保存する。成功したら true。 */
-export async function putPresence(ownerKey: string, heartbeat: Heartbeat, ts: number): Promise<boolean> {
+export async function putPresence(
+  ownerKey: string,
+  heartbeat: Heartbeat,
+  ts: number,
+  opts?: { tpTs?: number },
+): Promise<boolean> {
   if (!isBotApiConfigured()) return false;
   try {
-    await kvSet(WORLDBOX_PRESENCE_NAMESPACE, ownerKey, JSON.stringify({ ...heartbeat, ts }));
+    const tpTs = opts?.tpTs && Number.isFinite(opts.tpTs) && opts.tpTs > 0 ? opts.tpTs : undefined;
+    await kvSet(
+      WORLDBOX_PRESENCE_NAMESPACE,
+      ownerKey,
+      JSON.stringify({ ...heartbeat, ts, ...(tpTs !== undefined ? { tpTs } : {}) }),
+    );
     return true;
   } catch {
     return false;
@@ -34,13 +44,19 @@ export async function putPresenceTabGuarded(
   ownerKey: string,
   heartbeat: Heartbeat,
   ts: number,
+  opts?: { tpTs?: number },
 ): Promise<"stored" | "rejected" | "failed"> {
   if (!isBotApiConfigured()) return "failed";
   try {
     const raw = await kvGet(WORLDBOX_PRESENCE_NAMESPACE, ownerKey);
     const stored = raw === null ? null : parsePresenceEntry(presenceIdFor(ownerKey), raw);
     if (tabVerdict(stored, heartbeat, ts) === "reject") return "rejected";
-    await kvSet(WORLDBOX_PRESENCE_NAMESPACE, ownerKey, JSON.stringify({ ...heartbeat, ts }));
+    const tpTs = opts?.tpTs && Number.isFinite(opts.tpTs) && opts.tpTs > 0 ? opts.tpTs : stored?.tpTs;
+    await kvSet(
+      WORLDBOX_PRESENCE_NAMESPACE,
+      ownerKey,
+      JSON.stringify({ ...heartbeat, ts, ...(tpTs !== undefined ? { tpTs } : {}) }),
+    );
     return "stored";
   } catch {
     return "failed";

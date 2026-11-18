@@ -49,6 +49,7 @@ function parseRect(request: Request): { x0: number; y0: number; x1: number; y1: 
   const q = new URL(request.url).searchParams;
   const nums = ["x0", "y0", "x1", "y1"].map((k) => {
     const v = q.get(k);
+    if (v !== null && v.trim() === "") return NaN;
     return v === null ? NaN : Math.floor(Number(v));
   });
   if (nums.some((n) => !Number.isFinite(n))) return null;
@@ -101,73 +102,78 @@ export async function POST(request: Request) {
 
   // 枯渇は全員共有のため、同じオブジェクトへの同時行為を直列化する
   // （洞窟が空間ロックで二重開封を防ぐのと同じ対策）。
-  return withUserLock(`surface-object:${x},${y}`, async () => {
-    const profile = await loadProfile(ownerKey);
-    if (!profile) return err("profile_unavailable", 503);
-    // 道具・段位（定義が正。ツルハシは洞窟と同じエラー名を使う）
-    if (def.tool) {
-      const tier = bestToolTier(profile, def.tool);
-      if (tier <= 0) return err(def.tool === "pickaxe" ? "needs_pickaxe" : "tool_required", 409);
-      if (tier < (def.minTier ?? 0)) return err(def.tool === "pickaxe" ? "pickaxe_tier" : "tool_required", 409);
-    }
-    // 隣接検証（プレゼンス → セーブ。釣りと同じチェビシェフ ≤2）
-    const selfId = presenceIdFor(ownerKey);
-    const now = Date.now();
-    const entries = await listPresence();
-    const entry = entries.find((e) => e.id === selfId && e.space === "world" && now - e.ts <= 15_000);
-    let pos: { x: number; y: number } | null = entry ? { x: entry.x, y: entry.y } : null;
-    if (!pos) {
-      const saved = parseSave(await loadWorldBoxSave(ownerKey));
-      if (saved && saved.space === "world") pos = { x: saved.x, y: saved.y };
-    }
-    if (!pos) return err("position_unknown", 409);
-    if (Math.max(Math.abs(Math.floor(pos.x) - x), Math.abs(Math.floor(pos.y) - y)) > MAX_ACTION_DISTANCE) {
-      return err("too_far", 409);
-    }
-    const harvestedAt = await loadHarvestedAt(x, y);
-    if (!objectRespawned(def, harvestedAt, now)) return err("depleted", 409);
-
-    const rng = makeRng((now ^ x * 131 ^ y * 17) >>> 0);
-    const loot = rollObjectLoot(def, rng);
-    let next = profile;
-    for (const [itemId, count] of Object.entries(loot.gained)) {
-      next = addItem(next, itemId, count);
-    }
-    let trapped = false;
-    if (def.interaction === "open") {
-      trapped = loot.trapped;
-      // 斥候の専門: 宝箱の罠を半減で回避する（洞窟・遺跡と同仕様）
-      if (trapped && profile.role === "scout" && rng() < 0.5) trapped = false;
-      if (trapped) next = { ...next, hp: Math.max(0, next.hp - TRAP_DAMAGE) };
-    }
-    if (def.interaction === "mine" && profile.role === "miner") {
-      // 採掘者の常時効果: 追加ドロップ抽選 + 熟練（洞窟の採掘と同仕様）
-      if (Math.random() < MINER_BONUS_CHANCE) {
-        const bonus = rollObjectLoot(def, makeRng((now ^ 0x5eed) >>> 0));
-        for (const [itemId, count] of Object.entries(bonus.gained)) {
-          next = addItem(next, itemId, count);
-        }
+  return withUserLock(`surface-object:${x},${y}`, () =>
+    withUserLock(ownerKey, async () => {
+      const profile = await loadProfile(ownerKey);
+      if (!profile) return err("profile_unavailable", 503);
+      // 道具・段位（定義が正。ツルハシは洞窟と同じエラー名を使う）
+      if (def.tool) {
+        const tier = bestToolTier(profile, def.tool);
+        if (tier <= 0) return err(def.tool === "pickaxe" ? "needs_pickaxe" : "tool_required", 409);
+        if (tier < (def.minTier ?? 0)) return err(def.tool === "pickaxe" ? "pickaxe_tier" : "tool_required", 409);
       }
-      next = addMasteryXp(next, "miner", (def.minTier ?? 0) >= 2 ? 4 : 1).profile;
-    }
-    let healed = 0;
-    if (def.interaction === "rest" && def.heal) {
-      // 温泉: 定義の heal 分だけ回復する（洞窟温泉の全回復とは別物）
-      healed = Math.min(maxHpFor(next), next.hp + def.heal) - next.hp;
-      next = { ...next, hp: next.hp + healed };
-    }
-    // 道具の耐久: 道具を使う行為（鉱脈・倒木など）は最良の1本が摩耗する
-    let broke: string | null = null;
-    if (def.tool) {
-      const worn = wearTool(next, def.tool);
-      next = worn.profile;
-      broke = worn.brokeItemId;
-    }
-    if (!(await storeProfile(ownerKey, next))) return err("store_failed", 503);
-    await storeHarvestedAt(x, y, now);
-    return NextResponse.json(
-      { ok: true, gained: loot.gained, trapped, healed, profile: next, ...(broke ? { broke } : {}) },
-      { headers: NO_STORE },
-    );
-  });
+      // 隣接検証（プレゼンス → セーブ。釣りと同じチェビシェフ ≤2）
+      const selfId = presenceIdFor(ownerKey);
+      const now = Date.now();
+      const entries = await listPresence();
+      const entry = entries.find((e) => e.id === selfId && e.space === "world" && now - e.ts <= 15_000);
+      let pos: { x: number; y: number } | null = entry ? { x: entry.x, y: entry.y } : null;
+      if (!pos) {
+        const saved = parseSave(await loadWorldBoxSave(ownerKey));
+        if (saved && saved.space === "world") pos = { x: saved.x, y: saved.y };
+      }
+      if (!pos) return err("position_unknown", 409);
+      if (Math.max(Math.abs(Math.floor(pos.x) - x), Math.abs(Math.floor(pos.y) - y)) > MAX_ACTION_DISTANCE) {
+        return err("too_far", 409);
+      }
+      const harvestedAt = await loadHarvestedAt(x, y);
+      if (!objectRespawned(def, harvestedAt, now)) return err("depleted", 409);
+
+      const rng = makeRng((now ^ x * 131 ^ y * 17) >>> 0);
+      const loot = rollObjectLoot(def, rng);
+      let next = profile;
+      for (const [itemId, count] of Object.entries(loot.gained)) {
+        next = addItem(next, itemId, count);
+      }
+      let trapped = false;
+      if (def.interaction === "open") {
+        trapped = loot.trapped;
+        // 斥候の専門: 宝箱の罠を半減で回避する（洞窟・遺跡と同仕様）
+        if (trapped && profile.role === "scout" && rng() < 0.5) trapped = false;
+        if (trapped) next = { ...next, hp: Math.max(0, next.hp - TRAP_DAMAGE) };
+      }
+      if (def.interaction === "mine" && profile.role === "miner") {
+        // 採掘者の常時効果: 追加ドロップ抽選 + 熟練（洞窟の採掘と同仕様）
+        if (Math.random() < MINER_BONUS_CHANCE) {
+          const bonus = rollObjectLoot(def, makeRng((now ^ 0x5eed) >>> 0));
+          for (const [itemId, count] of Object.entries(bonus.gained)) {
+            next = addItem(next, itemId, count);
+          }
+        }
+        next = addMasteryXp(next, "miner", (def.minTier ?? 0) >= 2 ? 4 : 1).profile;
+      }
+      let healed = 0;
+      if (def.interaction === "rest" && def.heal) {
+        // 温泉: 定義の heal 分だけ回復する（洞窟温泉の全回復とは別物）
+        healed = Math.min(maxHpFor(next), next.hp + def.heal) - next.hp;
+        next = { ...next, hp: next.hp + healed };
+      }
+      // 道具の耐久: 道具を使う行為（鉱脈・倒木など）は最良の1本が摩耗する
+      let broke: string | null = null;
+      if (def.tool) {
+        const worn = wearTool(next, def.tool);
+        next = worn.profile;
+        broke = worn.brokeItemId;
+      }
+      if (!(await storeProfile(ownerKey, next))) return err("store_failed", 503);
+      if (!(await storeHarvestedAt(x, y, now))) {
+        await storeProfile(ownerKey, profile);
+        return err("store_failed", 503);
+      }
+      return NextResponse.json(
+        { ok: true, gained: loot.gained, trapped, healed, profile: next, ...(broke ? { broke } : {}) },
+        { headers: NO_STORE },
+      );
+    }),
+  );
 }

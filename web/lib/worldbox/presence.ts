@@ -189,6 +189,8 @@ export type PresenceEntry = Heartbeat & {
   id: string;
   /** サーバー受信時刻（ミリ秒）。 */
   ts: number;
+  /** サーバー側テレポート（ワープ・蘇生・救助等）の時刻（WS 中継追従用）。 */
+  tpTs?: number;
 };
 
 /** 所有者キー → 不透明な短い ID（FNV-1a ハッシュ）。 */
@@ -276,7 +278,8 @@ export function parsePresenceEntry(id: string, raw: unknown): PresenceEntry | nu
   if (typeof v.ts !== "number" || !Number.isFinite(v.ts)) return null;
   const hb = sanitizeHeartbeat(v, fallbackBounds());
   if (!hb) return null;
-  return { ...hb, id, ts: v.ts };
+  const tpTs = typeof v.tpTs === "number" && Number.isFinite(v.tpTs) && v.tpTs > 0 ? v.tpTs : undefined;
+  return { ...hb, id, ts: v.ts, ...(tpTs !== undefined ? { tpTs } : {}) };
 }
 
 /**
