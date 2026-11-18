@@ -60,7 +60,7 @@ const eco = await loadBundle(
 );
 const lob = await loadBundle(
   ["worldbox/rng.ts", "worldbox/mapgen.ts", "worldbox/lobby.ts"],
-  ["buildLobby", "stationNear"],
+  ["buildLobby", "stationNear", "EXCHANGE_HALL"],
 );
 
 test("価格: 決定的で範囲内に収まり、ティック境界でだけ変わる", () => {
@@ -124,13 +124,19 @@ test("sellToken: earn(token_sell) でトークンが減り、通常売却では�
   assert.equal(viaCounter.error, "not_sellable");
 });
 
-test("ロビー: 取引所カウンターが銀行の南東にあり、隣で station が返る", () => {
+test("ロビー: 取引所はカジノ翼の南の別室（ホール）にあり、隣で station が返る", () => {
   const lobby = lob.buildLobby();
   const counters = lobby.objects.filter((o) => o.station === "exchange");
-  assert.equal(counters.length, 2);
-  assert.ok(counters.every((o) => o.y === 19 && (o.x === 35 || o.x === 36)));
-  assert.equal(lob.stationNear(lobby.objects, 35, 20), "exchange");
-  assert.equal(lob.stationNear(lobby.objects, 36, 20), "exchange");
+  assert.equal(counters.length, 8);
+  assert.ok(counters.every((o) => o.y === 35 && o.x >= 40 && o.x <= 47));
+  assert.equal(lob.stationNear(lobby.objects, 43, 36), "exchange");
+  assert.equal(lob.stationNear(lobby.objects, 40, 36), "exchange");
+  // ホールは外形に含まれ、通路（カジノ翼の南）から歩いて入れる
+  assert.ok(lob.EXCHANGE_HALL.x1 - lob.EXCHANGE_HALL.x0 >= 15);
+  assert.notEqual(lobby.tiles[40 * lobby.width + 45], 0); // ホール中央は床
+  assert.notEqual(lobby.tiles[31 * lobby.width + 45], 0); // 通路も床
+  // 旧・広場のカウンター位置にはもう取引所はない
+  assert.equal(lob.stationNear(lobby.objects, 35, 20), null);
 });
 
 test("クライアント配線: パネルに取引所タブ、チップに取引所ラベルがある", () => {
