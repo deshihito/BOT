@@ -2,9 +2,10 @@ import { addMasteryXp } from "@/lib/worldbox/roles";
 import { NextResponse } from "next/server";
 import { getRequestSession, publicOrigin, sessionOwnerKey } from "@/lib/auth";
 import {
-  buyItem, buyToken, craftFromInputs, craftItem, eatItem, resolveSteal, sellItem, sellToken,
+  buyItem, buyToken, craftFromInputs, craftItem, dropItem, eatItem, resolveSteal, sellItem, sellToken,
   type CoinMovement, type EconomyError,
 } from "@/lib/worldbox/economy";
+import { addGroundItemDrop, loadMyPosition } from "@/lib/worldbox/ground-items-online";
 import { tokenPriceAt } from "@/lib/worldbox/exchange";
 import { buildEconomyOp, type EconomyOp } from "@/lib/worldbox/economy-bridge";
 import {
@@ -38,6 +39,8 @@ export const runtime = "nodejs";
 //   （場所制約: ロビーの店か鍛冶屋の前にいること。サーバー側でプレゼンス検証。
 //    購入は店ごとの品目ジャンルもサーバー側で検証する）
 // POST { action: "eat", itemId }: かばんの食事を食べて空腹度を回復
+// POST { action: "drop", itemId, count? }: かばんから捨てて、本人の足元の
+//   タイルへ地面ドロップとして置く（拾うのは ground-items ルート）
 // POST { action: "craft", inputs }: 自由セット式の合成（PR-B。レシピは
 //   サーバー側の照合表のみ。recipeId 形式も互換のため残す）
 //   （場所制約: ロビー鍛冶屋の作業台の前にいること。サーバー側で検証）
@@ -326,6 +329,34 @@ async function handlePost(request: Request, session: AuthedSession) {
       const movedProfile = moveSlot(current, data.from, data.to);
       if (!movedProfile) return errorResponse("invalid_action");
       return saveAndReturn({ ok: true, profile: movedProfile });
+    }
+    case "drop": {
+      const position = await loadMyPosition(ownerKey);
+      if (!position) {
+        return NextResponse.json({ error: "position_unknown" }, { status: 409, headers: NO_STORE });
+      }
+      const result = dropItem(current, data.itemId, data.count);
+      if (!result.ok) return errorResponse(result.error);
+      if (!(await storeProfile(ownerKey, result.profile))) {
+        return NextResponse.json({ error: "store_failed" }, { status: 503, headers: NO_STORE });
+      }
+      const placed = await addGroundItemDrop(position.space, {
+        id: crypto.randomUUID(),
+        itemId: result.dropped.itemId,
+        count: result.dropped.count,
+        x: position.tx,
+        y: position.ty,
+        at: Date.now(),
+      });
+      if (!placed) {
+        // 地面に置けなければプロフィールを戻して失敗にする（消失防止）
+        await storeProfile(ownerKey, current);
+        return NextResponse.json({ error: "store_failed" }, { status: 503, headers: NO_STORE });
+      }
+      return NextResponse.json(
+        { profile: result.profile, dropped: result.dropped, space: position.space },
+        { headers: NO_STORE },
+      );
     }
     case "eat": {
       const result = eatItem(current, data.itemId);
