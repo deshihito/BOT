@@ -23,19 +23,31 @@ import {
   MOB_ATTACK_RANGE, MOB_RESPAWN_MS, MOB_SPRITE, MOB_SPRITE_FALLBACK, attackTarget, knockbackTarget, mobBlockedTiles, mobDistance, mobFootprintTiles,
   mobHpNow, mobKeyOf, mobRespawnDelayMs, parseMobState, visibleMobs, type MobState,
 } from "@/lib/worldbox/combat";
-import { advanceWalkPhase, attackSwingAngle, damp, moveLean, stepBeatIndex, walkBob, walkSquashY } from "@/lib/worldbox/anim";
+import { advanceWalkPhase, attackSwingAngle, damp, moveLean, stepBeatIndex, telegraphSquashY, walkBob, walkSquashY } from "@/lib/worldbox/anim";
 import {
   HITSTOP_HIT_MS, HITSTOP_HURT_MS, HITSTOP_KILL_MS, WHIFF_ALPHA_SCALE, burstPaletteFor, createFxSystem, createHitstop,
-  createShake, fxLifeRatio, hitstopActiveAt, phaseKind, popProgress, popScale, shakeOffsetAt,
+  createShake, hitstopActiveAt, phaseKind, popProgress, popScale, shakeOffsetAt,
   slashAlpha, spawnAmbient, spawnBurst, spawnMobFx, startHitstop, startShake, stepFx, swingProgress, weatherAmbientKind, weatherBlendAt,
   type FxBurstKind, type FxShake, type FxSystem, type HitstopState,
 } from "@/lib/worldbox/fx";
 import type { SkillFxEffect } from "@/lib/worldbox/fx";
-import { skillFxProgress, skillFxStage, spawnSkillFx, thunderBoltPoints } from "@/lib/worldbox/fx";
+import { skillFxProgress, skillFxStage, spawnSkillFx } from "@/lib/worldbox/fx";
 import {
   activeSkillFor, masteryRankOf, roleById, skillCooldownLeft, SKILLS,
   SCOUT_STAMINA_MULT,
 } from "@/lib/worldbox/roles";
+import {
+  createFloatingTextSystem, idleBreathScaleY, mobShadowScale, pruneAfterimages, pushAfterimage,
+  spawnElectricSparkFx, spawnFireTrailFx, spawnFloatingText, spawnHealMoteFx,
+  spawnIceShatterFx, spawnPoisonBubbleFx, spawnSlamDustFx, stepFloatingTexts, telegraphTremble,
+  type Afterimage, type FloatingTextKind,
+} from "@/lib/worldbox/visual-fx";
+import {
+  drawAfterimages, drawFloatingTexts, drawFrozenPrism, drawLightingAndAtmosphere,
+  drawMobHudAndBadges, drawMobProjectileEnhanced, drawMobTelegraphEnhanced, drawMobWebEnhanced,
+  drawParticleEnhanced, drawPlayerAndSpaceOverlays, drawSkillFxEnhanced, drawWeaponSlashGlow,
+  drawWorldEnvironmentalAccents,
+} from "@/lib/worldbox/visual-render";
 import { clockOffsetEstimate, type PresenceEntry } from "@/lib/worldbox/presence";
 import { GROUND_PICKUP_RANGE, groundItemAt, type GroundItem } from "@/lib/worldbox/ground-items";
 import { createPollGuard, type PollGuard } from "@/lib/poll-guard";
@@ -1619,6 +1631,8 @@ export default function WorldBoxClient() {
   /** 演出イベントの受け渡し（行為の成功/失敗→描画ループでパーティクル/揺れ/ポップに変換）。
    * whiff は空振り（風切りのみ、粒なし）。hit/death/spawn はモブ演出用（sizeTiles/color 任意）。 */
   const fxEventsRef = useRef<{ kind: FxBurstKind | "whiff"; x: number; y: number; sizeTiles?: number; color?: string; colors?: string[]; stop?: number }[]>([]);
+  const floatingEventsRef = useRef<{ x: number; y: number; text: string; kind: FloatingTextKind; scale?: number }[]>([]);
+  const playerHurtAtRef = useRef(0);
   /** 無効操作のフィードバック（赤い輪＋揺れ。タップしたタイルと開始時刻）。 */
   const denyFxRef = useRef<{ x: number; y: number; at: number } | null>(null);
   /** 初回誘導を出した施設（セッション内だけ覚える。キー=施設種別/スプライト）。 */
@@ -1695,16 +1709,49 @@ export default function WorldBoxClient() {
       });
       const data = (await res.json().catch(() => ({}))) as {
         profile?: PlayerProfile; fx?: SkillFxEffect["kind"]; cx?: number; cy?: number; error?: string;
+        results?: { key: string; hp: number; dead: boolean }[]; healedCount?: number;
       };
       if (res.ok && data.profile) {
+        const prevSelfHp = invRef.current?.hp ?? data.profile.hp;
         setInvProfile(data.profile);
+        const fxKind = data.fx ?? skill.fx;
+        const fxX = data.cx ?? t.x + 0.5;
+        const fxY = data.cy ?? t.y + 0.5;
         skillFxRef.current.push({
           effect: {
-            kind: data.fx ?? skill.fx, x: data.cx ?? t.x + 0.5, y: data.cy ?? t.y + 0.5,
+            kind: fxKind, x: fxX, y: fxY,
             fromX: pos.x, fromY: pos.y, startedAt: performance.now(), seed: Math.floor(Math.random() * 1e9),
           },
           stage: -1,
         });
+        if (fxKind === "heal_zone") {
+          const gain = Math.max(0, data.profile.hp - prevSelfHp);
+          floatingEventsRef.current.push({
+            x: pos.x,
+            y: pos.y - 0.5,
+            text: gain > 0 ? `+${gain} 回復` : "回復陣!",
+            kind: "heal",
+          });
+        } else if (fxKind === "taunt") {
+          floatingEventsRef.current.push({ x: pos.x, y: pos.y - 0.6, text: "挑発!", kind: "status" });
+        }
+        if (Array.isArray(data.results)) {
+          for (const r of data.results) {
+            const snap = mobTilesRef.current.get(r.key);
+            const sx = snap ? snap.mx + 0.5 : fxX;
+            const sy = snap ? snap.my - 0.1 : fxY - 0.1;
+            const prevSt = mobStatesRef.current[r.key];
+            const mDef = mobById(r.key.split("@")[0]);
+            const prevHp = typeof prevSt?.hp === "number" ? prevSt.hp : mDef?.hp ?? 0;
+            const dmg = r.dead ? Math.max(1, prevHp) : Math.max(1, prevHp - r.hp);
+            floatingEventsRef.current.push({
+              x: sx,
+              y: sy,
+              text: r.dead ? `${dmg}!` : fxKind === "ice_lance" ? `${dmg} 氷結!` : `${dmg}`,
+              kind: r.dead || fxKind === "meteor" || fxKind === "thunder_strike" ? "crit" : "damage",
+            });
+          }
+        }
         playWbSe(skill.id === "heal_zone" || skill.id === "taunt" || skill.id === "porter" ? "warp" : "hit");
         void refreshMobsRef.current();
         return true;
@@ -1764,7 +1811,29 @@ export default function WorldBoxClient() {
     profile?: PlayerProfile; died?: boolean; respawn?: { x: number; y: number };
     teleport?: { space: string; x: number; y: number };
   }) => {
-    if (data.profile) setInvProfile(data.profile);
+    if (data.profile) {
+      const prevHp = invRef.current?.hp;
+      setInvProfile(data.profile);
+      if (typeof prevHp === "number") {
+        const diff = data.profile.hp - prevHp;
+        if (diff < 0 || data.died) {
+          playerHurtAtRef.current = performance.now();
+          floatingEventsRef.current.push({
+            x: playerPosRef.current.x,
+            y: playerPosRef.current.y - 0.5,
+            text: `-${Math.max(1, -diff)}`,
+            kind: "player_hurt",
+          });
+        } else if (diff > 0) {
+          floatingEventsRef.current.push({
+            x: playerPosRef.current.x,
+            y: playerPosRef.current.y - 0.5,
+            text: `+${diff}`,
+            kind: "heal",
+          });
+        }
+      }
+    }
     if (data.died && data.respawn) {
       respawnActionRef.current(data.respawn);
       setTileMsg("倒れた");
@@ -2661,11 +2730,25 @@ export default function WorldBoxClient() {
         fxEventsRef.current.push({ kind: "whiff", x: placed.x, y: placed.y });
         return;
       }
+      const scaledDef =
+        def && parseInstanceSpace(spaceUi)?.kind === "dungeon"
+          ? { ...def, hp: Math.max(1, Math.round(def.hp * dungeonHpScale(dungeonStateRef.current.size))) }
+          : def;
+      const prevHp = scaledDef ? mobHpNow(scaledDef, mobStatesRef.current[key] ?? null, Date.now()).hp : 0;
       const next = { ...mobStatesRef.current };
       // 復活時刻はサーバーの正を使う（S4）。無ければ従来どおり自時計で計算する。
       if (data.dead) next[key] = { hp: 0, deadUntil: typeof data.deadUntil === "number" ? data.deadUntil : Date.now() + MOB_RESPAWN_MS + mobRespawnDelayMs(key) };
       else if (typeof data.hp === "number") next[key] = { hp: data.hp };
       mobStatesRef.current = next;
+      const dmg = data.dead ? Math.max(1, prevHp) : typeof data.hp === "number" ? Math.max(1, prevHp - data.hp) : 1;
+      const fxX = curTile ? curTile.x + 0.5 : placed.x + 0.5;
+      const fxY = curTile ? curTile.y - 0.1 : placed.y - 0.1;
+      floatingEventsRef.current.push({
+        x: fxX,
+        y: fxY,
+        text: data.dead ? `${dmg}!` : `${dmg}`,
+        kind: data.dead || dmg >= 8 ? "crit" : "damage",
+      });
       // 攻撃でローカル状態が進んだ。取得中の古いモブ応答は適用されない（S6）。
       mobsVersionRef.current += 1;
       fxEventsRef.current.push({
@@ -2799,6 +2882,13 @@ export default function WorldBoxClient() {
       if (res.ok) {
         groundItemsRef.current = groundItemsRef.current.filter((i) => i.id !== g.id);
         if (data.profile) setInvProfile(data.profile);
+        floatingEventsRef.current.push({
+          x: g.x + 0.5,
+          y: g.y + 0.2,
+          text: `+${g.count} ${itemById(g.itemId)?.name ?? g.itemId}`,
+          kind: "pickup",
+          scale: 0.92,
+        });
         playWbSe("success");
       } else {
         void fetchGroundItems(spaceUi);
@@ -3222,7 +3312,7 @@ export default function WorldBoxClient() {
       ax: number; ay: number; wx: number; wy: number;
       tx: number; ty: number; nextThink: number; phase: number; face: 1 | -1;
       flashAt: number; kx: number; ky: number; seenAt: number; fleeUntil: number;
-      behavior: MobBehaviorState; provokedUntil: number; lastSpeed: number;
+      behavior: MobBehaviorState; provokedUntil: number; lastSpeed: number; trailHp: number;
     };
     const mobRenders = new Map<string, MobRender>();
     /** ピアノの打鍵位置（タイルごとの音階ステップ）。 */
@@ -3268,6 +3358,11 @@ export default function WorldBoxClient() {
       typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     const fxSys: FxSystem = createFxSystem((Date.now() % 2147483646) + 1);
     if (reducedMotion) fxSys.intensity = 0.35;
+    const floatSys = createFloatingTextSystem();
+    const afterimages: Afterimage[] = [];
+    let lastPlayerAfterimageAt = 0;
+    let lastMobAfterimageAt = 0;
+    let lastSkillTrailAt = 0;
     let shake: FxShake = createShake();
     /** ヒットストップ（命中の一瞬だけ世界の時を止める）。計算は fx.ts。 */
     let hitstop: HitstopState = createHitstop();
@@ -4500,12 +4595,15 @@ export default function WorldBoxClient() {
       swim = false,
       plate: { roleSymbol: string; rank: number; title?: string } | null = null,
       sit = false,
+      hurt = false,
     ) => {
       const size = TILE * AVATAR_TILES;
       // 泳ぎ中は体を沈め、歩行の上下動をゆるい浮き沈みに替える。座りは浅く沈んで静止する
       const sink = swim ? size * 0.34 : sit ? size * 0.16 : 0;
-      const bob = swim ? Math.sin(performance.now() / 280 + phase) * TILE * 0.02 : sit ? 0 : walkBob(phase) * TILE * 0.07 * speedRatio;
-      const squash = swim ? 1 : sit ? 0.86 : 1 - (1 - walkSquashY(phase)) * speedRatio;
+      const nowFrame = performance.now();
+      const bob = swim ? Math.sin(nowFrame / 280 + phase) * TILE * 0.02 : sit ? 0 : walkBob(phase) * TILE * 0.07 * speedRatio;
+      const idleBreath = !reducedMotion && speedRatio === 0 && !swim && !sit ? idleBreathScaleY(nowFrame, sx * 0.03) : 1;
+      const squash = (swim ? 1 : sit ? 0.86 : 1 - (1 - walkSquashY(phase)) * speedRatio) * idleBreath;
       const waterline = sy - size * 0.28;
       c.fillStyle = "rgba(20,30,16,0.30)";
       c.beginPath();
@@ -4521,7 +4619,9 @@ export default function WorldBoxClient() {
           c.translate(sx, sy - bob + sink);
           c.rotate(moveLean(speedRatio) * face);
           c.scale(face * (1 + (1 - squash) * 0.7), squash);
+          if (hurt) c.filter = "brightness(1.45) sepia(0.85) saturate(3.2) hue-rotate(-32deg)";
           c.drawImage(avatar, -size / 2, -size, size, size);
+          if (hurt) c.filter = "none";
           c.restore();
         };
         if (swim) {
@@ -4531,7 +4631,7 @@ export default function WorldBoxClient() {
           paintSprite(1, sy - size * 2, sy + size);
         }
       } else {
-        c.fillStyle = "#f4f6f8";
+        c.fillStyle = hurt ? "#ff7b7b" : "#f4f6f8";
         c.beginPath();
         c.arc(sx, sy - size / 2 - bob + sink, size * 0.36, 0, Math.PI * 2);
         c.fill();
@@ -5290,6 +5390,7 @@ export default function WorldBoxClient() {
               color: MOB_FX_COLOR[def.id],
               stop: HITSTOP_HURT_MS,
             });
+            playerHurtAtRef.current = now;
             shake = startShake(shake, 2, now);
           }
         }
@@ -5370,6 +5471,18 @@ export default function WorldBoxClient() {
       const speedRatio = Math.min(1, speed / WALK_SPEED);
 
       // ---- 演出の更新（行為イベントの消化・粒の前進・移動の副産物） ----
+      for (const fev of floatingEventsRef.current.splice(0)) {
+        spawnFloatingText(floatSys, {
+          x: fev.x,
+          y: fev.y,
+          text: fev.text,
+          kind: fev.kind,
+          nowMs: now,
+          scale: fev.scale,
+        });
+      }
+      stepFloatingTexts(floatSys, now);
+      pruneAfterimages(afterimages, now);
       for (const ev of fxEventsRef.current.splice(0)) {
         // ヒットストップ: 自分の命中・撃破・被弾のイベントだけが時を止める
         if (ev.stop && !reducedMotion) hitstop = startHitstop(hitstop, ev.stop, now);
@@ -5438,6 +5551,20 @@ export default function WorldBoxClient() {
         lastDashFxAt = now;
         spawnBurst(fxSys, "dash", player.x - player.vx * 0.06, player.y - 0.35);
         playWbSe("dash");
+      }
+      if (dashing && speed > 0.6 && now - lastPlayerAfterimageAt >= 65 && !reducedMotion) {
+        lastPlayerAfterimageAt = now;
+        pushAfterimage(afterimages, {
+          x: player.x,
+          y: player.y + PLAYER_RADIUS,
+          face: player.face,
+          sizeTiles: AVATAR_TILES,
+          mobId: null,
+          kind: "player_dash",
+          color: "#a8dcff",
+          createdAt: now,
+          durationMs: 220,
+        });
       }
       if (playerSwimming && speed > 0.6 && now - lastSwimFxAt > 200) {
         lastSwimFxAt = now;
@@ -5549,6 +5676,21 @@ export default function WorldBoxClient() {
           }
         }
       }
+
+      // 水面のきらめき・雨天の水たまり波紋
+      drawWorldEnvironmentalAccents(ctx, {
+        tx0,
+        tx1,
+        ty0,
+        ty1,
+        isWaterTile: (tx, ty) => mapTileAt(worldMap, tx, ty) === T_WATER,
+        toScreenX,
+        toScreenY,
+        TILE,
+        now,
+        rainStrength: weatherBlendAt(nowMs / 1000).rainStrength,
+        reducedMotion,
+      });
 
       // タイル上書きの重ね描き（畑・切り株・作物の成長段階）。地形と同じスナップ座標で重ねる
       for (let ty = ty0; ty <= ty1; ty++) {
@@ -5679,15 +5821,22 @@ export default function WorldBoxClient() {
         if (csx < -TILE * 2 || csy < -TILE * 2 || csx > cw + TILE * 2 || csy > ch + TILE * 2) continue;
         drawCapital(ctx, csx, csy, n);
       }
-      // 地面のドロップ（ワールド）: アイコンを小さく浮かせて描く
+      // 地面のドロップ（ワールド）: アイコンを小さく浮かせて描く（足元に淡い拾得オーラ）
       for (const g of groundItemsRef.current) {
         if (g.x < tx0 || g.x > tx1 || g.y < ty0 || g.y > ty1) continue;
         const img = itemIcons[g.itemId];
         if (!texReady(img)) continue;
         const gs = Math.round(TILE * 0.62);
-        const bob = Math.round(Math.sin(nowMs / 380 + g.x * 1.7 + g.y * 2.3) * 2);
-        const gx = Math.round(tileSx(g.x) + (TILE - gs) / 2);
-        const gy = Math.round(tileSy(g.y) + TILE * 0.3) + bob;
+        const phaseG = nowMs / 380 + g.x * 1.7 + g.y * 2.3;
+        const bob = Math.round(Math.sin(phaseG) * 2);
+        const baseGx = tileSx(g.x);
+        const baseGy = tileSy(g.y);
+        const gx = Math.round(baseGx + (TILE - gs) / 2);
+        const gy = Math.round(baseGy + TILE * 0.3) + bob;
+        ctx.fillStyle = `rgba(255,232,140,${(0.20 + 0.08 * Math.sin(phaseG * 1.3)).toFixed(3)})`;
+        ctx.beginPath();
+        ctx.ellipse(baseGx + TILE * 0.5, baseGy + TILE * 0.78, TILE * 0.28, TILE * 0.10, 0, 0, Math.PI * 2);
+        ctx.fill();
         ctx.drawImage(img, gx, gy, gs, gs);
         if (g.count > 1) {
           ctx.font = "bold 10px sans-serif";
@@ -5695,9 +5844,9 @@ export default function WorldBoxClient() {
           const label = String(g.count);
           const tw = Math.ceil(ctx.measureText(label).width) + 4;
           ctx.fillStyle = "rgba(0,0,0,0.65)";
-          ctx.fillRect(Math.round(tileSx(g.x) + TILE - tw - 1), Math.round(tileSy(g.y) + TILE - 13), tw, 12);
+          ctx.fillRect(Math.round(baseGx + TILE - tw - 1), Math.round(baseGy + TILE - 13), tw, 12);
           ctx.fillStyle = "#fff";
-          ctx.fillText(label, Math.round(tileSx(g.x) + TILE - 3), Math.round(tileSy(g.y) + TILE - 3));
+          ctx.fillText(label, Math.round(baseGx + TILE - 3), Math.round(baseGy + TILE - 3));
         }
       }
       } else {
@@ -5749,7 +5898,7 @@ export default function WorldBoxClient() {
             }
           }
         }
-        // 地面のドロップ（室内）: アイコンを小さく浮かせて描く
+        // 地面のドロップ（室内）: アイコンを小さく浮かせて描く（足元に淡い拾得オーラ）
         for (const g of groundItemsRef.current) {
           const img = itemIcons[g.itemId];
           if (!texReady(img)) continue;
@@ -5757,7 +5906,12 @@ export default function WorldBoxClient() {
           const gsy = lobbyOy + g.y * TILE;
           if (gsx < -TILE || gsy < -TILE || gsx > cw + TILE || gsy > ch + TILE) continue;
           const gs = Math.round(TILE * 0.62);
-          const bob = Math.round(Math.sin(nowMs / 380 + g.x * 1.7 + g.y * 2.3) * 2);
+          const phaseG = nowMs / 380 + g.x * 1.7 + g.y * 2.3;
+          const bob = Math.round(Math.sin(phaseG) * 2);
+          ctx.fillStyle = `rgba(255,232,140,${(0.20 + 0.08 * Math.sin(phaseG * 1.3)).toFixed(3)})`;
+          ctx.beginPath();
+          ctx.ellipse(gsx + TILE * 0.5, gsy + TILE * 0.78, TILE * 0.28, TILE * 0.10, 0, 0, Math.PI * 2);
+          ctx.fill();
           ctx.drawImage(img, Math.round(gsx + (TILE - gs) / 2), Math.round(gsy + TILE * 0.3) + bob, gs, gs);
           if (g.count > 1) {
             ctx.font = "bold 10px sans-serif";
@@ -5826,7 +5980,10 @@ export default function WorldBoxClient() {
         const loco = locomotionFor(def.id);
         const pose = locomotionPose(loco, r.phase, r.lastSpeed > 0.05);
         const bob = pose.bob * TILE;
-        const cxp = toScreenX(r.wx) + r.kx + pose.sway * TILE;
+        const windupTotal = r.behavior.mode === "windup" && r.behavior.pattern ? PATTERN_DEF[r.behavior.pattern].windupMs : 0;
+        const windupFrac = windupTotal > 0 ? Math.max(0, Math.min(1, 1 - (r.behavior.until - now) / windupTotal)) : 0;
+        const tremble = telegraphTremble(windupFrac, now, reducedMotion);
+        const cxp = toScreenX(r.wx) + r.kx + (pose.sway + tremble) * TILE;
         const baseY = toScreenY(r.wy) + r.ky;
         const cy = baseY - bob;
         const flash = now - r.flashAt < 130;
@@ -5834,31 +5991,57 @@ export default function WorldBoxClient() {
         const w = sizePx;
         const h = sizePx;
         const by = baseY - h;
+        const boss = isBossMob(def);
         ctx.save();
         if (pop !== 1) {
           ctx.translate(cxp, baseY);
           ctx.scale(pop, pop);
           ctx.translate(-cxp, -baseY);
         }
-        // locomotion の傾き・つぶれ＋windup の沈み込み（予兆の読みやすさ）
-        const windupSquash = r.behavior.mode === "windup" ? 0.84 : 1;
-        if (pose.tilt !== 0 || pose.squashY !== 1 || windupSquash !== 1) {
+        // locomotion の傾き・つぶれ＋windup の溜め沈み込み（telegraphSquashY）
+        const windupSquash = r.behavior.mode === "windup" ? telegraphSquashY(windupFrac) : 1;
+        const idleBreath = !reducedMotion && r.lastSpeed <= 0.05 && r.behavior.mode !== "windup"
+          ? idleBreathScaleY(now, r.phase)
+          : 1;
+        if (pose.tilt !== 0 || pose.squashY !== 1 || windupSquash !== 1 || idleBreath !== 1) {
           ctx.translate(cxp, baseY);
           ctx.rotate(pose.tilt * r.face);
-          ctx.scale(1, pose.squashY * windupSquash);
+          ctx.scale(1 + (1 - windupSquash) * 0.45, pose.squashY * windupSquash * idleBreath);
           ctx.translate(-cxp, -baseY);
         }
-        // 影
-        ctx.fillStyle = "rgba(20,26,20,0.25)";
+        // 足元の影（高度 bob に応じて縮小して立体感を出す）
+        const shScale = mobShadowScale(pose.bob);
+        ctx.fillStyle = `rgba(20,26,20,${(0.26 * shScale).toFixed(3)})`;
         ctx.beginPath();
-        ctx.ellipse(cxp, baseY + sizePx * 0.02, sizePx * 0.34, sizePx * 0.12, 0, 0, Math.PI * 2);
+        ctx.ellipse(cxp, baseY + sizePx * 0.02, sizePx * 0.34 * shScale, sizePx * 0.12 * shScale, 0, 0, Math.PI * 2);
         ctx.fill();
+        if (loco === "swim") {
+          // 水棲モブの同心波紋
+          const wt = now / 900;
+          for (let i = 0; i < 2; i++) {
+            const wk = (wt + i * 0.5 + r.phase * 0.1) % 1;
+            ctx.strokeStyle = `rgba(210,242,255,${(0.42 * (1 - wk)).toFixed(3)})`;
+            ctx.lineWidth = 1.3;
+            ctx.beginPath();
+            ctx.ellipse(cxp, baseY + sizePx * 0.03, sizePx * (0.28 + 0.24 * wk), sizePx * (0.09 + 0.08 * wk), 0, 0, Math.PI * 2);
+            ctx.stroke();
+          }
+        }
+        if (boss) {
+          // ボスオーラリング（怒り時は二重パルス）
+          const p = 0.28 + 0.12 * Math.sin(now * 0.008);
+          ctx.strokeStyle = r.behavior.enraged ? `rgba(255,95,72,${(p + 0.2).toFixed(3)})` : `rgba(255,205,78,${p.toFixed(3)})`;
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.ellipse(cxp, baseY + sizePx * 0.02, sizePx * 0.48, sizePx * 0.18, 0, 0, Math.PI * 2);
+          ctx.stroke();
+        }
         if (r.behavior.enraged) {
-          // 怒り状態: 赤いオーラ（脈動）
-          const pulse = 0.16 + 0.08 * Math.sin(now * 0.012);
+          // 怒り状態: 赤いオーラ（脈動＋警告輪）
+          const pulse = 0.18 + 0.09 * Math.sin(now * 0.012);
           ctx.fillStyle = `rgba(226,72,58,${pulse.toFixed(3)})`;
           ctx.beginPath();
-          ctx.ellipse(cxp, cy, sizePx * 0.55, sizePx * 0.45, 0, 0, Math.PI * 2);
+          ctx.ellipse(cxp, cy, sizePx * 0.56, sizePx * 0.46, 0, 0, Math.PI * 2);
           ctx.fill();
         }
         // 本体: 素材スプライト（ピクセル固定・足元基準・向き反転）
@@ -5895,31 +6078,48 @@ export default function WorldBoxClient() {
             ctx.fill();
           }
         }
-        // 凍結中は氷色で覆う（アイスランス）
+        // 凍結中は多角氷結晶プリズムで覆う（アイスランス）
         {
           const key = mobKeyFor(placed);
           const st = mobStatesRef.current[key];
           if (st?.frozenUntil && st.frozenUntil > Date.now()) {
-            ctx.fillStyle = "rgba(140,210,255,0.45)";
-            ctx.fillRect(Math.round(cxp - w / 2), Math.round(cy - h / 2), Math.round(w), Math.round(h));
-            ctx.strokeStyle = "rgba(220,245,255,0.8)";
-            ctx.lineWidth = 1;
-            ctx.strokeRect(Math.round(cxp - w / 2) + 0.5, Math.round(cy - h / 2) + 0.5, Math.round(w) - 1, Math.round(h) - 1);
+            drawFrozenPrism(ctx, cxp, cy, w, h, nowMs);
           }
         }
         ctx.restore();
-        // HP バー（自分が攻撃しようとした個体だけ。当てても外しても出す）
+        // 発見「!」・予兆閃光・ボス冠ラベル
+        drawMobHudAndBadges(ctx, {
+          cxp,
+          by,
+          sizePx,
+          mode: r.behavior.mode,
+          enraged: r.behavior.enraged,
+          boss,
+          hpFrac,
+          trailHpFrac: r.trailHp,
+          showHp,
+          skipHpBar: true,
+          now,
+        });
+        // HP バー（自分が攻撃しようとした個体だけ。最大値でも表示し、倒すか画面外でリセット）
         if (showHp) {
-          const bw = Math.min(180, Math.max(26, w * 0.9));
-          const bh2 = 4;
-          const bxHp = Math.round(cxp - bw / 2);
-          const byHp = Math.round(by - 9);
-          ctx.fillStyle = "rgba(12,14,12,0.55)";
-          ctx.fillRect(bxHp - 1, byHp - 1, bw + 2, bh2 + 2);
+          const bw = Math.min(200, Math.max(boss ? 68 : 28, sizePx * 0.92));
+          const bh = boss ? 6 : 4;
+          const bx = Math.round(cxp - bw / 2);
+          const byHp = Math.round(by - (boss ? 12 : 9));
+          ctx.fillStyle = "rgba(10,12,14,0.68)";
+          ctx.fillRect(bx - 1, byHp - 1, bw + 2, bh + 2);
           ctx.fillStyle = "rgba(255,255,255,0.22)";
-          ctx.fillRect(bxHp, byHp, bw, bh2);
+          ctx.fillRect(bx, byHp, bw, bh);
+          // 白黄色の追従残像バー（ダメージ分がすっと縮む手応え演出）
+          const clampedHp = Math.min(1, Math.max(0, hpFrac));
+          const clampedTrail = Math.min(1, Math.max(clampedHp, r.trailHp));
+          if (clampedTrail > clampedHp + 0.005) {
+            ctx.fillStyle = "rgba(255,242,165,0.88)";
+            ctx.fillRect(bx, byHp, Math.round(bw * clampedTrail), bh);
+          }
           ctx.fillStyle = hpFrac > 0.5 ? "#7ed957" : hpFrac > 0.25 ? "#f2c53c" : "#e2483a";
-          ctx.fillRect(bxHp, byHp, Math.round(bw * Math.min(1, Math.max(0, hpFrac))), bh2);
+          ctx.fillRect(bx, byHp, Math.round(bw * Math.min(1, Math.max(0, hpFrac))), bh);
         }
       };
       if (space === "world" || parseInstanceSpace(space)) {
@@ -5948,6 +6148,8 @@ export default function WorldBoxClient() {
           for (const k of [...mobRenders.keys()]) if (!keys.has(k)) mobRenders.delete(k);
           for (const k of [...revealedMobs]) if (!keys.has(k)) revealedMobs.delete(k);
         }
+        const emitMobDashGhost = !reducedMotion && now - lastMobAfterimageAt >= 65;
+        if (emitMobDashGhost) lastMobAfterimageAt = now;
         for (const placed of mobCache) {
           const def = mobById(placed.mobId);
           if (!def) continue;
@@ -5976,6 +6178,7 @@ export default function WorldBoxClient() {
               tx: placed.x + 0.5, ty: placed.y + 0.5, nextThink: 0,
               phase: Math.random() * 6, face: 1, flashAt: 0, kx: 0, ky: 0, seenAt: now, fleeUntil: 0,
               behavior: createBehaviorState(placed.x + 0.5, placed.y + 0.5), provokedUntil: 0, lastSpeed: 0,
+              trailHp: 1,
             };
             mobRenders.set(key, r);
             fxEventsRef.current.push({ kind: "spawn", x: placed.x, y: placed.y, sizeTiles: placed.size, color: MOB_FX_COLOR[def.id] });
@@ -6017,11 +6220,31 @@ export default function WorldBoxClient() {
                 mobProjectiles.push({ pattern: pat, x: r.wx, y: r.wy, tx: r.behavior.tx, ty: r.behavior.ty, from: now, until: now + 380, color: MOB_FX_COLOR[def.id] ?? "#ffffff" });
               } else if (pd.kind === "burst") {
                 fxEventsRef.current.push({ kind: pat === "roar" || pat === "gust" || pat === "leaf_burst" ? "spawn" : "hit", x: placed.x, y: placed.y, sizeTiles: placed.size, color: pat === "breath_cone" ? "#e07c3c" : MOB_FX_COLOR[def.id] });
-                if (pat === "slam" || pat === "club_slam" || pat === "slam_big" || pat === "tail_sweep" || pat === "roar") shake = startShake(shake, isBossMob(def) ? 5 : 3, now);
+                if (pat === "slam" || pat === "club_slam" || pat === "slam_big" || pat === "tail_sweep" || pat === "roar") {
+                  shake = startShake(shake, isBossMob(def) ? 5 : 3, now);
+                  if (!reducedMotion) spawnSlamDustFx(fxSys, r.wx, r.wy, pd.radius);
+                } else if (pat === "breath_cone" && !reducedMotion) {
+                  spawnFireTrailFx(fxSys, r.wx + ev.dirX * 1.4, r.wy + ev.dirY * 1.4, 8);
+                } else if (pat === "shard_burst" && !reducedMotion) {
+                  spawnIceShatterFx(fxSys, r.wx, r.wy, 12);
+                }
               }
             }
           }
           if (bout.teleport) {
+            if (!reducedMotion) {
+              pushAfterimage(afterimages, {
+                x: r.wx,
+                y: r.wy,
+                face: r.face,
+                sizeTiles: placed.size,
+                mobId: def.id,
+                kind: "mob_teleport",
+                color: MOB_FX_COLOR[def.id] ?? "#c8b0ff",
+                createdAt: now,
+                durationMs: 280,
+              });
+            }
             fxEventsRef.current.push({ kind: "spawn", x: placed.x, y: placed.y, sizeTiles: placed.size, color: MOB_FX_COLOR[def.id] });
             r.wx = bout.teleport.x; r.wy = bout.teleport.y;
           }
@@ -6034,6 +6257,19 @@ export default function WorldBoxClient() {
           const stopAt = r.behavior.mode === "chase" ? 0.85 : 0.03;
           r.lastSpeed = 0;
           if (distT > stopAt && speed > 0) {
+            if (emitMobDashGhost && r.behavior.mode === "strike") {
+              pushAfterimage(afterimages, {
+                x: r.wx,
+                y: r.wy,
+                face: r.face,
+                sizeTiles: placed.size,
+                mobId: def.id,
+                kind: "mob_dash",
+                color: MOB_FX_COLOR[def.id] ?? "#ff8866",
+                createdAt: now,
+                durationMs: 220,
+              });
+            }
             const step = Math.min(distT - stopAt, speed * sdt);
             r.wx += (dx / distT) * step;
             r.wy += (dy / distT) * step;
@@ -6044,7 +6280,9 @@ export default function WorldBoxClient() {
           }
           r.kx *= Math.exp(-9 * sdt);
           r.ky *= Math.exp(-9 * sdt);
-          mobDrawQueue.push({ placed, r, hpFrac: hpNow.hp / defFor(def).hp, showHp: revealedMobs.has(key) });
+          const hpFrac = hpNow.hp / defFor(def).hp;
+          r.trailHp = damp(r.trailHp, hpFrac, 6.5, sdt);
+          mobDrawQueue.push({ placed, r, hpFrac, showHp: revealedMobs.has(key) });
         }
         // React 側（攻撃・技の申告）へモブの現在タイルを渡すスナップショット。
         // サーバーはアンカーしか知らないため、見た目の現在位置を申告して
@@ -6062,68 +6300,42 @@ export default function WorldBoxClient() {
         for (let i = mobTelegraphs.length - 1; i >= 0; i--) {
           const t = mobTelegraphs[i];
           if (now > t.until) { mobTelegraphs.splice(i, 1); continue; }
-          const pd = PATTERN_DEF[t.pattern];
-          const total = Math.max(1, t.until - t.from);
-          const frac = Math.min(1, (now - t.from) / total);
-          const alpha = 0.16 + 0.20 * frac + 0.05 * Math.sin(now * 0.03);
-          ctx.fillStyle = `rgba(255,64,40,${alpha.toFixed(3)})`;
-          ctx.strokeStyle = `rgba(255,90,60,${(alpha + 0.25).toFixed(3)})`;
-          ctx.lineWidth = 2;
-          const gx = pd.kind === "dash" || pd.kind === "teleport" || pd.kind === "projectile" ? t.tx : t.x;
-          const gy = pd.kind === "dash" || pd.kind === "teleport" || pd.kind === "projectile" ? t.ty : t.y;
-          if (pd.telegraph === "circle") {
-            ctx.beginPath();
-            ctx.ellipse(toScreenX(gx), toScreenY(gy), pd.radius * TILE * (0.4 + 0.6 * frac), pd.radius * TILE * 0.45 * (0.4 + 0.6 * frac), 0, 0, Math.PI * 2);
-            ctx.fill(); ctx.stroke();
-          } else if (pd.telegraph === "ring") {
-            ctx.beginPath();
-            ctx.ellipse(toScreenX(t.x), toScreenY(t.y), pd.radius * TILE * frac, pd.radius * TILE * 0.45 * frac, 0, 0, Math.PI * 2);
-            ctx.stroke();
-          } else if (pd.telegraph === "line") {
-            const ex = t.x + t.dirX * pd.radius;
-            const ey = t.y + t.dirY * pd.radius;
-            ctx.lineWidth = Math.max(6, TILE * 0.5 * (0.5 + t.size * 0.2));
-            ctx.beginPath();
-            ctx.moveTo(toScreenX(t.x), toScreenY(t.y));
-            ctx.lineTo(toScreenX(ex), toScreenY(ey));
-            ctx.stroke();
-            ctx.lineWidth = 2;
-          } else if (pd.telegraph === "cone") {
-            const ang = Math.atan2(t.dirY, t.dirX);
-            ctx.beginPath();
-            ctx.moveTo(toScreenX(t.x), toScreenY(t.y));
-            ctx.arc(toScreenX(t.x), toScreenY(t.y), pd.radius * TILE, ang - 0.6, ang + 0.6);
-            ctx.closePath();
-            ctx.fill();
-          }
+          drawMobTelegraphEnhanced(ctx, t, now, toScreenX, toScreenY, TILE);
         }
         for (let i = mobWebs.length - 1; i >= 0; i--) {
           const w = mobWebs[i];
           if (now > w.until) { mobWebs.splice(i, 1); continue; }
-          const sx = toScreenX(w.x); const sy = toScreenY(w.y);
-          ctx.strokeStyle = "rgba(240,240,235,0.55)";
-          ctx.lineWidth = 1.5;
-          for (const [dx, dy] of [[-0.4, -0.2], [0.4, -0.2], [-0.4, 0.2], [0.4, 0.2], [0, -0.35], [0, 0.35]] as const) {
-            ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(sx + dx * TILE, sy + dy * TILE); ctx.stroke();
-          }
+          drawMobWebEnhanced(ctx, toScreenX(w.x), toScreenY(w.y), Math.max(0, (w.until - now) / 2600), TILE);
         }
         for (let i = mobProjectiles.length - 1; i >= 0; i--) {
           const pr = mobProjectiles[i];
           if (now > pr.until) {
             mobProjectiles.splice(i, 1);
             if (pr.pattern === "web_shot") mobWebs.push({ x: pr.tx, y: pr.ty, until: now + 2600 });
+            if (pr.pattern === "rock_throw" && !reducedMotion) {
+              spawnSlamDustFx(fxSys, pr.tx, pr.ty, 1.4);
+              shake = startShake(shake, 3, now, 160);
+            }
             continue;
           }
-          const f = Math.min(1, (now - pr.from) / Math.max(1, pr.until - pr.from));
-          const arc = pr.pattern === "rock_throw" ? Math.sin(f * Math.PI) * TILE * 1.1 : 0;
-          const sx = toScreenX(pr.x + (pr.tx - pr.x) * f);
-          const sy = toScreenY(pr.y + (pr.ty - pr.y) * f) - arc;
-          ctx.fillStyle = pr.pattern === "web_shot" ? "rgba(240,240,235,0.9)" : pr.color;
-          ctx.beginPath();
-          ctx.arc(sx, sy, Math.max(3, TILE * 0.14), 0, Math.PI * 2);
-          ctx.fill();
+          drawMobProjectileEnhanced(ctx, pr, now, toScreenX, toScreenY, TILE);
         }
       }
+
+      // 残像（ダッシュ・モブ突進/転移）はエンティティより背面に描画
+      drawAfterimages(
+        ctx,
+        afterimages,
+        now,
+        toScreenX,
+        toScreenY,
+        lobbyOx,
+        lobbyOy,
+        space !== "world",
+        TILE,
+        texReady(avatar) ? avatar : undefined,
+        mobSprites,
+      );
 
       // プレイヤー群（y 順で奥行き感）
       const drawList: { y: number; draw: () => void }[] = [];
@@ -6265,6 +6477,7 @@ export default function WorldBoxClient() {
             (space !== "world" ? Math.round(lobbyOy + player.y * TILE) + TILE * PLAYER_RADIUS : toScreenY(player.y) + TILE * PLAYER_RADIUS) - slimeBouncePx,
             player.face, player.phase, speedRatio, null, null, playerSwimming,
             null, sitTileRef.current !== null,
+            playerHurtAtRef.current > 0 && now - playerHurtAtRef.current < 260,
           ),
       });
       // 競馬: 発走中のレースはトラック上に馬を描く（位置は見せ方専用、
@@ -6493,12 +6706,15 @@ export default function WorldBoxClient() {
         const dark = darkCanvasRef.current;
         if (dark.width !== cw || dark.height !== ch) { dark.width = cw; dark.height = ch; }
         const dctx = dark.getContext("2d");
+        const caveLights: { sx: number; sy: number; rTiles: number; itemId: string; seed: number }[] = [];
+        const pItems = invRef.current?.items;
+        const pLightId = (pItems?.["lamp"] ?? 0) > 0 ? "lamp" : (pItems?.["torch"] ?? 0) > 0 ? "torch" : null;
+        const cxp = Math.round(lobbyOx + player.x * TILE);
+        const cyp = Math.round(lobbyOy + player.y * TILE);
+        const radius = lightRadiusTiles(pItems) * TILE;
         if (dctx) {
           dctx.setTransform(1, 0, 0, 1, 0, 0);
           dctx.clearRect(0, 0, cw, ch);
-          const radius = lightRadiusTiles(invRef.current?.items) * TILE;
-          const cxp = Math.round(lobbyOx + player.x * TILE);
-          const cyp = Math.round(lobbyOy + player.y * TILE);
           const grad = dctx.createRadialGradient(cxp, cyp, radius * 0.55, cxp, cyp, radius);
           grad.addColorStop(0, "rgba(5,6,14,0)");
           grad.addColorStop(1, "rgba(5,6,14,0.93)");
@@ -6508,7 +6724,7 @@ export default function WorldBoxClient() {
           for (const [key, ov] of Object.entries(tilesRef.current)) {
             const itemId = ov.block?.itemId;
             const rTiles = placedLightRadiusTiles(itemId);
-            if (!rTiles) continue;
+            if (!rTiles || !itemId) continue;
             const comma = key.indexOf(",");
             const lx = Number(key.slice(0, comma));
             const ly = Number(key.slice(comma + 1));
@@ -6523,10 +6739,25 @@ export default function WorldBoxClient() {
             dctx.beginPath();
             dctx.arc(sx, sy, r, 0, Math.PI * 2);
             dctx.fill();
+            caveLights.push({ sx, sy, rTiles, itemId, seed: lx * 31 + ly * 17 });
           }
           dctx.globalCompositeOperation = "source-over";
           ctx.drawImage(dark, 0, 0, cw, ch);
         }
+        drawLightingAndAtmosphere(ctx, {
+          cw,
+          ch,
+          TILE,
+          now,
+          nowMs,
+          phase: 0,
+          night: 1,
+          rainStrength: 0,
+          inWorld: false,
+          inDarkInstance: true,
+          lights: caveLights,
+          playerLight: pLightId ? { sx: cxp, sy: cyp, rTiles: lightRadiusTiles(pItems), itemId: pLightId } : null,
+        });
       }
 
       // 入水/出水の波紋（広がって消える輪）
@@ -6546,7 +6777,7 @@ export default function WorldBoxClient() {
         }
       }
 
-      // ---- パーティクル（形は fx.ts の shape、描き分けはここだけ） ----
+      // ---- パーティクル（形は fx.ts の shape、描き分けは visual-render.ts へ委譲） ----
       const drawParticles = (glowPass: boolean) => {
         for (const p of fxSys.particles) {
           const isGlow = p.shape === "glow";
@@ -6554,57 +6785,8 @@ export default function WorldBoxClient() {
           const sx = space !== "world" ? Math.round(lobbyOx + p.x * TILE) : toScreenX(p.x);
           const sy = space !== "world" ? Math.round(lobbyOy + p.y * TILE) : toScreenY(p.y);
           if (sx < -TILE || sy < -TILE || sx > cw + TILE || sy > ch + TILE) continue;
-          const ratio = fxLifeRatio(p);
           const sizePx = Math.max(1.5, p.size * TILE);
-          ctx.fillStyle = p.color;
-          ctx.strokeStyle = p.color;
-          if (p.shape === "chip" || p.shape === "leaf") {
-            ctx.save();
-            ctx.globalAlpha = Math.min(1, ratio * 1.6);
-            ctx.translate(sx, sy);
-            ctx.rotate(p.rot);
-            ctx.fillRect(-sizePx / 2, -sizePx / 4, sizePx, sizePx / 2);
-            ctx.restore();
-          } else if (p.shape === "spark") {
-            ctx.save();
-            ctx.globalAlpha = Math.min(1, ratio * 1.8);
-            ctx.translate(sx, sy);
-            ctx.rotate(Math.atan2(p.vy, p.vx));
-            ctx.fillRect(-sizePx / 2, -1, sizePx, 2);
-            ctx.restore();
-          } else if (p.shape === "ring") {
-            const prog = 1 - ratio;
-            ctx.save();
-            ctx.globalAlpha = 0.65 * ratio;
-            ctx.lineWidth = 2;
-            ctx.beginPath();
-            ctx.ellipse(sx, sy, sizePx * (0.6 + 2.2 * prog), sizePx * (0.25 + 0.8 * prog), 0, 0, Math.PI * 2);
-            ctx.stroke();
-            ctx.restore();
-          } else if (p.shape === "puff") {
-            ctx.save();
-            ctx.globalAlpha = 0.32 * ratio;
-            ctx.beginPath();
-            ctx.arc(sx, sy, sizePx * (1.15 - 0.35 * ratio), 0, Math.PI * 2);
-            ctx.fill();
-            ctx.restore();
-          } else if (p.shape === "glow") {
-            ctx.save();
-            ctx.globalCompositeOperation = "lighter";
-            ctx.globalAlpha = 0.75 * ratio;
-            ctx.beginPath();
-            ctx.arc(sx, sy, sizePx / 2, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.restore();
-          } else {
-            // drop / snow: 小さな丸（暗色も混ぜてあるので背景を選ばない）
-            ctx.save();
-            ctx.globalAlpha = Math.min(1, ratio * 1.7);
-            ctx.beginPath();
-            ctx.arc(sx, sy, sizePx / 2, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.restore();
-          }
+          drawParticleEnhanced(ctx, p, sx, sy, sizePx, nowMs);
         }
       };
       // 環境パーティクル（雪原=雪、雨天=雨、森=落葉、夜=蛍、それ以外=花粉。ワールドのみ）
@@ -6640,151 +6822,53 @@ export default function WorldBoxClient() {
       }
       drawParticles(false);
 
-      // 冒険役職の技演出: 段階遷移で粒を出し、形を描く
+      // 冒険役職の技演出: 段階遷移で粒を出し、多層エフェクトを描く
       {
         const inCaveFx = space !== "world";
         const sx = (wx: number) => (inCaveFx ? Math.round(lobbyOx + wx * TILE) : toScreenX(wx));
         const sy = (wy: number) => (inCaveFx ? Math.round(lobbyOy + wy * TILE) : toScreenY(wy));
         skillFxRef.current = skillFxRef.current.filter((entry) => skillFxProgress(entry.effect, now) < 1);
+        const emitContinuousSkill = !reducedMotion && now - lastSkillTrailAt >= 90;
+        if (emitContinuousSkill && skillFxRef.current.length > 0) lastSkillTrailAt = now;
         for (const entry of skillFxRef.current) {
           const eff = entry.effect;
           const stage = skillFxStage(eff, now);
           if (stage > entry.stage) {
             entry.stage = stage;
             spawnSkillFx(fxSys, eff, stage);
-            if (eff.kind === "meteor" && stage === 2) shake = startShake(shake, 8, now, 260);
-            if (eff.kind === "thunder_strike" && stage === 1) shake = startShake(shake, 5, now, 200);
+            if (eff.kind === "meteor" && stage === 2) {
+              shake = startShake(shake, 8, now, 260);
+              spawnFireTrailFx(fxSys, eff.x, eff.y, 14);
+              spawnSlamDustFx(fxSys, eff.x, eff.y, 2.4);
+            }
+            if (eff.kind === "thunder_strike" && stage === 1) {
+              shake = startShake(shake, 5, now, 200);
+              spawnElectricSparkFx(fxSys, eff.x, eff.y, 16);
+            }
             if ((eff.kind === "sweep" || eff.kind === "whirlwind") && stage === 1) shake = startShake(shake, 3, now, 160);
-            if (eff.kind === "fireball" && stage === 1) shake = startShake(shake, 4, now, 180);
+            if (eff.kind === "fireball" && stage === 1) {
+              shake = startShake(shake, 4, now, 180);
+              spawnFireTrailFx(fxSys, eff.x, eff.y, 12);
+            }
+            if (eff.kind === "ice_lance" && stage === 1) spawnIceShatterFx(fxSys, eff.x, eff.y, 14);
+            if (eff.kind === "heal_zone" && stage === 1) spawnHealMoteFx(fxSys, eff.x, eff.y, 10);
+            if (eff.kind === "poison_field" && stage === 1) spawnPoisonBubbleFx(fxSys, eff.x, eff.y, 10);
           }
-          const prog = Math.max(0, skillFxProgress(eff, now));
-          const cxp = sx(eff.x);
-          const cyp = sy(eff.y);
-          ctx.save();
-          if (eff.kind === "heal_zone" || eff.kind === "poison_field") {
-            const rTiles = eff.kind === "heal_zone" ? 2.25 : 2.0;
-            const pulse = 1 + Math.sin(now / 160) * 0.05;
-            ctx.globalAlpha = 0.22 * (1 - prog * 0.5);
-            ctx.fillStyle = eff.kind === "heal_zone" ? "#7ed957" : "#9be15d";
-            ctx.beginPath();
-            ctx.ellipse(cxp, cyp, rTiles * TILE * pulse, rTiles * TILE * 0.45 * pulse, 0, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.globalAlpha = 0.7;
-            ctx.strokeStyle = eff.kind === "heal_zone" ? "#b6f26d" : "#7ac74f";
-            ctx.lineWidth = 2;
-            ctx.beginPath();
-            ctx.ellipse(cxp, cyp, rTiles * TILE * pulse, rTiles * TILE * 0.45 * pulse, 0, 0, Math.PI * 2);
-            ctx.stroke();
-          } else if (eff.kind === "sweep") {
-            const a0 = -Math.PI * 0.9 + prog * Math.PI * 1.1;
-            ctx.globalAlpha = 0.85 * (1 - prog);
-            ctx.strokeStyle = "#e8f4ff";
-            ctx.lineWidth = 5;
-            for (let k = 0; k < 3; k++) {
-              ctx.beginPath();
-              ctx.arc(sx(eff.fromX), sy(eff.fromY) - TILE * 0.4, (1.1 + k * 0.28) * TILE, a0 - k * 0.16, a0 + 0.9 - k * 0.16);
-              ctx.stroke();
+          if (emitContinuousSkill) {
+            const prog = Math.max(0, skillFxProgress(eff, now));
+            if (eff.kind === "fireball" && stage === 0) {
+              const t01 = prog / 0.4;
+              spawnFireTrailFx(fxSys, eff.fromX + (eff.x - eff.fromX) * t01, eff.fromY - 0.4 + (eff.y - eff.fromY) * t01, 2);
+            } else if (eff.kind === "meteor" && stage === 1) {
+              const t01 = Math.max(0, Math.min(1, (prog - 0.6) / 0.2));
+              spawnFireTrailFx(fxSys, eff.x + 2.4 * (1 - t01), eff.y - 4.8 * (1 - t01), 3);
+            } else if (eff.kind === "heal_zone" && stage >= 1) {
+              spawnHealMoteFx(fxSys, eff.x, eff.y, 2);
+            } else if (eff.kind === "poison_field" && stage >= 1) {
+              spawnPoisonBubbleFx(fxSys, eff.x, eff.y, 2);
             }
-          } else if (eff.kind === "whirlwind") {
-            ctx.globalAlpha = 0.8 * (1 - prog * 0.6);
-            ctx.strokeStyle = "#dff3ff";
-            ctx.lineWidth = 4;
-            for (let k = 0; k < 3; k++) {
-              const rr = (0.9 + k * 0.5 + prog * 0.5) * TILE;
-              const a0 = prog * Math.PI * 6 + k * 0.7;
-              ctx.beginPath();
-              ctx.arc(sx(eff.fromX), sy(eff.fromY) - TILE * 0.3, rr, a0, a0 + Math.PI * 1.2);
-              ctx.stroke();
-            }
-          } else if (eff.kind === "fireball" || eff.kind === "ice_lance") {
-            const t01 = Math.min(1, prog / 0.4);
-            const px = eff.fromX + (eff.x - eff.fromX) * t01;
-            const py = eff.fromY - 0.4 + (eff.y - 0.4 - (eff.fromY - 0.4)) * t01;
-            ctx.globalAlpha = 0.95;
-            ctx.fillStyle = eff.kind === "fireball" ? "#ff9a3c" : "#bfe9ff";
-            ctx.beginPath();
-            ctx.arc(sx(px), sy(py), TILE * 0.22, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.globalAlpha = 0.5;
-            ctx.beginPath();
-            ctx.arc(sx(px), sy(py), TILE * 0.36, 0, Math.PI * 2);
-            ctx.fill();
-          } else if (eff.kind === "thunder_strike") {
-            if (stage === 0) {
-              ctx.globalAlpha = 0.25 + 0.2 * Math.sin(now / 60);
-              ctx.fillStyle = "#cfe8ff";
-              ctx.fillRect(cxp - 3, cyp - TILE * 5, 6, TILE * 5);
-            } else {
-              ctx.globalAlpha = stage === 1 ? 0.95 : 0.4;
-              ctx.strokeStyle = "#eaf6ff";
-              ctx.lineWidth = 3;
-              const pts = thunderBoltPoints(eff.seed, eff.x, eff.y - 5, eff.x, eff.y);
-              ctx.beginPath();
-              pts.forEach((pt, i) => {
-                const X = sx(pt.x);
-                const Y = sy(pt.y);
-                if (i === 0) ctx.moveTo(X, Y); else ctx.lineTo(X, Y);
-              });
-              ctx.stroke();
-            }
-          } else if (eff.kind === "meteor") {
-            if (stage === 0) {
-              ctx.globalAlpha = 0.5 + 0.3 * Math.sin(now / 70);
-              ctx.strokeStyle = "#ff6b4a";
-              ctx.lineWidth = 3;
-              ctx.beginPath();
-              ctx.ellipse(cxp, cyp, 2.5 * TILE, 2.5 * TILE * 0.45, 0, 0, Math.PI * 2);
-              ctx.stroke();
-            } else if (stage === 1) {
-              const t01 = (prog - 0.6) / 0.2;
-              const px = eff.x + 2.2 * (1 - t01);
-              const py = eff.y - 4.5 * (1 - t01);
-              ctx.globalAlpha = 0.95;
-              ctx.fillStyle = "#8a6f5c";
-              ctx.beginPath();
-              ctx.arc(sx(px), sy(py), TILE * 0.34, 0, Math.PI * 2);
-              ctx.fill();
-            }
-          } else if (eff.kind === "arrow_rain") {
-            ctx.globalAlpha = 0.5;
-            ctx.strokeStyle = "#ffd23e";
-            ctx.lineWidth = 2;
-            ctx.beginPath();
-            ctx.ellipse(cxp, cyp, 2.1 * TILE, 2.1 * TILE * 0.45, 0, 0, Math.PI * 2);
-            ctx.stroke();
-            ctx.globalAlpha = 0.85;
-            ctx.strokeStyle = "#e8e2d0";
-            for (let i = 0; i < 10; i++) {
-              const h = ((eff.seed * (i + 3) * 7919) % 100) / 100;
-              const ax = eff.x + (((eff.seed >> (i % 8)) % 40) / 10 - 2);
-              const ay = eff.y - 2.6 + ((prog * 3 + h) % 1) * 2.6;
-              ctx.beginPath();
-              ctx.moveTo(sx(ax), sy(ay));
-              ctx.lineTo(sx(ax) + 3, sy(ay) + TILE * 0.5);
-              ctx.stroke();
-            }
-          } else if (eff.kind === "taunt") {
-            ctx.globalAlpha = 0.7 * (1 - prog);
-            ctx.strokeStyle = "#ffd23e";
-            ctx.lineWidth = 3;
-            ctx.beginPath();
-            ctx.ellipse(sx(eff.fromX), sy(eff.fromY), (0.5 + prog * 3) * TILE, (0.5 + prog * 3) * TILE * 0.45, 0, 0, Math.PI * 2);
-            ctx.stroke();
-          } else if (eff.kind === "warp") {
-            // 立ち上る光柱＋広がるリング（ポーター設置）
-            const rise = Math.min(1, prog * 1.5);
-            const colW = TILE * 0.55 * (1 - prog * 0.35);
-            ctx.globalAlpha = 0.5 * (1 - prog * 0.55);
-            ctx.fillStyle = "#ffe9a8";
-            ctx.fillRect(cxp - colW / 2, cyp - TILE * 3.4 * rise, colW, TILE * 3.4 * rise);
-            ctx.globalAlpha = 0.85 * (1 - prog);
-            ctx.strokeStyle = "#ffd23e";
-            ctx.lineWidth = 2;
-            ctx.beginPath();
-            ctx.ellipse(cxp, cyp, (0.3 + prog * 1.2) * TILE, (0.3 + prog * 1.2) * TILE * 0.45, 0, 0, Math.PI * 2);
-            ctx.stroke();
           }
-          ctx.restore();
+          drawSkillFxEnhanced(ctx, eff, stage, now, sx, sy, TILE, reducedMotion);
         }
         // 薬師向け死亡マーカー
         if (invRef.current?.role === "medic") {
@@ -6809,11 +6893,13 @@ export default function WorldBoxClient() {
           const cxp = inCave ? Math.round(lobbyOx + player.x * TILE) : toScreenX(player.x);
           const cyp = (inCave ? Math.round(lobbyOy + player.y * TILE) : toScreenY(player.y)) - TILE * 0.45;
           const ang = attackSwingAngle(sk);
+          const alphaBase = slashAlpha(sk) * 0.85 * (swing.whiff ? WHIFF_ALPHA_SCALE : 1);
           ctx.save();
           ctx.translate(cxp, cyp);
           ctx.scale(swing.face, 1);
+          drawWeaponSlashGlow(ctx, sk, ang, swing.whiff, swing.itemId, alphaBase, TILE);
           // 風切り（振り抜きの瞬間だけ出る弧。空振りは薄く・細く）
-          ctx.strokeStyle = `rgba(255,255,255,${(slashAlpha(sk) * 0.85 * (swing.whiff ? WHIFF_ALPHA_SCALE : 1)).toFixed(3)})`;
+          ctx.strokeStyle = `rgba(255,255,255,${alphaBase.toFixed(3)})`;
           ctx.lineWidth = swing.whiff ? 1.5 : 3;
           ctx.beginPath();
           ctx.arc(0, 0, TILE * 0.78, ang - 1.15, ang + 0.35);
@@ -6844,47 +6930,105 @@ export default function WorldBoxClient() {
       // 昼夜の薄い色づけ（共有時計。ロビーは屋内なので付けない）。
       // 夜はオフスクリーンに描いて、自分の明かりと設置した明かりの周りに
       // 穴を開けてから重ねる（明かりが実際に周りを照らす）。
-      const night = nightAmount(phaseAtTime(nowMs / 1000));
-      if (space === "world" && night > 0.01) {
-        if (!darkCanvasRef.current) darkCanvasRef.current = document.createElement("canvas");
-        const dark = darkCanvasRef.current;
-        if (dark.width !== cw || dark.height !== ch) { dark.width = cw; dark.height = ch; }
-        const dctx = dark.getContext("2d");
-        if (dctx) {
-          dctx.setTransform(1, 0, 0, 1, 0, 0);
-          dctx.clearRect(0, 0, cw, ch);
-          dctx.fillStyle = `rgba(9,13,42,${(night * 0.36).toFixed(3)})`;
-          dctx.fillRect(0, 0, cw, ch);
-          dctx.globalCompositeOperation = "destination-out";
-          const punch = (sx: number, sy: number, rTiles: number) => {
-            const r = rTiles * TILE;
-            if (sx < -r || sy < -r || sx > cw + r || sy > ch + r) return;
-            const g = dctx.createRadialGradient(sx, sy, r * 0.4, sx, sy, r);
-            g.addColorStop(0, "rgba(0,0,0,0.95)");
-            g.addColorStop(1, "rgba(0,0,0,0)");
-            dctx.fillStyle = g;
-            dctx.beginPath();
-            dctx.arc(sx, sy, r, 0, Math.PI * 2);
-            dctx.fill();
-          };
-          punch(toScreenX(player.x), toScreenY(player.y), lightRadiusTiles(invRef.current?.items));
-          for (const [key, ov] of Object.entries(tilesRef.current)) {
-            const rTiles = placedLightRadiusTiles(ov.block?.itemId);
-            if (!rTiles) continue;
-            const comma = key.indexOf(",");
-            const lx = Number(key.slice(0, comma));
-            const ly = Number(key.slice(comma + 1));
-            punch(toScreenX(lx + 0.5), toScreenY(ly + 0.5), rTiles);
+      const worldSec = nowMs / 1000;
+      const worldPhase = phaseAtTime(worldSec);
+      const night = nightAmount(worldPhase);
+      if (space === "world") {
+        const worldRainStrength = weatherBlendAt(worldSec).rainStrength;
+        const worldLights: { sx: number; sy: number; rTiles: number; itemId: string; seed: number }[] = [];
+        const pItems = invRef.current?.items;
+        const pLightId = (pItems?.["lamp"] ?? 0) > 0 ? "lamp" : (pItems?.["torch"] ?? 0) > 0 ? "torch" : null;
+        if (night > 0.01) {
+          if (!darkCanvasRef.current) darkCanvasRef.current = document.createElement("canvas");
+          const dark = darkCanvasRef.current;
+          if (dark.width !== cw || dark.height !== ch) { dark.width = cw; dark.height = ch; }
+          const dctx = dark.getContext("2d");
+          if (dctx) {
+            dctx.setTransform(1, 0, 0, 1, 0, 0);
+            dctx.clearRect(0, 0, cw, ch);
+            dctx.fillStyle = `rgba(9,13,42,${(night * 0.36).toFixed(3)})`;
+            dctx.fillRect(0, 0, cw, ch);
+            dctx.globalCompositeOperation = "destination-out";
+            const punch = (sx: number, sy: number, rTiles: number) => {
+              const r = rTiles * TILE;
+              if (sx < -r || sy < -r || sx > cw + r || sy > ch + r) return;
+              const g = dctx.createRadialGradient(sx, sy, r * 0.4, sx, sy, r);
+              g.addColorStop(0, "rgba(0,0,0,0.95)");
+              g.addColorStop(1, "rgba(0,0,0,0)");
+              dctx.fillStyle = g;
+              dctx.beginPath();
+              dctx.arc(sx, sy, r, 0, Math.PI * 2);
+              dctx.fill();
+            };
+            punch(toScreenX(player.x), toScreenY(player.y), lightRadiusTiles(pItems));
+            for (const [key, ov] of Object.entries(tilesRef.current)) {
+              const itemId = ov.block?.itemId;
+              const rTiles = placedLightRadiusTiles(itemId);
+              if (!rTiles || !itemId) continue;
+              const comma = key.indexOf(",");
+              const lx = Number(key.slice(0, comma));
+              const ly = Number(key.slice(comma + 1));
+              const lsx = toScreenX(lx + 0.5);
+              const lsy = toScreenY(ly + 0.5);
+              punch(lsx, lsy, rTiles);
+              worldLights.push({ sx: lsx, sy: lsy, rTiles, itemId, seed: lx * 31 + ly * 17 });
+            }
+            dctx.globalCompositeOperation = "source-over";
+            ctx.drawImage(dark, 0, 0, cw, ch);
+          } else {
+            ctx.fillStyle = `rgba(9,13,42,${(night * 0.36).toFixed(3)})`;
+            ctx.fillRect(0, 0, cw, ch);
           }
-          dctx.globalCompositeOperation = "source-over";
-          ctx.drawImage(dark, 0, 0, cw, ch);
-        } else {
-          ctx.fillStyle = `rgba(9,13,42,${(night * 0.36).toFixed(3)})`;
-          ctx.fillRect(0, 0, cw, ch);
         }
+        // 朝焼け/夕焼け/雨雲ティント＋夜間設置光源の暖かい加算ブルーム
+        drawLightingAndAtmosphere(ctx, {
+          cw,
+          ch,
+          TILE,
+          now,
+          nowMs,
+          phase: worldPhase,
+          night,
+          rainStrength: worldRainStrength,
+          inWorld: true,
+          inDarkInstance: false,
+          lights: worldLights,
+          playerLight: pLightId
+            ? { sx: toScreenX(player.x), sy: toScreenY(player.y), rTiles: lightRadiusTiles(pItems), itemId: pLightId }
+            : null,
+        });
       }
-      // 光る粒（蛍・ワープの光）は夜の色づけの上に出す
-      if (space === "world") drawParticles(true);
+      // 光る粒（蛍・ワープ・魔法の光）は夜の色づけの上に出す
+      drawParticles(true);
+      // 守護挑発オーラ・被弾赤ビネット・フローティングダメージ数値
+      {
+        const inCaveOv = space !== "world";
+        const pSx = inCaveOv ? Math.round(lobbyOx + player.x * TILE) : toScreenX(player.x);
+        const pSy = (inCaveOv ? Math.round(lobbyOy + player.y * TILE) : toScreenY(player.y)) + TILE * PLAYER_RADIUS;
+        drawPlayerAndSpaceOverlays(ctx, {
+          cw,
+          ch,
+          playerScreenX: pSx,
+          playerScreenY: pSy,
+          TILE,
+          now,
+          hurtAt: playerHurtAtRef.current,
+          tauntActive: (invRef.current?.tauntUntil ?? 0) > nowMs,
+          reducedMotion,
+        });
+        drawFloatingTexts(
+          ctx,
+          floatSys.items,
+          now,
+          toScreenX,
+          toScreenY,
+          lobbyOx,
+          lobbyOy,
+          inCaveOv,
+          TILE,
+          reducedMotion,
+        );
+      }
 
       // スティック（固定基点）
       const base = stickBase(cw, ch);

@@ -718,3 +718,11 @@ export function spawnSkillFx(sys: FxSystem, effect: SkillFxEffect, stage: number
       break;
   }
 }
+
+/** 外部の演出エミッタから1粒を直接追加する（上限 cap と intensity は尊重）。 */
+export function emitFxParticle(sys: FxSystem, p: FxParticle): boolean {
+  if (sys.intensity <= 0) return false;
+  pushParticle(sys, p);
+  return true;
+}
+
