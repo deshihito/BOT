@@ -22,7 +22,8 @@ import { consumeEffect } from "./vitals";
 export type EconomyError =
   | "unknown_item" | "unknown_recipe" | "not_enough_coins" | "not_enough_items"
   | "hunger_full" | "too_tired" | "invalid_count" | "invalid_request"
-  | "steal_cooldown" | "target_protected" | "target_recently_stolen" | "self_target";
+  | "steal_cooldown" | "target_protected" | "target_recently_stolen" | "self_target"
+  | "not_sellable";
 
 /** 遷移に伴うコインの移動（ブリッジのオプとして積む材料）。 */
 export type CoinMovement =
@@ -66,6 +67,9 @@ export function buyItem(
 export function sellItem(profile: PlayerProfile, itemId: unknown, countRaw?: unknown): Transition {
   const item = itemById(itemId);
   if (!item) return { ok: false, error: "unknown_item" };
+  // アゴトークンは取引所でのみ売れる（固定価格の売却カウンターで売ると
+  // 市場価格との差で無限に増やせてしまうため）
+  if (item.id === "ago_token") return { ok: false, error: "not_sellable" };
   const count = clampCount(countRaw);
   if (count === null) return { ok: false, error: "invalid_count" };
   const removed = removeItem(profile, item.id, count);
@@ -76,6 +80,47 @@ export function sellItem(profile: PlayerProfile, itemId: unknown, countRaw?: unk
     ok: true,
     profile: removed,
     coin: { kind: "earn", amount: Math.floor(sellPrice(item) * count * bonus), reason: "shop_sale" },
+  };
+}
+
+/**
+ * 取引所でアゴトークンを買う。価格はルートが exchange.ts から読んで
+ * 渡す（このモジュールは時刻を持たない）。支払いは spend オプ。
+ */
+export function buyToken(
+  profile: PlayerProfile,
+  countRaw: unknown,
+  price: number,
+  balanceCoins: number,
+): Transition {
+  const count = clampCount(countRaw);
+  if (count === null) return { ok: false, error: "invalid_count" };
+  const cost = price * count;
+  if (balanceCoins < cost) return { ok: false, error: "not_enough_coins" };
+  return {
+    ok: true,
+    profile: addItem(profile, "ago_token", count),
+    coin: { kind: "spend", amount: cost, reason: "token_buy" },
+  };
+}
+
+/**
+ * 取引所でアゴトークンを売る。売却益は earn オプ（原資はバンクロール、
+ * 他の売却と同じ Plan A）。価格はルートが exchange.ts から読んで渡す。
+ */
+export function sellToken(
+  profile: PlayerProfile,
+  countRaw: unknown,
+  price: number,
+): Transition {
+  const count = clampCount(countRaw);
+  if (count === null) return { ok: false, error: "invalid_count" };
+  const removed = removeItem(profile, "ago_token", count);
+  if (!removed) return { ok: false, error: "not_enough_items" };
+  return {
+    ok: true,
+    profile: removed,
+    coin: { kind: "earn", amount: price * count, reason: "token_sell" },
   };
 }
 

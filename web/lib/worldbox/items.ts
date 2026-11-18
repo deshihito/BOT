@@ -423,6 +423,7 @@ export const ITEMS: readonly ItemDef[] = [
   { id: "star_crown", name: "星の王冠", desc: "星を冠した王冠", category: "special", price: 15500 },
   { id: "world_seed", name: "世界の種", desc: "不思議な大きな種", category: "special", price: 6900 },
   { id: "ago_emblem", name: "アゴの紋章", desc: "アゴの印の飾り", category: "special", price: 4800 },
+  { id: "ago_token", name: "アゴトークン", desc: "取引所で売買できるトークン", category: "special", price: 100 },
 ];
 
 
@@ -507,7 +508,7 @@ export const ITEM_ICON_IDS: readonly string[] = [
   "bomb", "dragon_charm", "ghost_lantern", "spider_silk", "turtle_shield",
   "chest_box", "market_stall", "flag_red", "flag_blue", "fountain",
   "stairs", "scepter", "tiara", "dragon_egg", "star_crown",
-  "world_seed", "ago_emblem",
+  "world_seed", "ago_emblem", "ago_token",
 ];
 
 

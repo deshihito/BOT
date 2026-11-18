@@ -69,6 +69,7 @@ export const EARN_REASONS: ReadonlySet<string> = new Set([
   "ruins_complete",
   "dungeon_clear",
   "nation_treasury_withdraw",
+  "token_sell",
 ]);
 
 /** gamble の理由ホワイトリスト（Bot 側でも同じ集合で検証する）。 */
