@@ -1,7 +1,8 @@
 // AGO WORLD BOX のロビー（純粋ロジック、DOM 非依存）。
 // ロビーはワールドとは別の空間で、形は長方形ではなく図形の組み合わせ:
 // 中央=大円（交流広場）、左=矩形の翼（ショップ）、右=矩形の翼（カジノ）、
-// 上=半円のアプス（闘技場）、下=小円+矩形（鍛冶屋）。床グリッドはこれらの
+// 上=半円のアプス（闘技場）、下=小円+矩形（鍛冶屋）、カジノ翼の南に
+// 矩形の別室（取引所ホール）。床グリッドはこれらの
 // 図形の和集合で、和集合の境界セルが壁になる。ショップ翼の2階（ギルド
 // ショップ）は同じグリッド内の別領域（サブエリア）として持ち、階段タイルで
 // 往復する。カジノ翼の東には通路の先に競馬場（大きな矩形＋楕円トラック）を
@@ -73,6 +74,10 @@ const SMITH_CIRCLE = { cx: 28, cy: 39, r: 4 };
 export const RACETRACK = { cx: 93, cy: 26, rx: 29, ry: 18, innerRx: 24, innerRy: 13 };
 /** カジノ翼から競馬場への通路（外形に含まれる矩形）。 */
 export const RACE_CORRIDOR = { x0: 54, y0: 21, x1: 59, y1: 27 };
+/** 取引所ホール（カジノ翼の南の別室）。 */
+export const EXCHANGE_HALL = { x0: 36, y0: 33, x1: 54, y1: 46 };
+/** カジノ翼から取引所ホールへの通路（外形に含まれる矩形）。 */
+export const EXCHANGE_CORRIDOR = { x0: 44, y0: 31, x1: 46, y1: 32 };
 /** 競馬場エリア（外形に含まれる矩形）。 */
 export const RACECOURSE = { x0: 60, y0: 4, x1: 125, y1: 47 };
 
@@ -119,6 +124,9 @@ export function inLobbyShape(x: number, y: number): boolean {
   // 下: 鍛冶屋（矩形＋小円）
   if (inRect(24, 34, 32, 41, x, y)) return true;
   if (inCircle(SMITH_CIRCLE.cx, SMITH_CIRCLE.cy, SMITH_CIRCLE.r, x, y)) return true;
+  // 取引所ホール（カジノ翼の南の別室）と、カジノ翼からの通路
+  if (inRect(EXCHANGE_HALL.x0, EXCHANGE_HALL.y0, EXCHANGE_HALL.x1, EXCHANGE_HALL.y1, x, y)) return true;
+  if (inRect(EXCHANGE_CORRIDOR.x0, EXCHANGE_CORRIDOR.y0, EXCHANGE_CORRIDOR.x1, EXCHANGE_CORRIDOR.y1, x, y)) return true;
   // 東: カジノ翼から競馬場への通路と、競馬場エリア
   if (inRect(RACE_CORRIDOR.x0, RACE_CORRIDOR.y0, RACE_CORRIDOR.x1, RACE_CORRIDOR.y1, x, y)) return true;
   if (inRect(RACECOURSE.x0, RACECOURSE.y0, RACECOURSE.x1, RACECOURSE.y1, x, y)) return true;
@@ -153,6 +161,9 @@ function floorAt(x: number, y: number): number {
   if (inCircle(PLAZA.cx, PLAZA.cy, PLAZA.r, x, y)) {
     floor = dist2(PLAZA.cx, PLAZA.cy, x, y) <= 100 ? L_PLAZA : L_RING;
   }
+  // 取引所ホールと通路はチェック床（広場・カジノと区別する）
+  if (inRect(EXCHANGE_HALL.x0, EXCHANGE_HALL.y0, EXCHANGE_HALL.x1, EXCHANGE_HALL.y1, x, y)) floor = L_CHECK;
+  if (inRect(EXCHANGE_CORRIDOR.x0, EXCHANGE_CORRIDOR.y0, EXCHANGE_CORRIDOR.x1, EXCHANGE_CORRIDOR.y1, x, y)) floor = L_CHECK;
   return floor;
 }
 
@@ -217,8 +228,19 @@ row("bank_counter", 33, 34, 17, { station: "bank" });
 put("vault", 35, 17, { station: "bank" });
 put("atm", 35, 18, { station: "bank" });
 
-// --- 取引所（銀行の南東）: アゴトークンの売買カウンター ---
-row("shop_counter", 35, 36, 19, { station: "exchange" });
+// --- 取引所ホール（カジノ翼の南の別室）: アゴトークンの売買 ---
+// 北壁沿いの長いカウンターが取引所。係員はカウンター背面（北側）に立つ。
+// 南壁の掲示板は価格ボード（飾り、ステーションなし）。
+row("shop_counter", 40, 47, 35, { station: "exchange" });
+put("vault", 52, 34);
+put("sign_board", 37, 34);
+put("lamp", 53, 34);
+put("lamp", 37, 40);
+row("bench", 41, 43, 40);
+row("bench", 45, 47, 40);
+row("bulletin_board", 38, 40, 45);
+put("planter", 37, 45);
+put("planter", 53, 45);
 
 // --- ショップ翼（左）: カウンター2列＋店員レーン、什器の間仕切りで小部屋状に ---
 // 店ごとに品目ジャンルが違う（左上から 道具屋・建築屋・家具屋・食料屋・種素材屋）。
@@ -372,7 +394,7 @@ export const LOBBY_NPCS: readonly { x: number; y: number }[] = [
   { x: 5, y: 19 }, { x: 9, y: 19 }, { x: 13, y: 19 }, // 北カウンターの店員レーン
   { x: 5, y: 28 }, { x: 13, y: 28 }, { x: 15, y: 28 }, // 南カウンターの店員レーン（15 は買取カウンター）
   { x: 74, y: 24 }, // 競馬場の馬券カウンターの係員レーン
-  { x: 36, y: 18 }, // 取引所カウンターの係員レーン
+  { x: 42, y: 34 }, { x: 45, y: 34 }, // 取引所ホールの係員レーン
 ];
 
 /** ロビー入場地点（ワープパッドの北、広場側）。 */
