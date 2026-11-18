@@ -296,6 +296,15 @@ class TestEarn(WorkerCase):
         self.assertEqual(record["status"], "done")
         self.assertEqual(record["appliedAmount"], 120)
 
+    async def test_earn_token_sell_reason(self):
+        # 取引所のアゴトークン売却益: ホワイトリストに無いと invalid_reason で落ちる
+        self.store.pool = 5000
+        op = self.add_op(kind="earn", amount=300, reason="token_sell")
+        await self.worker.poll_once()
+        record = self.record(op["id"])
+        self.assertEqual(record["status"], "done")
+        self.assertEqual(record["appliedAmount"], 300)
+
     async def test_earn_arena_pvp_prize_reason(self):
         # 闘技場PvP の賞金（バッチ7c）: ホワイトリストに無いと invalid_reason で落ちる
         self.store.pool = 5000
