@@ -198,6 +198,7 @@ const rolesUrl = dataUrl(transpile("worldbox/roles.ts").replaceAll('"./profile"'
 const achievementsUrl = dataUrl(transpile("worldbox/achievements.ts"));
 const progressOnlineStubUrl = dataUrl(`export function dispatchProgressEffects() {} export async function notifyAchievementDiscord() {}`);
 const tentStubUrl = dataUrl(`export const TENT_MAX_TIER = 2; export const TENT_TIERS = [{ w: 13, h: 10, price: 0 }, { w: 17, h: 13, price: 3000 }, { w: 22, h: 17, price: 10000 }];`);
+const exchangeStubUrl = dataUrl(`export function tokenPriceAt() { return 100; }`);
 const profileRoute = await import(
   dataUrl(
     transpile("api/worldbox/profile/route.ts", rootDir + "/app")
@@ -212,6 +213,7 @@ const profileRoute = await import(
       .replaceAll('"@/lib/worldbox/items"', JSON.stringify(itemsUrl))
       .replaceAll('"@/lib/worldbox/tent"', JSON.stringify(tentStubUrl))
       .replaceAll('"@/lib/worldbox/station-online"', JSON.stringify(stationOnlineUrl))
+      .replaceAll('"@/lib/worldbox/exchange"', JSON.stringify(exchangeStubUrl))
       .replaceAll('"@/lib/worldbox/profile-online"', JSON.stringify(profileOnlineUrl))
       .replaceAll('"@/lib/worldbox/user-lock"', JSON.stringify(userLockUrl))
       .replaceAll('"@/lib/worldbox/roles"', JSON.stringify(rolesUrl))
@@ -237,6 +239,7 @@ const boardRoute = await import(
       .replaceAll('"@/lib/worldbox/board"', JSON.stringify(boardUrl))
       .replaceAll('"@/lib/worldbox/board-online"', JSON.stringify(boardOnlineUrl))
       .replaceAll('"@/lib/worldbox/station-online"', JSON.stringify(stationOnlineUrl))
+      .replaceAll('"@/lib/worldbox/exchange"', JSON.stringify(exchangeStubUrl))
       .replaceAll('"@/lib/worldbox/user-lock"', JSON.stringify(userLockUrl)),
   ),
 );
