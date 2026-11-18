@@ -19,7 +19,15 @@ export type LllSeName =
   | "status"
   | "ko"
   | "guard"
-  | "break";
+  | "break"
+  | "cutin"
+  | "weak"
+  | "summon"
+  | "legend"
+  | "claim"
+  | "awaken";
+
+export type BgmScene = "home" | "scout" | "battle" | "boss";
 
 export type SoundSettings = { bgm: boolean; se: boolean };
 
@@ -218,6 +226,42 @@ const SE_RECIPES: Record<LllSeName, (t: number) => void> = {
     noise({ dur: 0.18, gain: 0.18, at: t, filterFrom: 4000, filterTo: 800 });
     tone({ freq: 880, freqEnd: 220, dur: 0.16, type: "square", gain: 0.07, at: t });
   },
+  cutin: (t) => {
+    noise({ dur: 0.16, gain: 0.18, at: t, filterFrom: 600, filterTo: 4200 });
+    tone({ freq: 440, freqEnd: 1175, dur: 0.18, type: "sawtooth", gain: 0.09, at: t });
+    tone({ freq: 880, dur: 0.24, type: "triangle", gain: 0.14, at: t + 0.12 });
+    tone({ freq: 1319, dur: 0.28, type: "sine", gain: 0.12, at: t + 0.16 });
+  },
+  weak: (t) => {
+    noise({ dur: 0.12, gain: 0.22, at: t, filterFrom: 3400, filterTo: 650 });
+    tone({ freq: 240, freqEnd: 95, dur: 0.14, type: "triangle", gain: 0.22, at: t });
+    tone({ freq: 1175, dur: 0.11, type: "sine", gain: 0.13, at: t + 0.03 });
+    tone({ freq: 1568, dur: 0.16, type: "sine", gain: 0.11, at: t + 0.07 });
+  },
+  summon: (t) => {
+    noise({ dur: 0.45, gain: 0.12, at: t, filterFrom: 350, filterTo: 2600 });
+    [261.6, 329.6, 392.0, 523.3, 659.3].forEach((f, i) =>
+      tone({ freq: f, dur: 0.28, type: "sine", gain: 0.09, at: t + i * 0.075 }),
+    );
+  },
+  legend: (t) => {
+    noise({ dur: 0.35, gain: 0.15, at: t, filterFrom: 900, filterTo: 4800 });
+    [523.25, 659.25, 783.99, 1046.5, 1318.5, 1567.98].forEach((f, i) =>
+      tone({ freq: f, dur: 0.48, type: "triangle", gain: 0.13, at: t + i * 0.06 }),
+    );
+    tone({ freq: 2093, dur: 0.75, type: "sine", gain: 0.1, at: t + 0.36 });
+  },
+  claim: (t) => {
+    [784, 988, 1175, 1568].forEach((f, i) =>
+      tone({ freq: f, dur: 0.16, type: "sine", gain: 0.12, at: t + i * 0.045 }),
+    );
+  },
+  awaken: (t) => {
+    tone({ freq: 220, freqEnd: 880, dur: 0.26, type: "triangle", gain: 0.14, at: t });
+    [587.3, 740.0, 880.0, 1174.7, 1480.0].forEach((f, i) =>
+      tone({ freq: f, dur: 0.32, type: "sine", gain: 0.11, at: t + 0.14 + i * 0.06 }),
+    );
+  },
 };
 
 export function playSe(name: LllSeName): void {
@@ -231,25 +275,100 @@ export function playSe(name: LllSeName): void {
   }
 }
 
-/* --- BGM シーケンサ（穏やかなパッド＋sparse なプラック） --- */
+/* --- BGM シーケンサ（シーン別パッド＋アルペジオ＋ベース） --- */
 
-const BAR_SEC = 5.2;
-// Cmaj7 – Am7 – Dm7 – G7
-const CHORDS: number[][] = [
-  [130.81, 164.81, 196.0, 246.94],
-  [110.0, 130.81, 164.81, 196.0],
-  [146.83, 174.61, 220.0, 261.63],
-  [98.0, 123.47, 146.83, 174.61],
-];
-const PLUCK_SCALE = [261.63, 293.66, 329.63, 392.0, 440.0, 523.25];
+type BgmPreset = {
+  barSec: number;
+  filterFreq: number;
+  chords: number[][];
+  scale: number[];
+  pluckChance: number;
+  stepsPerBar: number;
+  bass: boolean;
+  padGain: number;
+  pluckType: OscillatorType;
+};
 
+const BGM_PRESETS: Record<BgmScene, BgmPreset> = {
+  home: {
+    barSec: 5.2,
+    filterFreq: 860,
+    // Cmaj7 – Am7 – Dm7 – G7
+    chords: [
+      [130.81, 164.81, 196.0, 246.94],
+      [110.0, 130.81, 164.81, 196.0],
+      [146.83, 174.61, 220.0, 261.63],
+      [98.0, 123.47, 146.83, 174.61],
+    ],
+    scale: [261.63, 293.66, 329.63, 392.0, 440.0, 523.25],
+    pluckChance: 0.35,
+    stepsPerBar: 4,
+    bass: false,
+    padGain: 0.03,
+    pluckType: "triangle",
+  },
+  scout: {
+    barSec: 4.2,
+    filterFreq: 1180,
+    // Fmaj7 – G6 – Em7 – Am9
+    chords: [
+      [174.61, 220.0, 261.63, 329.63],
+      [196.0, 246.94, 293.66, 329.63],
+      [164.81, 196.0, 246.94, 293.66],
+      [110.0, 164.81, 246.94, 261.63],
+    ],
+    scale: [329.63, 392.0, 440.0, 493.88, 587.33, 659.25],
+    pluckChance: 0.65,
+    stepsPerBar: 6,
+    bass: false,
+    padGain: 0.028,
+    pluckType: "sine",
+  },
+  battle: {
+    barSec: 2.4,
+    filterFreq: 1380,
+    // Am – F – C – G
+    chords: [
+      [110.0, 164.81, 220.0, 261.63],
+      [87.31, 130.81, 174.61, 220.0],
+      [130.81, 196.0, 261.63, 329.63],
+      [98.0, 146.83, 196.0, 246.94],
+    ],
+    scale: [220.0, 261.63, 293.66, 329.63, 392.0, 440.0, 523.25],
+    pluckChance: 0.85,
+    stepsPerBar: 8,
+    bass: true,
+    padGain: 0.025,
+    pluckType: "triangle",
+  },
+  boss: {
+    barSec: 2.0,
+    filterFreq: 1650,
+    // Dm – Bb – Gm – A7
+    chords: [
+      [146.83, 174.61, 220.0, 261.63],
+      [116.54, 146.83, 174.61, 233.08],
+      [98.0, 146.83, 196.0, 233.08],
+      [110.0, 138.59, 164.81, 196.0],
+    ],
+    scale: [293.66, 349.23, 392.0, 440.0, 466.16, 554.37, 587.33],
+    pluckChance: 0.95,
+    stepsPerBar: 8,
+    bass: true,
+    padGain: 0.028,
+    pluckType: "sawtooth",
+  },
+};
+
+let currentScene: BgmScene = "home";
 let bgmTimer: ReturnType<typeof setInterval> | null = null;
 let bgmNextBarAt = 0;
 let bgmChordIndex = 0;
 let bgmWasPlayingBeforeHidden = false;
 
-function pad(freq: number, at: number, dur: number): void {
+function pad(freq: number, at: number, dur: number, peakGain: number): void {
   if (!ctx || !bgmFilter) return;
+  const attack = Math.min(0.8, dur * 0.28);
   for (const [type, detune] of [
     ["sine", 0],
     ["triangle", 4],
@@ -260,8 +379,8 @@ function pad(freq: number, at: number, dur: number): void {
     osc.frequency.value = freq;
     osc.detune.value = detune;
     g.gain.setValueAtTime(0.0001, at);
-    g.gain.exponentialRampToValueAtTime(0.03, at + 1.6);
-    g.gain.setValueAtTime(0.03, at + dur - 1.7);
+    g.gain.exponentialRampToValueAtTime(peakGain, at + attack);
+    g.gain.setValueAtTime(peakGain, Math.max(at + attack, at + dur - attack));
     g.gain.exponentialRampToValueAtTime(0.0001, at + dur);
     osc.connect(g);
     g.connect(bgmFilter);
@@ -270,35 +389,72 @@ function pad(freq: number, at: number, dur: number): void {
   }
 }
 
-function pluck(freq: number, at: number): void {
+function pluck(freq: number, at: number, type: OscillatorType, dur = 0.65, gain = 0.036): void {
+  if (!ctx || !bgmFilter) return;
+  const osc = ctx.createOscillator();
+  const g = ctx.createGain();
+  osc.type = type;
+  osc.frequency.value = freq;
+  g.gain.setValueAtTime(0.0001, at);
+  g.gain.exponentialRampToValueAtTime(gain, at + 0.015);
+  g.gain.exponentialRampToValueAtTime(0.0001, at + dur);
+  osc.connect(g);
+  g.connect(bgmFilter);
+  osc.start(at);
+  osc.stop(at + dur + 0.06);
+}
+
+function bassPulse(freq: number, at: number, dur: number): void {
   if (!ctx || !bgmFilter) return;
   const osc = ctx.createOscillator();
   const g = ctx.createGain();
   osc.type = "triangle";
-  osc.frequency.value = freq;
+  osc.frequency.value = freq * 0.5;
   g.gain.setValueAtTime(0.0001, at);
-  g.gain.exponentialRampToValueAtTime(0.04, at + 0.02);
-  g.gain.exponentialRampToValueAtTime(0.0001, at + 1.0);
+  g.gain.exponentialRampToValueAtTime(0.06, at + 0.02);
+  g.gain.exponentialRampToValueAtTime(0.0001, at + dur);
   osc.connect(g);
   g.connect(bgmFilter);
   osc.start(at);
-  osc.stop(at + 1.1);
+  osc.stop(at + dur + 0.05);
 }
 
 function scheduleBar(): void {
   if (!ctx) return;
+  const preset = BGM_PRESETS[currentScene] ?? BGM_PRESETS.home;
+  if (bgmFilter) {
+    bgmFilter.frequency.setTargetAtTime(preset.filterFreq, ctx.currentTime, 0.25);
+  }
   const at = Math.max(ctx.currentTime + 0.06, bgmNextBarAt);
-  const chord = CHORDS[bgmChordIndex % CHORDS.length];
+  const chord = preset.chords[bgmChordIndex % preset.chords.length];
   bgmChordIndex += 1;
-  for (const freq of chord) pad(freq, at, BAR_SEC + 0.4);
-  // 1.3秒グリッドで、たまにだけプラックを置く（C メジャーペンタトニック）
-  for (let step = 0; step < 4; step++) {
-    if (Math.random() < 0.3) {
-      const freq = PLUCK_SCALE[Math.floor(Math.random() * PLUCK_SCALE.length)];
-      pluck(freq, at + step * 1.3 + 0.1);
+  for (const freq of chord) pad(freq, at, preset.barSec + 0.25, preset.padGain);
+
+  const stepDur = preset.barSec / preset.stepsPerBar;
+  for (let step = 0; step < preset.stepsPerBar; step++) {
+    const stepAt = at + step * stepDur;
+    if (preset.bass && step % 2 === 0) {
+      bassPulse(chord[0], stepAt, stepDur * 1.4);
+    }
+    if (Math.random() < preset.pluckChance) {
+      const idx =
+        currentScene === "battle" || currentScene === "boss"
+          ? (bgmChordIndex + step) % preset.scale.length
+          : Math.floor(Math.random() * preset.scale.length);
+      pluck(preset.scale[idx], stepAt + 0.02, preset.pluckType, currentScene === "home" ? 1.0 : 0.45);
     }
   }
-  bgmNextBarAt = at + BAR_SEC;
+  bgmNextBarAt = at + preset.barSec;
+}
+
+export function setBgmScene(scene: BgmScene): void {
+  if (currentScene === scene) return;
+  currentScene = scene;
+  if (ctx && bgmTimer) {
+    bgmNextBarAt = ctx.currentTime + 0.08;
+    bgmChordIndex = 0;
+    scheduleBar();
+  }
 }
 
 export function startBgm(): void {
@@ -311,7 +467,7 @@ export function startBgm(): void {
   scheduleBar();
   bgmTimer = setInterval(() => {
     if (ctx && bgmNextBarAt < ctx.currentTime + 1.4) scheduleBar();
-  }, 400);
+  }, 350);
 }
 
 export function stopBgm(): void {

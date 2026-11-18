@@ -57,6 +57,8 @@ export type BattleActor = {
   shield: number;
   defending: boolean;
   alive: boolean;
+  /** 限界突破段階 0〜5（表示用）。 */
+  limitBreak?: number;
   /** 戦術カード A9 の強化（残りターンと倍率）。高密度化でのみ使う。 */
   buffTurns?: number;
   buffMult?: number;
@@ -115,6 +117,11 @@ export type BattleEvent = {
   affinity?: number;
   /** 表示用メタ（status の付与イベントのみ）: 付与した状態の種類。 */
   statusKind?: BattleStatusKind;
+  /** 表示用メタ（演出用）: 発動属性・技名・威力・カットイン有無。 */
+  element?: LllElement;
+  skillName?: string;
+  skillPower?: number;
+  cutIn?: boolean;
 };
 export type BattleState = {
   id: string;
@@ -131,6 +138,12 @@ export type BattleState = {
   turnCount: number;
   /** 高密度化（戦術カード）が有効な対戦でのみ存在する。旧形式の対戦には無い。 */
   tactics?: TacticsState;
+  /** 対戦モード種別（既定: ladder）。 */
+  mode?: "ladder" | "abyss" | "pvp";
+  /** バトル見出し・階層・ライバル名（任意）。 */
+  title?: string;
+  floor?: number;
+  rivalName?: string;
 };
 export type PlayerAction = { skill: 0 | 1 | "basic" | "defend"; targetKey?: string };
 
@@ -422,6 +435,8 @@ function dealDamage(
     amount: dealt,
     hpAfter: Math.max(0, target.hp),
     affinity,
+    element: attacker.element,
+    ...(typeof sourcePower === "number" ? { skillPower: sourcePower } : {}),
   });
   // 「このターンの出来事」への記録（直接効果による与ダメージのみ数える）
   if (tactics && tactics.effectDepth === 0 && attacker.side === tactics.turn.side && dealt > 0) {
@@ -524,30 +539,70 @@ function executeAction(state: BattleState, actor: BattleActor, action: PlayerAct
   if (!skill) throw new Error("技が見つかりません。");
   if (actor.cooldowns[action.skill] > 0) throw new Error("この技はクールダウン中です。");
   actor.cooldowns[action.skill] = skill.cooldown;
+  const isCutIn = action.skill === 1 || actor.tier === "legend";
 
   if (skill.kind === "heal") {
     const target = resolveTarget(state, actor, action.targetKey, "ally");
     const atk = effectiveAtk(actor);
     const amount = Math.max(1, Math.floor(skill.power * (atk / (atk + effectiveDef(target))) * (0.8 + nextRandom(state) * 0.4)));
-    pushLog(state, { type: "info", text: `${actor.name}の「${skill.name}」。`, actorKey: actor.key, targetKey: target.key });
+    pushLog(state, {
+      type: "info",
+      text: `${actor.name}の「${skill.name}」。`,
+      actorKey: actor.key,
+      targetKey: target.key,
+      element: actor.element,
+      skillName: skill.name,
+      skillPower: skill.power,
+      cutIn: isCutIn,
+    });
     healActor(state, actor, target, amount);
     return;
   }
   if (skill.kind === "shield") {
     const target = resolveTarget(state, actor, action.targetKey, "ally");
     target.shield += skill.power;
-    pushLog(state, { type: "shield", text: `${actor.name}の「${skill.name}」。${target.name}にシールド ${skill.power}。`, actorKey: actor.key, targetKey: target.key, amount: skill.power, shieldAfter: target.shield });
+    pushLog(state, {
+      type: "shield",
+      text: `${actor.name}の「${skill.name}」。${target.name}にシールド ${skill.power}。`,
+      actorKey: actor.key,
+      targetKey: target.key,
+      amount: skill.power,
+      shieldAfter: target.shield,
+      element: actor.element,
+      skillName: skill.name,
+      skillPower: skill.power,
+      cutIn: isCutIn,
+    });
     return;
   }
   if (skill.kind === "overdrive") {
     // 自分への強化技。対象指定（クライアントの敵タップ等）は無視して自分に付与する
     addStatus(actor, "overdrive", 2);
-    pushLog(state, { type: "status", text: `${actor.name}の「${skill.name}」。攻撃力が上がった。`, actorKey: actor.key, targetKey: actor.key, statusKind: "overdrive" });
+    pushLog(state, {
+      type: "status",
+      text: `${actor.name}の「${skill.name}」。攻撃力が上がった。`,
+      actorKey: actor.key,
+      targetKey: actor.key,
+      statusKind: "overdrive",
+      element: actor.element,
+      skillName: skill.name,
+      skillPower: skill.power,
+      cutIn: isCutIn,
+    });
     return;
   }
   // 攻撃系（damage / burn / stun / guard_break / drain）
   const target = resolveTarget(state, actor, action.targetKey, "enemy");
-  pushLog(state, { type: "info", text: `${actor.name}の「${skill.name}」。`, actorKey: actor.key, targetKey: target.key });
+  pushLog(state, {
+    type: "info",
+    text: `${actor.name}の「${skill.name}」。`,
+    actorKey: actor.key,
+    targetKey: target.key,
+    element: actor.element,
+    skillName: skill.name,
+    skillPower: skill.power,
+    cutIn: isCutIn,
+  });
   const dealt = dealDamage(state, actor, target, skill.power, skill.power);
   if (target.alive) {
     if (skill.kind === "burn") {
@@ -1109,6 +1164,7 @@ function toActor(card: LllCard, side: "player" | "cpu", index: number): BattleAc
     element: card.element,
     tier: card.tier,
     level: card.level,
+    ...(typeof card.limitBreak === "number" && card.limitBreak > 0 ? { limitBreak: card.limitBreak } : {}),
     ...(card.glyph ? { glyph: card.glyph } : {}),
     ...(card.imageDataUrl ? { imageDataUrl: card.imageDataUrl } : {}),
     maxHp: stats.hp,
@@ -1136,7 +1192,13 @@ export function createBattle(
   enemyTeam: LllCard[],
   tierIndex: number,
   seed: number,
-  options?: { tacticDecks?: { player: string[] | null; cpu: string[] | null } },
+  options?: {
+    tacticDecks?: { player: string[] | null; cpu: string[] | null };
+    mode?: "ladder" | "abyss" | "pvp";
+    title?: string;
+    floor?: number;
+    rivalName?: string;
+  },
 ): BattleState {
   const state: BattleState = {
     id,
@@ -1153,6 +1215,10 @@ export function createBattle(
     seed,
     rngState: seed >>> 0,
     turnCount: 0,
+    ...(options?.mode ? { mode: options.mode } : {}),
+    ...(options?.title ? { title: options.title } : {}),
+    ...(typeof options?.floor === "number" ? { floor: options.floor } : {}),
+    ...(options?.rivalName ? { rivalName: options.rivalName } : {}),
   };
   pushLog(state, { type: "info", text: "対戦開始。" });
   if (options?.tacticDecks) {
@@ -1301,4 +1367,18 @@ export function runCpuBattleToEnd(
     applyAction(state, playerPolicy(state, actor));
   }
   return state;
+}
+
+/** オートバトル1手: 現在のプレイヤー手番に対して戦術＋行動を自動実行する。 */
+export function autoPlayerTurn(state: BattleState): BattleState {
+  if (state.phase !== "battle") throw new Error("この対戦は終了しています。");
+  const actor = currentActor(state);
+  if (!actor || actor.side !== "player") throw new Error("いまはプレイヤーの手番ではありません。");
+  if (state.tactics) {
+    cpuPlayTactics(state, actor);
+    if (state.phase !== "battle") return state;
+  }
+  const nextActor = currentActor(state);
+  if (!nextActor || nextActor.side !== "player") return state;
+  return applyAction(state, cpuChooseAction(state, nextActor));
 }

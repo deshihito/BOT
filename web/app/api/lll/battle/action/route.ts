@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
-import { LllError, battleAction, battleTactic, parseBattleActionBody } from "@/lib/lll/lll-server";
+import { LllError, battleAction, battleAutoStep, battleTactic, parseBattleActionBody } from "@/lib/lll/lll-server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-/** 行動または戦術カードのプレイを適用する。進めた状態と最新のプロフィールを返す。 */
+/** 行動・戦術・オート進行を適用する。進めた状態と最新のプロフィールを返す。 */
 export async function POST(request: Request) {
   let body: unknown;
   try {
@@ -15,9 +15,11 @@ export async function POST(request: Request) {
   try {
     const parsed = parseBattleActionBody(body);
     const result =
-      parsed.kind === "tactic"
-        ? await battleTactic(parsed.token, parsed.battleId, parsed.cardId)
-        : await battleAction(parsed.token, parsed.battleId, parsed.action);
+      parsed.kind === "auto"
+        ? await battleAutoStep(parsed.token, parsed.battleId)
+        : parsed.kind === "tactic"
+          ? await battleTactic(parsed.token, parsed.battleId, parsed.cardId)
+          : await battleAction(parsed.token, parsed.battleId, parsed.action);
     return NextResponse.json(result);
   } catch (error) {
     if (error instanceof LllError) return NextResponse.json({ error: error.message }, { status: error.status });

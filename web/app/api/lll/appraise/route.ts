@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
-import { LllError, appraise, parseAppraiseBody } from "@/lib/lll/lll-server";
+import { LllError, appraise, parseAppraiseBody, ticketSummon } from "@/lib/lll/lll-server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-/** 画像スカウト（鑑定）。新規カード生成、または同一画像なら欠片変換。 */
+/** 画像スカウト（鑑定）またはチケット召喚。 */
 export async function POST(request: Request) {
   let body: unknown;
   try {
@@ -14,8 +14,12 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "リクエストの形式が正しくありません" }, { status: 400 });
   }
   try {
-    const { token, features, imageDataUrl } = parseAppraiseBody(body);
-    const result = await appraise(token, features, imageDataUrl);
+    const parsed = parseAppraiseBody(body);
+    if (parsed.ticketSummon) {
+      const result = await ticketSummon(parsed.token);
+      return NextResponse.json(result);
+    }
+    const result = await appraise(parsed.token, parsed.features!, parsed.imageDataUrl!);
     return NextResponse.json(result);
   } catch (error) {
     if (error instanceof LllError) return NextResponse.json({ error: error.message }, { status: error.status });

@@ -21,6 +21,10 @@ export type PlaybackEventLike = {
   shieldAfter?: number;
   affinity?: number;
   statusKind?: string;
+  element?: string;
+  skillName?: string;
+  skillPower?: number;
+  cutIn?: boolean;
 };
 
 export type PlaybackActorLike = {
@@ -45,6 +49,14 @@ export type PlaybackFloatKind =
   | "burn"
   | "death";
 
+export type PlaybackVfx = {
+  kind: "attack" | "heal" | "shield" | "status" | "ko";
+  element: string;
+  fromKey?: string;
+  toKey?: string;
+  strong?: boolean;
+};
+
 export type PlaybackStep = {
   /** このステップで表示するイベント（元の列の index 付き）。 */
   event: PlaybackEventLike;
@@ -61,6 +73,12 @@ export type PlaybackStep = {
   float: { targetKey: string; text: string; kind: PlaybackFloatKind } | null;
   /** この拍で点滅させるシールド/防御バッジの持ち主。無ければ null。 */
   shieldFlashKey: string | null;
+  /** カットイン演出（技2やレジェンド技の開始時）。 */
+  cutIn: { actorKey: string; skillName: string; element: string } | null;
+  /** 2D/3D共通のビジュアルエフェクト指示。 */
+  vfx: PlaybackVfx | null;
+  /** 画面・カメラシェイクの強さ（0=なし, 1=弱, 2=中, 3=強）。 */
+  shakeIntensity: 0 | 1 | 2 | 3;
 };
 
 /** 1倍速の基準尺（ms）。ダメージと回復が主拍、情報は最短。 */
@@ -127,6 +145,19 @@ export function buildPlaybackSteps<T extends PlaybackActorLike>(
     let se: string | null = null;
     let vibrate: number | number[] | null = null;
     let shieldFlashKey: string | null = null;
+    let cutIn: PlaybackStep["cutIn"] = null;
+    let vfx: PlaybackVfx | null = null;
+    let shakeIntensity: 0 | 1 | 2 | 3 = 0;
+    let durationMs = PLAYBACK_DURATIONS[event.type] ?? 400;
+
+    if (event.cutIn && event.actorKey && event.skillName) {
+      cutIn = {
+        actorKey: event.actorKey,
+        skillName: event.skillName,
+        element: event.element ?? "light",
+      };
+      durationMs = Math.max(durationMs, 680);
+    }
 
     switch (event.type) {
       case "damage": {
@@ -143,9 +174,19 @@ export function buildPlaybackSteps<T extends PlaybackActorLike>(
             text: kind === "weak" ? `弱点 -${event.amount ?? 0}` : `-${event.amount ?? 0}`,
             kind,
           };
-          if (target.side === "player") vibrate = 18;
+          if (target.side === "player") vibrate = kind === "weak" ? [20, 20, 20] : 18;
+          vfx = {
+            kind: "attack",
+            element: event.element ?? "fire",
+            fromKey: event.actorKey,
+            toKey: target.key,
+            strong: kind === "weak" || (event.skillPower ?? 0) >= 80,
+          };
+          shakeIntensity = kind === "weak" || (event.skillPower ?? 0) >= 80 ? 3 : 1;
+          se = kind === "weak" ? "weak" : "hit";
+        } else {
+          se = "hit";
         }
-        se = "hit";
         break;
       }
       case "trait": {
@@ -154,6 +195,8 @@ export function buildPlaybackSteps<T extends PlaybackActorLike>(
           applyHp(target, event, -1);
           float = { targetKey: target.key, text: `反射 -${event.amount ?? 0}`, kind: "trait" };
           if (target.side === "player") vibrate = 18;
+          vfx = { kind: "attack", element: "fire", fromKey: event.actorKey, toKey: target.key };
+          shakeIntensity = 1;
         }
         se = "status";
         break;
@@ -162,6 +205,7 @@ export function buildPlaybackSteps<T extends PlaybackActorLike>(
         if (target) {
           applyHp(target, event, 1);
           float = { targetKey: target.key, text: `+${event.amount ?? 0}`, kind: "heal" };
+          vfx = { kind: "heal", element: event.element ?? "water", fromKey: event.actorKey, toKey: target.key };
         }
         se = "heal";
         break;
@@ -183,6 +227,8 @@ export function buildPlaybackSteps<T extends PlaybackActorLike>(
           };
           se = broke ? "break" : "guard";
           shieldFlashKey = target.key;
+          if (granted) vfx = { kind: "shield", element: event.element ?? "earth", toKey: target.key };
+          if (broke) shakeIntensity = 2;
         }
         break;
       }
@@ -192,6 +238,7 @@ export function buildPlaybackSteps<T extends PlaybackActorLike>(
           applyHp(target, event, -1);
           float = { targetKey: target.key, text: `やけど -${event.amount}`, kind: "burn" };
           if (target.side === "player") vibrate = 12;
+          vfx = { kind: "status", element: "fire", toKey: target.key };
           se = "status";
         } else if (event.statusKind && target) {
           const kind = event.statusKind;
@@ -200,9 +247,11 @@ export function buildPlaybackSteps<T extends PlaybackActorLike>(
           if (existing) existing.turns = Math.max(existing.turns, turns);
           else target.statuses.push({ kind, turns });
           float = { targetKey: target.key, text: STATUS_FLOAT_LABEL[kind] ?? kind, kind: "status" };
+          vfx = { kind: "status", element: event.element ?? "dark", toKey: target.key };
           se = "status";
         } else if (event.statusKind === "stun" && actor) {
           float = { targetKey: actor.key, text: "スタンで行動不能", kind: "status" };
+          vfx = { kind: "status", element: "wind", toKey: actor.key };
           se = "status";
         }
         break;
@@ -215,13 +264,20 @@ export function buildPlaybackSteps<T extends PlaybackActorLike>(
           target.statuses = [];
           float = { targetKey: target.key, text: "撃破", kind: "death" };
           vibrate = target.side === "player" ? [40, 40, 40] : 25;
+          vfx = { kind: "ko", element: "dark", toKey: target.key, strong: true };
+          shakeIntensity = 3;
         }
         se = "ko";
         break;
       }
       case "info": {
         // 防御の宣言はバッジを1回膨らませる対象として拾う
-        if (actor && event.text.includes("防御した")) shieldFlashKey = actor.key;
+        if (actor && event.text.includes("防御した")) {
+          shieldFlashKey = actor.key;
+          vfx = { kind: "shield", element: "earth", toKey: actor.key };
+        } else if (cutIn) {
+          se = "cutin";
+        }
         break;
       }
       default:
@@ -232,11 +288,14 @@ export function buildPlaybackSteps<T extends PlaybackActorLike>(
       event,
       eventIndex,
       actors,
-      durationMs: PLAYBACK_DURATIONS[event.type] ?? 400,
+      durationMs,
       se,
       vibrate,
       float,
       shieldFlashKey,
+      cutIn,
+      vfx,
+      shakeIntensity,
     });
   });
 
