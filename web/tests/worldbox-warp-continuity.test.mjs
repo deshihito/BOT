@@ -69,14 +69,20 @@ const DOWN_LANDING = { x: 17.5, y: 27.5, space: "lobby" };
 const PLAZA = { x: 28.5, y: 32.5, space: "lobby" };
 
 test("ワープ表は lobby.ts の階段定数と一致する（ドリフト防止）", () => {
-  assert.equal(wb.SAME_SPACE_WARPS.length, 2);
-  const [up, down] = wb.SAME_SPACE_WARPS;
+  assert.equal(wb.SAME_SPACE_WARPS.length, 4);
+  const [up, down, secIn, secOut] = wb.SAME_SPACE_WARPS;
   assert.deepEqual(up.sources, lobby.LOBBY_STAIRS_UP);
   assert.deepEqual(up.landing, lobby.LOBBY_UP_LANDING);
   assert.deepEqual(down.sources, lobby.LOBBY_STAIRS_DOWN);
   assert.deepEqual(down.landing, lobby.LOBBY_DOWN_LANDING);
   assert.equal(up.space, "lobby");
   assert.equal(down.space, "lobby");
+  assert.deepEqual(secIn.sources, lobby.LOBBY_SECRET_STAIRS_IN);
+  assert.deepEqual(secIn.landing, lobby.LOBBY_SECRET_IN_LANDING);
+  assert.deepEqual(secOut.sources, lobby.LOBBY_SECRET_STAIRS_OUT);
+  assert.deepEqual(secOut.landing, lobby.LOBBY_SECRET_OUT_LANDING);
+  assert.equal(secIn.space, "lobby");
+  assert.equal(secOut.space, "lobby");
   // 中継ミラーも同じ表を持つ
   assert.deepEqual(relay.SAME_SPACE_WARPS, wb.SAME_SPACE_WARPS);
   assert.equal(relay.WARP_LANDING_TOLERANCE_TILES, wb.WARP_LANDING_TOLERANCE_TILES);
@@ -169,4 +175,22 @@ test("遺跡の転移罠: サーバーがプレゼンス/セーブを転移先�
   const route = fs.readFileSync(path.join(rootDir, "app/api/worldbox/instances/route.ts"), "utf8");
   assert.ok(route.includes("putPresence"), "転移時にプレゼンスをそろえていない");
   assert.ok(route.includes("serializeSave({ space, x: teleport.x"), "転移時にセーブをそろえていない");
+});
+
+test("秘密階段ワープ: VIP秘密クラブへの往復が REST/セーブ/WS 中継の全経路で通る", () => {
+  const secInLand = { x: lobby.LOBBY_SECRET_IN_LANDING.x, y: lobby.LOBBY_SECRET_IN_LANDING.y, space: "lobby" };
+  const secOutLand = { x: lobby.LOBBY_SECRET_OUT_LANDING.x, y: lobby.LOBBY_SECRET_OUT_LANDING.y, space: "lobby" };
+  for (const lagMs of [0, 500, 2000]) {
+    const secInBase = { x: 187.5, y: 126.9, space: "lobby", ts: NOW };
+    assert.equal(wb.checkMovementContinuity(secInBase, secInLand, NOW + lagMs).ok, true, `secIn lag=${lagMs}`);
+    const secOutBase = { x: 199.5, y: 129.6, space: "lobby", ts: NOW };
+    assert.equal(wb.checkMovementContinuity(secOutBase, secOutLand, NOW + lagMs).ok, true, `secOut lag=${lagMs}`);
+  }
+  assert.equal(wb.checkSaveFallbackContinuity({ x: 187.5, y: 127.5, space: "lobby" }, secInLand).ok, true);
+  assert.equal(wb.checkSaveFallbackContinuity({ x: 199.5, y: 130.5, space: "lobby" }, secOutLand).ok, true);
+  const hb = (x, y) => ({ x, y, vx: 0, vy: 0, face: 1, space: "lobby" });
+  const room = relay.createRoom();
+  relay.acceptHeartbeat(room, "p1", "n", hb(187.5, 126.9), NOW);
+  const res = relay.acceptHeartbeat(room, "p1", "n", hb(secInLand.x, secInLand.y), NOW + 500);
+  assert.ok(res && !res.rejected, "秘密階段INが中継で却下された");
 });

@@ -51,10 +51,18 @@ import { createRemoteTrack, stepRemoteTrack, updateRemoteTrack, type RemoteTrack
 import type { NationView, NationsResponse } from "@/lib/worldbox/nations";
 import {
   L_PLAZA, L_SAND, L_VOID,
+  LOBBY_DISTRICTS,
   LOBBY_ENTRY, LOBBY_FLOOR_FALLBACK, LOBBY_FLOOR_SPRITE, LOBBY_H, LOBBY_STAIRS_DOWN, LOBBY_STAIRS_UP,
+  LOBBY_SECRET_IN_LANDING, LOBBY_SECRET_OUT_LANDING, LOBBY_SECRET_STAIRS_IN, LOBBY_SECRET_STAIRS_OUT,
   LOBBY_DOWN_LANDING, LOBBY_UP_LANDING, LOBBY_W, LOBBY_WARP_PAD,
-  buildLobby, lobbyTileAt, stationArcadeNear, stationGenreNear, stationNear, RACETRACK, type LobbyData, type LobbyObject, type LobbyStation,
+  buildLobby, isSecretPassageTile, lobbyDistrictAt, lobbySecretRoomAt,
+  lobbyTileAt, stationArcadeNear, stationGenreNear, stationNear, RACETRACK, type LobbyData, type LobbyObject, type LobbyStation,
 } from "@/lib/worldbox/lobby";
+import {
+  emptyDiscoveryState, loadDiscoveryState, recordDistrictDiscovery, recordFortuneDraw,
+  recordQuizClear, recordSecretRoomDiscovery, recordShootingScore, recordVaultClear,
+  saveDiscoveryState, toggleFortuneTie, type FortuneRecord, type LobbyDiscoveryState,
+} from "@/lib/worldbox/lobby-discovery";
 import {
   COAT_COLORS, RACE_DURATION_MS, generateRaceCore, horseTrackPose, scheduleAt, type RaceCore,
 } from "@/lib/worldbox/racing";
@@ -121,6 +129,12 @@ import WorldBoxGuildBoardPanel from "./WorldBoxGuildBoardPanel";
 import WorldBoxGuildShopPanel from "./WorldBoxGuildShopPanel";
 import WorldBoxTradePanel from "./WorldBoxTradePanel";
 import WorldBoxCodexPanel from "./WorldBoxCodexPanel";
+import WorldBoxShrinePanel from "./WorldBoxShrinePanel";
+import WorldBoxJukeboxPanel from "./WorldBoxJukeboxPanel";
+import WorldBoxShootingPanel from "./WorldBoxShootingPanel";
+import WorldBoxVaultPuzzlePanel from "./WorldBoxVaultPuzzlePanel";
+import WorldBoxStampPanel from "./WorldBoxStampPanel";
+import WorldBoxArchivePanel from "./WorldBoxArchivePanel";
 import { notifyTradeChanged } from "@/lib/worldbox/trade-push";
 import type { TradeClientView } from "@/lib/worldbox/trade";
 import { ItemSlot as ItemSlotView, ItemSlotGrid } from "./ItemSlotGrid";
@@ -769,6 +783,12 @@ const STATION_LABEL: Record<LobbyStation, string> = {
   sell: "売却専用ショップ",
   telescope: "望遠鏡",
   exchange: "取引所",
+  shrine: "おみくじ神社・祠",
+  jukebox: "ジュークボックス",
+  shooting: "縁日射的場",
+  vault_puzzle: "古代暗号金庫",
+  stamp: "総合案内・スタンプ帳",
+  archive: "歴史博物館",
 };
 
 export default function WorldBoxClient() {
@@ -1183,6 +1203,69 @@ export default function WorldBoxClient() {
     if (inviteGuildId) setGuildBoardOpen(true);
   }, [inviteGuildId]);
   const [guildShopOpen, setGuildShopOpen] = useState(false);
+  const [shrineOpen, setShrineOpen] = useState(false);
+  const [jukeboxOpen, setJukeboxOpen] = useState(false);
+  const [shootingOpen, setShootingOpen] = useState(false);
+  const [vaultPuzzleOpen, setVaultPuzzleOpen] = useState(false);
+  const [stampOpen, setStampOpen] = useState(false);
+  const [archiveOpen, setArchiveOpen] = useState(false);
+  const [discovery, setDiscovery] = useState<LobbyDiscoveryState>(() => emptyDiscoveryState());
+  const discoveryRef = useRef<LobbyDiscoveryState>(discovery);
+  discoveryRef.current = discovery;
+  const [discoveryToast, setDiscoveryToast] = useState<{ text: string; secret?: boolean } | null>(null);
+  const discoveryToastTimerRef = useRef<number | undefined>(undefined);
+  const showDiscoveryToast = (text: string, secret = false) => {
+    setDiscoveryToast({ text, secret });
+    window.clearTimeout(discoveryToastTimerRef.current);
+    discoveryToastTimerRef.current = window.setTimeout(() => setDiscoveryToast(null), 4500);
+  };
+  useEffect(() => {
+    const loaded = loadDiscoveryState();
+    discoveryRef.current = loaded;
+    setDiscovery(loaded);
+    return () => window.clearTimeout(discoveryToastTimerRef.current);
+  }, []);
+  const updateDiscovery = (updater: (prev: LobbyDiscoveryState) => LobbyDiscoveryState) => {
+    const next = updater(discoveryRef.current);
+    discoveryRef.current = next;
+    saveDiscoveryState(next);
+    setDiscovery(next);
+    return next;
+  };
+  const trackLobbyTileRef = useRef<(tx: number, ty: number) => boolean>(() => false);
+  trackLobbyTileRef.current = (tx: number, ty: number) => {
+    const sr = lobbySecretRoomAt(tx, ty);
+    if (sr) {
+      const res = recordSecretRoomDiscovery(discoveryRef.current, sr.id);
+      if (res.newlyDiscovered) {
+        discoveryRef.current = res.state;
+        saveDiscoveryState(res.state);
+        setDiscovery(res.state);
+        playWbSe("success");
+        showDiscoveryToast(`🗝️ 秘密の部屋を発見！「${sr.name}」`, true);
+        return true;
+      }
+      return false;
+    }
+    const rawDistrict = lobbyDistrictAt(tx, ty);
+    const matched = LOBBY_DISTRICTS.find(
+      (d) =>
+        d.name === rawDistrict || (rawDistrict === "競馬場インフィールド庭園" && d.id === "race"),
+    );
+    if (matched) {
+      const res = recordDistrictDiscovery(discoveryRef.current, matched.id);
+      if (res.newlyDiscovered) {
+        discoveryRef.current = res.state;
+        saveDiscoveryState(res.state);
+        setDiscovery(res.state);
+        showDiscoveryToast(
+          `🗺️ 新エリア踏破！「${matched.name}」 (${res.state.districts.length}/${LOBBY_DISTRICTS.length})`,
+          false,
+        );
+      }
+    }
+    return false;
+  };
   const [reportOpen, setReportOpen] = useState(false);
   const [reportText, setReportText] = useState("");
   const sendReport = async () => {
@@ -1304,6 +1387,11 @@ export default function WorldBoxClient() {
     if (stationUi !== "arena") setArenaOpen(false);
     if (stationUi !== "arcade") setArcadeOpen(false);
     if (stationUi !== "race") setRacingOpen(false);
+    if (stationUi !== "shrine") setShrineOpen(false);
+    if (stationUi !== "jukebox") setJukeboxOpen(false);
+    if (stationUi !== "shooting") setShootingOpen(false);
+    if (stationUi !== "vault_puzzle") setVaultPuzzleOpen(false);
+    if (stationUi !== "archive") setArchiveOpen(false);
     setPlazaMsg("");
   }, [stationUi]);
 
@@ -1493,6 +1581,12 @@ export default function WorldBoxClient() {
       setTradePanelOpen(false);
       setCodexOpen(false);
       setTelescopeOpen(false);
+      setShrineOpen(false);
+      setJukeboxOpen(false);
+      setShootingOpen(false);
+      setVaultPuzzleOpen(false);
+      setStampOpen(false);
+      setArchiveOpen(false);
     };
     window.addEventListener("keydown", onEsc);
     return () => window.removeEventListener("keydown", onEsc);
@@ -4824,6 +4918,19 @@ export default function WorldBoxClient() {
       }
       if (LOBBY_STAIRS_DOWN.some((t) => t.x === tx && t.y === ty)) {
         placePlayer(LOBBY_DOWN_LANDING.x, LOBBY_DOWN_LANDING.y);
+        return;
+      }
+      if (LOBBY_SECRET_STAIRS_IN.some((t) => t.x === tx && t.y === ty)) {
+        placePlayer(LOBBY_SECRET_IN_LANDING.x, LOBBY_SECRET_IN_LANDING.y);
+        trackLobbyTileRef.current(Math.floor(LOBBY_SECRET_IN_LANDING.x), Math.floor(LOBBY_SECRET_IN_LANDING.y));
+        return;
+      }
+      if (LOBBY_SECRET_STAIRS_OUT.some((t) => t.x === tx && t.y === ty)) {
+        placePlayer(LOBBY_SECRET_OUT_LANDING.x, LOBBY_SECRET_OUT_LANDING.y);
+        return;
+      }
+      if (trackLobbyTileRef.current(tx, ty)) {
+        spawnBurst(fxSys, "warp", player.x, player.y - 0.3);
       }
     };
 
@@ -5590,6 +5697,7 @@ export default function WorldBoxClient() {
         }
         // 平置きオブジェクト（ワープパッド・階段・タペストリー）は足元レイヤー
         for (const o of indoor.objects) {
+          if (o.secret) continue;
           if (!FLAT_LOBBY_SPRITES.has(o.sprite)) continue;
           if (o.x + o.w < lx0 || o.x > lx1 || o.y + o.h < ly0 || o.y > ly1) continue;
           drawLobbySprite(o);
@@ -5928,10 +6036,29 @@ export default function WorldBoxClient() {
         const caveDraw = caveLayerNow();
         const ruinsObjDraw = ruinsNow();
         for (const o of indoorData().objects) {
-          if (FLAT_LOBBY_SPRITES.has(o.sprite)) continue;
+          if (!o.secret) {
+            if (FLAT_LOBBY_SPRITES.has(o.sprite)) continue;
+          }
           const sx = lobbyOx + o.x * TILE;
           const sy = lobbyOy + o.y * TILE;
           if (sx < -TILE * 4 || sy < -TILE * 4 || sx > cw + TILE * 4 || sy > ch + TILE * 4) continue;
+          if (o.secret) {
+            drawList.push({
+              y: 1_000_000 + o.y + o.h,
+              draw: () => {
+                const dist = Math.hypot(player.x - (o.x + o.w / 2), player.y - (o.y + o.h / 2));
+                if (dist < 2.2) {
+                  ctx.save();
+                  ctx.globalAlpha = 0.34;
+                  drawLobbySprite(o);
+                  ctx.restore();
+                } else {
+                  drawLobbySprite(o);
+                }
+              },
+            });
+            continue;
+          }
           if (ruinsObjDraw && (o.sprite === "ruins_chest" || o.sprite === "gold_door")) {
             const isDoor = o.sprite === "gold_door";
             const door = ruinsObjDraw.doors.find((d) => d.x === o.x && d.y === o.y);
@@ -6068,6 +6195,23 @@ export default function WorldBoxClient() {
       }
       drawList.sort((a, b) => a.y - b.y);
       for (const d of drawList) d.draw();
+
+      if (space === "lobby" && isSecretPassageTile(player.x, player.y)) {
+        const pxScreen = Math.round(lobbyOx + player.x * TILE);
+        const pyScreen = Math.round(lobbyOy + player.y * TILE);
+        const grad = ctx.createRadialGradient(
+          pxScreen,
+          pyScreen,
+          TILE * 1.4,
+          pxScreen,
+          pyScreen,
+          Math.max(cw, ch) * 0.52,
+        );
+        grad.addColorStop(0, "rgba(255, 225, 160, 0.04)");
+        grad.addColorStop(1, "rgba(6, 7, 14, 0.42)");
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, cw, ch);
+      }
 
       // ギルドショップ区画: 借りている区画はカウンター上にギルド名を出す
       // （空き区画は汎用カウンターのまま。首都マーカーの国名と同じ流儀）
@@ -7013,6 +7157,12 @@ export default function WorldBoxClient() {
       run: () => setGuildShopOpen((v) => !v),
     },
     {
+      id: "lobby_stamp",
+      label: stampOpen ? "館内マップを閉じる" : "館内マップ・スタンプ帳",
+      show: spaceUi === "lobby",
+      run: () => setStampOpen((v) => !v),
+    },
+    {
       id: "codex",
       label: codexOpen ? "冒険手帳を閉じる" : "冒険手帳",
       show: true,
@@ -7143,8 +7293,37 @@ export default function WorldBoxClient() {
         >
           {statusText}
           {othersCount > 0 ? ` ・ いま ${othersCount} 人が歩いている` : ""}
+          {spaceUi === "lobby" ? ` ・ ${lobbyDistrictAt(coords.x, coords.y)}` : ""}
           {` ・ 座標 X ${coords.x} / Y ${coords.y}`}
         </div>
+        {discoveryToast && spaceUi === "lobby" && (
+          <div
+            role="status"
+            style={{
+              position: "absolute",
+              top: "calc(44px + env(safe-area-inset-top, 0px))",
+              left: "50%",
+              transform: "translateX(-50%)",
+              padding: "6px 14px",
+              borderRadius: 99,
+              background: discoveryToast.secret
+                ? "linear-gradient(135deg, rgba(160,105,25,0.95), rgba(110,60,15,0.95))"
+                : "rgba(18,32,48,0.92)",
+              border: discoveryToast.secret
+                ? "1px solid rgba(255,215,90,0.8)"
+                : "1px solid rgba(120,210,255,0.45)",
+              color: "#fff",
+              fontSize: 12,
+              fontWeight: 700,
+              whiteSpace: "nowrap",
+              pointerEvents: "none",
+              zIndex: 5,
+              boxShadow: "0 8px 24px rgba(0,0,0,0.45)",
+            }}
+          >
+            {discoveryToast.text}
+          </div>
+        )}
         <button
           type="button"
           aria-label="メニュー"
@@ -7385,6 +7564,60 @@ export default function WorldBoxClient() {
                 onClick={() => void plazaAction("rest")}
               >
                 休む
+              </button>
+            )}
+            {stationUi === "shrine" && (
+              <button
+                type="button"
+                style={{ ...btn, minHeight: hud.buttonMinHeight, padding: "2px 10px" }}
+                onClick={() => setShrineOpen((v) => !v)}
+              >
+                {shrineOpen ? "閉じる" : "おみくじ"}
+              </button>
+            )}
+            {stationUi === "jukebox" && (
+              <button
+                type="button"
+                style={{ ...btn, minHeight: hud.buttonMinHeight, padding: "2px 10px" }}
+                onClick={() => setJukeboxOpen((v) => !v)}
+              >
+                {jukeboxOpen ? "閉じる" : "音楽を聴く"}
+              </button>
+            )}
+            {stationUi === "shooting" && (
+              <button
+                type="button"
+                style={{ ...btn, minHeight: hud.buttonMinHeight, padding: "2px 10px" }}
+                onClick={() => setShootingOpen((v) => !v)}
+              >
+                {shootingOpen ? "閉じる" : "射的で遊ぶ"}
+              </button>
+            )}
+            {stationUi === "vault_puzzle" && (
+              <button
+                type="button"
+                style={{ ...btn, minHeight: hud.buttonMinHeight, padding: "2px 10px" }}
+                onClick={() => setVaultPuzzleOpen((v) => !v)}
+              >
+                {vaultPuzzleOpen ? "閉じる" : "解錠に挑戦"}
+              </button>
+            )}
+            {stationUi === "stamp" && (
+              <button
+                type="button"
+                style={{ ...btn, minHeight: hud.buttonMinHeight, padding: "2px 10px" }}
+                onClick={() => setStampOpen((v) => !v)}
+              >
+                {stampOpen ? "閉じる" : "案内マップ・スタンプ帳"}
+              </button>
+            )}
+            {stationUi === "archive" && (
+              <button
+                type="button"
+                style={{ ...btn, minHeight: hud.buttonMinHeight, padding: "2px 10px" }}
+                onClick={() => setArchiveOpen((v) => !v)}
+              >
+                {archiveOpen ? "閉じる" : "資料を見る"}
               </button>
             )}
             {plazaMsg && <span role="status">{plazaMsg}</span>}
@@ -8356,6 +8589,45 @@ export default function WorldBoxClient() {
         <WorldBoxArcadePanel
           gameId={stationArcade}
           onClose={() => setArcadeOpen(false)}
+        />
+      )}
+      {shrineOpen && spaceUi === "lobby" && (
+        <WorldBoxShrinePanel
+          discovery={discovery}
+          onDrawFortune={(f: FortuneRecord) => updateDiscovery((s) => recordFortuneDraw(s, f))}
+          onTieFortune={() => updateDiscovery((s) => toggleFortuneTie(s))}
+          onClose={() => setShrineOpen(false)}
+        />
+      )}
+      {jukeboxOpen && spaceUi === "lobby" && (
+        <WorldBoxJukeboxPanel onClose={() => setJukeboxOpen(false)} />
+      )}
+      {shootingOpen && spaceUi === "lobby" && (
+        <WorldBoxShootingPanel
+          bestScore={discovery.bestShootingScore}
+          onRoundFinish={(score) => updateDiscovery((s) => recordShootingScore(s, score))}
+          onClose={() => setShootingOpen(false)}
+        />
+      )}
+      {vaultPuzzleOpen && spaceUi === "lobby" && (
+        <WorldBoxVaultPuzzlePanel
+          clears={discovery.vaultClears}
+          onClear={() => updateDiscovery((s) => recordVaultClear(s))}
+          onClose={() => setVaultPuzzleOpen(false)}
+        />
+      )}
+      {stampOpen && spaceUi === "lobby" && (
+        <WorldBoxStampPanel
+          discovery={discovery}
+          playerPos={playerPosRef.current}
+          onClose={() => setStampOpen(false)}
+        />
+      )}
+      {archiveOpen && spaceUi === "lobby" && (
+        <WorldBoxArchivePanel
+          discovery={discovery}
+          onQuizClear={(qid) => updateDiscovery((s) => recordQuizClear(s, qid))}
+          onClose={() => setArchiveOpen(false)}
         />
       )}
       {reportOpen && (

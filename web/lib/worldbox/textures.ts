@@ -112,6 +112,13 @@ export const LOBBY_SPRITE_SRC: Record<string, string> = {
   hedge: "/img/worldbox/lobby/hedge.png",
   tapestry: "/img/worldbox/lobby/tapestry.png",
   vending: "/img/worldbox/lobby/vending.png",
+  secret_wall: "/img/worldbox/lobby/secret_wall.png",
+  shrine: "/img/worldbox/lobby/shrine.png",
+  jukebox: "/img/worldbox/lobby/jukebox.png",
+  shooting_booth: "/img/worldbox/lobby/shooting_booth.png",
+  vault_puzzle: "/img/worldbox/lobby/vault_puzzle.png",
+  stamp_desk: "/img/worldbox/lobby/stamp_desk.png",
+  exhibit_pedestal: "/img/worldbox/lobby/exhibit_pedestal.png",
 };
 
 export function loadLobbySprites(): Record<string, HTMLImageElement> {
