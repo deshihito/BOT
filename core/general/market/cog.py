@@ -30,6 +30,8 @@ from core.economy_image import render_market_chart_png
 from core.general.circulation import economy_pool as economy_core
 from core.general.items import items as items_core
 from core.general.market import market as market_core
+from core.general.market import worldbox_bridge as worldbox_bridge_core
+from core.support.storage import KVStore
 from core.game.hub import prison as prison_core
 from core.support.messages import COIN_UPDATE_FAILED_RETRY, MARKET_INVALID_AMOUNT, market_trade_failed
 from core.support.panel_v2 import as_panel_v2, edit_panel_v2, edit_panel_with_files as _edit_panel, wrap_panel_view as _wrap
@@ -239,6 +241,14 @@ class MarketCog(commands.Cog):
         self.economy_store = (
             economy_store if economy_store is not None
             else economy_core.shared_store())
+        # WorldBox 取引所の橋渡し: bot_kv のオプを市場の正規経路で適用する。
+        self.worldbox_bridge = worldbox_bridge_core.WorldBoxMarketBridge(
+            kv=KVStore(worldbox_bridge_core.NAMESPACE, remote_only=True),
+            buy=self.buy_structured,
+            sell=self.sell_structured,
+            convert=self.convert_structured,
+            snapshot=lambda: worldbox_bridge_core.build_snapshot(self.store),
+        )
 
     def _recycle_fee_burn(self, result: dict) -> None:
         """手数料のうち消却された分を還流する（best-effort）。"""
@@ -253,11 +263,26 @@ class MarketCog(commands.Cog):
     async def cog_load(self) -> None:
         if not self.tick_loop.is_running():
             self.tick_loop.start()
+        if not self.worldbox_loop.is_running():
+            self.worldbox_loop.start()
 
     async def cog_unload(self) -> None:
         if self.tick_loop.is_running():
             self.tick_loop.cancel()
+        if self.worldbox_loop.is_running():
+            self.worldbox_loop.cancel()
         self.store.flush()
+
+    @tasks.loop(seconds=3)
+    async def worldbox_loop(self) -> None:
+        try:
+            await self.worldbox_bridge.poll_once()
+        except Exception:
+            logger.exception("market: WorldBox 取引所のオプ処理に失敗しました")
+
+    @worldbox_loop.before_loop
+    async def _before_worldbox_loop(self) -> None:
+        await self.bot.wait_until_ready()
 
     @tasks.loop(seconds=market_core.TICK_SECONDS)
     async def tick_loop(self) -> None:
@@ -266,6 +291,10 @@ class MarketCog(commands.Cog):
             self.store.maybe_flush()
             self.economy_store.maybe_flush()
             await self._refresh_chart_cache()
+            try:
+                await self.worldbox_bridge.publish_snapshot()
+            except Exception:
+                logger.exception("market: WorldBox 向けスナップショットの公開に失敗しました")
         except Exception:
             logger.exception("market: tick の処理に失敗しました")
 
@@ -338,46 +367,66 @@ class MarketCog(commands.Cog):
         await economy_helpers.record_transaction_history(
             sender_id, receiver_id, amount, reason, log_label="market")
 
-    async def execute_buy(self, user_id: int, aga_amount: int) -> str:
+    async def buy_structured(self, user_id: int, aga_amount: int) -> dict:
+        """買いの実処理（execute_buy と WorldBox 橋渡しで共用）。
+
+        成功は {"ok": True, tokens/fee/rate/tokenBalance/coinBalance}、
+        失敗は {"ok": False, "error": ユーザ向け理由} を返す。
+        """
         uid = str(user_id)
         try:
             blocked = prison_core.block_message(uid)
             if blocked:
-                return market_trade_failed(blocked)
+                return {"ok": False, "error": blocked}
             fee_rate = self._effective_fee_rate(uid)
             cap_ratio = self._effective_cap_ratio(uid)
             self.store.validate_buy(aga_amount, fee_rate=fee_rate, cap_ratio=cap_ratio)
             wallet = self._wallet()
             debit = await wallet._change_balance(uid, -aga_amount, require_funds=True)
             if debit is INSUFFICIENT:
-                return market_trade_failed("コインが不足しています。")
+                return {"ok": False, "error": "コインが不足しています。"}
             if debit is None:
-                return market_trade_failed(COIN_UPDATE_FAILED_RETRY)
+                return {"ok": False, "error": COIN_UPDATE_FAILED_RETRY}
             try:
                 result = self.store.apply_buy(uid, aga_amount, fee_rate=fee_rate)
             except market_core.TradeError as exc:
                 await wallet._change_balance(uid, aga_amount)
-                return market_trade_failed(exc)
+                return {"ok": False, "error": str(exc)}
             self._recycle_fee_burn(result)
             await self._record_history(uid, "MARKET_POOL", aga_amount, "token_buy")
-            return (
-                f"{SUCCESS} **{market_core.TOKEN_NAME}を買いました**\n"
-                f"{aga_amount:,} AGO → **{result['tokens']:,.2f} {market_core.TOKEN_NAME}**"
-                f"（レート {result['rate']:,.2f}、手数料 {result['fee']:,} AGO）\n"
-                f"保有量: {result['balance']:,.2f} {market_core.TOKEN_NAME} / コイン残高: {debit:,} AGO"
-            )
+            return {
+                "ok": True,
+                "amountAga": aga_amount,
+                "tokens": result["tokens"],
+                "fee": result["fee"],
+                "rate": result["rate"],
+                "tokenBalance": result["balance"],
+                "coinBalance": debit,
+            }
         except market_core.TradeError as exc:
-            return market_trade_failed(exc)
+            return {"ok": False, "error": str(exc)}
         except Exception:
             logger.exception("market: 買い処理に失敗 user=%s amount=%s", uid, aga_amount)
-            return market_trade_failed("取引中にエラーが発生しました。時間をおいて再試行してください。")
+            return {"ok": False, "error": "取引中にエラーが発生しました。時間をおいて再試行してください。"}
 
-    async def execute_sell(self, user_id: int, token_amount: float) -> str:
+    async def execute_buy(self, user_id: int, aga_amount: int) -> str:
+        result = await self.buy_structured(user_id, aga_amount)
+        if not result.get("ok"):
+            return market_trade_failed(result.get("error") or "取引できませんでした。")
+        return (
+            f"{SUCCESS} **{market_core.TOKEN_NAME}を買いました**\n"
+            f"{aga_amount:,} AGO → **{result['tokens']:,.2f} {market_core.TOKEN_NAME}**"
+            f"（レート {result['rate']:,.2f}、手数料 {result['fee']:,} AGO）\n"
+            f"保有量: {result['tokenBalance']:,.2f} {market_core.TOKEN_NAME} / コイン残高: {result['coinBalance']:,} AGO"
+        )
+
+    async def sell_structured(self, user_id: int, token_amount: float) -> dict:
+        """売りの実処理（execute_sell と WorldBox 橋渡しで共用）。"""
         uid = str(user_id)
         try:
             blocked = prison_core.block_message(uid)
             if blocked:
-                return market_trade_failed(blocked)
+                return {"ok": False, "error": blocked}
             fee_rate = self._effective_fee_rate(uid)
             cap_ratio = self._effective_cap_ratio(uid)
             self.store.validate_sell(uid, token_amount, fee_rate=fee_rate, cap_ratio=cap_ratio)
@@ -390,20 +439,56 @@ class MarketCog(commands.Cog):
             credit = await wallet._change_balance(uid, result["net_aga"], create_with=0)
             if credit is None or credit is INSUFFICIENT:
                 self.store.rollback_sell(uid, token_amount, result)
-                return market_trade_failed("コインの更新に失敗したため、売却を取り消しました。")
+                return {"ok": False, "error": "コインの更新に失敗したため、売却を取り消しました。"}
             self._recycle_fee_burn(result)
             await self._record_history("MARKET_POOL", uid, result["net_aga"], "token_sell")
-            return (
-                f"{SUCCESS} **{market_core.TOKEN_NAME}を売りました**\n"
-                f"{token_amount:,.2f} {market_core.TOKEN_NAME} → **{result['net_aga']:,} AGO**"
-                f"（レート {result['rate']:,.2f}、手数料 {result['fee']:,} AGO）\n"
-                f"保有量: {result['balance']:,.2f} {market_core.TOKEN_NAME} / コイン残高: {credit:,} AGO"
-            )
+            return {
+                "ok": True,
+                "tokenAmount": token_amount,
+                "netAga": result["net_aga"],
+                "grossAga": result["gross_aga"],
+                "fee": result["fee"],
+                "rate": result["rate"],
+                "tokenBalance": result["balance"],
+                "coinBalance": credit,
+            }
         except market_core.TradeError as exc:
-            return market_trade_failed(exc)
+            return {"ok": False, "error": str(exc)}
         except Exception:
             logger.exception("market: 売り処理に失敗 user=%s amount=%s", uid, token_amount)
-            return market_trade_failed("取引中にエラーが発生しました。時間をおいて再試行してください。")
+            return {"ok": False, "error": "取引中にエラーが発生しました。時間をおいて再試行してください。"}
+
+    async def execute_sell(self, user_id: int, token_amount: float) -> str:
+        result = await self.sell_structured(user_id, token_amount)
+        if not result.get("ok"):
+            return market_trade_failed(result.get("error") or "取引できませんでした。")
+        return (
+            f"{SUCCESS} **{market_core.TOKEN_NAME}を売りました**\n"
+            f"{token_amount:,.2f} {market_core.TOKEN_NAME} → **{result['netAga']:,} AGO**"
+            f"（レート {result['rate']:,.2f}、手数料 {result['fee']:,} AGO）\n"
+            f"保有量: {result['tokenBalance']:,.2f} {market_core.TOKEN_NAME} / コイン残高: {result['coinBalance']:,} AGO"
+        )
+
+    async def convert_structured(self, user_id: int, count: int) -> dict:
+        """WorldBox の旧アイテム版トークン → 本物トークンへの 1:1 変換。"""
+        uid = str(user_id)
+        try:
+            blocked = prison_core.block_message(uid)
+            if blocked:
+                return {"ok": False, "error": blocked}
+            result = self.store.apply_convert(uid, float(count))
+            self.store.flush()
+            return {
+                "ok": True,
+                "count": count,
+                "tokens": result["tokens"],
+                "tokenBalance": result["balance"],
+            }
+        except market_core.TradeError as exc:
+            return {"ok": False, "error": str(exc)}
+        except Exception:
+            logger.exception("market: 変換処理に失敗 user=%s count=%s", uid, count)
+            return {"ok": False, "error": "取引中にエラーが発生しました。時間をおいて再試行してください。"}
 
 
 async def setup(bot: commands.Bot):

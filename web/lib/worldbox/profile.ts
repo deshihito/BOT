@@ -83,6 +83,10 @@ export type PlayerProfile = {
   stealActorAt: number;
   /** 最後に steal された時刻（epoch ms）。 */
   stealTargetAt: number;
+  /** アイテム版アゴトークンの変換オプ ID（変換の冪等マーカー）。 */
+  tokenConvertNonce?: string;
+  /** 変換マーカーと対になるアイテム版トークンの個数。 */
+  tokenConvertCount?: number;
   /** 冒険役職（自由人/剣士/守護/斥候/採掘者/薬師/テレポーター）。 */
   role: AdventureRoleId;
   /** 一度でも役職を選んだか（転職コストの初回無料判定。旧データで
@@ -306,6 +310,8 @@ export function parseProfile(raw: unknown): PlayerProfile {
     storage: inv.storage,
     stealActorAt: clampInt(data.stealActorAt, 0, Number.MAX_SAFE_INTEGER, 0),
     stealTargetAt: clampInt(data.stealTargetAt, 0, Number.MAX_SAFE_INTEGER, 0),
+    tokenConvertNonce: typeof data.tokenConvertNonce === "string" ? data.tokenConvertNonce : undefined,
+    tokenConvertCount: clampInt(data.tokenConvertCount, 0, 100_000, 0) || undefined,
     role,
     // 旧データ（フラグなし）で役職を持っている人は「選んだ」ものとして扱う
     rolePicked: data.rolePicked === true || role !== "free",
@@ -525,6 +531,8 @@ export function serializeProfile(profile: PlayerProfile): string {
     storage: inv.storage,
     stealActorAt: clampInt(profile.stealActorAt, 0, Number.MAX_SAFE_INTEGER, 0),
     stealTargetAt: clampInt(profile.stealTargetAt, 0, Number.MAX_SAFE_INTEGER, 0),
+    tokenConvertNonce: typeof profile.tokenConvertNonce === "string" ? profile.tokenConvertNonce : undefined,
+    tokenConvertCount: clampInt(profile.tokenConvertCount, 0, 100_000, 0) || undefined,
     role: isAdventureRoleId(profile.role) ? profile.role : "free",
     rolePicked: profile.rolePicked === true || (isAdventureRoleId(profile.role) && profile.role !== "free"),
     mastery: parseMastery(profile.mastery),
