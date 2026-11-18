@@ -2,11 +2,11 @@ import { addMasteryXp } from "@/lib/worldbox/roles";
 import { NextResponse } from "next/server";
 import { getRequestSession, publicOrigin, sessionOwnerKey } from "@/lib/auth";
 import {
-  buyItem, buyToken, craftFromInputs, craftItem, dropItem, eatItem, resolveSteal, sellItem, sellToken,
+  buyItem, craftFromInputs, craftItem, dropItem, eatItem, resolveSteal, sellItem,
   type CoinMovement, type EconomyError,
 } from "@/lib/worldbox/economy";
 import { addGroundItemDrop, loadMyPosition } from "@/lib/worldbox/ground-items-online";
-import { tokenPriceAt } from "@/lib/worldbox/exchange";
+import { loadMarketOp, submitMarketOp, waitForMarketOp } from "@/lib/worldbox/market-online";
 import { buildEconomyOp, type EconomyOp } from "@/lib/worldbox/economy-bridge";
 import {
   deleteEconomyOp, deleteEconomyOpLedger, findEconomyOp, isEconomyEnabled, readUserBalance, submitEconomyOp, waitForOpDone,
@@ -46,9 +46,12 @@ export const runtime = "nodejs";
 //   （場所制約: ロビー鍛冶屋の作業台の前にいること。サーバー側で検証）
 // POST { action: "work" }: 労働は廃止（2026-11-16）。常に拒否する
 // POST { action: "steal", targetId }: いま同じ空間にいる相手から steal
-// POST { action: "token_buy" | "token_sell", count }: 取引所でアゴトークンを売買
-//   （場所制約: ロビーの取引所の前にいること。価格は exchange.ts の
-//    決定的価格（5分ティック）で、サーバー側が読んで遷移へ渡す）
+// POST { action: "token_buy", agaAmount } | { action: "token_sell", tokenAmount }:
+//   取引所で /general のアゴトークン（Bot 本体の市場）を売買する
+//   （場所制約: ロビーの取引所の前にいること）。売買は bot_kv 経由で
+//    Bot 側の市場が適用し、コインとトークンは Bot 側でだけ動く。
+// POST { action: "token_convert" }: 旧アイテム版アゴトークンを本物へ
+//   1:1 変換する（変換オプの ID をプロフィールに控えて冪等にする）
 // プロフィールの保存先は bot_kv（名前空間 worldbox_profiles、
 // キー = 所有者キー）。コインが動くアクションは Discord ログイン必須。
 // Bot API 未設定なら 503。
@@ -132,6 +135,7 @@ async function handlePost(request: Request, session: AuthedSession) {
     action?: unknown; itemId?: unknown; count?: unknown; recipeId?: unknown; targetId?: unknown;
     inputs?: unknown; title?: unknown;
     hotbarIndex?: unknown; storageIndex?: unknown; from?: unknown; to?: unknown;
+    agaAmount?: unknown; tokenAmount?: unknown;
   };
   const ownerKey = sessionOwnerKey(session);
   const current = await loadProfile(ownerKey);
@@ -500,18 +504,99 @@ async function handlePost(request: Request, session: AuthedSession) {
       if ("response" in gate) return gate.response;
       const place = await exchangeGate();
       if (place) return place;
-      const balance = await readUserBalance(gate.discordId);
-      if (balance === null) return statusError("economy_unavailable", 503);
-      const price = tokenPriceAt(Date.now());
-      return saveWithCoin(buyToken(current, data.count, price, balance), gate.discordId, { tokenPrice: price });
+      const agaAmount = typeof data.agaAmount === "number" ? Math.floor(data.agaAmount) : NaN;
+      if (!Number.isFinite(agaAmount) || agaAmount < 1 || agaAmount > 1_000_000) {
+        return errorResponse("invalid_amount");
+      }
+      const op = { id: crypto.randomUUID(), kind: "buy" as const, userId: gate.discordId, amountAga: agaAmount };
+      try {
+        await submitMarketOp(op);
+      } catch {
+        return statusError("economy_unavailable", 503);
+      }
+      const done = await waitForMarketOp(op.id);
+      if (!done) return statusError("economy_unavailable", 503);
+      if (done.status === "failed") {
+        return NextResponse.json(
+          { error: "market_trade_failed", message: done.error ?? "取引できませんでした" },
+          { status: 409, headers: NO_STORE },
+        );
+      }
+      if (done.status !== "done") return statusError("trade_pending", 409);
+      return NextResponse.json({ ok: true, profile: current, ...done.result }, { headers: NO_STORE });
     }
     case "token_sell": {
       const gate = coinGate();
       if ("response" in gate) return gate.response;
       const place = await exchangeGate();
       if (place) return place;
-      const price = tokenPriceAt(Date.now());
-      return saveWithCoin(sellToken(current, data.count, price), gate.discordId, { tokenPrice: price });
+      const tokenAmount = typeof data.tokenAmount === "number" ? data.tokenAmount : NaN;
+      if (!Number.isFinite(tokenAmount) || tokenAmount <= 0 || tokenAmount > 1_000_000) {
+        return errorResponse("invalid_amount");
+      }
+      const op = { id: crypto.randomUUID(), kind: "sell" as const, userId: gate.discordId, tokenAmount };
+      try {
+        await submitMarketOp(op);
+      } catch {
+        return statusError("economy_unavailable", 503);
+      }
+      const done = await waitForMarketOp(op.id);
+      if (!done) return statusError("economy_unavailable", 503);
+      if (done.status === "failed") {
+        return NextResponse.json(
+          { error: "market_trade_failed", message: done.error ?? "取引できませんでした" },
+          { status: 409, headers: NO_STORE },
+        );
+      }
+      if (done.status !== "done") return statusError("trade_pending", 409);
+      return NextResponse.json({ ok: true, profile: current, ...done.result }, { headers: NO_STORE });
+    }
+    case "token_convert": {
+      // 旧アイテム版アゴトークン（ago_token）を本物へ 1:1 変換する。
+      // 変換オプの ID（nonce）を先にプロフィールへ控えることで、応答が
+      // 途中で切れても二重変換にならない（控えがある間は同じオプを待つ）。
+      const gate = coinGate();
+      if ("response" in gate) return gate.response;
+      const place = await exchangeGate();
+      if (place) return place;
+      let working = current;
+      let nonce = working.tokenConvertNonce;
+      let count = working.tokenConvertCount ?? 0;
+      if (!nonce) {
+        count = working.items["ago_token"] ?? 0;
+        if (count <= 0) return errorResponse("not_enough_items");
+        nonce = crypto.randomUUID();
+        working = { ...working, tokenConvertNonce: nonce, tokenConvertCount: count };
+        await storeProfile(ownerKey, working);
+      }
+      const op = { id: nonce, kind: "convert" as const, userId: gate.discordId, count };
+      // 既に同じ ID のオプがある場合は上書きしない（done を pending に
+      // 戻すと Bot が二重に適用してしまう）。ある場合はその結果を待つ。
+      let done = await loadMarketOp(op.id);
+      if (!done) {
+        try {
+          await submitMarketOp(op);
+        } catch {
+          return statusError("economy_unavailable", 503);
+        }
+        done = await waitForMarketOp(op.id);
+      } else if (done.status === "pending" || done.status === "processing") {
+        done = await waitForMarketOp(op.id);
+      }
+      if (!done) return statusError("economy_unavailable", 503);
+      if (done.status === "failed") {
+        const cleared = { ...working, tokenConvertNonce: undefined, tokenConvertCount: undefined };
+        await storeProfile(ownerKey, cleared);
+        return NextResponse.json(
+          { error: "market_trade_failed", message: done.error ?? "変換できませんでした" },
+          { status: 409, headers: NO_STORE },
+        );
+      }
+      if (done.status !== "done") return statusError("trade_pending", 409);
+      const removed = removeItem(working, "ago_token", count) ?? working;
+      const finalProfile = { ...removed, tokenConvertNonce: undefined, tokenConvertCount: undefined };
+      await storeProfile(ownerKey, finalProfile);
+      return NextResponse.json({ ok: true, profile: finalProfile, ...done.result }, { headers: NO_STORE });
     }
     case "steal": {
       // steal（2026-11-16 に一旦廃止、2026-11-18 のユーザー指示で復活）。
