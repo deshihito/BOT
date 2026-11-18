@@ -1,22 +1,29 @@
-// AGO WORLD BOX 取引所の検証:
-// - 価格は決定的（同じティックで同価格）で、範囲 30〜300 に収まる
-// - buyToken / sellToken の遷移（残高不足・所持不足・通常売却の拒否）
-// - ロビーに station "exchange" のカウンターが置かれ、隣で station が返る
-// - アゴトークンのカタログとアイコンの配線
-import { test } from "node:test";
+// AGO WORLD BOX の取引所（/general の本物アゴトークン市場との接続）の検証:
+// - market.ts: スナップショットの解釈と見積もり（Bot 側 quote と同じ式）
+// - market-online.ts: bot_kv 名前空間とオプの配線（ソース確認）
+// - GET /api/worldbox/exchange: スナップショットから本人の保有量つきで返す
+// - profile ルート: token_buy / token_sell / token_convert は市場オプ経由
+// - 旧アイテム版 ago_token は通常売却できない（sellItem が拒否）
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
+import test from "node:test";
+import { fileURLToPath } from "node:url";
 import ts from "typescript";
 
-const rootDir = path.join(import.meta.dirname, "..");
+const here = path.dirname(fileURLToPath(import.meta.url));
+const rootDir = path.join(here, "..");
 const libDir = path.join(rootDir, "lib");
 
-function transpile(name, base = libDir) {
-  const src = fs.readFileSync(path.join(base, name), "utf8");
-  return ts.transpileModule(src, {
+function transpile(rel, base = libDir) {
+  const file = path.join(base, rel);
+  const source = fs.readFileSync(file, "utf8");
+  return ts.transpileModule(source, {
     compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
   }).outputText;
+}
+function dataUrl(code) {
+  return "data:text/javascript;base64," + Buffer.from(code).toString("base64");
 }
 function stripModuleSyntax(code) {
   const lines = code.split("\n");
@@ -31,119 +38,110 @@ function stripModuleSyntax(code) {
       if (!line.includes(";")) skippingImport = true;
       continue;
     }
-    out.push(
-      line
-        .replace(/^export\s+(?=(const|let|var|function|class)\s)/, "")
-        .replace(/^export\s+(?=async\s+function)/, "")
-        .replace(/^export\s*\{[^}]*\};?\s*$/, ""),
-    );
+    out.push(line.replace(/^export\s+/, ""));
   }
   return out.join("\n");
 }
-function dataUrl(js) {
-  return "data:text/javascript;base64," + Buffer.from(js).toString("base64");
-}
-async function loadBundle(files, exportNames) {
-  const code =
-    files.map((name) => stripModuleSyntax(transpile(name))).join("\n") +
-    `\nexport { ${exportNames.join(", ")} };\n`;
-  return import(dataUrl(code));
+function bundleModule(files, names) {
+  const code = files.map((name) => stripModuleSyntax(transpile(name))).join("\n");
+  return dataUrl(`${code}\nexport { ${names.join(", ")} };`);
 }
 
-const ex = await loadBundle(
-  ["worldbox/exchange.ts"],
-  ["TOKEN_TICK_MS", "TOKEN_MIN_PRICE", "TOKEN_MAX_PRICE", "tokenTickOf", "tokenPriceAtTick", "tokenPriceAt", "tokenNextTickAt", "tokenPriceHistory"],
-);
-const eco = await loadBundle(
+const market = await import(bundleModule(
+  ["worldbox/market.ts"],
+  ["parseMarketSnapshot", "marketBalanceOf", "quoteBuyTokens", "quoteSellAga", "quantizeTokens", "MARKET_FEE_RATE"],
+));
+const eco = await import(bundleModule(
   ["worldbox/items.ts", "worldbox/profile.ts", "worldbox/vitals.ts", "worldbox/economy.ts"],
-  ["buyToken", "sellToken", "sellItem", "itemById", "ITEM_ICON_IDS", "parseProfile"],
-);
-const lob = await loadBundle(
-  ["worldbox/rng.ts", "worldbox/mapgen.ts", "worldbox/lobby.ts"],
-  ["buildLobby", "stationNear", "EXCHANGE_HALL"],
-);
+  ["sellItem", "itemById", "parseProfile"],
+));
 
-test("価格: 決定的で範囲内に収まり、ティック境界でだけ変わる", () => {
-  const now = 1_700_000_000_000;
-  assert.equal(ex.tokenPriceAt(now), ex.tokenPriceAt(now + 60_000), "同じティック内は同価格");
-  assert.equal(ex.tokenTickOf(now), Math.floor(now / ex.TOKEN_TICK_MS));
-  assert.equal(ex.tokenNextTickAt(now), (ex.tokenTickOf(now) + 1) * ex.TOKEN_TICK_MS);
-  for (let tick = 0; tick < 20000; tick += 7) {
-    const p = ex.tokenPriceAtTick(tick);
-    assert.ok(Number.isInteger(p) && p >= ex.TOKEN_MIN_PRICE && p <= ex.TOKEN_MAX_PRICE, `tick=${tick} price=${p}`);
-  }
-  // 価格は実際に動く（全ティック同価格ではない）
-  const prices = new Set();
-  for (let tick = 0; tick < 500; tick++) prices.add(ex.tokenPriceAtTick(tick));
-  assert.ok(prices.size > 50, `variety=${prices.size}`);
+const profileSrc = fs.readFileSync(path.join(rootDir, "app/api/worldbox/profile/route.ts"), "utf8");
+const exchangeRouteSrc = fs.readFileSync(path.join(rootDir, "app/api/worldbox/exchange/route.ts"), "utf8");
+const marketOnlineSrc = fs.readFileSync(path.join(libDir, "worldbox/market-online.ts"), "utf8");
+const panelSrc = fs.readFileSync(path.join(rootDir, "app/games/worldbox/WorldBoxEconomyPanel.tsx"), "utf8");
+
+// ---------- market.ts（純粋ロジック） ----------
+
+test("parseMarketSnapshot: Bot の公開形式を解釈し、保有量を引ける", () => {
+  const snap = market.parseMarketSnapshot({
+    rate: 123.45,
+    history: [{ t: "2026-11-18T10:00:00+09:00", rate: 120 }, { t: "x", rate: 123.45 }],
+    halted: false,
+    haltReason: "",
+    tradeCapAga: 5000,
+    balances: { "12345": 7.5 },
+    updatedAt: "2026-11-18T10:05:00+09:00",
+  });
+  assert.ok(snap);
+  assert.equal(snap.rate, 123.45);
+  assert.equal(snap.history.length, 2);
+  assert.equal(market.marketBalanceOf(snap, "12345"), 7.5);
+  assert.equal(market.marketBalanceOf(snap, "99999"), 0);
 });
 
-test("価格: 履歴は古い順で最後が現在価格", () => {
-  const now = 1_700_000_000_000;
-  const history = ex.tokenPriceHistory(now, 24);
-  assert.equal(history.length, 24);
-  assert.equal(history[23].price, ex.tokenPriceAt(now));
-  assert.equal(history[23].tick, ex.tokenTickOf(now));
-  for (let i = 1; i < history.length; i++) assert.equal(history[i].tick, history[i - 1].tick + 1);
+test("parseMarketSnapshot: レートが無い・不正なら null", () => {
+  assert.equal(market.parseMarketSnapshot(null), null);
+  assert.equal(market.parseMarketSnapshot({}), null);
+  assert.equal(market.parseMarketSnapshot({ rate: 0 }), null);
+  assert.equal(market.parseMarketSnapshot({ rate: "100" }), null);
 });
 
-test("カタログ: アゴトークンがあり、アイコンも登録されている", () => {
-  const def = eco.itemById("ago_token");
-  assert.ok(def);
-  assert.equal(def.name, "アゴトークン");
-  assert.ok(eco.ITEM_ICON_IDS.includes("ago_token"));
-  assert.ok(fs.existsSync(path.join(rootDir, "public/img/worldbox/items/ago_token.png")));
+test("見積もりは Bot 側 quote と同じ式（手数料1%・切り捨て・0.01単位）", () => {
+  // quote_buy: fee = int(aga * 0.01), tokens = (aga - fee) / rate を 0.01 切り捨て
+  const buy = market.quoteBuyTokens(1000, 100);
+  assert.deepEqual(buy, { fee: 10, netAga: 990, tokens: 9.9 });
+  const buy2 = market.quoteBuyTokens(10000, 123.45);
+  assert.equal(buy2.fee, 100);
+  assert.equal(buy2.tokens, market.quantizeTokens(9900 / 123.45));
+  // quote_sell: gross = int(tokens * rate), fee = int(gross * 0.01)
+  const sell = market.quoteSellAga(9.9, 100);
+  assert.deepEqual(sell, { grossAga: 990, fee: 9, netAga: 981 });
+  assert.equal(market.MARKET_FEE_RATE, 0.01);
 });
 
-test("buyToken: 残高が足りれば spend(token_buy) でトークンが増える", () => {
-  const profile = eco.parseProfile({ items: {} });
-  const ok = eco.buyToken(profile, 3, 120, 1000);
-  assert.equal(ok.ok, true);
-  assert.deepEqual(ok.coin, { kind: "spend", amount: 360, reason: "token_buy" });
-  assert.equal(ok.profile.items.ago_token, 3);
-  const poor = eco.buyToken(profile, 3, 120, 359);
-  assert.equal(poor.ok, false);
-  assert.equal(poor.error, "not_enough_coins");
-  const bad = eco.buyToken(profile, 0, 120, 1000);
-  assert.equal(bad.ok, false);
-  assert.equal(bad.error, "invalid_count");
+// ---------- 配線（ソース確認） ----------
+
+test("market-online: 名前空間 worldbox_market と snapshot キーで bot_kv を使う", () => {
+  assert.ok(marketOnlineSrc.includes('WORLDBOX_MARKET_NAMESPACE = "worldbox_market"'));
+  assert.ok(marketOnlineSrc.includes('MARKET_SNAPSHOT_KEY = "snapshot"'));
+  assert.ok(marketOnlineSrc.includes("kvGet") && marketOnlineSrc.includes("kvSet"));
+  assert.ok(marketOnlineSrc.includes("submitMarketOp") && marketOnlineSrc.includes("waitForMarketOp"));
 });
 
-test("sellToken: earn(token_sell) でトークンが減り、通常売却では売れない", () => {
-  const profile = eco.parseProfile({ items: { ago_token: 5 } });
-  const ok = eco.sellToken(profile, 2, 150);
-  assert.equal(ok.ok, true);
-  assert.deepEqual(ok.coin, { kind: "earn", amount: 300, reason: "token_sell" });
-  assert.equal(ok.profile.items.ago_token, 3);
-  const lack = eco.sellToken(profile, 6, 150);
-  assert.equal(lack.ok, false);
-  assert.equal(lack.error, "not_enough_items");
-  // 売却カウンター（固定6割）では売れない（市場価格との差で増殖するため）
-  const viaCounter = eco.sellItem(profile, "ago_token", 1);
-  assert.equal(viaCounter.ok, false);
-  assert.equal(viaCounter.error, "not_sellable");
+test("取引所の価格表示ルートはスナップショットから返す（決定的価格は廃止）", () => {
+  assert.ok(exchangeRouteSrc.includes("loadMarketSnapshot"));
+  assert.ok(exchangeRouteSrc.includes("marketBalanceOf"));
+  assert.ok(!exchangeRouteSrc.includes("tokenPriceAt"));
+  assert.ok(!fs.existsSync(path.join(libDir, "worldbox/exchange.ts")), "旧 exchange.ts が残っている");
 });
 
-test("ロビー: 取引所はカジノ翼の南の別室（ホール）にあり、隣で station が返る", () => {
-  const lobby = lob.buildLobby();
-  const counters = lobby.objects.filter((o) => o.station === "exchange");
-  assert.equal(counters.length, 8);
-  assert.ok(counters.every((o) => o.y === 35 && o.x >= 40 && o.x <= 47));
-  assert.equal(lob.stationNear(lobby.objects, 43, 36), "exchange");
-  assert.equal(lob.stationNear(lobby.objects, 40, 36), "exchange");
-  // ホールは外形に含まれ、通路（カジノ翼の南）から歩いて入れる
-  assert.ok(lob.EXCHANGE_HALL.x1 - lob.EXCHANGE_HALL.x0 >= 15);
-  assert.notEqual(lobby.tiles[40 * lobby.width + 45], 0); // ホール中央は床
-  assert.notEqual(lobby.tiles[31 * lobby.width + 45], 0); // 通路も床
-  // 旧・広場のカウンター位置にはもう取引所はない
-  assert.equal(lob.stationNear(lobby.objects, 35, 20), null);
+test("profile ルート: token 系は市場オプ経由で、旧価格遷移を使わない", () => {
+  assert.ok(profileSrc.includes("submitMarketOp") && profileSrc.includes("waitForMarketOp"));
+  assert.ok(profileSrc.includes("token_buy"));
+  assert.ok(profileSrc.includes("token_convert"));
+  assert.ok(profileSrc.includes("tokenConvertNonce"), "変換の冪等マーカーが無い");
+  assert.ok(!profileSrc.includes("buyToken") && !profileSrc.includes("sellToken"));
+  assert.ok(!profileSrc.includes("tokenPriceAt"));
 });
 
-test("クライアント配線: パネルに取引所タブ、チップに取引所ラベルがある", () => {
-  const panel = fs.readFileSync(path.join(rootDir, "app/games/worldbox/WorldBoxEconomyPanel.tsx"), "utf8");
-  assert.ok(panel.includes('tabBtn("exchange", "取引所")'));
-  assert.ok(panel.includes('"token_buy"') && panel.includes('"token_sell"'));
-  assert.ok(panel.includes("/api/worldbox/exchange"));
-  const client = fs.readFileSync(path.join(rootDir, "app/games/worldbox/WorldBoxClient.tsx"), "utf8");
-  assert.ok(client.includes('exchange: "取引所"'));
+test("経済パネル: 取引所タブは本物残高と AGO 買い／トークン売り／変換を出す", () => {
+  assert.ok(panelSrc.includes("tokenInfo?.balance") || panelSrc.includes("tokenInfo.balance"));
+  assert.ok(panelSrc.includes('action: "token_buy", agaAmount'));
+  assert.ok(panelSrc.includes('action: "token_sell", tokenAmount'));
+  assert.ok(panelSrc.includes('action: "token_convert"'));
+  assert.ok(panelSrc.includes("quoteBuyTokens") && panelSrc.includes("quoteSellAga"));
+  assert.ok(panelSrc.includes("market_trade_failed"), "Bot の失敗文言を表示していない");
+});
+
+// ---------- 旧アイテム版トークン ----------
+
+test("sellItem: 旧アゴトークンは通常売却できない", () => {
+  const profile = eco.parseProfile(JSON.stringify({
+    coins: 0, hunger: 100, hp: 100, status: [], items: { ago_token: 2 },
+    hotbar: [], storage: [], role: "free",
+  }));
+  const result = eco.sellItem(profile, "ago_token", 1);
+  assert.equal(result.ok, false);
+  assert.equal(result.error, "not_sellable");
 });

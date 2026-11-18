@@ -198,7 +198,12 @@ const rolesUrl = dataUrl(transpile("worldbox/roles.ts").replaceAll('"./profile"'
 const achievementsUrl = dataUrl(transpile("worldbox/achievements.ts"));
 const progressOnlineStubUrl = dataUrl(`export function dispatchProgressEffects() {} export async function notifyAchievementDiscord() {}`);
 const tentStubUrl = dataUrl(`export const TENT_MAX_TIER = 2; export const TENT_TIERS = [{ w: 13, h: 10, price: 0 }, { w: 17, h: 13, price: 3000 }, { w: 22, h: 17, price: 10000 }];`);
-const exchangeStubUrl = dataUrl(`export function tokenPriceAt() { return 100; }`);
+const marketOnlineStubUrl = dataUrl(`
+export async function submitMarketOp() {}
+export async function loadMarketOp() { return null; }
+export async function waitForMarketOp() { return null; }
+export async function loadMarketSnapshot() { return null; }
+`);
 const groundOnlineStubUrl = dataUrl(`
 const drops = (globalThis.__wbGroundDrops = []);
 export async function addGroundItemDrop(space, item) { drops.push({ space, ...item }); return true; }
@@ -219,7 +224,7 @@ const profileRoute = await import(
       .replaceAll('"@/lib/worldbox/tent"', JSON.stringify(tentStubUrl))
       .replaceAll('"@/lib/worldbox/ground-items-online"', JSON.stringify(groundOnlineStubUrl))
       .replaceAll('"@/lib/worldbox/station-online"', JSON.stringify(stationOnlineUrl))
-      .replaceAll('"@/lib/worldbox/exchange"', JSON.stringify(exchangeStubUrl))
+      .replaceAll('"@/lib/worldbox/market-online"', JSON.stringify(marketOnlineStubUrl))
       .replaceAll('"@/lib/worldbox/profile-online"', JSON.stringify(profileOnlineUrl))
       .replaceAll('"@/lib/worldbox/user-lock"', JSON.stringify(userLockUrl))
       .replaceAll('"@/lib/worldbox/roles"', JSON.stringify(rolesUrl))
@@ -247,7 +252,7 @@ const boardRoute = await import(
       .replaceAll('"@/lib/worldbox/board-online"', JSON.stringify(boardOnlineUrl))
       .replaceAll('"@/lib/worldbox/ground-items-online"', JSON.stringify(groundOnlineStubUrl))
       .replaceAll('"@/lib/worldbox/station-online"', JSON.stringify(stationOnlineUrl))
-      .replaceAll('"@/lib/worldbox/exchange"', JSON.stringify(exchangeStubUrl))
+      .replaceAll('"@/lib/worldbox/market-online"', JSON.stringify(marketOnlineStubUrl))
       .replaceAll('"@/lib/worldbox/user-lock"', JSON.stringify(userLockUrl)),
   ),
 );
