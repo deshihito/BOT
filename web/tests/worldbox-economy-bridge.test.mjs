@@ -440,8 +440,13 @@ function bundleModule(files, names) {
 }
 const profileEcoUrl = bundleModule(
   ["worldbox/items.ts", "worldbox/profile.ts", "worldbox/vitals.ts", "worldbox/economy.ts"],
-  ["buyItem", "sellItem", "eatItem", "doWork", "craftItem", "craftFromInputs", "resolveSteal", "buyToken", "sellToken"],
+  ["buyItem", "sellItem", "eatItem", "doWork", "craftItem", "craftFromInputs", "resolveSteal", "buyToken", "sellToken", "dropItem"],
 );
+const groundOnlineStubUrl = dataUrl(`
+const drops = (globalThis.__wbGroundDrops = []);
+export async function addGroundItemDrop(space, item) { drops.push({ space, ...item }); return true; }
+export async function loadMyPosition() { return globalThis.__wbMyPosition === undefined ? { space: "world", tx: 10, ty: 10 } : globalThis.__wbMyPosition; }
+`);
 const exchangeUrl = bundleModule(["worldbox/exchange.ts"], ["tokenPriceAt"]);
 const bridgeOnlineStubUrl = dataUrl(`
 const state = (globalThis.__wbBridge = { ops: [], balances: new Map(), failEnqueue: false });
@@ -499,6 +504,7 @@ const profileRoute = await import(
       .replaceAll('"@/lib/worldbox/economy-bridge"', JSON.stringify(economyUrl))
       .replaceAll('"@/lib/worldbox/economy"', JSON.stringify(profileEcoUrl))
       .replaceAll('"@/lib/worldbox/exchange"', JSON.stringify(exchangeUrl))
+      .replaceAll('"@/lib/worldbox/ground-items-online"', JSON.stringify(groundOnlineStubUrl))
       .replaceAll('"@/lib/worldbox/presence-online"', JSON.stringify(presenceStubUrl))
       .replaceAll('"@/lib/worldbox/shops"', JSON.stringify(shopsUrl))
       .replaceAll('"@/lib/worldbox/items"', JSON.stringify(itemsOnlyUrl))
@@ -633,6 +639,33 @@ test("API(profile): steal は保護対象とクールダウンを拒否する", 
   assert.equal(cooled.status, 409);
   assert.equal((await cooled.json()).error, "steal_cooldown");
   assert.equal(globalThis.__wbBridge.ops.length, 0);
+});
+
+test("API(profile): drop はかばんから減らし、足元へ地面ドロップを置く（オプなし）", async () => {
+  resetBridgeState();
+  globalThis.__wbGroundDrops.length = 0;
+  globalThis.__wbMyPosition = { space: "world", tx: 10, ty: 10 };
+  globalThis.__wbProfiles.set(MY_KEY, { coins: 100, hunger: 100, items: { wood: 5 }, stealActorAt: 0, stealTargetAt: 0 });
+  const cookie = sessionCookie(ME, "eco-user");
+  const res = await profileRoute.POST(apiRequest(URL_P, "POST", cookie, { action: "drop", itemId: "wood", count: 2 }));
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.deepEqual(body.dropped, { itemId: "wood", count: 2 });
+  assert.equal(globalThis.__wbProfiles.get(MY_KEY)?.items?.wood, 3);
+  assert.equal(globalThis.__wbBridge.ops.length, 0, "コインは動かない");
+  assert.equal(globalThis.__wbGroundDrops.length, 1);
+  const drop = globalThis.__wbGroundDrops[0];
+  assert.equal(drop.space, "world");
+  assert.equal(drop.itemId, "wood");
+  assert.equal(drop.count, 2);
+  assert.equal(drop.x, 10);
+  assert.equal(drop.y, 10);
+  // 位置が分からなければ捨てられない（アイテムも減らない）
+  globalThis.__wbMyPosition = null;
+  const denied = await profileRoute.POST(apiRequest(URL_P, "POST", cookie, { action: "drop", itemId: "wood", count: 1 }));
+  assert.equal(denied.status, 409);
+  assert.equal((await denied.json()).error, "position_unknown");
+  assert.equal(globalThis.__wbProfiles.get(MY_KEY)?.items?.wood, 3);
 });
 
 // ---------- クライアント配線 ----------
