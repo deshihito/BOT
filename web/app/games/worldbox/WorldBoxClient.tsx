@@ -1001,6 +1001,10 @@ export default function WorldBoxClient() {
   const telescopeCenterRef = useRef(0);
   /** ロビーのピアノ（鍵盤パネル）。音は中継でロビー全員に届く。 */
   const [pianoOpen, setPianoOpen] = useState(false);
+  const pianoOpenRef = useRef(false);
+  useEffect(() => {
+    pianoOpenRef.current = pianoOpen;
+  }, [pianoOpen]);
   useEffect(() => {
     if (stationUi !== "piano") setPianoOpen(false);
   }, [stationUi]);
@@ -3747,6 +3751,7 @@ export default function WorldBoxClient() {
       const tag = (e.target as HTMLElement | null)?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA") return; // 掲示板の入力中は歩かない
       if (arcadeOpenRef.current) return; // 筐体で遊んでいる間は歩かない（ゲーム側のキー入力を優先）
+      if (pianoOpenRef.current) return; // ピアノを弾いている間は歩かない（キーボード演奏を優先）
       const k = e.key.toLowerCase();
       if (["arrowup", "arrowdown", "arrowleft", "arrowright", " "].includes(k)) e.preventDefault();
       keys.add(k);
