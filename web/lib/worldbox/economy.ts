@@ -125,6 +125,24 @@ export function sellToken(
 }
 
 /**
+ * かばんからアイテムを捨てる（コインは動かない）。捨てた分はルートが
+ * 本人の足元へ地面ドロップとして置く（ground-items）。
+ */
+export function dropItem(
+  profile: PlayerProfile,
+  itemId: unknown,
+  countRaw?: unknown,
+): Transition<{ dropped: { itemId: string; count: number } }> {
+  const item = itemById(itemId);
+  if (!item) return { ok: false, error: "unknown_item" };
+  const count = clampCount(countRaw);
+  if (count === null) return { ok: false, error: "invalid_count" };
+  const removed = removeItem(profile, item.id, count);
+  if (!removed) return { ok: false, error: "not_enough_items" };
+  return { ok: true, profile: removed, dropped: { itemId: item.id, count } };
+}
+
+/**
  * かばんの食事・飲み物を消費して空腹度を回復する。
  * 効果の数式（hunger / heal / 解毒 / バフ）は vitals.consumeEffect が正で、
  * ここは消費・容器返却・満腹ゲートだけを持つ（二重実装にしない）。

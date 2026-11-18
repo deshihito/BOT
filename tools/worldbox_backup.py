@@ -38,6 +38,7 @@ NAMESPACES = [
     "worldbox_economy",
     "worldbox_economy_applied",
     "worldbox_fishing",
+    "worldbox_ground_items",
     "worldbox_guild_shop",
     "worldbox_instances",
     "worldbox_machines",

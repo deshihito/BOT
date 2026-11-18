@@ -252,6 +252,11 @@ export function dispatchProgressEffects() {}
 export async function notifyAchievementDiscord() {}
 `);
 const exchangeStubUrl = dataUrl(`export function tokenPriceAt() { return 100; }`);
+const groundOnlineStubUrl = dataUrl(`
+const drops = (globalThis.__wbGroundDrops = []);
+export async function addGroundItemDrop(space, item) { drops.push({ space, ...item }); return true; }
+export async function loadMyPosition() { return globalThis.__wbMyPosition === undefined ? { space: "world", tx: 10, ty: 10 } : globalThis.__wbMyPosition; }
+`);
 const profileRoute = await import(
   dataUrl(
     transpile("api/worldbox/profile/route.ts", rootDir + "/app")
@@ -266,6 +271,7 @@ const profileRoute = await import(
       .replaceAll('"@/lib/worldbox/items"', JSON.stringify(itemsUrl))
       .replaceAll('"@/lib/worldbox/presence-online"', JSON.stringify(presenceOnlineUrl))
       .replaceAll('"@/lib/worldbox/shops"', JSON.stringify(shopsUrl))
+      .replaceAll('"@/lib/worldbox/ground-items-online"', JSON.stringify(groundOnlineStubUrl))
       .replaceAll('"@/lib/worldbox/station-online"', JSON.stringify(stationOnlineUrl))
       .replaceAll('"@/lib/worldbox/exchange"', JSON.stringify(exchangeStubUrl))
       .replaceAll('"@/lib/worldbox/profile-online"', JSON.stringify(profileOnlineUrl))
@@ -296,6 +302,7 @@ const rolesRoute = await import(
       .replaceAll('"@/lib/worldbox/party"', JSON.stringify(partyUrl))
       .replaceAll('"@/lib/worldbox/party-online"', JSON.stringify(partyOnlineUrl))
       .replaceAll('"@/lib/worldbox/roles-online"', JSON.stringify(rolesOnlineUrl))
+      .replaceAll('"@/lib/worldbox/ground-items-online"', JSON.stringify(groundOnlineStubUrl))
       .replaceAll('"@/lib/worldbox/station-online"', JSON.stringify(stationOnlineUrl))
       .replaceAll('"@/lib/worldbox/exchange"', JSON.stringify(exchangeStubUrl))
       .replaceAll('"@/lib/worldbox/roles"', JSON.stringify(rolesUrl))

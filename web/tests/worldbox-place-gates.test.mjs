@@ -199,6 +199,11 @@ const achievementsUrl = dataUrl(transpile("worldbox/achievements.ts"));
 const progressOnlineStubUrl = dataUrl(`export function dispatchProgressEffects() {} export async function notifyAchievementDiscord() {}`);
 const tentStubUrl = dataUrl(`export const TENT_MAX_TIER = 2; export const TENT_TIERS = [{ w: 13, h: 10, price: 0 }, { w: 17, h: 13, price: 3000 }, { w: 22, h: 17, price: 10000 }];`);
 const exchangeStubUrl = dataUrl(`export function tokenPriceAt() { return 100; }`);
+const groundOnlineStubUrl = dataUrl(`
+const drops = (globalThis.__wbGroundDrops = []);
+export async function addGroundItemDrop(space, item) { drops.push({ space, ...item }); return true; }
+export async function loadMyPosition() { return globalThis.__wbMyPosition === undefined ? { space: "world", tx: 10, ty: 10 } : globalThis.__wbMyPosition; }
+`);
 const profileRoute = await import(
   dataUrl(
     transpile("api/worldbox/profile/route.ts", rootDir + "/app")
@@ -212,6 +217,7 @@ const profileRoute = await import(
       .replaceAll('"@/lib/worldbox/shops"', JSON.stringify(shopsUrl))
       .replaceAll('"@/lib/worldbox/items"', JSON.stringify(itemsUrl))
       .replaceAll('"@/lib/worldbox/tent"', JSON.stringify(tentStubUrl))
+      .replaceAll('"@/lib/worldbox/ground-items-online"', JSON.stringify(groundOnlineStubUrl))
       .replaceAll('"@/lib/worldbox/station-online"', JSON.stringify(stationOnlineUrl))
       .replaceAll('"@/lib/worldbox/exchange"', JSON.stringify(exchangeStubUrl))
       .replaceAll('"@/lib/worldbox/profile-online"', JSON.stringify(profileOnlineUrl))
@@ -228,6 +234,7 @@ const economyRoute = await import(
       .replaceAll('"@/lib/auth"', JSON.stringify(authUrl))
       .replaceAll('"@/lib/worldbox/economy-bridge"', JSON.stringify(bridgeUrl))
       .replaceAll('"@/lib/worldbox/economy-bridge-online"', JSON.stringify(economyOnlineUrl))
+      .replaceAll('"@/lib/worldbox/ground-items-online"', JSON.stringify(groundOnlineStubUrl))
       .replaceAll('"@/lib/worldbox/station-online"', JSON.stringify(stationOnlineUrl)),
   ),
 );
@@ -238,6 +245,7 @@ const boardRoute = await import(
       .replaceAll('"@/lib/auth"', JSON.stringify(authUrl))
       .replaceAll('"@/lib/worldbox/board"', JSON.stringify(boardUrl))
       .replaceAll('"@/lib/worldbox/board-online"', JSON.stringify(boardOnlineUrl))
+      .replaceAll('"@/lib/worldbox/ground-items-online"', JSON.stringify(groundOnlineStubUrl))
       .replaceAll('"@/lib/worldbox/station-online"', JSON.stringify(stationOnlineUrl))
       .replaceAll('"@/lib/worldbox/exchange"', JSON.stringify(exchangeStubUrl))
       .replaceAll('"@/lib/worldbox/user-lock"', JSON.stringify(userLockUrl)),
