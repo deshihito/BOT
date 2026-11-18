@@ -440,9 +440,29 @@ function bundleModule(files, names) {
 }
 const profileEcoUrl = bundleModule(
   ["worldbox/items.ts", "worldbox/profile.ts", "worldbox/vitals.ts", "worldbox/economy.ts"],
-  ["buyItem", "sellItem", "eatItem", "doWork", "craftItem", "craftFromInputs", "resolveSteal", "buyToken", "sellToken"],
+  ["buyItem", "sellItem", "eatItem", "doWork", "craftItem", "craftFromInputs", "resolveSteal", "dropItem"],
 );
-const exchangeUrl = bundleModule(["worldbox/exchange.ts"], ["tokenPriceAt"]);
+const groundOnlineStubUrl = dataUrl(`
+const drops = (globalThis.__wbGroundDrops = []);
+export async function addGroundItemDrop(space, item) { drops.push({ space, ...item }); return true; }
+export async function loadMyPosition() { return globalThis.__wbMyPosition === undefined ? { space: "world", tx: 10, ty: 10 } : globalThis.__wbMyPosition; }
+`);
+const marketOnlineStubUrl = dataUrl(`
+const mkt = (globalThis.__wbMarket = { ops: new Map(), responder: null });
+export async function submitMarketOp(op) { mkt.ops.set(op.id, { ...op, status: "pending" }); }
+export async function loadMarketOp(id) { return mkt.ops.get(id) ?? null; }
+export async function waitForMarketOp(id) {
+  const rec = mkt.ops.get(id);
+  if (!rec) return null;
+  const result = mkt.responder ? mkt.responder(rec) : { ok: true, tokens: 9.9, fee: 10, rate: 100, tokenBalance: 9.9, coinBalance: 900, netAga: 490 };
+  const done = result && result.ok === false
+    ? { ...rec, status: "failed", error: result.error || "失敗" }
+    : { ...rec, status: "done", result };
+  mkt.ops.set(id, done);
+  return done;
+}
+export async function loadMarketSnapshot() { return null; }
+`);
 const bridgeOnlineStubUrl = dataUrl(`
 const state = (globalThis.__wbBridge = { ops: [], balances: new Map(), failEnqueue: false });
 export function isEconomyEnabled() { return true; }
@@ -498,7 +518,8 @@ const profileRoute = await import(
       .replaceAll('"@/lib/worldbox/economy-bridge-online"', JSON.stringify(bridgeOnlineStubUrl))
       .replaceAll('"@/lib/worldbox/economy-bridge"', JSON.stringify(economyUrl))
       .replaceAll('"@/lib/worldbox/economy"', JSON.stringify(profileEcoUrl))
-      .replaceAll('"@/lib/worldbox/exchange"', JSON.stringify(exchangeUrl))
+      .replaceAll('"@/lib/worldbox/market-online"', JSON.stringify(marketOnlineStubUrl))
+      .replaceAll('"@/lib/worldbox/ground-items-online"', JSON.stringify(groundOnlineStubUrl))
       .replaceAll('"@/lib/worldbox/presence-online"', JSON.stringify(presenceStubUrl))
       .replaceAll('"@/lib/worldbox/shops"', JSON.stringify(shopsUrl))
       .replaceAll('"@/lib/worldbox/items"', JSON.stringify(itemsOnlyUrl))
@@ -519,6 +540,10 @@ function resetBridgeState() {
   globalThis.__wbBridge.failEnqueue = false;
   globalThis.__wbProfiles.clear();
   globalThis.__wbPresence.clear();
+  if (globalThis.__wbMarket) {
+    globalThis.__wbMarket.ops.clear();
+    globalThis.__wbMarket.responder = null;
+  }
   globalThis.__wbStationValue = "shop"; // 既定はショップの前
 }
 
@@ -635,54 +660,108 @@ test("API(profile): steal は保護対象とクールダウンを拒否する", 
   assert.equal(globalThis.__wbBridge.ops.length, 0);
 });
 
+test("API(profile): drop はかばんから減らし、足元へ地面ドロップを置く（オプなし）", async () => {
+  resetBridgeState();
+  globalThis.__wbGroundDrops.length = 0;
+  globalThis.__wbMyPosition = { space: "world", tx: 10, ty: 10 };
+  globalThis.__wbProfiles.set(MY_KEY, { coins: 100, hunger: 100, items: { wood: 5 }, stealActorAt: 0, stealTargetAt: 0 });
+  const cookie = sessionCookie(ME, "eco-user");
+  const res = await profileRoute.POST(apiRequest(URL_P, "POST", cookie, { action: "drop", itemId: "wood", count: 2 }));
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.deepEqual(body.dropped, { itemId: "wood", count: 2 });
+  assert.equal(globalThis.__wbProfiles.get(MY_KEY)?.items?.wood, 3);
+  assert.equal(globalThis.__wbBridge.ops.length, 0, "コインは動かない");
+  assert.equal(globalThis.__wbGroundDrops.length, 1);
+  const drop = globalThis.__wbGroundDrops[0];
+  assert.equal(drop.space, "world");
+  assert.equal(drop.itemId, "wood");
+  assert.equal(drop.count, 2);
+  assert.equal(drop.x, 10);
+  assert.equal(drop.y, 10);
+  // 位置が分からなければ捨てられない（アイテムも減らない）
+  globalThis.__wbMyPosition = null;
+  const denied = await profileRoute.POST(apiRequest(URL_P, "POST", cookie, { action: "drop", itemId: "wood", count: 1 }));
+  assert.equal(denied.status, 409);
+  assert.equal((await denied.json()).error, "position_unknown");
+  assert.equal(globalThis.__wbProfiles.get(MY_KEY)?.items?.wood, 3);
+});
+
 // ---------- クライアント配線 ----------
 
-test("API(profile): token_buy は取引所の前でだけ通り、spend(token_buy) オプとトークンを積む", async () => {
+test("API(profile): token_buy は取引所の前でだけ通り、市場オプを Bot へ渡す", async () => {
   resetBridgeState();
-  globalThis.__wbBridge.balances.set(ME, 100000);
   const cookie = sessionCookie(ME, "eco-user");
   // 取引所の前でなければ 409
   globalThis.__wbStationValue = "shop";
-  const denied = await profileRoute.POST(apiRequest(URL_P, "POST", cookie, { action: "token_buy", count: 2 }));
+  const denied = await profileRoute.POST(apiRequest(URL_P, "POST", cookie, { action: "token_buy", agaAmount: 1000 }));
   assert.equal(denied.status, 409);
   assert.equal((await denied.json()).error, "not_at_exchange");
-  assert.equal(globalThis.__wbBridge.ops.length, 0);
-  // 取引所の前: 価格は決定的（テスト時は実価格を読む）
+  assert.equal(globalThis.__wbMarket.ops.size, 0);
+  // 取引所の前: Bot 側の市場へ buy オプが渡り、結果がそのまま返る
   globalThis.__wbStationValue = "exchange";
-  const res = await profileRoute.POST(apiRequest(URL_P, "POST", cookie, { action: "token_buy", count: 2 }));
+  const res = await profileRoute.POST(apiRequest(URL_P, "POST", cookie, { action: "token_buy", agaAmount: 1000 }));
   assert.equal(res.status, 200);
   const body = await res.json();
-  const price = body.tokenPrice;
-  assert.ok(Number.isInteger(price) && price >= 30 && price <= 300);
-  const ops = globalThis.__wbBridge.ops;
+  assert.equal(body.tokens, 9.9);
+  const ops = [...globalThis.__wbMarket.ops.values()];
   assert.equal(ops.length, 1);
-  assert.equal(ops[0].kind, "spend");
-  assert.equal(ops[0].reason, "token_buy");
-  assert.equal(ops[0].amount, price * 2);
-  assert.equal(globalThis.__wbProfiles.get(MY_KEY)?.items?.ago_token, 2);
+  assert.equal(ops[0].kind, "buy");
+  assert.equal(ops[0].amountAga, 1000);
+  assert.equal(ops[0].userId, ME);
+  // かばんには何も増えない（トークンは Bot 側市場の残高が正）
+  assert.equal(globalThis.__wbProfiles.get(MY_KEY)?.items?.ago_token, undefined);
   globalThis.__wbStationValue = "shop";
 });
 
-test("API(profile): token_sell は earn(token_sell) オプを積み、通常売却ではトークンを売れない", async () => {
+test("API(profile): token_sell は市場オプを渡し、Bot の失敗は文言つきで返る／通常売却では旧トークンを売れない", async () => {
   resetBridgeState();
   globalThis.__wbStationValue = "exchange";
   globalThis.__wbProfiles.set(MY_KEY, { coins: 100, hunger: 100, items: { ago_token: 3 }, stealActorAt: 0, stealTargetAt: 0 });
   const cookie = sessionCookie(ME, "eco-user");
-  const res = await profileRoute.POST(apiRequest(URL_P, "POST", cookie, { action: "token_sell", count: 2 }));
+  const res = await profileRoute.POST(apiRequest(URL_P, "POST", cookie, { action: "token_sell", tokenAmount: 2.5 }));
   assert.equal(res.status, 200);
   const body = await res.json();
-  const ops = globalThis.__wbBridge.ops;
+  assert.equal(body.netAga, 490);
+  const ops = [...globalThis.__wbMarket.ops.values()];
   assert.equal(ops.length, 1);
-  assert.equal(ops[0].kind, "earn");
-  assert.equal(ops[0].reason, "token_sell");
-  assert.equal(ops[0].amount, body.tokenPrice * 2);
-  assert.equal(globalThis.__wbProfiles.get(MY_KEY)?.items?.ago_token, 1);
-  // 通常の売却（sell）ではアゴトークンを売れない
+  assert.equal(ops[0].kind, "sell");
+  assert.equal(ops[0].tokenAmount, 2.5);
+  // Bot が失敗を返したら 409 + market_trade_failed + Bot の文言
+  globalThis.__wbMarket.responder = () => ({ ok: false, error: "アゴトークンが不足しています。" });
+  const failed = await profileRoute.POST(apiRequest(URL_P, "POST", cookie, { action: "token_sell", tokenAmount: 2.5 }));
+  assert.equal(failed.status, 409);
+  const failedBody = await failed.json();
+  assert.equal(failedBody.error, "market_trade_failed");
+  assert.equal(failedBody.message, "アゴトークンが不足しています。");
+  globalThis.__wbMarket.responder = null;
+  // 通常の売却（sell）では旧トークンを売れない
   globalThis.__wbStationValue = "shop";
   const sell = await profileRoute.POST(apiRequest(URL_P, "POST", cookie, { action: "sell", itemId: "ago_token", count: 1 }));
   assert.equal(sell.status, 409);
   assert.equal((await sell.json()).error, "not_sellable");
-  assert.equal(globalThis.__wbProfiles.get(MY_KEY)?.items?.ago_token, 1);
+  assert.equal(globalThis.__wbProfiles.get(MY_KEY)?.items?.ago_token, 3);
+});
+
+test("API(profile): token_convert は旧トークンを本物へ変換し、かばんから消す", async () => {
+  resetBridgeState();
+  globalThis.__wbStationValue = "exchange";
+  globalThis.__wbProfiles.set(MY_KEY, { coins: 100, hunger: 100, items: { ago_token: 3 }, stealActorAt: 0, stealTargetAt: 0 });
+  const cookie = sessionCookie(ME, "eco-user");
+  const res = await profileRoute.POST(apiRequest(URL_P, "POST", cookie, { action: "token_convert" }));
+  assert.equal(res.status, 200);
+  const ops = [...globalThis.__wbMarket.ops.values()];
+  assert.equal(ops.length, 1);
+  assert.equal(ops[0].kind, "convert");
+  assert.equal(ops[0].count, 3);
+  const saved = globalThis.__wbProfiles.get(MY_KEY);
+  assert.equal(saved?.items?.ago_token, undefined);
+  assert.equal(saved?.tokenConvertNonce, undefined);
+  // 旧トークンが無ければ変換できない
+  const denied = await profileRoute.POST(apiRequest(URL_P, "POST", cookie, { action: "token_convert" }));
+  assert.equal(denied.status, 409);
+  assert.equal((await denied.json()).error, "not_enough_items");
+  globalThis.__wbStationValue = "shop";
 });
 
 test("クライアント: 経済パネルに残高・銀行タブ・処理中表示がある", () => {

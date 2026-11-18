@@ -496,6 +496,26 @@ class MarketStore(DirtyFlushMixin):
             state["net_flow_aga"] += result["gross_aga"]
             self._mark_dirty()
 
+    def apply_convert(self, user_id: str, tokens: float) -> dict[str, Any]:
+        """外部（WorldBox の旧アイテム版トークン）からの 1:1 変換。
+
+        新規発行はせず、市場プールからそのまま移すため総量の保存則は
+        保たれる。手数料なし・コインの移動なし。プールが足りなければ
+        TradeError（変換は成立しない）。
+        """
+        tokens = quantize_tokens(tokens)
+        if tokens <= 0:
+            raise TradeError(f"{TOKEN_NAME}の数量を正しく入力してください。")
+        with self._lock:
+            state = self._state
+            if tokens > state["pool_token"]:
+                raise TradeError("市場プールのトークンが不足しています。")
+            state["pool_token"] -= tokens
+            key = str(user_id)
+            state["balances"][key] = state["balances"].get(key, 0.0) + tokens
+            self._mark_dirty()
+        return {"tokens": tokens, "balance": self.token_balance(user_id)}
+
 
 # ---------------------------------------------------------------------------
 # チャート（OHLC 集計は純関数、描画は cogs 側で遅延 import する）

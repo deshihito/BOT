@@ -84,44 +84,21 @@ export function sellItem(profile: PlayerProfile, itemId: unknown, countRaw?: unk
 }
 
 /**
- * 取引所でアゴトークンを買う。価格はルートが exchange.ts から読んで
- * 渡す（このモジュールは時刻を持たない）。支払いは spend オプ。
+ * かばんからアイテムを捨てる（コインは動かない）。捨てた分はルートが
+ * 本人の足元へ地面ドロップとして置く（ground-items）。
  */
-export function buyToken(
+export function dropItem(
   profile: PlayerProfile,
-  countRaw: unknown,
-  price: number,
-  balanceCoins: number,
-): Transition {
+  itemId: unknown,
+  countRaw?: unknown,
+): Transition<{ dropped: { itemId: string; count: number } }> {
+  const item = itemById(itemId);
+  if (!item) return { ok: false, error: "unknown_item" };
   const count = clampCount(countRaw);
   if (count === null) return { ok: false, error: "invalid_count" };
-  const cost = price * count;
-  if (balanceCoins < cost) return { ok: false, error: "not_enough_coins" };
-  return {
-    ok: true,
-    profile: addItem(profile, "ago_token", count),
-    coin: { kind: "spend", amount: cost, reason: "token_buy" },
-  };
-}
-
-/**
- * 取引所でアゴトークンを売る。売却益は earn オプ（原資はバンクロール、
- * 他の売却と同じ Plan A）。価格はルートが exchange.ts から読んで渡す。
- */
-export function sellToken(
-  profile: PlayerProfile,
-  countRaw: unknown,
-  price: number,
-): Transition {
-  const count = clampCount(countRaw);
-  if (count === null) return { ok: false, error: "invalid_count" };
-  const removed = removeItem(profile, "ago_token", count);
+  const removed = removeItem(profile, item.id, count);
   if (!removed) return { ok: false, error: "not_enough_items" };
-  return {
-    ok: true,
-    profile: removed,
-    coin: { kind: "earn", amount: price * count, reason: "token_sell" },
-  };
+  return { ok: true, profile: removed, dropped: { itemId: item.id, count } };
 }
 
 /**

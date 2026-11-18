@@ -670,8 +670,116 @@ export type WbSeOptions = {
   material?: FootstepMaterial;
 };
 
+/* --- ピアノ専用バス: リバーブ（生成インパルスのコンボルバ）＋サステインペダル ---
+ * ピアノだけは SE レシピの汎用経路ではなく専用バスを通す。乾き（ダンパー）と
+ * ペダル時の伸びを音ごとに管理するため、発音中の声（gain＋osc 群）を保持する。 */
+
+/** リバーブの残響時間（秒）とウェット量（0..1）。 */
+export const PIANO_REVERB_SECONDS = 1.8;
+export const PIANO_REVERB_WET = 0.22;
+/** ダンパーありの減衰（秒）。ペダル中は PIANO_PEDAL_DECAY_SECONDS まで伸びる。 */
+export const PIANO_DECAY_SECONDS = 1.1;
+export const PIANO_PEDAL_DECAY_SECONDS = 4.0;
+
+let pianoBus: GainNode | null = null;
+let pianoPedalDown = false;
+
+type PianoVoice = { gain: GainNode; oscs: OscillatorNode[] };
+const pianoVoices = new Set<PianoVoice>();
+
+function ensurePianoBus(): GainNode | null {
+  if (!ctx || !seBus) return null;
+  if (pianoBus) return pianoBus;
+  pianoBus = ctx.createGain();
+  pianoBus.gain.value = 0.9;
+  pianoBus.connect(seBus);
+  // リバーブ: 指数減衰ノイズのインパルス応答をその場で生成する（アセットなし）。
+  const rate = ctx.sampleRate;
+  const len = Math.max(1, Math.floor(rate * PIANO_REVERB_SECONDS));
+  const ir = ctx.createBuffer(2, len, rate);
+  for (let ch = 0; ch < 2; ch++) {
+    const data = ir.getChannelData(ch);
+    for (let i = 0; i < len; i++) data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 2.6);
+  }
+  const conv = ctx.createConvolver();
+  conv.buffer = ir;
+  const wet = ctx.createGain();
+  wet.gain.value = PIANO_REVERB_WET;
+  pianoBus.connect(conv);
+  conv.connect(wet);
+  wet.connect(seBus);
+  return pianoBus;
+}
+
+function pianoDecaySeconds(): number {
+  return pianoPedalDown ? PIANO_PEDAL_DECAY_SECONDS : PIANO_DECAY_SECONDS;
+}
+
+/** ピアノの1音（基音＋倍音2つ、note レシピと同じ配分）を専用バスで鳴らす。 */
+function pianoNote(freq: number, at: number): void {
+  const bus = ensurePianoBus();
+  if (!ctx || !bus) return;
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0.0001, at);
+  g.gain.exponentialRampToValueAtTime(tierGain("note", 1.1), at + 0.008);
+  g.gain.exponentialRampToValueAtTime(0.0001, at + pianoDecaySeconds());
+  g.connect(bus);
+  const oscs: OscillatorNode[] = [];
+  const partials: [number, OscillatorType, number][] = [
+    [1, "triangle", 1],
+    [2, "sine", 0.36],
+    [3, "sine", 0.14],
+  ];
+  for (const [mult, type, ratio] of partials) {
+    const osc = ctx.createOscillator();
+    osc.type = type;
+    osc.frequency.value = freq * mult;
+    const og = ctx.createGain();
+    og.gain.value = ratio;
+    osc.connect(og);
+    og.connect(g);
+    osc.start(at);
+    osc.stop(at + PIANO_PEDAL_DECAY_SECONDS + 0.1);
+    oscs.push(osc);
+  }
+  const voice: PianoVoice = { gain: g, oscs };
+  pianoVoices.add(voice);
+  oscs[0].onended = () => pianoVoices.delete(voice);
+}
+
+/** サステインペダルの ON/OFF。踏んでいる間は鳴っている音の減衰が伸び、
+ * 離すと残っている音はダンパーで短く止まる。パネルが閉じたら必ず OFF に戻す。 */
+export function setPianoPedal(down: boolean): void {
+  if (pianoPedalDown === down) return;
+  pianoPedalDown = down;
+  if (!ctx) return;
+  const now = ctx.currentTime;
+  for (const voice of pianoVoices) {
+    try {
+      const cur = Math.max(0.0001, voice.gain.gain.value);
+      voice.gain.gain.cancelScheduledValues(now);
+      voice.gain.gain.setValueAtTime(cur, now);
+      if (down) {
+        voice.gain.gain.exponentialRampToValueAtTime(0.0001, now + PIANO_PEDAL_DECAY_SECONDS);
+      } else {
+        voice.gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.35);
+        for (const osc of voice.oscs) {
+          try { osc.stop(now + 0.45); } catch { /* 停止済み */ }
+        }
+      }
+    } catch {
+      // 音響ノードの状態が想定外でもゲームは止めない
+    }
+  }
+}
+
+/** ペダルを踏んでいるか（テスト/表示用）。 */
+export function pianoPedalIsDown(): boolean {
+  return pianoPedalDown;
+}
+
 /** ピアノの音（半音オフセット列、C5=0）。和音と速い連打のために playWbSe の
- * 名前単位スロットルを通さず、音ごとに sePitch を切り替えて note レシピを鳴らす。 */
+ * 名前単位スロットルを通さず、専用バス（リバーブ＋ペダル）で鳴らす。 */
 export function playPianoNotes(semitones: readonly number[]): void {
   loadWbSoundSettings();
   if (!settings.se || !ctx || !seBus) return;
@@ -679,16 +787,10 @@ export function playPianoNotes(semitones: readonly number[]): void {
   if (notes.length === 0) return;
   try {
     if (ctx.state === "suspended") void ctx.resume().catch(() => {});
-    seGain = 1;
-    for (const n of notes) {
-      sePitch = Math.pow(2, n / 12);
-      SE_RECIPES.note(ctx.currentTime + 0.01);
-    }
+    const at = ctx.currentTime + 0.01;
+    for (const n of notes) pianoNote(523.25 * Math.pow(2, n / 12), at);
   } catch {
     // 音が出ない環境でもゲームは止めない
-  } finally {
-    sePitch = 1;
-    seGain = 1;
   }
 }
 

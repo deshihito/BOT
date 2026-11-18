@@ -18,6 +18,7 @@ import type { StationKind } from "@/lib/worldbox/tiles";
 import { dailyPriceFor, dailyStockForGenre, genreById, isShopExcluded, itemsForGenre, shopDayKeyOf, type ShopGenreId } from "@/lib/worldbox/shops";
 import type { LobbyStation } from "@/lib/worldbox/lobby";
 import { ENHANCE_BASE_COST, ENHANCE_MATERIALS, ENHANCE_MAX_LEVEL, type PlayerProfile } from "@/lib/worldbox/profile";
+import { quoteBuyTokens, quoteSellAga } from "@/lib/worldbox/market";
 import type { SaveSpace } from "@/lib/worldbox/save";
 import { playWbSe, type WbSeName } from "@/lib/worldbox/sound";
 import { ItemAnnotation, ItemIcon, ItemSlot, ItemSlotGrid } from "./ItemSlotGrid";
@@ -32,12 +33,23 @@ const ACTION_SE: Record<string, WbSeName> = {
   steal: "coin",
   token_buy: "coin",
   token_sell: "coin",
+  token_convert: "coin",
 };
 
 type Tab = "bag" | "shop" | "sell" | "craft" | "steal" | "bank" | "exchange";
 type LoadState = "loading" | "ready" | "guest" | "unavailable";
 type StealTarget = { id: string; name: string };
-type TokenInfo = { price: number; prevPrice: number; history: { tick: number; price: number }[] };
+type TokenInfo = {
+  available: boolean;
+  rate?: number;
+  prevRate?: number;
+  history?: { t: string; rate: number }[];
+  halted?: boolean;
+  haltReason?: string;
+  tradeCapAga?: number;
+  balance?: number;
+  updatedAt?: string;
+};
 
 const ERROR_LABEL: Record<string, string> = {
   not_enough_coins: "コインが足りません",
@@ -61,7 +73,9 @@ const ERROR_LABEL: Record<string, string> = {
   not_at_workbench: "作業台の前にいません",
   not_at_bank: "銀行の前にいません",
   not_at_exchange: "取引所の前にいません",
+  trade_pending: "取引を確認中です。少し待って残高を見てください",
   not_sellable: "取引所でのみ売れます",
+  position_unknown: "位置が分かりません",
 };
 
 const OP_KIND_LABEL: Record<EconomyOp["kind"], string> = {
@@ -147,7 +161,8 @@ export default function WorldBoxEconomyPanel({ space, station, genre, worldStati
   const [tab, setTab] = useState<Tab>("bag");
   const [targets, setTargets] = useState<StealTarget[]>([]);
   const [tokenInfo, setTokenInfo] = useState<TokenInfo | null>(null);
-  const [tokenCount, setTokenCount] = useState("1");
+  const [buyAga, setBuyAga] = useState("1000");
+  const [sellTokens, setSellTokens] = useState("");
   const [msg, setMsg] = useState("");
   const [busy, setBusy] = useState(false);
   const [balance, setBalance] = useState<number | null>(null);
@@ -156,6 +171,7 @@ export default function WorldBoxEconomyPanel({ space, station, genre, worldStati
   const [transferAmount, setTransferAmount] = useState("");
   // かばん/ショップのスロット選択（注釈は選択中アイテムのものだけ出す）
   const [bagSel, setBagSel] = useState<string | null>(null);
+  const [dropCount, setDropCount] = useState("1");
   const [shopSel, setShopSel] = useState<string | null>(null);
   const [sellSel, setSellSel] = useState<string | null>(null);
   // 強化のスロット選択と成功フラッシュ（金色背景 → 透明へ transition）
@@ -267,10 +283,14 @@ export default function WorldBoxEconomyPanel({ space, station, genre, worldStati
         body: JSON.stringify(payload),
       });
       const data = (await res.json().catch(() => ({}))) as Record<string, unknown> & {
-        profile?: PlayerProfile; error?: string;
+        profile?: PlayerProfile; error?: string; message?: string;
       };
       if (!res.ok || !data.profile) {
-        setMsg(ERROR_LABEL[data.error ?? ""] ?? "できませんでした");
+        setMsg(
+          data.error === "market_trade_failed" && typeof data.message === "string"
+            ? data.message
+            : ERROR_LABEL[data.error ?? ""] ?? "できませんでした",
+        );
         return;
       }
       setProfile(data.profile);
@@ -536,6 +556,23 @@ export default function WorldBoxEconomyPanel({ space, station, genre, worldStati
                   </button>
                 </div>
               )}
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8, alignItems: "center" }}>
+                <input
+                  type="number"
+                  min={1}
+                  max={99}
+                  value={dropCount}
+                  onChange={(e) => setDropCount(e.target.value)}
+                  style={{ width: 64, minHeight: 36, padding: "4px 8px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.25)", background: "rgba(255,255,255,0.06)", color: "inherit" }}
+                />
+                <button type="button" style={btn} disabled={busy}
+                  onClick={() => void act(
+                    { action: "drop", itemId: bagSelItem.id, count: Math.max(1, Math.floor(Number(dropCount) || 0)) },
+                    () => `${bagSelItem.name}を捨てた`,
+                  )}>
+                  捨てる
+                </button>
+              </div>
             </ItemAnnotation>
           )}
         </div>
@@ -842,42 +879,61 @@ export default function WorldBoxEconomyPanel({ space, station, genre, worldStati
       )}
 
       {activeTab === "exchange" && (() => {
-        const price = tokenInfo?.price ?? null;
-        const prev = tokenInfo?.prevPrice ?? null;
-        const diff = price !== null && prev !== null ? price - prev : 0;
-        const ownedTokens = profile.items["ago_token"] ?? 0;
-        const count = Math.max(1, Math.floor(Number(tokenCount) || 0));
-        const history = tokenInfo?.history ?? [];
-        const hMax = Math.max(...history.map((h) => h.price), 1);
-        const hMin = Math.min(...history.map((h) => h.price), 0);
+        const available = tokenInfo?.available === true;
+        const rate = available ? tokenInfo?.rate ?? null : null;
+        const prev = available ? tokenInfo?.prevRate ?? null : null;
+        const diff = rate !== null && prev !== null ? rate - prev : 0;
+        const ownedTokens = tokenInfo?.balance ?? 0;
+        const legacyTokens = profile.items["ago_token"] ?? 0;
+        const halted = available && tokenInfo?.halted === true;
+        const history = (tokenInfo?.history ?? []).filter((h) => typeof h.rate === "number");
+        const hMax = Math.max(...history.map((h) => h.rate), 1);
+        const hMin = Math.min(...history.map((h) => h.rate), 0);
         const points = history
-          .map((h, i) => `${(i / Math.max(1, history.length - 1)) * 260},${36 - ((h.price - hMin) / Math.max(1, hMax - hMin)) * 32}`)
+          .map((h, i) => `${(i / Math.max(1, history.length - 1)) * 260},${36 - ((h.rate - hMin) / Math.max(1, hMax - hMin)) * 32}`)
           .join(" ");
-        const trade = async (action: "token_buy" | "token_sell") => {
-          await act({ action, count }, (d) => {
-            const p = typeof d.tokenPrice === "number" ? d.tokenPrice : price ?? 0;
-            return action === "token_buy"
-              ? `アゴトークン ${count} 枚を ${p * count} コインで買いました`
-              : `アゴトークン ${count} 枚を ${p * count} コインで売りました`;
-          });
+        const agaAmount = Math.max(0, Math.floor(Number(buyAga) || 0));
+        const buyQuote = rate !== null && agaAmount > 0 ? quoteBuyTokens(agaAmount, rate) : null;
+        const sellAmount = Math.max(0, Number(sellTokens) || 0);
+        const sellQuote = rate !== null && sellAmount > 0 ? quoteSellAga(sellAmount, rate) : null;
+        const fmtTokens = (n: number) => n.toLocaleString("ja-JP", { maximumFractionDigits: 2 });
+        const buy = async () => {
+          await act({ action: "token_buy", agaAmount }, (d) =>
+            `アゴトークン ${fmtTokens(typeof d.tokens === "number" ? d.tokens : 0)} を買いました`);
           void refreshToken();
         };
+        const sell = async () => {
+          await act({ action: "token_sell", tokenAmount: sellAmount }, (d) =>
+            `アゴトークン ${fmtTokens(sellAmount)} を ${typeof d.netAga === "number" ? d.netAga : 0} コインで売りました`);
+          void refreshToken();
+        };
+        const convert = async () => {
+          await act({ action: "token_convert" }, () =>
+            `旧トークン ${legacyTokens} 枚をアゴトークンに変換しました`);
+          void refreshToken();
+        };
+        const numInput = {
+          minHeight: 36, padding: "4px 8px", borderRadius: 8,
+          border: "1px solid rgba(255,255,255,0.25)", background: "rgba(255,255,255,0.06)", color: "inherit",
+        } as const;
         return (
           <div style={{ marginTop: 6 }}>
             <div style={row}>
               <strong>アゴトークン</strong>
               <span style={{ fontSize: 18 }}>
-                {price === null ? "—" : price}
+                {rate === null ? "—" : rate.toLocaleString("ja-JP", { maximumFractionDigits: 2 })}
                 <span style={{ fontSize: 12 }}> コイン</span>
               </span>
-              {price !== null && prev !== null && (
+              {rate !== null && prev !== null && (
                 <span style={{ color: diff > 0 ? "#7ee787" : diff < 0 ? "#ff9c9c" : "inherit", fontSize: 12 }}>
-                  {diff > 0 ? `+${diff}` : diff}
+                  {diff > 0 ? `+${diff.toFixed(2)}` : diff.toFixed(2)}
                 </span>
               )}
               <span style={{ flex: 1 }} />
-              <span>保有 {ownedTokens} 枚</span>
+              <span>保有 {fmtTokens(ownedTokens)}</span>
             </div>
+            {!available && <div style={row}><span>市場に接続できません</span></div>}
+            {halted && <div style={row}><span>{tokenInfo?.haltReason || "取引を一時停止しています"}</span></div>}
             {history.length > 1 && (
               <svg viewBox="0 0 260 40" style={{ width: "100%", height: 40, display: "block" }} aria-hidden="true">
                 <polyline points={points} fill="none" stroke="#ffd23e" strokeWidth="1.5" />
@@ -886,21 +942,43 @@ export default function WorldBoxEconomyPanel({ space, station, genre, worldStati
             <div style={row}>
               <input
                 type="number"
-                min={1}
-                max={99}
-                value={tokenCount}
-                onChange={(e) => setTokenCount(e.target.value)}
-                style={{ width: 72, minHeight: 36, padding: "4px 8px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.25)", background: "rgba(255,255,255,0.06)", color: "inherit" }}
+                min={10}
+                value={buyAga}
+                onChange={(e) => setBuyAga(e.target.value)}
+                style={{ ...numInput, width: 96 }}
               />
-              <span>枚</span>
+              <span>コインで買う</span>
+              {buyQuote && <span style={{ fontSize: 12 }}>→ {fmtTokens(buyQuote.tokens)}（手数料 {buyQuote.fee}）</span>}
               <span style={{ flex: 1 }} />
-              <button type="button" style={btn} disabled={busy || price === null} onClick={() => void trade("token_buy")}>
-                買う{price !== null ? `（${price * count}）` : ""}
-              </button>
-              <button type="button" style={btn} disabled={busy || price === null || ownedTokens <= 0} onClick={() => void trade("token_sell")}>
-                売る{price !== null ? `（${price * count}）` : ""}
+              <button type="button" style={btn} disabled={busy || rate === null || halted || agaAmount <= 0} onClick={() => void buy()}>
+                買う
               </button>
             </div>
+            <div style={row}>
+              <input
+                type="number"
+                min={0}
+                step="0.01"
+                value={sellTokens}
+                onChange={(e) => setSellTokens(e.target.value)}
+                style={{ ...numInput, width: 96 }}
+              />
+              <span>枚売る</span>
+              {sellQuote && <span style={{ fontSize: 12 }}>→ {sellQuote.netAga} コイン（手数料 {sellQuote.fee}）</span>}
+              <span style={{ flex: 1 }} />
+              <button type="button" style={btn} disabled={busy || rate === null || halted || sellAmount <= 0 || sellAmount > ownedTokens} onClick={() => void sell()}>
+                売る
+              </button>
+            </div>
+            {legacyTokens > 0 && (
+              <div style={row}>
+                <span>旧トークン {legacyTokens} 枚</span>
+                <span style={{ flex: 1 }} />
+                <button type="button" style={btn} disabled={busy || !available} onClick={() => void convert()}>
+                  本物に変換
+                </button>
+              </div>
+            )}
           </div>
         );
       })()}

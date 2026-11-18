@@ -37,6 +37,7 @@ import {
   SCOUT_STAMINA_MULT,
 } from "@/lib/worldbox/roles";
 import { clockOffsetEstimate, type PresenceEntry } from "@/lib/worldbox/presence";
+import { GROUND_PICKUP_RANGE, groundItemAt, type GroundItem } from "@/lib/worldbox/ground-items";
 import { createPollGuard, type PollGuard } from "@/lib/poll-guard";
 import { isWsHealthy, presencePollDue } from "@/lib/worldbox/realtime-poll";
 import { notifyEconomyApplied } from "@/lib/worldbox/economy-push";
@@ -807,6 +808,9 @@ export default function WorldBoxClient() {
   const boardGuardRef = useRef<PollGuard>(createPollGuard());
   const nationsGuardRef = useRef<PollGuard>(createPollGuard());
   const guildShopGuardRef = useRef<PollGuard>(createPollGuard());
+  const groundGuardRef = useRef<PollGuard>(createPollGuard());
+  /** 現在の空間に落ちているアイテム（描画とタップ判定が参照する）。 */
+  const groundItemsRef = useRef<GroundItem[]>([]);
   // ギルドショップの借り区画（地図のギルド名表示用。借りている区画だけ）
   const guildShopPlotsRef = useRef<{ idx: number; guildName: string }[]>([]);
   const invGuardRef = useRef<PollGuard>(createPollGuard());
@@ -1017,6 +1021,10 @@ export default function WorldBoxClient() {
   const telescopeCenterRef = useRef(0);
   /** ロビーのピアノ（鍵盤パネル）。音は中継でロビー全員に届く。 */
   const [pianoOpen, setPianoOpen] = useState(false);
+  const pianoOpenRef = useRef(false);
+  useEffect(() => {
+    pianoOpenRef.current = pianoOpen;
+  }, [pianoOpen]);
   useEffect(() => {
     if (stationUi !== "piano") setPianoOpen(false);
   }, [stationUi]);
@@ -2763,6 +2771,52 @@ export default function WorldBoxClient() {
     } catch { /* noop */ }
   };
 
+  /** 地面のドロップを取得する（現在の空間ぶんだけを保持する）。 */
+  const fetchGroundItems = async (space: string) => {
+    const ticket = groundGuardRef.current.begin();
+    if (ticket === null) return;
+    try {
+      const res = await fetch(`/api/worldbox/ground-items?space=${encodeURIComponent(space)}`, {
+        headers: { Accept: "application/json" },
+      });
+      if (!res.ok) return;
+      const data = (await res.json()) as { items?: GroundItem[] };
+      if (!groundGuardRef.current.isCurrent(ticket)) return;
+      if (Array.isArray(data.items)) groundItemsRef.current = data.items;
+    } catch { /* noop */ } finally {
+      groundGuardRef.current.end(ticket);
+    }
+  };
+  /** 地面のドロップを拾う（サーバー側で距離と在庫を検証する）。 */
+  const pickupGroundItem = async (g: GroundItem) => {
+    try {
+      const res = await fetch("/api/worldbox/ground-items", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ action: "pickup", space: spaceUi, id: g.id }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { profile?: PlayerProfile };
+      if (res.ok) {
+        groundItemsRef.current = groundItemsRef.current.filter((i) => i.id !== g.id);
+        if (data.profile) setInvProfile(data.profile);
+        playWbSe("success");
+      } else {
+        void fetchGroundItems(spaceUi);
+      }
+    } catch { /* noop */ }
+  };
+  const pickupGroundItemRef = useRef(pickupGroundItem);
+  pickupGroundItemRef.current = pickupGroundItem;
+
+  // 地面のドロップは空間ごとに数秒間隔で取り直す（他人のドロップも見える）
+  useEffect(() => {
+    groundItemsRef.current = [];
+    void fetchGroundItems(spaceUi);
+    const timer = window.setInterval(() => void fetchGroundItems(spaceUi), 4000);
+    return () => window.clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [spaceUi]);
+
   /** スロットのタップ: 持ち上げ → 置く/交換。同じ枠の再タップで解除。
    * 食べ物スロットのダブルタップ（350ms 以内の同じ枠2回）だけは食べる。 */
   const tapSlot = (zone: SlotRef["zone"], index: number) => {
@@ -3791,6 +3845,7 @@ export default function WorldBoxClient() {
       const tag = (e.target as HTMLElement | null)?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA") return; // 掲示板の入力中は歩かない
       if (arcadeOpenRef.current) return; // 筐体で遊んでいる間は歩かない（ゲーム側のキー入力を優先）
+      if (pianoOpenRef.current) return; // ピアノを弾いている間は歩かない（キーボード演奏を優先）
       const k = e.key.toLowerCase();
       if (["arrowup", "arrowdown", "arrowleft", "arrowright", " "].includes(k)) e.preventDefault();
       keys.add(k);
@@ -4017,6 +4072,12 @@ export default function WorldBoxClient() {
     const handleIndoorTap = (t: { x: number; y: number }): boolean => {
       const px = Math.floor(player.x);
       const py = Math.floor(player.y);
+      // 地面のドロップは室内でも拾える（座席・収納より優先）
+      const gItem = groundItemAt(groundItemsRef.current, t.x, t.y);
+      if (gItem && Math.max(Math.abs(t.x - px), Math.abs(t.y - py)) <= GROUND_PICKUP_RANGE) {
+        void pickupGroundItemRef.current(gItem);
+        return true;
+      }
       if (Math.max(Math.abs(t.x - px), Math.abs(t.y - py)) > 1) return false;
       const obj = indoorData().objects.find(
         (o) => t.x >= o.x && t.x < o.x + o.w && t.y >= o.y && t.y < o.y + o.h,
@@ -4315,6 +4376,15 @@ export default function WorldBoxClient() {
               return;
             }
           }
+        }
+        // 地面のドロップ: タップで拾う（タイル操作より優先）
+        const gItem = groundItemAt(groundItemsRef.current, t.x, t.y);
+        if (
+          gItem &&
+          Math.max(Math.abs(t.x - Math.floor(player.x)), Math.abs(t.y - Math.floor(player.y))) <= GROUND_PICKUP_RANGE
+        ) {
+          void pickupGroundItemRef.current(gItem);
+          return;
         }
         // ダブルタップ（450ms 以内・同タイル近傍）は冒険役職の技が消費する。
         // クールタイム中・役職なしでは発動せず通常タップとして処理する。
@@ -5609,6 +5679,27 @@ export default function WorldBoxClient() {
         if (csx < -TILE * 2 || csy < -TILE * 2 || csx > cw + TILE * 2 || csy > ch + TILE * 2) continue;
         drawCapital(ctx, csx, csy, n);
       }
+      // 地面のドロップ（ワールド）: アイコンを小さく浮かせて描く
+      for (const g of groundItemsRef.current) {
+        if (g.x < tx0 || g.x > tx1 || g.y < ty0 || g.y > ty1) continue;
+        const img = itemIcons[g.itemId];
+        if (!texReady(img)) continue;
+        const gs = Math.round(TILE * 0.62);
+        const bob = Math.round(Math.sin(nowMs / 380 + g.x * 1.7 + g.y * 2.3) * 2);
+        const gx = Math.round(tileSx(g.x) + (TILE - gs) / 2);
+        const gy = Math.round(tileSy(g.y) + TILE * 0.3) + bob;
+        ctx.drawImage(img, gx, gy, gs, gs);
+        if (g.count > 1) {
+          ctx.font = "bold 10px sans-serif";
+          ctx.textAlign = "right";
+          const label = String(g.count);
+          const tw = Math.ceil(ctx.measureText(label).width) + 4;
+          ctx.fillStyle = "rgba(0,0,0,0.65)";
+          ctx.fillRect(Math.round(tileSx(g.x) + TILE - tw - 1), Math.round(tileSy(g.y) + TILE - 13), tw, 12);
+          ctx.fillStyle = "#fff";
+          ctx.fillText(label, Math.round(tileSx(g.x) + TILE - 3), Math.round(tileSy(g.y) + TILE - 3));
+        }
+      }
       } else {
         // ---- ロビー描画（ピクセル固定: 整数原点・整数座標・補間オフ） ----
         ctx.fillStyle = "#14121c";
@@ -5656,6 +5747,27 @@ export default function WorldBoxClient() {
               ctx.fillStyle = "rgba(255,255,255,0.10)";
               ctx.fillRect(sx, sy, TILE, TILE);
             }
+          }
+        }
+        // 地面のドロップ（室内）: アイコンを小さく浮かせて描く
+        for (const g of groundItemsRef.current) {
+          const img = itemIcons[g.itemId];
+          if (!texReady(img)) continue;
+          const gsx = lobbyOx + g.x * TILE;
+          const gsy = lobbyOy + g.y * TILE;
+          if (gsx < -TILE || gsy < -TILE || gsx > cw + TILE || gsy > ch + TILE) continue;
+          const gs = Math.round(TILE * 0.62);
+          const bob = Math.round(Math.sin(nowMs / 380 + g.x * 1.7 + g.y * 2.3) * 2);
+          ctx.drawImage(img, Math.round(gsx + (TILE - gs) / 2), Math.round(gsy + TILE * 0.3) + bob, gs, gs);
+          if (g.count > 1) {
+            ctx.font = "bold 10px sans-serif";
+            ctx.textAlign = "right";
+            const label = String(g.count);
+            const tw = Math.ceil(ctx.measureText(label).width) + 4;
+            ctx.fillStyle = "rgba(0,0,0,0.65)";
+            ctx.fillRect(Math.round(gsx + TILE - tw - 1), Math.round(gsy + TILE - 13), tw, 12);
+            ctx.fillStyle = "#fff";
+            ctx.fillText(label, Math.round(gsx + TILE - 3), Math.round(gsy + TILE - 3));
           }
         }
         // 遺跡の床罠は薄いヒビとしてだけ見える（発動済みは消える）。
