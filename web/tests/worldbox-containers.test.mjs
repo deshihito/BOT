@@ -49,7 +49,7 @@ function bundleModule(files, names) {
 
 const invUrl = bundleModule(
   ["worldbox/items.ts", "worldbox/profile.ts"],
-  ["parseProfile", "serializeProfile", "countItem"],
+  ["parseProfile", "serializeProfile", "countItem", "bumpProfileStat"],
 );
 const inv = await import(invUrl);
 
@@ -67,7 +67,7 @@ const tilesUrl = bundleModule(
   ["worldbox/rng.ts", "worldbox/mapgen.ts", "worldbox/items.ts", "worldbox/profile.ts", "worldbox/presence.ts", "worldbox/seasons.ts", "worldbox/tiles.ts"],
   [
     "worldTileSource", "mapTileAt", "T_GRASS",
-    "applyTileAction", "applyPlaceBlock", "applyMineBlock", "applyFlowerAction", "applyToggleGate",
+    "applyTileAction", "applyPlaceBlock", "applyMineBlock", "applyFlowerAction", "applyToggleGate", "applySetGateAccess", "isGateItem",
     "applySetSign", "applyDisplayAction", "applyDrawWater", "applyFortify", "FORTIFY_COST",
     "tileKey", "parseTileOverride", "parseTileOverrides",
     "presenceIdFor", "isOverrideActive",
@@ -365,6 +365,11 @@ const lobbyFloorsUrl = bundleModule(
   ["buildLobby2", "buildLobby3"],
 );
 const tentMod = await import(tentUrl);
+const aclUrl = bundleModule(["worldbox/acl.ts"], ["canAccessScope", "isAccessScope", "parseAccessScope"]);
+const nationsBundleUrl = bundleModule(
+  ["worldbox/rng.ts", "worldbox/mapgen.ts", "worldbox/move.ts", "worldbox/presence.ts", "worldbox/nations.ts"],
+  ["nationIdForPresenceId"],
+);
 const containersRoute = await routeImport("api/worldbox/containers/route.ts", [
   ['"next/server"', nextServerStubUrl],
   ['"@/lib/auth"', authUrl],
@@ -378,6 +383,9 @@ const containersRoute = await routeImport("api/worldbox/containers/route.ts", [
   ['"@/lib/worldbox/tiles-online"', tilesOnlineStubUrl],
   ['"@/lib/worldbox/containers"', containersUrl],
   ['"@/lib/worldbox/containers-online"', containersOnlineStubUrl],
+  ['"@/lib/worldbox/acl"', aclUrl],
+  ['"@/lib/worldbox/nations"', nationsBundleUrl],
+  ['"@/lib/worldbox/nations-online"', nationsOnlineStubUrl],
   ['"@/lib/worldbox/tent"', tentUrl],
   ['"@/lib/worldbox/lobby"', lobbyUrl],
   ['"@/lib/worldbox/lobby-floors"', lobbyFloorsUrl],
@@ -420,10 +428,18 @@ export async function submitEconomyOp(op) {
 }
 export async function waitForOpDone() { return globalThis.__wbWaitedOp ?? null; }
 `);
+const progressOnlineStubUrl = dataUrl(`
+export function dispatchProgressEffects() {}
+export async function notifyAchievementDiscord() {}
+`);
+const weatherStubUrl = dataUrl(`
+export function weatherGrowthMult() { return 1; }
+`);
 const tilesRoute = await routeImport("api/worldbox/tiles/route.ts", [
   ['"next/server"', nextServerStubUrl],
   ['"@/lib/auth"', authUrl],
   ['"@/lib/worldbox/mapgen"', mapgenUrl],
+  ['"@/lib/worldbox/profile"', invUrl],
   ['"@/lib/worldbox/profile-online"', profileOnlineStubUrl],
   ['"@/lib/worldbox/presence-online"', presenceOnlineStubUrl],
   ['"@/lib/worldbox/presence"', presenceBundleUrl],
@@ -434,6 +450,8 @@ const tilesRoute = await routeImport("api/worldbox/tiles/route.ts", [
   ['"@/lib/worldbox/rails"', railsUrl],
   ['"@/lib/worldbox/economy-bridge"', economyBridgeStubUrl],
   ['"@/lib/worldbox/economy-bridge-online"', economyBridgeOnlineStubUrl],
+  ['"@/lib/worldbox/acl"', aclUrl],
+  ['"@/lib/worldbox/nations"', nationsBundleUrl],
   ['"@/lib/worldbox/nations-online"', nationsOnlineStubUrl],
   ['"@/lib/worldbox/war"', warUrl],
   ['"@/lib/worldbox/war-online"', warsOnlineStubUrl],
@@ -446,6 +464,8 @@ const tilesRoute = await routeImport("api/worldbox/tiles/route.ts", [
   ['"@/lib/worldbox/metrics-online"', metricsOnlineStubUrl],
   ['"@/lib/worldbox/ops-online"', opsOnlineStubUrl],
   ['"@/lib/worldbox/user-lock"', userLockUrl],
+  ['"@/lib/worldbox/progress-online"', progressOnlineStubUrl],
+  ['"@/lib/worldbox/weather"', weatherStubUrl],
 ]);
 
 process.env["DISCORD_SESSION" + "_SECRET"] = "worldbox-containers-test-secret";

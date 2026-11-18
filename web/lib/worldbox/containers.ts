@@ -30,11 +30,16 @@ export function isContainerItem(itemId: unknown): boolean {
   return containerCapacity(itemId) > 0;
 }
 
+/** コンテナの公開範囲。未設定は "public"（従来の全員共有）と同じ。 */
+export type ContainerAccess = "public" | "union" | "owner";
+
 /** コンテナの中身。slots の長さは容量と一致する。 */
 export type ContainerState = {
   /** 所有者の不透明 ID（設置ブロックの ownerId と同じ）。 */
   ownerId: string;
   slots: ItemSlot[];
+  /** アクセス区分（public 相当のときは省略可）。 */
+  access?: ContainerAccess;
 };
 
 export function emptyContainer(ownerId: string, itemId: string): ContainerState {
@@ -85,11 +90,17 @@ export function parseContainerState(raw: unknown, itemId: string): ContainerStat
   for (let i = 0; i < Math.min(capacity, v.slots.length); i++) {
     slots[i] = parseContainerSlot(v.slots[i]);
   }
-  return { ownerId: v.ownerId, slots };
+  const out: ContainerState = { ownerId: v.ownerId, slots };
+  if (v.access === "union" || v.access === "owner") out.access = v.access;
+  return out;
 }
 
 export function serializeContainerState(state: ContainerState): string {
-  return JSON.stringify({ ownerId: state.ownerId, slots: state.slots });
+  return JSON.stringify({
+    ownerId: state.ownerId,
+    slots: state.slots,
+    ...(state.access === "union" || state.access === "owner" ? { access: state.access } : {}),
+  });
 }
 
 // ---------------------------------------------------------------- スロット移動

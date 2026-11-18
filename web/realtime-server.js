@@ -483,6 +483,16 @@ if (wss) {
           for (const pid of watchCore.economyTargetPids(prevValue, c.value)) pids.add(pid);
         }
         if (pids.size > 0) sendTo((info) => pids.has(info.pid), { t: "sync", kind: "economy" });
+      } else if (kind === "trade") {
+        // P2P 直接取引は当事者2人だけに通知する
+        const pids = new Set();
+        for (const c of changes) {
+          for (const pid of watchCore.tradeTargetPids(c.key, c.value)) pids.add(pid);
+          if (prev && prev.has(c.key)) {
+            for (const pid of watchCore.tradeTargetPids(c.key, prev.get(c.key))) pids.add(pid);
+          }
+        }
+        if (pids.size > 0) sendTo((info) => pids.has(info.pid), { t: "sync", kind: "trade" });
       }
     };
     watchCore.WATCH_PLAN.forEach((plan, idx) => {
@@ -510,7 +520,7 @@ if (wss) {
         setInterval(() => void run(), plan.intervalMs);
       }, 500 + idx * 300);
     });
-    console.log("[realtime] kv watch enabled (chat/party/requests/tiles/mobs/board/nations/instances/economy/objects/fishing/guildShop)");
+    console.log("[realtime] kv watch enabled (chat/party/requests/tiles/mobs/board/nations/instances/economy/objects/fishing/guildShop/trade)");
   } else {
     console.log("[realtime] kv watch disabled (bot api not configured)");
   }

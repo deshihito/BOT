@@ -6,11 +6,13 @@ import { isFishingEnabled, loadAllCaughtAt, loadCaughtAt, storeCaughtAt } from "
 import { lootForObjectAt } from "@/lib/worldbox/objects";
 import { listPresence } from "@/lib/worldbox/presence-online";
 import { presenceIdFor } from "@/lib/worldbox/presence";
-import { addItem } from "@/lib/worldbox/profile";
+import { addItem, bumpProfileStat } from "@/lib/worldbox/profile";
 import { loadProfile, storeProfile } from "@/lib/worldbox/profile-online";
+import { dispatchProgressEffects } from "@/lib/worldbox/progress-online";
 import { parseSave } from "@/lib/worldbox/save";
 import { loadWorldBoxSave } from "@/lib/worldbox/save-online";
 import { withUserLock } from "@/lib/worldbox/user-lock";
+import { rollRainFishingBonus, weatherAt } from "@/lib/worldbox/weather";
 
 export const runtime = "nodejs";
 
@@ -106,16 +108,41 @@ export async function POST(request: Request) {
       if (!fishingReady(caughtAt, now)) return err("not_respawned", 409);
       const loot = lootForObjectAt(MAP_SEED, "fishing_spot", x, y, fishingNonce(caughtAt, now));
       if (!loot) return err("no_spot", 404);
+      const weather = weatherAt(Math.floor(now / 1000));
+      const bonus = rollRainFishingBonus(weather);
+      const gained: Record<string, number> = { ...loot.gained };
+      for (const [itemId, count] of Object.entries(bonus)) {
+        gained[itemId] = (gained[itemId] ?? 0) + count;
+      }
       let next = profile;
-      for (const [itemId, count] of Object.entries(loot.gained)) {
+      for (const [itemId, count] of Object.entries(gained)) {
         next = addItem(next, itemId, count);
       }
+      next = bumpProfileStat(next, "fishes", 1);
       if (!(await storeProfile(ownerKey, next))) return err("store_failed", 503);
       if (!(await storeCaughtAt(x, y, now))) {
         await storeProfile(ownerKey, profile);
         return err("store_failed", 503);
       }
-      return NextResponse.json({ ok: true, gained: loot.gained, profile: next }, { headers: NO_STORE });
+      dispatchProgressEffects({
+        ownerKey,
+        actorName: session.username?.trim() || "冒険者",
+        before: profile,
+        after: next,
+        goalKind: "gather",
+        goalDelta: 1,
+        now,
+      });
+      return NextResponse.json(
+        {
+          ok: true,
+          gained,
+          profile: next,
+          weather,
+          ...(Object.keys(bonus).length > 0 ? { rainBonus: true } : {}),
+        },
+        { headers: NO_STORE },
+      );
     }),
   );
 }

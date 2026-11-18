@@ -123,10 +123,18 @@ export function findCapitalTile(
 /** 国ごとの所属人数。 */
 export function memberCounts(state: NationsState): Record<string, number> {
   const counts: Record<string, number> = {};
-  for (const m of Object.values(state.members)) {
+  for (const m of Object.values(state?.members ?? {})) {
     counts[m.nationId] = (counts[m.nationId] ?? 0) + 1;
   }
   return counts;
+}
+
+/** プレゼンス ID に対応する所属国 ID を返す（見つからなければ null）。 */
+export function nationIdForPresenceId(state: NationsState, presenceId: string): string | null {
+  for (const [memberKey, m] of Object.entries(state?.members ?? {})) {
+    if (presenceIdFor(memberKey) === presenceId) return m.nationId;
+  }
+  return null;
 }
 
 // ---------- 状態遷移 ----------

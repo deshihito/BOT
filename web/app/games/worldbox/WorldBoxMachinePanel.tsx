@@ -4,11 +4,24 @@
 // バッファの回収、プログラム（有効/間隔/プリセット）の変更、共有コードの
 // 書き出し・取り込みを行う。状態の正はサーバー（/api/worldbox/machines）。
 import { useCallback, useEffect, useState } from "react";
-import type { PlayerProfile } from "@/lib/worldbox/profile";
+import { countItem, type PlayerProfile } from "@/lib/worldbox/profile";
+import { CROPS, itemById } from "@/lib/worldbox/items";
 import { ItemAnnotation, ItemSlot, ItemSlotGrid } from "./ItemSlotGrid";
 import {
-  DEVICE_INTERVAL_CHOICES, DEVICE_PRESETS, type DeviceProgram,
+  DEVICE_ACTIONS, DEVICE_INTERVAL_CHOICES, DEVICE_PRESETS, DEVICE_TRIGGERS,
+  type DeviceAction, type DeviceProgram, type DeviceTrigger,
 } from "@/lib/worldbox/machines";
+
+const TRIGGER_LABEL: Record<DeviceTrigger, string> = {
+  mature: "成熟したら",
+  intruder: "侵入検知",
+  buffer_full: "バッファ満杯",
+};
+const ACTION_LABEL: Record<DeviceAction, string> = {
+  harvest: "収穫",
+  harvest_replant: "収穫+種まき",
+  discord_alert: "Discord通知",
+};
 
 const panelStyle: React.CSSProperties = {
   position: "absolute", left: "50%", bottom: 12, transform: "translateX(-50%)",
@@ -39,11 +52,13 @@ type MachineView = {
 export default function WorldBoxMachinePanel({
   x,
   y,
+  profile,
   onProfileChange,
   onClose,
 }: {
   x: number;
   y: number;
+  profile: PlayerProfile | null;
   onProfileChange: (profile: PlayerProfile) => void;
   onClose: () => void;
 }) {
@@ -78,7 +93,12 @@ export default function WorldBoxMachinePanel({
         machine?: MachineView; profile?: PlayerProfile; error?: string;
       };
       if (!res.ok) {
-        setMsg(data.error === "empty" ? "まだ何もない" : data.error === "bad_code" ? "コードが違う" : "できない");
+        setMsg(
+          data.error === "empty" ? "まだ何もない"
+          : data.error === "bad_code" ? "コードが違う"
+          : data.error === "not_enough_items" ? "種が足りない"
+          : "できない",
+        );
         return;
       }
       if (data.machine) setMachine(data.machine);
@@ -92,6 +112,8 @@ export default function WorldBoxMachinePanel({
   const setProgram = (program: DeviceProgram) => {
     void post({ action: "set_program", program });
   };
+
+  const ownedSeeds = profile ? CROPS.filter((c) => countItem(profile, c.seedId) > 0) : [];
 
   return (
     <div style={panelStyle} role="dialog" aria-label="自動収穫機" className="wb-panel">
@@ -138,6 +160,26 @@ export default function WorldBoxMachinePanel({
               </div>
             )}
           </div>
+          {ownedSeeds.length > 0 && (
+            <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap", alignItems: "center" }}>
+              <span style={{ fontSize: 12, opacity: 0.8 }}>種補充</span>
+              {ownedSeeds.map((c) => {
+                const have = countItem(profile!, c.seedId);
+                return (
+                  <button
+                    key={c.seedId}
+                    type="button"
+                    style={btn}
+                    onClick={() => {
+                      void post({ action: "deposit_seed", itemId: c.seedId, count: Math.min(10, have) });
+                    }}
+                  >
+                    {itemById(c.seedId)?.name ?? c.seedId} +{Math.min(10, have)}
+                  </button>
+                );
+              })}
+            </div>
+          )}
           <div style={{ display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap", alignItems: "center" }}>
             <button
               type="button"
@@ -171,6 +213,36 @@ export default function WorldBoxMachinePanel({
                 <option key={p.id} value={p.id}>{p.name}</option>
               ))}
             </select>
+          </div>
+          <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap", alignItems: "center" }}>
+            <select
+              value={machine.program.trigger}
+              onChange={(e) => setProgram({ ...machine.program, trigger: e.target.value as DeviceTrigger })}
+              style={{ ...input, minHeight: 32 }}
+              aria-label="条件"
+            >
+              {DEVICE_TRIGGERS.map((t) => (
+                <option key={t} value={t}>{TRIGGER_LABEL[t]}</option>
+              ))}
+            </select>
+            <select
+              value={machine.program.action}
+              onChange={(e) => setProgram({ ...machine.program, action: e.target.value as DeviceAction })}
+              style={{ ...input, minHeight: 32 }}
+              aria-label="動作"
+            >
+              {DEVICE_ACTIONS.map((a) => (
+                <option key={a} value={a}>{ACTION_LABEL[a]}</option>
+              ))}
+            </select>
+            <button
+              type="button"
+              style={{ ...btn, ...(machine.program.autoStore ? {} : { opacity: 0.55 }) }}
+              aria-pressed={machine.program.autoStore}
+              onClick={() => setProgram({ ...machine.program, autoStore: !machine.program.autoStore })}
+            >
+              {machine.program.autoStore ? "収納へ搬出 ON" : "収納へ搬出 OFF"}
+            </button>
           </div>
           <div style={{ marginTop: 10, fontSize: 12, opacity: 0.85, wordBreak: "break-all" }}>
             共有コード: {machine.code}

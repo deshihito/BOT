@@ -177,6 +177,14 @@ const input: React.CSSProperties = {
 
 
 
+type UnionGoalsData = {
+  guildId: string | null;
+  guildName?: string;
+  week: string;
+  goals: { id: string; name: string; current: number; target: number; completedAt: number | null }[];
+  totalCompleted: number;
+};
+
 export default function WorldBoxGuildBoardPanel({
   nations,
   nationMsg,
@@ -197,7 +205,23 @@ export default function WorldBoxGuildBoardPanel({
   /** 招待リンク（?union=）で指定されたサーバー。該当行を先頭に強調する。 */
   inviteGuildId?: string | null;
 }) {
-  const [tab, setTab] = useState<"requests" | "roles" | "adventure" | "board" | "war" | "settings">("requests");
+  const [tab, setTab] = useState<"requests" | "roles" | "adventure" | "board" | "war" | "goals" | "settings">("requests");
+  const [goalsData, setGoalsData] = useState<UnionGoalsData | null>(null);
+  const [goalsLoaded, setGoalsLoaded] = useState(false);
+  const refreshGoals = useCallback(async () => {
+    try {
+      const res = await fetch("/api/worldbox/union-goals", { headers: { Accept: "application/json" } });
+      if (res.ok) setGoalsData((await res.json()) as UnionGoalsData);
+      else setGoalsData(null);
+    } catch {
+      setGoalsData(null);
+    } finally {
+      setGoalsLoaded(true);
+    }
+  }, []);
+  useEffect(() => {
+    if (tab === "goals") void refreshGoals();
+  }, [tab, refreshGoals]);
   // 国家設定（税率・公開/非公開・大臣）
   const [nsData, setNsData] = useState<NationSettingsData | null>(null);
   const [nsLoaded, setNsLoaded] = useState(false);
@@ -275,6 +299,7 @@ export default function WorldBoxGuildBoardPanel({
   const [unionRole, setUnionRole] = useState<string>("");
   const [unionMode, setUnionMode] = useState<"global" | "channel" | "none">("none");
   const [unionLinkChannelId, setUnionLinkChannelId] = useState<string | null>(null);
+  const [unionEvents, setUnionEvents] = useState(true);
   const [unionDirectory, setUnionDirectory] = useState<{
     channels: { id: string; name: string }[];
     globalChatChannelId: string | null;
@@ -293,12 +318,13 @@ export default function WorldBoxGuildBoardPanel({
       if (setRes.ok) {
         const data = (await setRes.json()) as {
           role?: string;
-          settings?: { mode?: "global" | "channel" | "none"; channelId?: string | null };
+          settings?: { mode?: "global" | "channel" | "none"; channelId?: string | null; events?: boolean };
           directory?: { channels: { id: string; name: string }[]; globalChatChannelId: string | null } | null;
         };
         setUnionRole(data.role ?? "");
         setUnionMode(data.settings?.mode ?? "none");
         setUnionLinkChannelId(data.settings?.channelId ?? null);
+        setUnionEvents(data.settings?.events !== false);
         setUnionDirectory(data.directory ?? null);
       }
     } catch { /* 読めなくてもパネルは開いたままにする */ }
@@ -335,21 +361,26 @@ export default function WorldBoxGuildBoardPanel({
       setBusy(false);
     }
   };
-  const saveUnionLink = async (mode: "global" | "channel" | "none", channelId: string | null) => {
+  const saveUnionLink = async (
+    mode: "global" | "channel" | "none",
+    channelId: string | null,
+    events: boolean = unionEvents,
+  ) => {
     setBusy(true);
     try {
       const res = await fetch("/api/worldbox/union-settings", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mode, channelId }),
+        body: JSON.stringify({ mode, channelId, events }),
       });
       const json = (await res.json().catch(() => ({}))) as {
-        settings?: { mode?: "global" | "channel" | "none"; channelId?: string | null };
+        settings?: { mode?: "global" | "channel" | "none"; channelId?: string | null; events?: boolean };
         error?: string;
       };
       if (res.ok) {
         setUnionMode(json.settings?.mode ?? mode);
         setUnionLinkChannelId(json.settings?.channelId ?? null);
+        setUnionEvents(json.settings?.events !== false);
         setUnionPicking(false);
         setMsg("保存した");
       } else {
@@ -490,6 +521,14 @@ export default function WorldBoxGuildBoardPanel({
           onClick={() => setTab("war")}
         >
           戦争
+        </button>
+        <button
+          type="button"
+          style={{ ...tabBtn, ...(tab === "goals" ? tabOn : {}) }}
+          aria-pressed={tab === "goals"}
+          onClick={() => setTab("goals")}
+        >
+          目標
         </button>
         <button
           type="button"
@@ -802,6 +841,17 @@ export default function WorldBoxGuildBoardPanel({
                       >
                         連携なし
                       </button>
+                      {unionMode !== "none" && (
+                        <button
+                          type="button"
+                          style={{ ...tabBtn, ...(unionEvents ? tabOn : {}) }}
+                          disabled={busy}
+                          aria-pressed={unionEvents}
+                          onClick={() => { void saveUnionLink(unionMode, unionLinkChannelId, !unionEvents); }}
+                        >
+                          {unionEvents ? "イベント通知 ON" : "イベント通知 OFF"}
+                        </button>
+                      )}
                     </>
                   )}
                 </>
@@ -926,6 +976,61 @@ export default function WorldBoxGuildBoardPanel({
                 </div>
               )}
               {msg && <p role="status" style={{ margin: "10px 0 0", fontSize: 13 }}>{msg}</p>}
+            </div>
+          )}
+        </div>
+      )}
+
+      {tab === "goals" && (
+        <div style={{ marginTop: 10 }}>
+          {!goalsLoaded ? (
+            <p style={{ margin: 0, fontSize: 13, opacity: 0.75 }}>読み込み中…</p>
+          ) : !goalsData?.guildId ? (
+            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+              <span style={{ fontSize: 13, opacity: 0.75 }}>国に所属していません</span>
+              <button type="button" style={btn} onClick={() => setTab("roles")}>
+                役職を見る
+              </button>
+            </div>
+          ) : (
+            <div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+                <strong style={{ fontSize: 14 }}>{goalsData.guildName || "ユニオン"}</strong>
+                <span style={{ fontSize: 12, opacity: 0.7 }}>{goalsData.week}</span>
+                <span style={{ flex: 1 }} />
+                <span style={{ fontSize: 12, color: "#ffd75e", fontWeight: 700 }}>
+                  累計達成: {goalsData.totalCompleted}回
+                </span>
+              </div>
+              {goalsData.goals.map((g) => {
+                const done = g.completedAt !== null || g.current >= g.target;
+                const pct = Math.min(100, Math.round((g.current / Math.max(1, g.target)) * 100));
+                return (
+                  <div key={g.id} style={{ ...rowStyle, flexDirection: "column", alignItems: "stretch" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <strong style={{ fontSize: 13, color: done ? "#46a758" : "#fff" }}>{g.name}</strong>
+                      <span style={{ flex: 1 }} />
+                      <span style={{ fontSize: 12, opacity: done ? 1 : 0.8 }}>
+                        {done ? "達成済み" : `${g.current} / ${g.target}`}
+                      </span>
+                    </div>
+                    <div
+                      aria-hidden
+                      style={{
+                        height: 6, borderRadius: 99, overflow: "hidden",
+                        background: "rgba(255,255,255,0.12)",
+                      }}
+                    >
+                      <div
+                        style={{
+                          width: `${pct}%`, height: "100%",
+                          background: done ? "#46a758" : "#ffd23e",
+                        }}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>

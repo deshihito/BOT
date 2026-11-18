@@ -156,6 +156,9 @@ export function isGateItem(itemId: string): boolean {
   return GATE_ITEM_IDS.has(itemId);
 }
 
+/** 門の開閉権限。未設定は "public"（誰でも可）。 */
+export type GateAccess = "public" | "union" | "owner";
+
 /** 1タイルの上書き。無い項目は「地形どおり・素の状態」を意味する。 */
 export type TileOverride = {
   /** 地形の置き換え（伐採→草/雪、採掘→土）。 */
@@ -174,6 +177,8 @@ export type TileOverride = {
   deco?: string;
   /** 門（wooden_gate）の開閉状態。true は開いている（通過できる）。 */
   gateOpen?: boolean;
+  /** 門（wooden_gate）の開閉権限。未設定は "public"（誰でも可）。 */
+  gateAccess?: GateAccess;
   /** 看板（sign_board）に書かれたテキスト。所有者だけが編集できる。 */
   signText?: string;
   /** 棚（item_shelf）に展示中のアイテム ID。 */
@@ -235,8 +240,17 @@ export type TileView = {
   farmland: boolean;
   stump: boolean;
   crop: { cropId: string; stage: 0 | 1 | 2; ready: boolean } | null;
-  /** 設置されたブロック（自分のものかどうか・残り HP 割合・門の開閉・看板・展示・要塞化つき）。 */
-  block: { itemId: string; mine: boolean; hpFrac: number; gateOpen?: boolean; signText?: string; display?: string; fort: number } | null;
+  /** 設置されたブロック（自分のものかどうか・残り HP 割合・門の開閉/権限・看板・展示・要塞化つき）。 */
+  block: {
+    itemId: string;
+    mine: boolean;
+    hpFrac: number;
+    gateOpen?: boolean;
+    gateAccess?: GateAccess;
+    signText?: string;
+    display?: string;
+    fort: number;
+  } | null;
   /** 地形（岩・木）の残り HP 割合（1 = 無傷。HP制の対象でないタイルは 1）。 */
   hpFrac: number;
   /** マスの個体値（豊穣度・純度・標高。決定的生成で保存はしない）。 */
@@ -284,6 +298,7 @@ export function tileView(
           hpFrac: blockHpFraction(active.block),
           fort: fortBonus(active.block),
           ...(active.gateOpen !== undefined ? { gateOpen: active.gateOpen } : {}),
+          ...(active.gateAccess ? { gateAccess: active.gateAccess } : {}),
           ...(active.signText ? { signText: active.signText } : {}),
           ...(active.display ? { display: active.display } : {}),
         }
@@ -300,7 +315,7 @@ export function hasTool(profile: PlayerProfile, kind: ToolKind): boolean {
 
 export type TileActionKind =
   | "chop" | "mine" | "till" | "plant" | "harvest"
-  | "place_block" | "mine_block" | "plant_flower" | "remove_flower" | "toggle_gate"
+  | "place_block" | "mine_block" | "plant_flower" | "remove_flower" | "toggle_gate" | "set_gate_access"
   | "set_sign" | "set_display" | "clear_display" | "draw_water" | "fortify";
 
 export type TileActionResult =
@@ -361,7 +376,7 @@ export function applyTileAction(
   yRaw: unknown,
   seedIdRaw: unknown,
   now: number,
-  opts?: { supplyConnected?: boolean },
+  opts?: { supplyConnected?: boolean; growthMult?: number },
 ): TileActionResult {
   if (action !== "chop" && action !== "mine" && action !== "till" && action !== "plant" && action !== "harvest") {
     return { ok: false, error: "invalid_action" };
@@ -466,8 +481,8 @@ export function applyTileAction(
         crop: {
           cropId: cropDef.id,
           plantedAt: now,
-          // 成長時間は季節倍率に加えて土地の豊穣度で変わる（個体値の効果）
-          readyAt: now + Math.round(cropDef.growthMinutes * 60_000 * seasonGrowthMult(cropDef.season, now) * fertilityGrowthFactor(tileIvsAt(x, y).fertility)),
+          // 成長時間は季節倍率に加えて土地の豊穣度・天候倍率で変わる（個体値＋天候の効果）
+          readyAt: now + Math.round(cropDef.growthMinutes * 60_000 * seasonGrowthMult(cropDef.season, now) * fertilityGrowthFactor(tileIvsAt(x, y).fertility) * (opts?.growthMult ?? 1)),
         },
         ownerId: selfId,
       };
@@ -701,6 +716,8 @@ export function applyMineBlock(
   delete rest.deco; // 植えた花は鉢ごと失われる
   delete rest.signText; // 看板の文字も板ごと失われる
   delete rest.display; // 展示品は棚ごと失われる（アイテムは戻らない）
+  delete rest.gateOpen; // 門を壊したら開閉/権限もリセット
+  delete rest.gateAccess;
   const empty =
     rest.tile === undefined && rest.farmland !== true && rest.crop === undefined &&
     rest.stump !== true && rest.until === undefined;
@@ -982,9 +999,8 @@ export function applyFortify(
 }
 
 /**
- * 門の開閉: 門タイルの gateOpen を反転する。開閉は所有者でなくてもできる
- * （門は出入りのための物。掘って壊すのは従来どおり所有者だけ）。
- * アイテムの消費・獲得は無い。
+ * 門の開閉: 門タイルの gateOpen を反転する。
+ * gateAccess に応じたアクセス権判定はルート側が行い、gateAllowed で渡す。
  */
 export function applyToggleGate(
   current: TileOverride | null,
@@ -994,6 +1010,7 @@ export function applyToggleGate(
   xRaw: unknown,
   yRaw: unknown,
   now: number,
+  ctx: { gateAllowed?: boolean } = {},
 ): TileActionResult {
   const tile = checkedTile(xRaw, yRaw);
   if (!tile) return { ok: false, error: "invalid_tile" };
@@ -1001,7 +1018,45 @@ export function applyToggleGate(
   const key = tileKey(x, y);
   const active = isOverrideActive(current, now) ? current : null;
   if (!active?.block || !isGateItem(active.block.itemId)) return { ok: false, error: "no_block" };
+  if (ctx.gateAllowed === false) return { ok: false, error: "not_allowed" };
   const next: TileOverride = { ...active, gateOpen: active.gateOpen !== true };
+  const overrides: TileOverridesMap = { [key]: active };
+  return {
+    ok: true,
+    override: next,
+    profile,
+    view: viewAfter(map, overrides, key, next, x, y, now, ownerKey),
+    gained: {},
+  };
+}
+
+/**
+ * 門の開閉権限設定（所有者だけ）。"public" | "union" | "owner"。
+ */
+export function applySetGateAccess(
+  current: TileOverride | null,
+  profile: PlayerProfile,
+  map: TopDownMap,
+  ownerKey: string,
+  xRaw: unknown,
+  yRaw: unknown,
+  accessRaw: unknown,
+  now: number,
+): TileActionResult {
+  const tile = checkedTile(xRaw, yRaw);
+  if (!tile) return { ok: false, error: "invalid_tile" };
+  if (accessRaw !== "public" && accessRaw !== "union" && accessRaw !== "owner") {
+    return { ok: false, error: "invalid_request" };
+  }
+  const { x, y } = tile;
+  const key = tileKey(x, y);
+  const active = isOverrideActive(current, now) ? current : null;
+  if (!active?.block || !isGateItem(active.block.itemId)) return { ok: false, error: "no_block" };
+  const selfId = presenceIdFor(ownerKey);
+  if (active.block.ownerId !== selfId) return { ok: false, error: "not_owner" };
+  const next: TileOverride = { ...active };
+  if (accessRaw === "public") delete next.gateAccess;
+  else next.gateAccess = accessRaw;
   const overrides: TileOverridesMap = { [key]: active };
   return {
     ok: true,
@@ -1071,6 +1126,7 @@ export function parseTileOverride(raw: unknown): TileOverride | null {
   }
   if (v.deco === "flower") out.deco = "flower";
   if (v.gateOpen === true) out.gateOpen = true;
+  if (v.gateAccess === "union" || v.gateAccess === "owner") out.gateAccess = v.gateAccess;
   if (typeof v.signText === "string") {
     const text = sanitizeSignText(v.signText);
     if (text) out.signText = text;

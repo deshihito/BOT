@@ -52,7 +52,7 @@ const invUrl = bundleModule(
   ["worldbox/items.ts", "worldbox/profile.ts"],
   [
     "ITEMS", "itemById", "CROPS", "cropById", "cropBySeedId", "itemsWithTool",
-    "parseProfile", "serializeProfile", "countItem", "addItem", "removeItem",
+    "parseProfile", "serializeProfile", "countItem", "addItem", "removeItem", "bumpProfileStat",
     "swapSlots", "overflowCount", "HOTBAR_SLOTS", "STORAGE_SLOTS", "STACK_MAX",
   ],
 );
@@ -63,7 +63,7 @@ const tilesUrl = bundleModule(
   [
     "worldTileSource", "mapTileAt", "T_GRASS", "T_TREE", "T_ROCK", "T_DIRT", "T_SNOW", "T_SNOW_TREE",
     "parseProfile", "addItem", "countItem",
-    "applyTileAction", "applyPlaceBlock", "applyMineBlock", "applyFlowerAction", "applyToggleGate", "tileView", "actionForTile", "tileKey",
+    "applyTileAction", "applyPlaceBlock", "applyMineBlock", "applyFlowerAction", "applyToggleGate", "applySetGateAccess", "isGateItem", "tileView", "actionForTile", "tileKey",
     "applySetSign", "applyDisplayAction", "applyDrawWater", "applyFortify", "FORTIFY_COST",
     "tileIvsAt", "fertilityGrowthFactor", "fertilityBonusYield", "purityBonusStone", "purityBonusCoal",
     "parseTileOverride", "parseTileOverrides", "isOverrideActive", "TREE_REGROW_MS",
@@ -483,12 +483,25 @@ export async function submitEconomyOp(op) {
 }
 export async function waitForOpDone() { return globalThis.__wbWaitedOp ?? null; }
 `);
+const aclUrl = bundleModule(["worldbox/acl.ts"], ["canAccessScope", "parseAccessScope"]);
+const nationsBundleUrl = bundleModule(
+  ["worldbox/rng.ts", "worldbox/mapgen.ts", "worldbox/move.ts", "worldbox/presence.ts", "worldbox/nations.ts"],
+  ["nationIdForPresenceId"],
+);
+const progressOnlineStubUrl = dataUrl(`
+export function dispatchProgressEffects() {}
+export async function notifyAchievementDiscord() {}
+`);
+const weatherStubUrl = dataUrl(`
+export function weatherGrowthMult() { return 1; }
+`);
 const tilesRoute = await import(
   dataUrl(
     transpile("api/worldbox/tiles/route.ts", rootDir + "/app")
       .replaceAll('"next/server"', JSON.stringify(nextServerStubUrl))
       .replaceAll('"@/lib/auth"', JSON.stringify(authUrl))
       .replaceAll('"@/lib/worldbox/mapgen"', JSON.stringify(mapgenUrl))
+      .replaceAll('"@/lib/worldbox/profile"', JSON.stringify(invUrl))
       .replaceAll('"@/lib/worldbox/profile-online"', JSON.stringify(profileOnlineStubUrl))
       .replaceAll('"@/lib/worldbox/presence-online"', JSON.stringify(presenceOnlineStubUrl))
       .replaceAll('"@/lib/worldbox/presence"', JSON.stringify(presenceBundleUrl))
@@ -508,9 +521,13 @@ const tilesRoute = await import(
       .replaceAll('"@/lib/worldbox/metrics-online"', JSON.stringify(metricsOnlineStubUrl))
       .replaceAll('"@/lib/worldbox/ops-online"', JSON.stringify(opsOnlineStubUrl))
       .replaceAll('"@/lib/worldbox/user-lock"', JSON.stringify(userLockUrl))
+      .replaceAll('"@/lib/worldbox/acl"', JSON.stringify(aclUrl))
+      .replaceAll('"@/lib/worldbox/nations"', JSON.stringify(nationsBundleUrl))
       .replaceAll('"@/lib/worldbox/nations-online"', JSON.stringify(nationsOnlineStubUrl))
       .replaceAll('"@/lib/worldbox/war"', JSON.stringify(warUrl))
-      .replaceAll('"@/lib/worldbox/war-online"', JSON.stringify(warsOnlineStubUrl)),
+      .replaceAll('"@/lib/worldbox/war-online"', JSON.stringify(warsOnlineStubUrl))
+      .replaceAll('"@/lib/worldbox/progress-online"', JSON.stringify(progressOnlineStubUrl))
+      .replaceAll('"@/lib/worldbox/weather"', JSON.stringify(weatherStubUrl)),
   ),
 );
 

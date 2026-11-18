@@ -7,6 +7,8 @@ export type ChatChannel = "proximity" | "global" | "union";
 
 /** 本文の上限文字数（掲示板と同じ）。 */
 export const CHAT_TEXT_MAX = 120;
+/** Discord イベント通知の上限文字数。 */
+export const CHAT_EVENT_TEXT_MAX = 240;
 /** 表示名の上限文字数。 */
 export const CHAT_NAME_MAX = 24;
 /** 近距離チャットの届く半径（タイル）。 */
@@ -47,6 +49,8 @@ export type UnionChatSettings = {
   /** mode = "channel" のときの専用チャンネル ID。 */
   channelId: string | null;
   updatedAt: number;
+  /** ゲーム内イベント通知を Discord へ流すか（既定は true、false のときのみ保持）。 */
+  events?: boolean;
 };
 
 const CHANNEL_ID_RE = /^\d{17,20}$/;
@@ -60,17 +64,18 @@ export function parseUnionChatSettings(raw: unknown): UnionChatSettings {
   if (!raw || typeof raw !== "object") return fallback;
   const v = raw as Record<string, unknown>;
   const updatedAt = typeof v.updatedAt === "number" && Number.isFinite(v.updatedAt) ? v.updatedAt : 0;
+  const ev = v.events === false ? { events: false } : {};
   if (v.mode === "global" || v.mode === "none") {
-    return { mode: v.mode, channelId: null, updatedAt };
+    return { mode: v.mode, channelId: null, updatedAt, ...ev };
   }
   if (v.mode === "channel") {
     return typeof v.channelId === "string" && CHANNEL_ID_RE.test(v.channelId)
-      ? { mode: "channel", channelId: v.channelId, updatedAt }
-      : fallback;
+      ? { mode: "channel", channelId: v.channelId, updatedAt, ...ev }
+      : { ...fallback, ...ev };
   }
   // 旧形式: chatChannelId の手入力
   if (typeof v.chatChannelId === "string" && CHANNEL_ID_RE.test(v.chatChannelId)) {
-    return { mode: "channel", channelId: v.chatChannelId, updatedAt };
+    return { mode: "channel", channelId: v.chatChannelId, updatedAt, ...ev };
   }
   return fallback;
 }
@@ -85,6 +90,14 @@ export function sanitizeChatText(raw: unknown): string | null {
   const text = raw.replace(/[\u0000-\u001f\u007f]/g, " ").trim().replace(/\s+/g, " ");
   if (text.length === 0 || text.length > CHAT_TEXT_MAX) return null;
   return text;
+}
+
+/** イベント通知テキストを整形する（最大 CHAT_EVENT_TEXT_MAX）。 */
+export function sanitizeEventText(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  const text = raw.replace(/[\u0000-\u001f\u007f]/g, " ").trim().replace(/\s+/g, " ");
+  if (text.length === 0) return null;
+  return Array.from(text).slice(0, CHAT_EVENT_TEXT_MAX).join("");
 }
 
 export function sanitizeChatName(raw: unknown): string {

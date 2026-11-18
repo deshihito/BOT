@@ -6,9 +6,11 @@
 // （Bot 側ワーカーがチャンネルへ投稿する）。
 import { isBotApiConfigured, kvGet, kvSet } from "../bot-api";
 import {
-  parseChatMessage, parseUnionChatSettings, pruneChatMessages,
+  parseChatMessage, parseUnionChatSettings, pruneChatMessages, sanitizeChatName, sanitizeEventText,
   type ChatChannel, type ChatMessage, type UnionChatSettings,
 } from "./chat";
+import { resolveLinkedChannelId } from "./discord-directory";
+import { loadDiscordDirectory } from "./discord-directory-online";
 import { withUserLock } from "./user-lock";
 
 export const WORLDBOX_CHAT_NAMESPACE = "worldbox_chat";
@@ -92,10 +94,15 @@ export async function loadUnionChatSettings(guildId: string): Promise<UnionChatS
 
 export async function storeUnionChatSettings(
   guildId: string,
-  settings: Pick<UnionChatSettings, "mode" | "channelId">,
+  settings: Pick<UnionChatSettings, "mode" | "channelId" | "events">,
 ): Promise<boolean> {
   try {
-    const full: UnionChatSettings = { ...settings, updatedAt: Date.now() };
+    const full: UnionChatSettings = {
+      mode: settings.mode,
+      channelId: settings.channelId,
+      updatedAt: Date.now(),
+      ...(settings.events === false ? { events: false } : {}),
+    };
     await kvSet(WORLDBOX_UNION_SETTINGS_NAMESPACE, guildId, JSON.stringify(full));
     return true;
   } catch {
@@ -112,12 +119,48 @@ export type ChatOutboxEntry = {
   text: string;
   at: number;
   status: "pending" | "sent";
+  kind?: "chat" | "event";
 };
 
 export async function enqueueChatOutbox(entry: ChatOutboxEntry): Promise<boolean> {
   try {
     await kvSet(WORLDBOX_CHAT_OUTBOX_NAMESPACE, entry.id, JSON.stringify(entry));
     return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * ユニオンの連携先 Discord チャンネルへゲーム内イベント通知を積む（ベストエフォート）。
+ * mode="none" または events=false のときは何もしない。
+ */
+export async function enqueueUnionDiscordEvent(
+  guildId: string | null | undefined,
+  title: string,
+  body: string,
+  id?: string,
+): Promise<boolean> {
+  if (!guildId || !isChatEnabled()) return false;
+  const text = sanitizeEventText(body);
+  if (!text) return false;
+  const name = sanitizeChatName(title) || "WORLD BOX";
+  try {
+    const settings = await loadUnionChatSettings(guildId);
+    if (settings.mode === "none" || settings.events === false) return false;
+    const directory = settings.mode === "global" ? await loadDiscordDirectory(guildId) : null;
+    const channelId = resolveLinkedChannelId(settings, directory);
+    if (!channelId) return false;
+    return await enqueueChatOutbox({
+      id: id ?? `ev-${crypto.randomUUID()}`,
+      guildId,
+      channelId,
+      name,
+      text,
+      at: Date.now(),
+      status: "pending",
+      kind: "event",
+    });
   } catch {
     return false;
   }

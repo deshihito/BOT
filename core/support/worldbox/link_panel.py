@@ -34,6 +34,7 @@ from core.support.worldbox.link import (
     build_link_status_fields,
     build_union_settings_record,
     parse_nation_guild_ids,
+    parse_union_events,
     parse_union_link,
 )
 
@@ -95,6 +96,7 @@ class WorldBoxLinkSettingsView(discord.ui.View):
         self.nations_store = nations_store
         self.mode: str = "none"
         self.channel_id: str | None = None
+        self.events: bool = True
         self.has_nation: bool = False
         self.notice: str | None = None
         self.build()
@@ -108,9 +110,11 @@ class WorldBoxLinkSettingsView(discord.ui.View):
         try:
             raw = await self.settings_store.load_one(str(self.guild.id))
             self.mode, self.channel_id = parse_union_link(raw)
+            self.events = parse_union_events(raw)
         except Exception:
             logger.warning("worldbox link: 連携設定の読み取りに失敗しました（guild=%s）", self.guild.id)
             self.mode, self.channel_id = "none", None
+            self.events = True
         try:
             nations_raw = await self.nations_store.load_one("nations")
             self.has_nation = str(self.guild.id) in parse_nation_guild_ids(nations_raw)
@@ -210,7 +214,7 @@ class WorldBoxLinkSettingsView(discord.ui.View):
             return await interaction.response.send_message(
                 MANAGE_GUILD_REQUIRED, ephemeral=True)
         try:
-            record = build_union_settings_record(mode, channel_id, _now_ms())
+            record = build_union_settings_record(mode, channel_id, _now_ms(), events=self.events)
             await self.settings_store.set(str(self.guild.id), record)
         except Exception:
             logger.exception("worldbox link: 連携設定の保存に失敗しました（guild=%s）", self.guild.id)
