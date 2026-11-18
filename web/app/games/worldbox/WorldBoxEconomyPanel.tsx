@@ -62,6 +62,7 @@ const ERROR_LABEL: Record<string, string> = {
   not_at_bank: "銀行の前にいません",
   not_at_exchange: "取引所の前にいません",
   not_sellable: "取引所でのみ売れます",
+  position_unknown: "位置が分かりません",
 };
 
 const OP_KIND_LABEL: Record<EconomyOp["kind"], string> = {
@@ -156,6 +157,7 @@ export default function WorldBoxEconomyPanel({ space, station, genre, worldStati
   const [transferAmount, setTransferAmount] = useState("");
   // かばん/ショップのスロット選択（注釈は選択中アイテムのものだけ出す）
   const [bagSel, setBagSel] = useState<string | null>(null);
+  const [dropCount, setDropCount] = useState("1");
   const [shopSel, setShopSel] = useState<string | null>(null);
   const [sellSel, setSellSel] = useState<string | null>(null);
   // 強化のスロット選択と成功フラッシュ（金色背景 → 透明へ transition）
@@ -536,6 +538,23 @@ export default function WorldBoxEconomyPanel({ space, station, genre, worldStati
                   </button>
                 </div>
               )}
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8, alignItems: "center" }}>
+                <input
+                  type="number"
+                  min={1}
+                  max={99}
+                  value={dropCount}
+                  onChange={(e) => setDropCount(e.target.value)}
+                  style={{ width: 64, minHeight: 36, padding: "4px 8px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.25)", background: "rgba(255,255,255,0.06)", color: "inherit" }}
+                />
+                <button type="button" style={btn} disabled={busy}
+                  onClick={() => void act(
+                    { action: "drop", itemId: bagSelItem.id, count: Math.max(1, Math.floor(Number(dropCount) || 0)) },
+                    () => `${bagSelItem.name}を捨てた`,
+                  )}>
+                  捨てる
+                </button>
+              </div>
             </ItemAnnotation>
           )}
         </div>
