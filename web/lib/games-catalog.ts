@@ -36,6 +36,12 @@ export type WebGame = {
    * サイト内に行き先がないページ（/jinrou/roles など）の唯一の入口にもなる。
    */
   guide?: { href: string; label: string };
+  /**
+   * 外部サイトへのリンク（指定時は /games/<slug> のページを持たず、
+   * 一覧ハブのカードはこの URL へ外部リンクになる。
+   * サイトマップ・詳細ページ・ランダム選出の対象外）。
+   */
+  externalHref?: string;
 };
 
 /**
@@ -940,6 +946,16 @@ export const WEB_GAMES: WebGame[] = [
     activity: true,
     players: "みんな（同時接続）",
     genre: "worldbox",
+  },
+  {
+    slug: "takasumi-worldbox",
+    title: "TAKASUMI WORLD BOX",
+    description: "見下ろし型の共有ワールド（テストプレイ版）",
+    status: "playable",
+    activity: false,
+    players: "みんな（同時接続）",
+    genre: "worldbox",
+    externalHref: "https://takasumi.agobot.app/games/worldbox",
   },
   {
     slug: "kwordle",

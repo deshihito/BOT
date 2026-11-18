@@ -68,7 +68,7 @@ test("カタログ: スラッグが一意で、チェスがプレイ可能・ア
   assert.ok(catalog.playableGames().some((g) => g.slug === "chess"));
 });
 
-test("ジャンル: WORLD BOX が先頭ジャンルで、所属は worldbox だけ", () => {
+test("ジャンル: WORLD BOX が先頭ジャンルで、所属は本家と TAKASUMI の2タイトルだけ", () => {
   assert.equal(catalog.GAME_GENRES[0].id, "worldbox");
   assert.equal(catalog.GAME_GENRES[0].label, "WORLD BOX");
   const desc = catalog.GAME_GENRES[0].description;
@@ -76,12 +76,26 @@ test("ジャンル: WORLD BOX が先頭ジャンルで、所属は worldbox だ�
   assert.ok(!/Minecraft|マイクラ/.test(desc), "他作品の名前を出さない");
   assert.equal(catalog.getGameGenre("worldbox").label, "WORLD BOX");
   assert.equal(catalog.getWebGame("worldbox").genre, "worldbox");
-  assert.deepEqual(catalog.gamesInGenre("worldbox").map((g) => g.slug), ["worldbox"]);
+  assert.deepEqual(catalog.gamesInGenre("worldbox").map((g) => g.slug), ["worldbox", "takasumi-worldbox"]);
   for (const g of catalog.WEB_GAMES) {
-    if (g.slug !== "worldbox") {
-      assert.equal(g.genre, undefined, `${g.slug}: ジャンル所属は worldbox だけのはず`);
+    if (g.slug !== "worldbox" && g.slug !== "takasumi-worldbox") {
+      assert.equal(g.genre, undefined, `${g.slug}: ジャンル所属は worldbox ジャンルの2タイトルだけのはず`);
     }
   }
+  // TAKASUMI WORLD BOX はサイト内にページを持たない外部リンクのタイトル。
+  const takasumi = catalog.getWebGame("takasumi-worldbox");
+  assert.equal(takasumi.title, "TAKASUMI WORLD BOX");
+  assert.equal(takasumi.externalHref, "https://takasumi.agobot.app/games/worldbox");
+});
+
+test("外部エントリ: ハブのカードは外部リンクになり、内部ページとサイトマップの対象外", () => {
+  const gridSrc = fs.readFileSync(path.join(import.meta.dirname, "..", "app", "games", "GamesGrid.tsx"), "utf8");
+  assert.ok(gridSrc.includes("game.externalHref"), "GamesGrid が外部リンクのカードを描いていない");
+  assert.ok(gridSrc.includes('target="_blank"'), "外部リンクが新しいタブで開かない");
+  const sitemapSrc = fs.readFileSync(path.join(import.meta.dirname, "..", "app", "sitemap.ts"), "utf8");
+  assert.ok(sitemapSrc.includes("externalHref"), "サイトマップが外部エントリを除外していない");
+  const pageSrc = fs.readFileSync(path.join(import.meta.dirname, "..", "app", "games", "[id]", "page.tsx"), "utf8");
+  assert.ok(pageSrc.includes("externalHref"), "[id] ページが外部エントリを除外・転送していない");
 });
 
 test("ジャンル: 日替わりおすすめにジャンル常設タイトルが入らない", () => {

@@ -23,12 +23,14 @@ export default function sitemap(): MetadataRoute.Sitemap {
     { url: `${SITE_URL}/terms`, lastModified: now, changeFrequency: "yearly", priority: 0.3 },
     { url: `${SITE_URL}/credits`, lastModified: now, changeFrequency: "yearly", priority: 0.3 },
   ];
-  const gameEntries: MetadataRoute.Sitemap = playableGames().map((game) => ({
-    url: `${SITE_URL}/games/${game.slug}`,
-    lastModified: now,
-    changeFrequency: "monthly" as const,
-    priority: 0.7,
-  }));
+  const gameEntries: MetadataRoute.Sitemap = playableGames()
+    .filter((game) => !game.externalHref)
+    .map((game) => ({
+      url: `${SITE_URL}/games/${game.slug}`,
+      lastModified: now,
+      changeFrequency: "monthly" as const,
+      priority: 0.7,
+    }));
   const roleEntries: MetadataRoute.Sitemap = JINROU_ROLES.map((role) => ({
     url: `${SITE_URL}/jinrou/roles/${encodeURIComponent(role.id)}`,
     lastModified: now,
