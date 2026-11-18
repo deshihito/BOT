@@ -375,7 +375,7 @@ export const FOOTER_GROUPS: { label: string; links: SiteLink[] }[] = [
   {
     label: "テスト公開",
     links: [
-      { href: "https://takasumi.agobot.app/games/worldbox", label: "TAKASUMI WORLD BOX", external: true },
+      { href: "https://takasumi-worldbox-test.vercel.app/games/worldbox", label: "TAKASUMI WORLD BOX", external: true },
     ],
   },
 ];

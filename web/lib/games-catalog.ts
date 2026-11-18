@@ -950,12 +950,12 @@ export const WEB_GAMES: WebGame[] = [
   {
     slug: "takasumi-worldbox",
     title: "TAKASUMI WORLD BOX",
-    description: "見下ろし型の共有ワールド（テストプレイ版）",
+    description: "見下ろし型の共有ワールド",
     status: "playable",
     activity: false,
     players: "みんな（同時接続）",
     genre: "worldbox",
-    externalHref: "https://takasumi.agobot.app/games/worldbox",
+    externalHref: "https://takasumi-worldbox-test.vercel.app/games/worldbox",
   },
   {
     slug: "kwordle",

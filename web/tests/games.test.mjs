@@ -85,7 +85,7 @@ test("ジャンル: WORLD BOX が先頭ジャンルで、所属は本家と TAKA
   // TAKASUMI WORLD BOX はサイト内にページを持たない外部リンクのタイトル。
   const takasumi = catalog.getWebGame("takasumi-worldbox");
   assert.equal(takasumi.title, "TAKASUMI WORLD BOX");
-  assert.equal(takasumi.externalHref, "https://takasumi.agobot.app/games/worldbox");
+  assert.equal(takasumi.externalHref, "https://takasumi-worldbox-test.vercel.app/games/worldbox");
 });
 
 test("外部エントリ: ハブのカードは外部リンクになり、内部ページとサイトマップの対象外", () => {
