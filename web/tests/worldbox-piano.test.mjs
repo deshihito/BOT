@@ -100,5 +100,66 @@ test("ピアノ: クライアントは打鍵を送り、届いた音をロビー
 
 test("ピアノ: playPianoNotes はスロットル無しで音ごとに鳴らす", () => {
   assert.match(sound, /export function playPianoNotes\(semitones: readonly number\[\]\): void/);
-  assert.match(sound, /sePitch = Math\.pow\(2, n \/ 12\);/);
+  assert.match(sound, /pianoNote\(523\.25 \* Math\.pow\(2, n \/ 12\), at\)/);
+});
+
+test("ピアノ: リバーブは生成インパルスのコンボルバを専用バスに挟む", () => {
+  assert.match(sound, /export const PIANO_REVERB_SECONDS = 1\.8;/);
+  assert.match(sound, /export const PIANO_REVERB_WET = 0\.22;/);
+  assert.match(sound, /ctx\.createConvolver\(\)/);
+  assert.match(sound, /ctx\.createBuffer\(2, len, rate\)/);
+  assert.match(sound, /pianoBus\.connect\(conv\);/);
+  assert.match(sound, /wet\.connect\(seBus\);/);
+});
+
+test("ピアノ: ペダルは減衰を延ばし、離すとダンパーで止まる", () => {
+  assert.match(sound, /export function setPianoPedal\(down: boolean\): void/);
+  const decay = sound.match(/export const PIANO_DECAY_SECONDS = ([\d.]+);/);
+  const pedalDecay = sound.match(/export const PIANO_PEDAL_DECAY_SECONDS = ([\d.]+);/);
+  assert.ok(decay && pedalDecay);
+  assert.ok(Number(pedalDecay[1]) > Number(decay[1]), "ペダル中の減衰が長い");
+  assert.match(sound, /pianoPedalDown \? PIANO_PEDAL_DECAY_SECONDS : PIANO_DECAY_SECONDS/);
+});
+
+test("ピアノ: パネルは Space とボタンでペダルを踏み、閉じたら離す", () => {
+  assert.match(panel, /import \{ setPianoPedal \} from "@\/lib\/worldbox\/sound";/);
+  assert.match(panel, /e\.code === "Space"/);
+  assert.match(panel, /window\.addEventListener\("keyup", onKeyUp\)/);
+  assert.match(panel, /aria-label="サステインペダル"/);
+  assert.match(panel, /onPointerDown=\{\(e\) => \{ e\.preventDefault\(\); setPedal\(true\); \}\}/);
+  assert.match(panel, /useEffect\(\(\) => \(\) => setPianoPedal\(false\), \[\]\)/);
+});
+
+const panel = fs.readFileSync(path.join(rootDir, "app/games/worldbox/WorldBoxPianoPanel.tsx"), "utf8");
+
+test("ピアノ: PC キーボードの2段マッピング（Z列=C4 / Q列=C5）", () => {
+  const block = panel.match(/const KEY_TO_SEMI[^=]*= \{([^}]*)\}/);
+  assert.ok(block, "KEY_TO_SEMI がある");
+  const map = {};
+  for (const m of block[1].matchAll(/(?:"([^"]+)"|([a-z]))\s*:\s*(-?\d+)/g)) {
+    map[m[1] ?? m[2]] = Number(m[3]);
+  }
+  assert.equal(map.z, -12);
+  assert.equal(map.s, -11);
+  assert.equal(map.m, -1);
+  assert.equal(map[","], 0);
+  assert.equal(map.q, 0);
+  assert.equal(map["2"], 1);
+  assert.equal(map.w, 2);
+  assert.equal(map["7"], 10);
+  assert.equal(map.i, 12);
+  // 白鍵・黒鍵の全半音（-12..12）にキー名ラベルがある
+  const labelBlock = panel.match(/const SEMI_TO_KEY_LABEL[^=]*= \{([^}]*)\}/);
+  assert.ok(labelBlock, "SEMI_TO_KEY_LABEL がある");
+  for (let semi = -12; semi <= 12; semi++) {
+    assert.ok(labelBlock[1].includes(`[${semi}]:`) || labelBlock[1].includes(`${semi}:`), `ラベル ${semi}`);
+  }
+});
+
+test("ピアノ: パネルは keydown で弾き、クライアントは演奏中は歩かない", () => {
+  assert.match(panel, /window\.addEventListener\("keydown", onKeyDown\)/);
+  assert.match(panel, /e\.repeat/);
+  assert.match(panel, /KEY_TO_SEMI\[e\.key\.toLowerCase\(\)\]/);
+  assert.match(client, /pianoOpenRef\.current\) return;/);
+  assert.match(client, /const pianoOpenRef = useRef\(false\)/);
 });
