@@ -128,6 +128,9 @@ export async function GET(request: Request) {
   if (!session) return err("unauthorized", 401);
   if (!isMachinesEnabled() || !isTilesEnabled()) return err("machines_unavailable", 503);
   const url = new URL(request.url);
+  if (!url.searchParams.get("x")?.trim() || !url.searchParams.get("y")?.trim()) {
+    return err("invalid_coord", 400);
+  }
   const coord = checkedCoord(Number(url.searchParams.get("x")), Number(url.searchParams.get("y")));
   if (!coord) return err("invalid_coord", 400);
   const ownerKey = sessionOwnerKey(session);
@@ -154,6 +157,9 @@ export async function POST(request: Request) {
     action?: unknown; x?: unknown; y?: unknown;
     program?: unknown; code?: unknown;
   };
+  if ((typeof fields.x === "string" && !fields.x.trim()) || (typeof fields.y === "string" && !fields.y.trim())) {
+    return err("invalid_coord", 400);
+  }
   const coord = checkedCoord(
     typeof fields.x === "number" ? fields.x : Number(fields.x),
     typeof fields.y === "number" ? fields.y : Number(fields.y),
@@ -183,14 +189,20 @@ export async function POST(request: Request) {
     }
     if (fields.action === "collect") {
       if (machineBufferCount(state) <= 0) return err("empty", 409);
-      let profile = await loadProfile(ownerKey);
-      for (const [itemId, count] of Object.entries(state.buffer)) {
-        profile = addItem(profile, itemId, count);
-      }
-      await storeProfile(ownerKey, profile);
-      state = { ...state, buffer: {}, updatedAt: now };
-      await storeMachine(coord.x, coord.y, state);
-      return NextResponse.json({ machine: publicState(state), profile }, { headers: NO_STORE });
+      return withUserLock(ownerKey, async () => {
+        let profile = await loadProfile(ownerKey);
+        const before = profile;
+        for (const [itemId, count] of Object.entries(state.buffer)) {
+          profile = addItem(profile, itemId, count);
+        }
+        if (!(await storeProfile(ownerKey, profile))) return err("store_failed", 503);
+        state = { ...state, buffer: {}, updatedAt: now };
+        if (!(await storeMachine(coord.x, coord.y, state))) {
+          await storeProfile(ownerKey, before);
+          return err("machines_failed", 500);
+        }
+        return NextResponse.json({ machine: publicState(state), profile }, { headers: NO_STORE });
+      });
     }
     return err("invalid_action", 400);
   });

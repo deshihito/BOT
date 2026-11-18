@@ -7,6 +7,7 @@ import {
 } from "@/lib/worldbox/ops-online";
 import { isTilesEnabled, storeTileOverride } from "@/lib/worldbox/tiles-online";
 import { parseTileKey } from "@/lib/worldbox/tiles";
+import { withUserLock } from "@/lib/worldbox/user-lock";
 
 export const runtime = "nodejs";
 
@@ -103,8 +104,10 @@ export async function POST(request: Request) {
       }
     }
     if (target === undefined) return err("no_journal", 404);
-    if (!(await storeTileOverride(x, y, target))) return err("store_failed", 503);
-    return NextResponse.json({ ok: true, restored: target }, { headers: NO_STORE });
+    return withUserLock(`tile:${x},${y}`, async () => {
+      if (!(await storeTileOverride(x, y, target))) return err("store_failed", 503);
+      return NextResponse.json({ ok: true, restored: target }, { headers: NO_STORE });
+    });
   }
 
   return err("invalid_action", 400);

@@ -496,6 +496,7 @@ const presenceRoute = await import(
 const stationStubUrl = dataUrl(`
 export async function loadMyLobbyStation() { return "board"; }
 `);
+const userLockUrl = dataUrl(transpile("worldbox/user-lock.ts"));
 const boardRoute = await import(
   dataUrl(
     transpile("api/worldbox/board/route.ts", rootDir + "/app")
@@ -503,7 +504,8 @@ const boardRoute = await import(
       .replaceAll('"@/lib/auth"', JSON.stringify(authUrl))
       .replaceAll('"@/lib/worldbox/board"', JSON.stringify(boardUrl))
       .replaceAll('"@/lib/worldbox/board-online"', JSON.stringify(boardOnlineUrl))
-      .replaceAll('"@/lib/worldbox/station-online"', JSON.stringify(stationStubUrl)),
+      .replaceAll('"@/lib/worldbox/station-online"', JSON.stringify(stationStubUrl))
+      .replaceAll('"@/lib/worldbox/user-lock"', JSON.stringify(userLockUrl)),
   ),
 );
 const gateRoute = await import(

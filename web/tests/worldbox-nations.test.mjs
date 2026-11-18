@@ -457,7 +457,8 @@ const nationsRoute = await import(
       .replaceAll('"@/lib/worldbox/economy-bridge"', JSON.stringify(economyBridgeStubUrl))
       .replaceAll('"@/lib/worldbox/economy-bridge-online"', JSON.stringify(economyBridgeOnlineStubUrl))
       .replaceAll('"@/lib/worldbox/war"', JSON.stringify(warUrl))
-      .replaceAll('"@/lib/worldbox/war-online"', JSON.stringify(warOnlineUrl)),
+      .replaceAll('"@/lib/worldbox/war-online"', JSON.stringify(warOnlineUrl))
+      .replaceAll('"@/lib/worldbox/user-lock"', JSON.stringify(userLockUrl)),
   ),
 );
 const spawnUrl = dataUrl(

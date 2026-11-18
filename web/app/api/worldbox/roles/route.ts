@@ -132,14 +132,17 @@ export async function GET(request: Request) {
   if (!profile) return err("roles_unavailable", 503);
   const url = new URL(request.url);
   const space = url.searchParams.get("space") ?? "world";
+  const hasXY = Boolean(url.searchParams.get("x")?.trim()) && Boolean(url.searchParams.get("y")?.trim());
   const x = Number(url.searchParams.get("x"));
   const y = Number(url.searchParams.get("y"));
   let deaths: { name: string; x: number; y: number; at: number }[] = [];
-  if (profile.role === "medic" && Number.isFinite(x) && Number.isFinite(y)) {
-    const all = await listDeaths(Date.now());
-    deaths = all
-      .filter((d) => d.space === space && d.ownerKey !== ownerKey && Math.hypot(d.x - x, d.y - y) <= 6)
-      .map((d) => ({ name: d.name, x: d.x, y: d.y, at: d.at }));
+  if (hasXY) {
+    if (profile.role === "medic" && Number.isFinite(x) && Number.isFinite(y)) {
+      const all = await listDeaths(Date.now());
+      deaths = all
+        .filter((d) => d.space === space && d.ownerKey !== ownerKey && Math.hypot(d.x - x, d.y - y) <= 6)
+        .map((d) => ({ name: d.name, x: d.x, y: d.y, at: d.at }));
+    }
   }
   // テレポーターの発動技はポーター設置（activeSkillFor は戦闘技として返さない）
   const skill = profile.role === "teleporter" ? SKILLS.porter : activeSkillFor(profile);
@@ -495,19 +498,25 @@ export async function POST(request: Request) {
         const def = mobById(placed.mobId);
         if (!def) continue;
         const key = await keyFor(ownerKey, space, placed);
-        const state = await loadMobState(key);
-        // 凍結中は追加ダメージを受けない（氷の上書き防止ではなく、状態の保護）
-        const effDef = await effectiveDef(ownerKey, space, def);
-        const result = applyMobAttack(effDef, state, baseAttack * skill.power, now, Math.random, key);
-        if ("error" in result) continue;
-        let st: MobState = result.state;
-        if (skillId === "ice_lance" && !result.dead) st = { ...st, frozenUntil: now + 3000 };
-        if (!(await storeMobState(key, st))) return err("store_failed", 503);
-        if (result.dead && parseInstanceSpace(space)?.kind === "ruins") {
-          const personal = await loadRuinsPersonal(space, ownerKey, weekKeyOf(now));
-          personal.summons = personal.summons.filter((m) => !(m.mobId === placed.mobId && m.x === placed.x && m.y === placed.y));
-          await storeRuinsPersonal(space, ownerKey, personal);
-        }
+        const mobRes = await withUserLock(`mob:${key}`, async () => {
+          const state = await loadMobState(key);
+          // 凍結中は追加ダメージを受けない（氷の上書き防止ではなく、状態の保護）
+          const effDef = await effectiveDef(ownerKey, space, def);
+          const result = applyMobAttack(effDef, state, baseAttack * skill.power, now, Math.random, key);
+          if ("error" in result) return null;
+          let st: MobState = result.state;
+          if (skillId === "ice_lance" && !result.dead) st = { ...st, frozenUntil: now + 3000 };
+          if (!(await storeMobState(key, st))) return err("store_failed", 503);
+          if (result.dead && parseInstanceSpace(space)?.kind === "ruins") {
+            const personal = await loadRuinsPersonal(space, ownerKey, weekKeyOf(now));
+            personal.summons = personal.summons.filter((m) => !(m.mobId === placed.mobId && m.x === placed.x && m.y === placed.y));
+            if (!(await storeRuinsPersonal(space, ownerKey, personal))) return err("store_failed", 503);
+          }
+          return { result };
+        });
+        if (!mobRes) continue;
+        if (mobRes instanceof NextResponse) return mobRes;
+        const { result } = mobRes;
         results.push({ key, hp: result.hp, dead: result.dead });
         if (result.dead) {
           anyDead = true;

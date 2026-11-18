@@ -86,6 +86,9 @@ export async function GET(request: Request) {
   if (!session) return errorResponse("unauthorized", 401);
   if (!isStallsEnabled()) return errorResponse("stalls_unavailable", 503);
   const url = new URL(request.url);
+  if (!url.searchParams.get("x")?.trim() || !url.searchParams.get("y")?.trim()) {
+    return errorResponse("invalid_request", 400);
+  }
   const coord = checkedCoord(Number(url.searchParams.get("x")), Number(url.searchParams.get("y")));
   if (!coord) return errorResponse("invalid_request", 400);
   const stall = await loadStall(coord.x, coord.y);
@@ -137,10 +140,11 @@ export async function POST(request: Request) {
         if (!def || price === null || count === null) return errorResponse("invalid_request", 400);
         const removed = removeItem(profile, def.id, count);
         if (!removed) return errorResponse("not_enough_items", 409);
+        if (!(await storeProfile(ownerKey, removed))) return errorResponse("store_failed", 503);
         if (!(await storeStall(x, y, { ownerKey, itemId: def.id, price, count }))) {
+          await storeProfile(ownerKey, profile);
           return errorResponse("stalls_failed", 500);
         }
-        if (!(await storeProfile(ownerKey, removed))) return errorResponse("store_failed", 503);
         return NextResponse.json(
           { stall: { itemId: def.id, name: def.name, price, count, mine: true }, profile: removed },
           { headers: NO_STORE },
@@ -151,8 +155,11 @@ export async function POST(request: Request) {
         if (!stall) return errorResponse("not_listed", 409);
         if (stall.ownerKey !== ownerKey) return errorResponse("not_owner", 403);
         const back = addItem(profile, stall.itemId, stall.count);
-        if (!(await storeStall(x, y, null))) return errorResponse("stalls_failed", 500);
         if (!(await storeProfile(ownerKey, back))) return errorResponse("store_failed", 503);
+        if (!(await storeStall(x, y, null))) {
+          await storeProfile(ownerKey, profile);
+          return errorResponse("stalls_failed", 500);
+        }
         return NextResponse.json({ stall: null, profile: back }, { headers: NO_STORE });
       }
 
@@ -174,7 +181,10 @@ export async function POST(request: Request) {
         const nextStall = stallAfterSale(stall);
         if (!(await storeStall(x, y, nextStall))) return errorResponse("stalls_failed", 500);
         const gained = addItem(profile, stall.itemId, 1);
-        if (!(await storeProfile(ownerKey, gained))) return errorResponse("store_failed", 503);
+        if (!(await storeProfile(ownerKey, gained))) {
+          await storeStall(x, y, stall);
+          return errorResponse("store_failed", 503);
+        }
         return NextResponse.json(
           {
             stall: nextStall

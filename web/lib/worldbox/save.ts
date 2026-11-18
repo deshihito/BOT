@@ -70,14 +70,16 @@ function parseWorldReturn(raw: unknown): { x: number; y: number } | null {
   return clampToSpace("world", v.x, v.y);
 }
 
-export function serializeSave(state: WorldBoxState): string {
+export function serializeSave(state: WorldBoxState, opts?: { tpAt?: number }): string {
   const pos = clampToSpace(state.space, state.x, state.y);
+  const tpAt = opts?.tpAt && Number.isFinite(opts.tpAt) && opts.tpAt > 0 ? opts.tpAt : undefined;
   return JSON.stringify({
     version: SAVE_VERSION,
     space: state.space,
     x: pos.x,
     y: pos.y,
     worldReturn: state.worldReturn ? clampToSpace("world", state.worldReturn.x, state.worldReturn.y) : null,
+    ...(tpAt !== undefined ? { tpAt } : {}),
   });
 }
 
@@ -85,6 +87,16 @@ export function serializeSave(state: WorldBoxState): string {
  * 壊れている・v6 でない場合は null（ワールドのスポーンにフォールバック）。
  * v5 以前のセーブは意図的に読み込まない（破棄）。
  */
+export function parseSaveTpAt(json: string | null | undefined): number {
+  if (!json) return 0;
+  try {
+    const data = JSON.parse(json) as { tpAt?: unknown };
+    return typeof data.tpAt === "number" && Number.isFinite(data.tpAt) && data.tpAt > 0 ? data.tpAt : 0;
+  } catch {
+    return 0;
+  }
+}
+
 export function parseSave(json: string | null | undefined): WorldBoxState | null {
   if (!json) return null;
   try {

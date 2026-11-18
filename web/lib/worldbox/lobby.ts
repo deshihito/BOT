@@ -495,9 +495,12 @@ export function stationArcadeNear(objectsList: readonly LobbyObject[], tx: numbe
 }
 
 export function stationGenreNear(objectsList: readonly LobbyObject[], tx: number, ty: number): ShopGenreId | null {
+  let diagonal: ShopGenreId | null = null;
   for (const o of objectsList) {
     if (o.station !== "shop" || !o.genre) continue;
-    if (tx >= o.x - 1 && tx <= o.x + o.w && ty >= o.y - 1 && ty <= o.y + o.h) return o.genre;
+    const tier = stationMatchTier(o, tx, ty);
+    if (tier === 1) return o.genre;
+    if (tier === 2 && diagonal === null) diagonal = o.genre;
   }
-  return null;
+  return diagonal;
 }

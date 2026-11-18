@@ -21,6 +21,7 @@ import {
 } from "@/lib/worldbox/economy-bridge-online";
 import { warMarksByNation } from "@/lib/worldbox/war";
 import { isWarsEnabled, loadWarState } from "@/lib/worldbox/war-online";
+import { withUserLock } from "@/lib/worldbox/user-lock";
 
 export const runtime = "nodejs";
 
@@ -197,18 +198,18 @@ export async function POST(request: Request) {
   if (action !== "travel" && (await loadMyLobbyStation(ownerKey)) !== "guild") {
     return errorResponse("not_at_guild_board");
   }
-  const state = await loadNationsState();
-
   if (action === "travel") {
+    const state = await loadNationsState();
     // 所属検証はサーバー側の状態が正。未所属は 409 not_in_nation。
     const dest = fastTravelDestination(state, ownerKey, worldTileSource());
     if (!dest.ok) return errorResponse(dest.error);
     // 移動をセーブ（ワールドのマーク位置）とプレゼンスに反映する。
     // どちらもベストエフォートで、応答の座標がクライアントの移動先になる。
     const prev = parseSave(await loadWorldBoxSave(ownerKey));
+    const now = Date.now();
     await storeWorldBoxSave(
       ownerKey,
-      serializeSave({ space: "world", x: dest.x, y: dest.y, worldReturn: prev?.worldReturn ?? null }),
+      serializeSave({ space: "world", x: dest.x, y: dest.y, worldReturn: prev?.worldReturn ?? null }, { tpAt: now }),
     );
     await putPresence(
       ownerKey,
@@ -216,7 +217,8 @@ export async function POST(request: Request) {
         name: session.username?.trim() || "プレイヤー",
         x: dest.x, y: dest.y, vx: 0, vy: 0, face: 1, space: "world",
       },
-      Date.now(),
+      now,
+      { tpTs: now },
     );
     return NextResponse.json(
       { ok: true, x: dest.x, y: dest.y, nationId: dest.nationId },
@@ -224,84 +226,94 @@ export async function POST(request: Request) {
     );
   }
 
-  let result: NationActionResult;
+  let preGuilds: UserGuildsResult | null = null;
   if (action === "found" || action === "join") {
     if (typeof fields.guildId !== "string" || !/^\d+$/.test(fields.guildId)) {
       return errorResponse("invalid_request");
     }
-    const guilds = await getUserGuilds(session);
-    if (!guilds.ok) return guildsErrorResponse(guilds);
-    const guild = guilds.guilds.find((g) => g.id === fields.guildId);
-    if (action === "found") {
-      // 建国はサーバーのオーナーだけ。一覧に無いサーバーも所有を証明できない
-      if (!guild || !guild.owner) return errorResponse("not_owner");
-      // 国名はクライアントから受け取らない（サーバー名をそのまま使う）
-      result = applyFound(state, ownerKey, guild, worldTileSource(), Date.now());
-    } else {
-      if (!guild) return errorResponse("not_member");
-      // 非公開の国には自力参加できない（招待リンク・一覧経由も同じ）
-      if (isPrivateNation(await loadNationSettings(fields.guildId))) {
-        return errorResponse("nation_private");
-      }
-      result = applyJoin(state, ownerKey, fields.guildId, roleInGuild(guild));
-    }
-  } else if (action === "leave") {
-    result = applyLeave(state, ownerKey);
-  } else {
+    preGuilds = await getUserGuilds(session);
+    if (!preGuilds.ok) return guildsErrorResponse(preGuilds);
+  } else if (action !== "leave") {
     return NextResponse.json({ error: "invalid_action" }, { status: 400, headers: NO_STORE });
   }
 
-  if (!result.ok) {
-    return NextResponse.json({ error: result.error }, { status: errorStatus(result.error), headers: NO_STORE });
-  }
-
-  // 移民コントロール（経済仕様書 §7.2）: 参加は移動先の入国料、離脱は
-  // 移動元の出金料率 × 所持金を徴収する。徴収分は国庫（treasury）へ
-  // 積み、累計を国家設定の feesCollected（表示用）へ併せて加算する。
-  // 徴収できなければ所属は変更しない。王の解散（disbanded な離脱）は
-  // 出金料を免除する。
-  const discordId = session.provider === "discord" ? session.id : null;
-  if (action === "join" && typeof fields.guildId === "string") {
-    const fee = entryFeeOf(await loadNationSettings(fields.guildId));
-    if (fee > 0) {
-      const charged = await chargeNationFee(ownerKey, discordId, fee, "nation_entry_fee");
-      if (!charged.ok) return errorResponse(charged.error, charged.status);
-      await updateNationSettings(fields.guildId, (cur) => ({
-        ...cur, feesCollected: cur.feesCollected + fee, treasury: cur.treasury + fee,
-      }));
+  return withUserLock("worldbox:nations", async () => {
+    const state = await loadNationsState();
+    let result: NationActionResult;
+    if (action === "found" || action === "join") {
+      if (typeof fields.guildId !== "string" || !preGuilds) return errorResponse("invalid_request");
+      const guilds: UserGuildsResult = preGuilds;
+      if (!guilds.ok) return guildsErrorResponse(guilds);
+      const guild = guilds.guilds.find((g) => g.id === fields.guildId);
+      if (action === "found") {
+        // 建国はサーバーのオーナーだけ。一覧に無いサーバーも所有を証明できない
+        if (!guild || !guild.owner) return errorResponse("not_owner");
+        // 国名はクライアントから受け取らない（サーバー名をそのまま使う）
+        result = applyFound(state, ownerKey, guild, worldTileSource(), Date.now());
+      } else {
+        if (!guild) return errorResponse("not_member");
+        // 非公開の国には自力参加できない（招待リンク・一覧経由も同じ）
+        if (isPrivateNation(await loadNationSettings(fields.guildId))) {
+          return errorResponse("nation_private");
+        }
+        result = applyJoin(state, ownerKey, fields.guildId, roleInGuild(guild));
+      }
+    } else {
+      result = applyLeave(state, ownerKey);
     }
-  } else if (action === "leave" && !result.disbanded) {
-    const from = state.members[ownerKey];
-    if (from) {
-      const rate = exitFeeRateOf(await loadNationSettings(from.nationId));
-      if (rate > 0) {
-        if (!discordId || !isEconomyEnabled()) return errorResponse("economy_unavailable", 503);
-        const balance = await readUserBalance(discordId);
-        if (balance === null) return errorResponse("economy_unavailable", 503);
-        const fee = exitFeeAmount(balance, rate);
-        if (fee > 0) {
-          const charged = await chargeNationFee(ownerKey, discordId, fee, "nation_exit_fee");
-          if (!charged.ok) return errorResponse(charged.error, charged.status);
-          await updateNationSettings(from.nationId, (cur) => ({
-            ...cur, feesCollected: cur.feesCollected + fee, treasury: cur.treasury + fee,
-          }));
+
+    if (!result.ok) {
+      return NextResponse.json({ error: result.error }, { status: errorStatus(result.error), headers: NO_STORE });
+    }
+
+    // 移民コントロール（経済仕様書 §7.2）: 参加は移動先の入国料、離脱は
+    // 移動元の出金料率 × 所持金を徴収する。徴収分は国庫（treasury）へ
+    // 積み、累計を国家設定の feesCollected（表示用）へ併せて加算する。
+    // 徴収できなければ所属は変更しない。王の解散（disbanded な離脱）は
+    // 出金料を免除する。
+    const discordId = session.provider === "discord" ? session.id : null;
+    if (action === "join" && typeof fields.guildId === "string") {
+      const fee = entryFeeOf(await loadNationSettings(fields.guildId));
+      if (fee > 0) {
+        const charged = await chargeNationFee(ownerKey, discordId, fee, "nation_entry_fee");
+        if (!charged.ok) return errorResponse(charged.error, charged.status);
+        await updateNationSettings(fields.guildId, (cur) => ({
+          ...cur, feesCollected: cur.feesCollected + fee, treasury: cur.treasury + fee,
+        }));
+      }
+    } else if (action === "leave" && !result.disbanded) {
+      const from = state.members[ownerKey];
+      if (from) {
+        const rate = exitFeeRateOf(await loadNationSettings(from.nationId));
+        if (rate > 0) {
+          if (!discordId || !isEconomyEnabled()) return errorResponse("economy_unavailable", 503);
+          const balance = await readUserBalance(discordId);
+          if (balance === null) return errorResponse("economy_unavailable", 503);
+          const fee = exitFeeAmount(balance, rate);
+          if (fee > 0) {
+            const charged = await chargeNationFee(ownerKey, discordId, fee, "nation_exit_fee");
+            if (!charged.ok) return errorResponse(charged.error, charged.status);
+            await updateNationSettings(from.nationId, (cur) => ({
+              ...cur, feesCollected: cur.feesCollected + fee, treasury: cur.treasury + fee,
+            }));
+          }
         }
       }
     }
-  }
 
-  const stored = await storeNationsState(result.state);
-  if (!stored) {
-    return NextResponse.json({ error: "nations_failed" }, { status: 500, headers: NO_STORE });
-  }
-  const view = result.nation ? nationViews(result.state).find((v) => v.id === result.nation!.guildId) ?? null : null;
-  return NextResponse.json(
-    {
-      ok: true,
-      me: buildNationsResponse(result.state, ownerKey).me,
-      nation: view,
-      disbanded: result.disbanded ?? false,
-    },
-    { headers: NO_STORE },
-  );
+    const stored = await storeNationsState(result.state);
+    if (!stored) {
+      return NextResponse.json({ error: "nations_failed" }, { status: 500, headers: NO_STORE });
+    }
+    const view = result.nation ? nationViews(result.state).find((v) => v.id === result.nation!.guildId) ?? null : null;
+    return NextResponse.json(
+      {
+        ok: true,
+        me: buildNationsResponse(result.state, ownerKey).me,
+        nation: view,
+        disbanded: result.disbanded ?? false,
+      },
+      { headers: NO_STORE },
+    );
+  });
 }

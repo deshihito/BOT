@@ -106,7 +106,7 @@ export async function POST(request: Request) {
     return err("invalid_request", 400);
   }
   const fields = (body ?? {}) as { action?: unknown; x?: unknown; y?: unknown };
-  if (fields.action !== "ride" || typeof fields.x !== "number" || typeof fields.y !== "number") {
+  if (fields.action !== "ride" || typeof fields.x !== "number" || typeof fields.y !== "number" || !Number.isFinite(fields.x) || !Number.isFinite(fields.y)) {
     return err("invalid_request", 400);
   }
   const ownerKey = sessionOwnerKey(session);
@@ -120,9 +120,10 @@ export async function POST(request: Request) {
   const destTile = { x: Math.floor(fields.x), y: Math.floor(fields.y) };
   const dest = findFreeNear(worldTileSource(), destTile.x + 0.5, destTile.y + 0.5, undefined, { swim: true });
   const prev = parseSave(await loadWorldBoxSave(ownerKey));
+  const now = Date.now();
   await storeWorldBoxSave(
     ownerKey,
-    serializeSave({ space: "world", x: dest.x, y: dest.y, worldReturn: prev?.worldReturn ?? null }),
+    serializeSave({ space: "world", x: dest.x, y: dest.y, worldReturn: prev?.worldReturn ?? null }, { tpAt: now }),
   );
   await putPresence(
     ownerKey,
@@ -130,7 +131,8 @@ export async function POST(request: Request) {
       name: session.username?.trim() || "プレイヤー",
       x: dest.x, y: dest.y, vx: 0, vy: 0, face: 1, space: "world",
     },
-    Date.now(),
+    now,
+    { tpTs: now },
   );
   return NextResponse.json({ ok: true, x: dest.x, y: dest.y }, { headers: NO_STORE });
 }

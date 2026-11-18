@@ -210,6 +210,42 @@ function findRoomEntry(room, id) {
   return null;
 }
 
+/**
+ * サーバー側テレポート（ワープ・蘇生・救助等）後の新しい基準位置を部屋へ反映する。
+ * 旧空間のエントリを消し、移動先空間へ baseline を書き換える。
+ */
+function setRoomBaseline(room, id, name, baseline) {
+  if (!baseline || typeof baseline.x !== "number" || typeof baseline.y !== "number") return null;
+  const space = sanitizeSpace(baseline.space);
+  const prev = findRoomEntry(room, id);
+  for (const [s, table] of room.spaces) {
+    if (s !== space) table.delete(id);
+  }
+  let table = room.spaces.get(space);
+  if (!table) {
+    table = new Map();
+    room.spaces.set(space, table);
+  }
+  const b = boundsForSpace(space);
+  const ts = typeof baseline.ts === "number" && Number.isFinite(baseline.ts) ? baseline.ts : Date.now();
+  const entry = {
+    id,
+    name: String(name ?? prev?.name ?? "").slice(0, NAME_MAX),
+    x: clampNum(baseline.x, b.minX, b.maxX),
+    y: clampNum(baseline.y, b.minY, b.maxY),
+    vx: 0,
+    vy: 0,
+    face: prev?.face ?? 1,
+    space,
+    role: prev?.role ?? "free",
+    rank: prev?.rank ?? 1,
+    party: prev?.party ?? "",
+    ts,
+  };
+  table.set(id, entry);
+  return entry;
+}
+
 /** ハートビートを受け付け、保存したエントリを返す。不正なら null。
  * 移動連続性を満たさない申告は { rejected: true, x, y, space }（保管位置つき）
  * を返し、部屋へは保存しない。externalBaseline は部屋に前回が無いときの
@@ -321,7 +357,7 @@ function verifyToken(token, secret, now) {
  * putPresence は kvSet(namespace, ownerKey, JSON.stringify({ ...heartbeat, ts }))
  * で、heartbeat は presence.ts の sanitizeHeartbeat の形（name を含む）。
  */
-function presenceKvValue(entry) {
+function presenceKvValue(entry, tpTs) {
   const hb = {
     name: entry.name,
     x: entry.x,
@@ -335,7 +371,10 @@ function presenceKvValue(entry) {
     party: entry.party ?? "",
     ...(entry.sit === true ? { sit: true } : {}),
   };
-  return JSON.stringify({ ...hb, ts: entry.ts });
+  const effTpTs = typeof tpTs === "number" && Number.isFinite(tpTs) && tpTs > 0
+    ? tpTs
+    : (typeof entry.tpTs === "number" && Number.isFinite(entry.tpTs) && entry.tpTs > 0 ? entry.tpTs : undefined);
+  return JSON.stringify({ ...hb, ts: entry.ts, ...(effTpTs !== undefined ? { tpTs: effTpTs } : {}) });
 }
 
 // ---- プレゼンス集約書き込みのスロットル（Phase 2） ----
@@ -401,6 +440,7 @@ module.exports = {
   sanitizeHeartbeat,
   createRoom,
   admitTab,
+  setRoomBaseline,
   acceptHeartbeat,
   snapshot,
   removePlayer,
