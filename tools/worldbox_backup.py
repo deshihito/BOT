@@ -42,6 +42,7 @@ NAMESPACES = [
     "worldbox_guild_shop",
     "worldbox_instances",
     "worldbox_machines",
+    "worldbox_market",
     "worldbox_metrics",
     "worldbox_metrics_econ",
     "worldbox_metrics_users",
