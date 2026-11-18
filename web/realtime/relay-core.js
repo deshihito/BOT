@@ -13,6 +13,8 @@ const MAX_PLAYERS = 32;
 const MAX_VELOCITY = 16;
 /** 表示名の上限文字数。presence.ts の PRESENCE_NAME_MAX と一致。 */
 const NAME_MAX = 24;
+/** 装備称号の上限文字数。presence.ts の PRESENCE_TITLE_MAX と一致。 */
+const TITLE_MAX = 12;
 /** 中継トークンの有効期限（ミリ秒）。 */
 const TOKEN_TTL_MS = 10 * 60 * 1000;
 
@@ -60,6 +62,11 @@ function clampNum(v, min, max) {
   return Math.max(min, Math.min(max, v));
 }
 
+function sanitizeTitle(raw) {
+  if (typeof raw !== "string") return "";
+  return raw.replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, TITLE_MAX);
+}
+
 /** ハートビートを検証・整形する（presence.ts の sanitizeHeartbeat と同じ規則）。 */
 function sanitizeHeartbeat(raw) {
   if (!raw || typeof raw !== "object") return null;
@@ -68,6 +75,7 @@ function sanitizeHeartbeat(raw) {
   const space = sanitizeSpace(raw.space);
   const b = boundsForSpace(space);
   const vel = (n) => (typeof n === "number" && Number.isFinite(n) ? clampNum(n, -MAX_VELOCITY, MAX_VELOCITY) : 0);
+  const title = sanitizeTitle(raw.title);
   return {
     x: clampNum(raw.x, b.minX, b.maxX),
     y: clampNum(raw.y, b.minY, b.maxY),
@@ -80,6 +88,7 @@ function sanitizeHeartbeat(raw) {
     role: typeof raw.role === "string" && ROLE_IDS.includes(raw.role) ? raw.role : "free",
     rank: typeof raw.rank === "number" && Number.isFinite(raw.rank) ? Math.max(1, Math.min(5, Math.floor(raw.rank))) : 1,
     party: typeof raw.party === "string" ? raw.party.slice(0, 48) : "",
+    ...(title ? { title } : {}),
     // 座り（sit）も presence.ts と同じ規則で通す（落とすと他者に座り姿勢が伝わらず、bot_kv 集約書き込みでも欠落する）。
     ...(raw.sit === true ? { sit: true } : {}),
   };
@@ -210,6 +219,43 @@ function findRoomEntry(room, id) {
   return null;
 }
 
+/**
+ * サーバー側テレポート（ワープ・蘇生・救助等）後の新しい基準位置を部屋へ反映する。
+ * 旧空間のエントリを消し、移動先空間へ baseline を書き換える。
+ */
+function setRoomBaseline(room, id, name, baseline) {
+  if (!baseline || typeof baseline.x !== "number" || typeof baseline.y !== "number") return null;
+  const space = sanitizeSpace(baseline.space);
+  const prev = findRoomEntry(room, id);
+  for (const [s, table] of room.spaces) {
+    if (s !== space) table.delete(id);
+  }
+  let table = room.spaces.get(space);
+  if (!table) {
+    table = new Map();
+    room.spaces.set(space, table);
+  }
+  const b = boundsForSpace(space);
+  const ts = typeof baseline.ts === "number" && Number.isFinite(baseline.ts) ? baseline.ts : Date.now();
+  const entry = {
+    id,
+    name: String(name ?? prev?.name ?? "").slice(0, NAME_MAX),
+    x: clampNum(baseline.x, b.minX, b.maxX),
+    y: clampNum(baseline.y, b.minY, b.maxY),
+    vx: 0,
+    vy: 0,
+    face: prev?.face ?? 1,
+    space,
+    role: prev?.role ?? "free",
+    rank: prev?.rank ?? 1,
+    party: prev?.party ?? "",
+    ...(prev?.title ? { title: prev.title } : {}),
+    ts,
+  };
+  table.set(id, entry);
+  return entry;
+}
+
 /** ハートビートを受け付け、保存したエントリを返す。不正なら null。
  * 移動連続性を満たさない申告は { rejected: true, x, y, space }（保管位置つき）
  * を返し、部屋へは保存しない。externalBaseline は部屋に前回が無いときの
@@ -321,7 +367,7 @@ function verifyToken(token, secret, now) {
  * putPresence は kvSet(namespace, ownerKey, JSON.stringify({ ...heartbeat, ts }))
  * で、heartbeat は presence.ts の sanitizeHeartbeat の形（name を含む）。
  */
-function presenceKvValue(entry) {
+function presenceKvValue(entry, tpTs) {
   const hb = {
     name: entry.name,
     x: entry.x,
@@ -333,9 +379,13 @@ function presenceKvValue(entry) {
     role: entry.role ?? "free",
     rank: entry.rank ?? 1,
     party: entry.party ?? "",
+    ...(entry.title ? { title: entry.title } : {}),
     ...(entry.sit === true ? { sit: true } : {}),
   };
-  return JSON.stringify({ ...hb, ts: entry.ts });
+  const effTpTs = typeof tpTs === "number" && Number.isFinite(tpTs) && tpTs > 0
+    ? tpTs
+    : (typeof entry.tpTs === "number" && Number.isFinite(entry.tpTs) && entry.tpTs > 0 ? entry.tpTs : undefined);
+  return JSON.stringify({ ...hb, ts: entry.ts, ...(effTpTs !== undefined ? { tpTs: effTpTs } : {}) });
 }
 
 // ---- プレゼンス集約書き込みのスロットル（Phase 2） ----
@@ -401,6 +451,7 @@ module.exports = {
   sanitizeHeartbeat,
   createRoom,
   admitTab,
+  setRoomBaseline,
   acceptHeartbeat,
   snapshot,
   removePlayer,

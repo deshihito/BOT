@@ -458,6 +458,7 @@ class CirculationCog(commands.Cog):
         self.worldbox_chat = worldbox_chat_core.WorldBoxChatWorker(
             kv=KVStore(worldbox_chat_core.NAMESPACE),
             channel_sender=self._send_worldbox_chat,
+            event_sender=self._send_worldbox_event,
         )
         # AGO WORLD BOX の Discord 連携: チャンネルディレクトリの公開と
         # 連携チャンネル投稿のユニオン掲示への取り込み（受信リレー）
@@ -533,6 +534,25 @@ class CirculationCog(commands.Cog):
         try:
             await channel.send(
                 f"**{name}**（WORLD BOX ユニオン）: {text}",
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
+            return True
+        except Exception:
+            return False
+
+    async def _send_worldbox_event(self, channel_id: str, name: str, text: str) -> bool:
+        """ゲーム内イベント通知を連携先チャンネルへ投稿する。メンションは一切許可しない。"""
+        try:
+            channel = self.bot.get_channel(int(channel_id))
+            if channel is None:
+                channel = await self.bot.fetch_channel(int(channel_id))
+        except Exception:
+            return False
+        if channel is None or not hasattr(channel, "send"):
+            return False
+        try:
+            await channel.send(
+                f"【WORLD BOX】**{name}**: {text}",
                 allowed_mentions=discord.AllowedMentions.none(),
             )
             return True

@@ -40,6 +40,8 @@ const WATCH_PLAN = [
   // を含むため、nations と同じ全体 poke 方式にする（地図の区画名表示と
   // パネルの追随が用途）
   { namespace: "worldbox_guild_shop", kind: "guildShop", intervalMs: 5_000 },
+  // P2P 直接取引は当事者2人のみに通知する poke 方式（2秒）
+  { namespace: "worldbox_trade", kind: "trade", intervalMs: 2_000 },
 ];
 
 /** 差分比較用の正規化（文字列はそのまま、オブジェクトは JSON 化）。 */
@@ -167,6 +169,24 @@ function instanceKeyScope(key) {
   return null;
 }
 
+/**
+ * 取引名前空間の1変更について、通知すべき当事者2人（または索引本人）のプレゼンス ID 集合。
+ * - 索引キー（active:<ownerKey>）はその本人のみ。
+ * - セッション本体（tr-...）は a / b 両者の ownerKey に対応する pid。
+ */
+function tradeTargetPids(key, value) {
+  const pids = new Set();
+  if (typeof key === "string" && key.startsWith("active:")) {
+    pids.add(presenceIdFor(key.slice("active:".length)));
+    return pids;
+  }
+  const session = parseJsonLoose(value);
+  if (!session || typeof session !== "object") return pids;
+  if (session.a && typeof session.a.ownerKey === "string") pids.add(presenceIdFor(session.a.ownerKey));
+  if (session.b && typeof session.b.ownerKey === "string") pids.add(presenceIdFor(session.b.ownerKey));
+  return pids;
+}
+
 module.exports = {
   WATCH_PLAN,
   normalizeValue,
@@ -177,4 +197,5 @@ module.exports = {
   unionBoardGuildId,
   economyTargetPids,
   instanceKeyScope,
+  tradeTargetPids,
 };

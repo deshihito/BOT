@@ -10,8 +10,9 @@ import {
   deleteEconomyOp, deleteEconomyOpLedger, findEconomyOp, isEconomyEnabled, readUserBalance, submitEconomyOp, waitForOpDone,
 } from "@/lib/worldbox/economy-bridge-online";
 import { TENT_MAX_TIER, TENT_TIERS } from "@/lib/worldbox/tent";
+import { isTitleUnlocked, sanitizePlayerTitle } from "@/lib/worldbox/achievements";
 import {
-  countItem, ENHANCE_BASE_COST, ENHANCE_MATERIALS, ENHANCE_MAX_LEVEL, moveSlot, removeItem,
+  bumpProfileStat, countItem, ENHANCE_BASE_COST, ENHANCE_MATERIALS, ENHANCE_MAX_LEVEL, moveSlot, removeItem,
   swapSlots, type PlayerProfile,
 } from "@/lib/worldbox/profile";
 import { itemById, recipeById, recipeKind } from "@/lib/worldbox/items";
@@ -20,6 +21,7 @@ import { checkBuyGenre, checkBuySold, checkDailyStock, dailyPriceFor, shopDayKey
 import { loadMyLobbyShopGenre, loadMyLobbyStation, loadMyWorldStationKinds } from "@/lib/worldbox/station-online";
 import type { StationKind } from "@/lib/worldbox/tiles";
 import { isProfileEnabled, loadProfile, storeProfile } from "@/lib/worldbox/profile-online";
+import { dispatchProgressEffects } from "@/lib/worldbox/progress-online";
 import { withUserLock } from "@/lib/worldbox/user-lock";
 
 export const runtime = "nodejs";
@@ -121,7 +123,7 @@ async function handlePost(request: Request, session: AuthedSession) {
   }
   const data = (body ?? {}) as {
     action?: unknown; itemId?: unknown; count?: unknown; recipeId?: unknown; targetId?: unknown;
-    inputs?: unknown;
+    inputs?: unknown; title?: unknown;
     hotbarIndex?: unknown; storageIndex?: unknown; from?: unknown; to?: unknown;
   };
   const ownerKey = sessionOwnerKey(session);
@@ -324,6 +326,17 @@ async function handlePost(request: Request, session: AuthedSession) {
       }
       return saveAndReturn(result, result.ok ? { itemName: result.item.name } : {});
     }
+    case "set_title": {
+      if (typeof data.title !== "string") return errorResponse("invalid_request");
+      const wanted = sanitizePlayerTitle(data.title);
+      if (wanted === "") {
+        const nextProfile: PlayerProfile = { ...current };
+        delete nextProfile.title;
+        return saveAndReturn({ ok: true, profile: nextProfile });
+      }
+      if (!isTitleUnlocked(current, wanted)) return statusError("title_locked", 409);
+      return saveAndReturn({ ok: true, profile: { ...current, title: wanted } });
+    }
     case "enhance": {
       // 道具強化: 鍛冶の前で、素材とコインを払って道具のレベルを上げる（最大3）。
       const gate = coinGate();
@@ -343,14 +356,28 @@ async function handlePost(request: Request, session: AuthedSession) {
       if (balance < cost) return statusError("insufficient_balance", 409);
       const removedMat = removeItem(current, material.itemId, material.count);
       if (!removedMat) return errorResponse("not_enough_items");
-      return saveWithCoin(
+      const enhanced = bumpProfileStat(
+        { ...removedMat, enhance: { ...removedMat.enhance, [def.id]: level + 1 } },
+        "enhances",
+        1,
+      );
+      const resp = await saveWithCoin(
         {
           ok: true,
-          profile: { ...removedMat, enhance: { ...removedMat.enhance, [def.id]: level + 1 } },
+          profile: enhanced,
           coin: { kind: "spend", amount: cost, reason: "tool_enhance" },
         },
         gate.discordId,
       );
+      if (resp.ok) {
+        dispatchProgressEffects({
+          ownerKey,
+          actorName: session.username?.trim() || "冒険者",
+          before: current,
+          after: enhanced,
+        });
+      }
+      return resp;
     }
     case "craft": {
       // 種別ごとに場所が違う: 合成=作業台/鍛冶台、精錬=かまど、調理=焚き火/調理鍋、
@@ -365,26 +392,46 @@ async function handlePost(request: Request, session: AuthedSession) {
           ? profile
           : { ...profile, discoveredRecipes: [...found, recipeId] };
       };
+      const craftStatKey = (kind: string) =>
+        kind === "smelt" ? "smelts" : kind === "cook" ? "cooks" : kind === "weave" ? "weaves" : "crafts";
       if (data.inputs !== undefined && data.inputs !== null) {
         // 自由セット式（PR-B）: レシピ・確率・レア名は事前に返さず、
         // 結果（craftedId）と気配（hint）だけを返す
         const result = craftFromInputs(current, data.inputs);
         if (!result.ok) return saveAndReturn(result);
-        const profile = result.matched && result.recipe
+        const withFound = result.matched && result.recipe
           ? withDiscovery(result.profile, result.recipe.id)
           : result.profile;
-        return saveAndReturn({ ok: true, profile }, {
+        const kind = result.matched && result.recipe ? recipeKind(result.recipe) : "craft";
+        const nextProfile = bumpProfileStat(withFound, craftStatKey(kind), 1);
+        const resp = await saveAndReturn({ ok: true, profile: nextProfile }, {
           craftedId: result.resultId,
           rareId: result.rare?.id ?? null,
           hint: result.hint,
           matched: result.matched,
         });
+        if (resp.ok) {
+          dispatchProgressEffects({
+            ownerKey,
+            actorName: session.username?.trim() || "冒険者",
+            before: current,
+            after: nextProfile,
+            goalKind: "craft",
+            goalDelta: 1,
+          });
+        }
+        return resp;
       }
       // recipeId 形式（従来呼び出しの互換）: 成功時は発見を記録し hint は exact
       const result = craftItem(current, data.recipeId);
       if (!result.ok) return saveAndReturn(result);
-      return saveAndReturn(
-        { ok: true, profile: withDiscovery(result.profile, result.recipe.id) },
+      const nextProfile = bumpProfileStat(
+        withDiscovery(result.profile, result.recipe.id),
+        craftStatKey(recipeKind(result.recipe)),
+        1,
+      );
+      const resp = await saveAndReturn(
+        { ok: true, profile: nextProfile },
         {
           craftedId: result.recipe.output,
           rareId: result.rare?.id ?? null,
@@ -392,6 +439,17 @@ async function handlePost(request: Request, session: AuthedSession) {
           matched: true,
         },
       );
+      if (resp.ok) {
+        dispatchProgressEffects({
+          ownerKey,
+          actorName: session.username?.trim() || "冒険者",
+          before: current,
+          after: nextProfile,
+          goalKind: "craft",
+          goalDelta: 1,
+        });
+      }
+      return resp;
     }
     case "work": {
       // 労働は廃止（2026-11-16 ユーザー指示）。どの経路からも実行できない。

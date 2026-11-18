@@ -21,6 +21,7 @@ ROLE_NAMES = {
     "scout": "斥候",
     "miner": "採掘者",
     "medic": "薬師",
+    "teleporter": "テレポーター",
 }
 
 

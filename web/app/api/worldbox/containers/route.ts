@@ -15,6 +15,9 @@ import {
 import {
   isContainersEnabled, loadContainer, storeContainer,
 } from "@/lib/worldbox/containers-online";
+import { canAccessScope, isAccessScope, parseAccessScope } from "@/lib/worldbox/acl";
+import { nationIdForPresenceId } from "@/lib/worldbox/nations";
+import { loadNationsState } from "@/lib/worldbox/nations-online";
 import { TENT_H, buildTent } from "@/lib/worldbox/tent";
 import { buildLobby } from "@/lib/worldbox/lobby";
 import { buildLobby2, buildLobby3 } from "@/lib/worldbox/lobby-floors";
@@ -25,17 +28,11 @@ export const runtime = "nodejs";
 // AGO WORLD BOX の収納コンテナ（樽・宝箱）。
 // 中身は bot_kv（名前空間 worldbox_containers、キー "<space>|x,y"）に
 // タイル単位で持ち、設置ブロック（worldbox_tiles の上書き）が種類の正。
-// 中身は全員共有（ユーザー指示 2026-11-17）: 誰でも開けて出し入れできる。
-// ブロック自体の回収も誰でも可（中身が空のときだけ、タイル側で検証）。
+// 公開範囲 access（"public" | "union" | "owner"、既定 "public"）により
+// 全員共有・自ユニオン限定・所有者限定の3段階を切り替えられる。
 // GET ?x&y[&space=tent]: そのタイルのコンテナの中身を返す（無ければ 404）。
-// POST { action: "move", x, y, from, to [, space] }: プロフィール⇔コンテナ
-// 間のスロット移動をサーバー側で再計算して適用し、両方の更新後を返す。
-// space=tent/lobby/lobby2/lobby3 は室内の備え付け樽・木箱が対象で、
-// こちらも中身は共有（ロビーは "lobby|x,y" キーで全員同じ中身）。
-// テントは段階で内装の高さが変わっても中身が付いてくるよう、保存キーは
-// tier 0 の高さに正規化した座標で持つ。
-// 隣接検証はタイル行為と同じ（プレゼンス → セーブ、チェビシェフ ≤2）。
-// Bot API 未設定なら 503（クライアントは収納なしで遊び続ける）。
+// POST { action: "move", x, y, from, to [, space] }: スロット移動。
+// POST { action: "set_access", x, y, access }: 所有者による公開範囲変更（world のみ）。
 
 const NO_STORE = { "Cache-Control": "no-store, max-age=0" };
 
@@ -63,8 +60,7 @@ function parseContainerSpace(raw: unknown): ContainerSpace {
   return raw === "tent" || raw === "lobby" || raw === "lobby2" || raw === "lobby3" ? raw : "world";
 }
 
-/** 備え付け家具の保存空間キー。中身は全員共有なので空間名だけ
- * （プレイヤー別にしていた時期の `lobby@<id>|…` キーは読まない）。 */
+/** 備え付け家具の保存空間キー。 */
 function fixtureStoreSpace(space: ContainerSpace): string {
   return space;
 }
@@ -82,10 +78,18 @@ async function actorPosition(ownerKey: string, space: ContainerSpace): Promise<{
 }
 
 type ResolvedContainer =
-  | { ok: true; itemId: string; state: ContainerState; storeSpace: string; storeX: number; storeY: number }
+  | {
+      ok: true;
+      itemId: string;
+      ownerId: string;
+      state: ContainerState;
+      storeSpace: string;
+      storeX: number;
+      storeY: number;
+    }
   | { ok: false; error: string; status: number };
 
-/** そのタイルにある本人のコンテナを解決する（所有・種類は設置ブロックが正）。 */
+/** そのタイルにあるコンテナを解決する（所有・種類は設置ブロックが正）。 */
 async function resolveContainer(
   ownerKey: string,
   space: ContainerSpace,
@@ -94,8 +98,6 @@ async function resolveContainer(
 ): Promise<ResolvedContainer> {
   const selfId = presenceIdFor(ownerKey);
   if (space !== "world") {
-    // 室内の備え付け家具が正。所有は常に本人（テントは個人空間、ロビーは
-    // 共用だが中身をプレイヤー別に持つ）。
     const tent = space === "tent" ? buildTent((await loadProfile(ownerKey)).tentTier) : null;
     const objects = tent ? tent.objects
       : space === "lobby" ? buildLobby().objects
@@ -105,31 +107,52 @@ async function resolveContainer(
       (o) => isContainerItem(o.sprite) && x >= o.x && x < o.x + o.w && y >= o.y && y < o.y + o.h,
     );
     if (!obj) return { ok: false, error: "no_container", status: 404 };
-    // テントは段階が上がると内装の高さと家具の y が変わるため、保存キーは
-    // tier 0 の高さに正規化した座標にする（家具の x は段階で不変）。
-    // ロビーは座標が固定なのでそのまま使う。
     const storeSpace = fixtureStoreSpace(space);
     const storeX = obj.x;
     const storeY = tent ? obj.y - (tent.height - TENT_H) : obj.y;
     const stored = await loadContainer(storeSpace, storeX, storeY, obj.sprite);
-    // 中身は全員共有: 保存済みの状態は誰のものでもそのまま使う
     const state = stored ?? emptyContainer(selfId, obj.sprite);
-    return { ok: true, itemId: obj.sprite, state, storeSpace, storeX, storeY };
+    return { ok: true, itemId: obj.sprite, ownerId: selfId, state, storeSpace, storeX, storeY };
   }
   const ov = await loadTileOverride(x, y);
   const block = ov && isOverrideActive(ov, Date.now()) ? ov.block : undefined;
   if (!block || !isContainerItem(block.itemId)) {
     return { ok: false, error: "no_container", status: 404 };
   }
-  // 中身は全員共有: 設置者のものでなくても開けて出し入れできる
-  // （ブロック自体の回収は従来どおり所有者のみ、タイル側で検証する）。
   const stored = await loadContainer("world", x, y, block.itemId);
-  const state = stored ?? emptyContainer(selfId, block.itemId);
-  return { ok: true, itemId: block.itemId, state, storeSpace: "world", storeX: x, storeY: y };
+  const state = stored ?? emptyContainer(block.ownerId, block.itemId);
+  return {
+    ok: true,
+    itemId: block.itemId,
+    ownerId: block.ownerId,
+    state,
+    storeSpace: "world",
+    storeX: x,
+    storeY: y,
+  };
 }
 
 function errorJson(error: string, status: number) {
   return NextResponse.json({ error }, { status, headers: NO_STORE });
+}
+
+async function checkWorldContainerAcl(
+  ownerKey: string,
+  resolved: Extract<ResolvedContainer, { ok: true }>,
+): Promise<NextResponse | null> {
+  const access = parseAccessScope(resolved.state.access);
+  if (access === "public") return null;
+  const selfId = presenceIdFor(ownerKey);
+  if (resolved.ownerId === selfId) return null;
+  if (access === "owner") return errorJson("not_allowed", 403);
+  const nations = await loadNationsState();
+  const allowed = canAccessScope(access, {
+    actorId: selfId,
+    ownerId: resolved.ownerId,
+    actorNationId: nations.members[ownerKey]?.nationId ?? null,
+    ownerNationId: nationIdForPresenceId(nations, resolved.ownerId),
+  });
+  return allowed ? null : errorJson("not_allowed", 403);
 }
 
 export async function GET(request: Request) {
@@ -141,13 +164,15 @@ export async function GET(request: Request) {
   const url = new URL(request.url);
   const xRaw = url.searchParams.get("x");
   const yRaw = url.searchParams.get("y");
+  if ((xRaw !== null && xRaw.trim() === "") || (yRaw !== null && yRaw.trim() === "")) {
+    return errorJson("invalid_tile", 400);
+  }
   const coord = checkedCoord(
     xRaw === null ? NaN : Number(xRaw),
     yRaw === null ? NaN : Number(yRaw),
   );
   if (!coord) return errorJson("invalid_tile", 400);
   const space = parseContainerSpace(url.searchParams.get("space"));
-  // 隣接検証（POST と同じ。読み取りでも遠隔地から中身を覗けないように）
   const ownerKey = sessionOwnerKey(session);
   const pos = await actorPosition(ownerKey, space);
   if (!pos) return errorJson("position_unknown", 409);
@@ -158,6 +183,11 @@ export async function GET(request: Request) {
   if (dist > MAX_ACTION_DISTANCE) return errorJson("too_far", 409);
   const resolved = await resolveContainer(ownerKey, space, coord.x, coord.y);
   if (!resolved.ok) return errorJson(resolved.error, resolved.status);
+  if (space === "world") {
+    const denied = await checkWorldContainerAcl(ownerKey, resolved);
+    if (denied) return denied;
+  }
+  const selfId = presenceIdFor(ownerKey);
   return NextResponse.json(
     {
       ok: true,
@@ -165,6 +195,8 @@ export async function GET(request: Request) {
       y: coord.y,
       itemId: resolved.itemId,
       capacity: containerCapacity(resolved.itemId),
+      access: parseAccessScope(resolved.state.access),
+      mine: space !== "world" || resolved.ownerId === selfId,
       container: resolved.state,
     },
     { headers: NO_STORE },
@@ -184,14 +216,26 @@ export async function POST(request: Request) {
   } catch {
     return errorJson("invalid_request", 400);
   }
-  const fields = (body ?? {}) as { action?: unknown; x?: unknown; y?: unknown; from?: unknown; to?: unknown; space?: unknown };
-  if (fields.action !== "move") return errorJson("invalid_action", 400);
+  const fields = (body ?? {}) as {
+    action?: unknown;
+    x?: unknown;
+    y?: unknown;
+    from?: unknown;
+    to?: unknown;
+    space?: unknown;
+    access?: unknown;
+  };
+  if (fields.action !== "move" && fields.action !== "set_access") {
+    return errorJson("invalid_action", 400);
+  }
   const coord = checkedCoord(fields.x, fields.y);
   if (!coord) return errorJson("invalid_tile", 400);
   const space = parseContainerSpace(fields.space);
+  if (fields.action === "set_access" && space !== "world") {
+    return errorJson("invalid_action", 400);
+  }
   const ownerKey = sessionOwnerKey(session);
 
-  // 隣接検証（タイル行為と同じ。位置不明は素通りさせず拒否する）
   const pos = await actorPosition(ownerKey, space);
   if (!pos) return errorJson("position_unknown", 409);
   const dist = Math.max(
@@ -200,25 +244,54 @@ export async function POST(request: Request) {
   );
   if (dist > MAX_ACTION_DISTANCE) return errorJson("too_far", 409);
 
-  // 同一ユーザーへの並行リクエストを直列化する（S4）: コンテナと
-  // プロフィールの両方を読み書きするため、ロック無しだと二重移動や
-  // lost update が起きる（タイル側と同じ型、S1 の横展開）。
-  return withUserLock(ownerKey, async () => {
-        const resolved = await resolveContainer(ownerKey, space, coord.x, coord.y);
-        if (!resolved.ok) return errorJson(resolved.error, resolved.status);
+  return withUserLock(`container:${space}:${coord.x},${coord.y}`, () =>
+    withUserLock(ownerKey, async () => {
+      const resolved = await resolveContainer(ownerKey, space, coord.x, coord.y);
+      if (!resolved.ok) return errorJson(resolved.error, resolved.status);
+      const selfId = presenceIdFor(ownerKey);
 
-        const profile = await loadProfile(ownerKey);
-        const moved = moveContainerSlot(profile, resolved.state, fields.from, fields.to);
-        if (!moved) return errorJson("invalid_action", 400);
-        if (!(await storeContainer(resolved.storeSpace, resolved.storeX, resolved.storeY, moved.container))) {
-          return errorJson("containers_failed", 500);
-        }
-        if (!(await storeProfile(ownerKey, moved.profile))) {
+      if (fields.action === "set_access") {
+        if (resolved.ownerId !== selfId) return errorJson("not_owner", 403);
+        if (!isAccessScope(fields.access)) return errorJson("invalid_access", 400);
+        const nextState: ContainerState = {
+          ownerId: resolved.ownerId,
+          slots: resolved.state.slots,
+          ...(fields.access !== "public" ? { access: fields.access } : {}),
+        };
+        if (!(await storeContainer(resolved.storeSpace, resolved.storeX, resolved.storeY, nextState))) {
           return errorJson("containers_failed", 500);
         }
         return NextResponse.json(
-          { ok: true, profile: moved.profile, container: moved.container },
+          { ok: true, access: fields.access, mine: true, container: nextState },
           { headers: NO_STORE },
         );
-  });
+      }
+
+      if (space === "world") {
+        const denied = await checkWorldContainerAcl(ownerKey, resolved);
+        if (denied) return denied;
+      }
+
+      const profile = await loadProfile(ownerKey);
+      const moved = moveContainerSlot(profile, resolved.state, fields.from, fields.to);
+      if (!moved) return errorJson("invalid_action", 400);
+      if (!(await storeContainer(resolved.storeSpace, resolved.storeX, resolved.storeY, moved.container))) {
+        return errorJson("containers_failed", 500);
+      }
+      if (!(await storeProfile(ownerKey, moved.profile))) {
+        await storeContainer(resolved.storeSpace, resolved.storeX, resolved.storeY, resolved.state);
+        return errorJson("containers_failed", 500);
+      }
+      return NextResponse.json(
+        {
+          ok: true,
+          profile: moved.profile,
+          container: moved.container,
+          access: parseAccessScope(moved.container.access),
+          mine: space !== "world" || resolved.ownerId === selfId,
+        },
+        { headers: NO_STORE },
+      );
+    }),
+  );
 }

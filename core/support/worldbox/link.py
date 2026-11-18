@@ -70,8 +70,16 @@ def parse_union_link(raw: Any) -> tuple[str, Optional[str]]:
     return ("none", None)
 
 
+def parse_union_events(raw: Any) -> bool:
+    """イベント通知が有効か（明示的に false でない限り True）。"""
+    data = _as_dict(raw)
+    if data is None:
+        return True
+    return data.get("events") is not False
+
+
 def build_union_settings_record(
-    mode: str, channel_id: Optional[str], now_ms: int
+    mode: str, channel_id: Optional[str], now_ms: int, events: Optional[bool] = None
 ) -> str:
     """保存用レコード（JSON 文字列）を Web の storeUnionChatSettings と
     同じ形で組み立てる。
@@ -87,10 +95,14 @@ def build_union_settings_record(
         stored_id: Optional[str] = channel_id
     else:
         stored_id = None
-    return json.dumps(
-        {"mode": mode, "channelId": stored_id, "updatedAt": int(now_ms)},
-        ensure_ascii=False,
-    )
+    payload: dict[str, Any] = {
+        "mode": mode,
+        "channelId": stored_id,
+        "updatedAt": int(now_ms),
+    }
+    if events is False:
+        payload["events"] = False
+    return json.dumps(payload, ensure_ascii=False)
 
 
 def parse_nation_guild_ids(raw: Any) -> set[str]:

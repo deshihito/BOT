@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getRequestSession, publicOrigin, sessionOwnerKey } from "@/lib/auth";
-import { MAP_SEED, WORLD_COORD_LIMIT } from "@/lib/worldbox/mapgen";
+import { MAP_SEED, T_WATER, tileAt, WORLD_COORD_LIMIT, worldTileSource } from "@/lib/worldbox/mapgen";
+import { findFreeNear } from "@/lib/worldbox/move";
 import { isNightPhase, phaseAtTime } from "@/lib/worldbox/daynight";
 import { mobById } from "@/lib/worldbox/mobs";
 import { mobDistance, mobExistsAt, resolveMobPosition, MOB_ATTACK_MAX_DISTANCE } from "@/lib/worldbox/combat";
@@ -10,6 +11,7 @@ import { presenceIdFor } from "@/lib/worldbox/presence";
 import { parseSave, serializeSave } from "@/lib/worldbox/save";
 import { loadWorldBoxSave, storeWorldBoxSave } from "@/lib/worldbox/save-online";
 import { loadNationsState } from "@/lib/worldbox/nations-online";
+import { isOverrideActive } from "@/lib/worldbox/tiles";
 import { loadTileOverride } from "@/lib/worldbox/tiles-online";
 import { buildCaveLayer, buildDungeonFloor, makeInstanceSpace, parseInstanceSpace, weekKeyOf } from "@/lib/worldbox/instances";
 import { loadRuinsPersonal } from "@/lib/worldbox/instances-online";
@@ -190,14 +192,58 @@ async function movePresenceAndSave(
   const prev = parseSave(await loadWorldBoxSave(ownerKey));
   const saved = await storeWorldBoxSave(
     ownerKey,
-    serializeSave({ space: dest.space, x: dest.x, y: dest.y, worldReturn: prev?.worldReturn ?? null }),
+    serializeSave({ space: dest.space, x: dest.x, y: dest.y, worldReturn: prev?.worldReturn ?? null }, { tpAt: now }),
   );
   if (!saved) return false;
   return putPresence(
     ownerKey,
     { name: name.trim() || "プレイヤー", x: dest.x, y: dest.y, vx: 0, vy: 0, face: 1, space: dest.space },
     now,
+    { tpTs: now },
   );
+}
+
+async function handleSwimRescue(
+  ownerKey: string,
+  data: { px?: unknown; py?: unknown; lx?: unknown; ly?: unknown },
+  now: number,
+  name: string,
+): Promise<NextResponse> {
+  const profile = await loadProfile(ownerKey);
+  if (
+    typeof data.lx !== "number" || typeof data.ly !== "number" ||
+    !Number.isFinite(data.lx) || !Number.isFinite(data.ly) ||
+    Math.abs(data.lx) > WORLD_COORD_LIMIT || Math.abs(data.ly) > WORLD_COORD_LIMIT
+  ) {
+    return errorResponse("invalid_request", 400);
+  }
+  const reported =
+    typeof data.px === "number" && typeof data.py === "number" &&
+    Number.isFinite(data.px) && Number.isFinite(data.py) &&
+    Math.abs(data.px) <= WORLD_COORD_LIMIT && Math.abs(data.py) <= WORLD_COORD_LIMIT
+      ? { x: data.px, y: data.py }
+      : null;
+  const pos = await actorWorldPosition(ownerKey, reported, "world");
+  if (!pos) return errorResponse("position_unknown", 409);
+  const px = Math.floor(pos.x);
+  const py = Math.floor(pos.y);
+  const posOv = await loadTileOverride(px, py);
+  const onBridge = !!(posOv && isOverrideActive(posOv, now) && posOv.block?.itemId === "bridge_block");
+  if (tileAt(px, py, MAP_SEED) !== T_WATER || onBridge) {
+    return errorResponse("not_in_water", 409);
+  }
+  if (Math.hypot(data.lx - pos.x, data.ly - pos.y) > 60) {
+    return errorResponse("too_far", 409);
+  }
+  const worldMap = worldTileSource(MAP_SEED);
+  const dest = findFreeNear(worldMap, data.lx, data.ly, undefined, { swim: false });
+  if (tileAt(Math.floor(dest.x), Math.floor(dest.y), MAP_SEED) === T_WATER) {
+    return errorResponse("invalid_rescue", 409);
+  }
+  if (!(await movePresenceAndSave(ownerKey, { space: "world", x: dest.x, y: dest.y }, now, name))) {
+    return errorResponse("store_failed", 503);
+  }
+  return NextResponse.json({ profile, died: false, rescue: dest }, { headers: NO_STORE });
 }
 
 export async function POST(request: Request) {
@@ -213,7 +259,7 @@ export async function POST(request: Request) {
   }
   const data = (body ?? {}) as {
     action?: unknown; mobId?: unknown; x?: unknown; y?: unknown; px?: unknown; py?: unknown; space?: unknown;
-    mx?: unknown; my?: unknown; target?: unknown;
+    mx?: unknown; my?: unknown; target?: unknown; lx?: unknown; ly?: unknown;
   };
   const ownerKey = sessionOwnerKey(session);
   const now = Date.now();
@@ -528,6 +574,10 @@ export async function POST(request: Request) {
       if (!(await storeProfile(ownerKey, next))) return errorResponse("store_failed", 503);
       return NextResponse.json({ profile: next, respawn: next.respawn }, { headers: NO_STORE });
     });
+  }
+
+  if (data.action === "swim_rescue") {
+    return withUserLock(ownerKey, () => handleSwimRescue(ownerKey, data, now, session.username ?? ""));
   }
 
   return errorResponse("invalid_action", 400);

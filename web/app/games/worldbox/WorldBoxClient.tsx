@@ -71,6 +71,7 @@ import {
 } from "@/lib/worldbox/instances";
 import { EVENT_DUNGEON_ENTRANCE } from "@/lib/worldbox/events";
 import { SEASON_NAMES, seasonDaysLeft, seasonOf } from "@/lib/worldbox/seasons";
+import { WEATHER_NAMES, weatherAt } from "@/lib/worldbox/weather";
 import { biomeAt, structureById, structuresForChunk, type PlacedStructure } from "@/lib/worldbox/maplogic";
 import { nearestEntrances, type CompassTarget } from "@/lib/worldbox/compass";
 import {
@@ -81,8 +82,11 @@ import { parseBoardPosts, type BoardPost } from "@/lib/worldbox/board";
 import { parseSave, serializeSave, type SaveSpace } from "@/lib/worldbox/save";
 import { chooseInitialSave } from "@/lib/worldbox/save-source";
 import {
-  actionForTile, blockHpFraction, cropStage, floorSpeedMultiplier, FORTIFY_COST, FORTIFY_HP_STEP, FORTIFY_MAX_BONUS, isFloorItem, isFlowerPotItem, isGateItem, isOverrideActive, isSeatItem, isShelfItem, isSignItem, isWellItem, parseTileOverride, placedBlockSolid, placedStationKinds, terrainHpFraction, tileKey, tileView,
-  type TileActionKind, type TileOverridesMap,
+  ACCESS_SCOPES, accessScopeLabel, type AccessScope,
+} from "@/lib/worldbox/acl";
+import {
+  actionForTile, blockHpFraction, cropStage, floorSpeedMultiplier, FORTIFY_COST, FORTIFY_HP_STEP, FORTIFY_MAX_BONUS, isFloorItem, isFlowerPotItem, isGateItem, isOverrideActive, isSeatItem, isShelfItem, isSignItem, isWellItem, parseTileKey, parseTileOverride, placedBlockSolid, placedStationKinds, terrainHpFraction, tileKey, tileView,
+  type GateAccess, type TileActionKind, type TileOverridesMap,
 } from "@/lib/worldbox/tiles";
 import { CROPS, ITEMS, itemById } from "@/lib/worldbox/items";
 import { HP_MAX, HUNGER_MAX, countItem, maxHpFor, toolDurabilityFraction, type AdventureRoleId, type ItemSlot, type PlayerProfile, type SlotRef } from "@/lib/worldbox/profile";
@@ -91,7 +95,7 @@ import { isStallItem } from "@/lib/worldbox/stalls";
 import {
   containerCapacity, isContainerItem, type ContainerSlotRef,
 } from "@/lib/worldbox/containers";
-import { isMachineItem } from "@/lib/worldbox/machines";
+import { isMachineItem, MACHINE_SENSOR_RADIUS } from "@/lib/worldbox/machines";
 import { DUNGEON_TILE_SRC, FARM_SPRITE_SRC, LOBBY_SPRITE_SRC, loadDungeonTiles, loadFarmSprites, loadLobbySprites, loadMobSprites, loadTextures } from "@/lib/worldbox/textures";
 import { preloadImages, transitionAlpha, transitionDone, transitionSwapDue, SPRITE_PRELOAD_TIMEOUT_MS, TRANSITION_OVERLAY_RGB, type TransitionKind } from "@/lib/worldbox/transition";
 import { isStickTouch, stickBase, stickVector } from "@/lib/worldbox/stick";
@@ -115,6 +119,10 @@ import WorldBoxMachinePanel from "./WorldBoxMachinePanel";
 import WorldBoxEconomyPanel from "./WorldBoxEconomyPanel";
 import WorldBoxGuildBoardPanel from "./WorldBoxGuildBoardPanel";
 import WorldBoxGuildShopPanel from "./WorldBoxGuildShopPanel";
+import WorldBoxTradePanel from "./WorldBoxTradePanel";
+import WorldBoxCodexPanel from "./WorldBoxCodexPanel";
+import { notifyTradeChanged } from "@/lib/worldbox/trade-push";
+import type { TradeClientView } from "@/lib/worldbox/trade";
 import { ItemSlot as ItemSlotView, ItemSlotGrid } from "./ItemSlotGrid";
 
 const SAVE_KEY = "ago-worldbox-save-v6";
@@ -406,6 +414,19 @@ const TILE_ERROR_LABEL: Record<string, string> = {
   not_empty: "中身が入っている",
   no_container: "収納がない",
   containers_unavailable: "いま使えない",
+  already_listed: "すでに出品されています",
+  not_listed: "出品されていません",
+  own_stall: "自分の屋台です",
+  insufficient_balance: "コインが足りない",
+  not_enough_balance: "コインが足りない",
+  no_stall: "屋台がない",
+  stalls_unavailable: "いま使えない",
+  stalls_failed: "失敗しました",
+  economy_failed: "支払いに失敗した",
+  store_failed: "保存に失敗した",
+  invalid_coord: "座標が不正",
+  not_allowed: "権限がありません",
+  invalid_access: "公開範囲が不正",
 };
 
 /** アイテムのドット絵アイコン（無いアイテムは名前ラベルのみで出す）。 */
@@ -1065,6 +1086,34 @@ export default function WorldBoxClient() {
       setTileMsg("テレポートできない");
     }
   };
+  /** 自宅（ベッド）へ帰還ワープ: ワールド空間・クールダウン・戦闘猶予の検証はサーバー側。 */
+  const teleportToHome = async () => {
+    try {
+      const res = await fetch("/api/worldbox/warp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "home" }),
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        error?: string; x?: number; y?: number; profile?: PlayerProfile;
+      };
+      if (res.ok && typeof data.x === "number" && typeof data.y === "number") {
+        if (data.profile) setInvProfile(data.profile);
+        setMapView(false);
+        teleportActionRef.current(data.x, data.y);
+        return;
+      }
+      setTileMsg(
+        data.error === "no_home" ? "ベッド未設定"
+        : data.error === "combat_cooldown" ? "被弾直後は不可"
+        : data.error === "warp_cooldown" ? "まだ使えない"
+        : data.error === "not_in_world" ? "ワールドでのみ可"
+        : "帰還できない",
+      );
+    } catch {
+      setTileMsg("帰還できない");
+    }
+  };
   /** 線路パネル: 線路の上に立つと、同じ路線の行き先を選んで移動できる。 */
   const [railOpen, setRailOpen] = useState(false);
   const [railStops, setRailStops] = useState<{ x: number; y: number; capital: boolean }[]>([]);
@@ -1253,6 +1302,7 @@ export default function WorldBoxClient() {
     if (stationUi !== "guild") setGuildBoardOpen(false);
     if (stationUi !== "arena") setArenaOpen(false);
     if (stationUi !== "arcade") setArcadeOpen(false);
+    if (stationUi !== "race") setRacingOpen(false);
     setPlazaMsg("");
   }, [stationUi]);
 
@@ -1384,6 +1434,8 @@ export default function WorldBoxClient() {
   const lastHotbarTapRef = useRef<{ index: number; at: number } | null>(null);
   /** 開いている収納コンテナ（自分の樽・宝箱）とその中身。 */
   const [containerPanel, setContainerPanel] = useState<{ x: number; y: number; itemId: string; space: "world" | "tent" | "lobby" | "lobby2" | "lobby3" } | null>(null);
+  const [containerAccess, setContainerAccess] = useState<AccessScope>("public");
+  const [containerMine, setContainerMine] = useState(false);
   const [machinePanel, setMachinePanel] = useState<{ x: number; y: number } | null>(null);
   /** 座っている家具のタイル（ベンチ・椅子・ソファ）。見た目だけの状態で、プレゼンスにも申告する。 */
   const sitTileRef = useRef<{ x: number; y: number } | null>(null);
@@ -1393,14 +1445,21 @@ export default function WorldBoxClient() {
   const [seedPicker, setSeedPicker] = useState<{ x: number; y: number } | null>(null);
   /** 看板テキストの編集対象（自分の看板をタップしたとき）。 */
   const [signEdit, setSignEdit] = useState<{ x: number; y: number; text: string } | null>(null);
-  const [fortifyPanel, setFortifyPanel] = useState<{ x: number; y: number; itemId: string; fort: number } | null>(null);
+  const [fortifyPanel, setFortifyPanel] = useState<{ x: number; y: number; itemId: string; fort: number; gateAccess?: GateAccess } | null>(null);
+  const [gateConfigPrompt, setGateConfigPrompt] = useState<{ x: number; y: number; itemId: string; fort: number; gateAccess: GateAccess } | null>(null);
+  const gateConfigTimerRef = useRef<number | null>(null);
   /** 屋台パネル: 対象タイルと、開いた時点で選択していたアイテム（出品候補）と自分の屋台か。 */
   const [stallPanel, setStallPanel] = useState<{ x: number; y: number; selItemId: string | null; mine: boolean } | null>(null);
+  const stallReqRef = useRef(0);
   /** 屋台の出品（サーバーが正）。undefined は読み込み中。 */
   const [stallInfo, setStallInfo] = useState<{ itemId: string; name: string; price: number; count: number; mine: boolean } | null | undefined>(undefined);
   const [stallPriceText, setStallPriceText] = useState("100");
   const [stallCountText, setStallCountText] = useState("1");
   const [tileMsg, setTileMsg] = useState("");
+  /** P2P 取引パネルの開閉と現在の取引ビュー。 */
+  const [tradePanelOpen, setTradePanelOpen] = useState(false);
+  const [tradeView, setTradeView] = useState<TradeClientView | null>(null);
+  const [codexOpen, setCodexOpen] = useState(false);
   /** 別のタブに同じアカウントで引き継がれた（このタブは無効化された）か。 */
   const [tabTaken, setTabTaken] = useState(false);
   // Esc で開いているパネル/メニューを全部閉じる（パネル内に閉じ場所が無い状態への保険）
@@ -1418,10 +1477,40 @@ export default function WorldBoxClient() {
       setSeedPicker(null);
       setContainerPanel(null);
       setHeldPanelSlot(null);
+      setArenaOpen(false);
+      setArcadeOpen(false);
+      setRacingOpen(false);
+      setPianoOpen(false);
+      setGuildShopOpen(false);
+      setReportOpen(false);
+      setRailOpen(false);
+      setMachinePanel(null);
+      setSignEdit(null);
+      setFortifyPanel(null);
+      setGateConfigPrompt(null);
+      setStallPanel(null);
+      setTradePanelOpen(false);
+      setCodexOpen(false);
+      setTelescopeOpen(false);
     };
     window.addEventListener("keydown", onEsc);
     return () => window.removeEventListener("keydown", onEsc);
   }, []);
+  useEffect(() => () => {
+    if (gateConfigTimerRef.current !== null) window.clearTimeout(gateConfigTimerRef.current);
+  }, []);
+  useEffect(() => {
+    setStallPanel(null);
+    setSignEdit(null);
+    setFortifyPanel(null);
+    setGateConfigPrompt(null);
+    setSeedPicker(null);
+    setMachinePanel(null);
+    setContainerPanel(null);
+    setHeldPanelSlot(null);
+    setRailOpen(false);
+    setTradePanelOpen(false);
+  }, [spaceUi]);
   const tilesRef = useRef<TileOverridesMap>({});
   const tilesVersionRef = useRef(0);
   /** 演出イベントの受け渡し（行為の成功/失敗→描画ループでパーティクル/揺れ/ポップに変換）。
@@ -1728,16 +1817,20 @@ export default function WorldBoxClient() {
   const [nearDungeonEntrance, setNearDungeonEntrance] = useState(false);
   /** タップで選択した他プレイヤーのプロフィールチップ。 */
   const [playerCard, setPlayerCard] = useState<{
-    id: string; name: string; role: AdventureRoleId; rank: number;
+    id: string; name: string; role: AdventureRoleId; rank: number; title?: string;
   } | null>(null);
   const playerCardTimerRef = useRef<number | null>(null);
-  const showPlayerCard = (card: { id: string; name: string; role: AdventureRoleId; rank: number }) => {
+  const showPlayerCard = (card: { id: string; name: string; role: AdventureRoleId; rank: number; title?: string }) => {
     setPlayerCard(card);
     if (playerCardTimerRef.current) window.clearTimeout(playerCardTimerRef.current);
     playerCardTimerRef.current = window.setTimeout(() => setPlayerCard(null), 6000);
   };
   const showPlayerCardRef = useRef(showPlayerCard);
   showPlayerCardRef.current = showPlayerCard;
+  useEffect(() => () => {
+    if (pianoFlushTimerRef.current !== undefined) window.clearTimeout(pianoFlushTimerRef.current);
+    if (playerCardTimerRef.current !== null) window.clearTimeout(playerCardTimerRef.current);
+  }, []);
   /** チャット（近距離/全体/ユニオン）。サーバーが正、ここは表示と送信だけ。 */
   const [chatChannel, setChatChannel] = useState<"proximity" | "global" | "union">("proximity");
   const [chatMsgs, setChatMsgs] = useState<{ name: string; text: string; at: number; source?: string }[]>([]);
@@ -1784,7 +1877,7 @@ export default function WorldBoxClient() {
         body: JSON.stringify({ x, y }),
       });
       const data = (await res.json().catch(() => ({}))) as {
-        gained?: Record<string, number>; profile?: PlayerProfile; error?: string;
+        gained?: Record<string, number>; profile?: PlayerProfile; rainBonus?: boolean; error?: string;
       };
       if (res.ok) {
         fishCaughtRef.current.set(`${x},${y}`, Date.now());
@@ -1792,7 +1885,11 @@ export default function WorldBoxClient() {
         const names = Object.entries(data.gained ?? {})
           .map(([id, n]) => `${itemById(id)?.name ?? id}×${n}`)
           .join(" ");
-        setTileMsg(names ? `釣れた: ${names}` : "何も釣れなかった");
+        setTileMsg(
+          names
+            ? (data.rainBonus ? `雨の恵みで追釣: ${names}` : `釣れた: ${names}`)
+            : "何も釣れなかった",
+        );
       } else {
         setTileMsg(data.error === "tool_required" ? "釣り竿が要る" : data.error === "not_respawned" ? "魚がいない" : "釣れない");
       }
@@ -1968,6 +2065,68 @@ export default function WorldBoxClient() {
   };
   const postPartyRef = useRef(postParty);
   postPartyRef.current = postParty;
+  const refreshTrade = async () => {
+    try {
+      const res = await fetch("/api/worldbox/trade", { headers: { Accept: "application/json" } });
+      if (!res.ok) return;
+      const data = (await res.json()) as { trade?: TradeClientView | null };
+      setTradeView(data.trade ?? null);
+    } catch { /* noop */ }
+  };
+  const refreshTradeRef = useRef(refreshTrade);
+  refreshTradeRef.current = refreshTrade;
+  useEffect(() => {
+    void refreshTrade();
+    const timer = window.setInterval(() => { if (!wsHealthyNow()) void refreshTradeRef.current(); }, 4000);
+    return () => window.clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const startTradeWith = async (targetId: string) => {
+    try {
+      const res = await fetch("/api/worldbox/trade", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "invite", targetId }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { error?: string; trade?: TradeClientView | null };
+      if (!res.ok || !data.trade) {
+        setTileMsg(
+          data.error === "target_not_near" ? "相手が近くにいない"
+          : data.error === "target_busy" ? "相手が取引中"
+          : data.error === "already_trading" ? "すでに取引中"
+          : "取引できない",
+        );
+        return;
+      }
+      setTradeView(data.trade);
+      setTradePanelOpen(true);
+    } catch {
+      setTileMsg("取引できない");
+    }
+  };
+  const respondTradeInvite = async (action: "accept" | "decline", tradeId: string) => {
+    try {
+      const res = await fetch("/api/worldbox/trade", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, tradeId }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { error?: string; trade?: TradeClientView | null };
+      if (!res.ok) {
+        setTileMsg(data.error === "target_not_near" ? "相手が近くにいない" : "取引できない");
+        void refreshTrade();
+        return;
+      }
+      if (action === "accept" && data.trade) {
+        setTradeView(data.trade);
+        setTradePanelOpen(true);
+      } else {
+        setTradeView(null);
+      }
+    } catch {
+      setTileMsg("取引できない");
+    }
+  };
   /** エンジン側の入場フロー（入口座標→セッション作成→空間遷移）。 */
   const enterDungeonRef = useRef<((ex: number, ey: number) => void) | null>(null);
   /** インスタンス内アクション（洞窟の採掘/宝箱/温泉、遺跡の宝箱/扉/罠）。検証と付与はサーバーが担う。 */
@@ -2144,7 +2303,15 @@ export default function WorldBoxClient() {
   };
   const refreshTilesRef = useRef(refreshTiles);
   refreshTilesRef.current = refreshTiles;
-  const postTileAction = async (action: TileActionKind, x: number, y: number, seedId?: string, itemId?: string, text?: string) => {
+  const postTileAction = async (
+    action: TileActionKind,
+    x: number,
+    y: number,
+    seedId?: string,
+    itemId?: string,
+    text?: string,
+    access?: AccessScope,
+  ) => {
     setTileMsg("");
     // 掘る前のブロック素材（応答で上書きが差し替わるため先に控える。破片の色に使う）
     const prevBlockId = action === "mine_block" ? tilesRef.current[tileKey(x, y)]?.block?.itemId : undefined;
@@ -2152,7 +2319,13 @@ export default function WorldBoxClient() {
       const res = await fetch("/api/worldbox/tiles", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action, x, y, ...(seedId ? { seedId } : {}), ...(itemId ? { itemId } : {}), ...(text !== undefined ? { text } : {}) }),
+        body: JSON.stringify({
+          action, x, y,
+          ...(seedId ? { seedId } : {}),
+          ...(itemId ? { itemId } : {}),
+          ...(text !== undefined ? { text } : {}),
+          ...(access ? { access } : {}),
+        }),
       });
       const data = (await res.json().catch(() => ({}))) as {
         error?: string; key?: string; override?: TileOverridesMap[string] | null; profile?: PlayerProfile;
@@ -2169,7 +2342,7 @@ export default function WorldBoxClient() {
         chop: "chop", mine: "mine", till: "till", plant: "plant", harvest: "harvest",
         place_block: "place", mine_block: "debris",
         plant_flower: "plant", remove_flower: "harvest",
-        toggle_gate: "place",
+        toggle_gate: "place", set_gate_access: "place",
         set_sign: "place", set_display: "place", clear_display: "harvest", draw_water: "splash",
         fortify: "place",
       };
@@ -2187,6 +2360,23 @@ export default function WorldBoxClient() {
         tilesRef.current = next;
         tilesVersionRef.current += 1;
         syncBlockBlocked();
+      }
+      if (
+        action === "toggle_gate"
+        && data.override?.block
+        && isGateItem(data.override.block.itemId)
+        && selfIdRef.current !== null
+        && data.override.block.ownerId === selfIdRef.current
+      ) {
+        setGateConfigPrompt({
+          x,
+          y,
+          itemId: data.override.block.itemId,
+          fort: data.override.block.fort ?? 0,
+          gateAccess: data.override.gateAccess ?? "public",
+        });
+        if (gateConfigTimerRef.current !== null) window.clearTimeout(gateConfigTimerRef.current);
+        gateConfigTimerRef.current = window.setTimeout(() => setGateConfigPrompt(null), 6000);
       }
       if (data.profile) setInvProfile(data.profile);
       if (data.broke) {
@@ -2207,6 +2397,7 @@ export default function WorldBoxClient() {
   postTileActionRef.current = postTileAction;
   /** 屋台の操作（出品・取り下げ・購入）。結果の出品とプロフィールで表示を更新する。 */
   const postStallAction = async (action: "list_item" | "unlist" | "buy", x: number, y: number, extra?: { itemId?: string; price?: number; count?: number }) => {
+    const reqId = ++stallReqRef.current;
     try {
       const res = await fetch("/api/worldbox/stalls", {
         method: "POST",
@@ -2222,6 +2413,7 @@ export default function WorldBoxClient() {
         setTileMsg(TILE_ERROR_LABEL[data.error ?? ""] ?? "できませんでした");
         return;
       }
+      if (stallReqRef.current !== reqId) return;
       setStallInfo(data.stall ?? null);
       if (data.profile) setInvProfile(data.profile);
     } catch {
@@ -2531,13 +2723,15 @@ export default function WorldBoxClient() {
     setHeldSlot(null);
     setHeldPanelSlot(null);
     setContainerSlots(null);
+    setContainerAccess("public");
+    setContainerMine(false);
     setContainerPanel({ x, y, itemId, space });
     try {
       const res = await fetch(`/api/worldbox/containers?x=${x}&y=${y}${space !== "world" ? `&space=${space}` : ""}`, {
         headers: { Accept: "application/json" },
       });
       const data = (await res.json().catch(() => ({}))) as {
-        container?: { slots?: ItemSlot[] }; error?: string;
+        container?: { slots?: ItemSlot[]; access?: AccessScope }; mine?: boolean; error?: string;
       };
       if (!res.ok) {
         setContainerPanel(null);
@@ -2545,6 +2739,8 @@ export default function WorldBoxClient() {
         return;
       }
       setContainerSlots(data.container?.slots ?? null);
+      setContainerAccess(data.container?.access ?? "public");
+      setContainerMine(Boolean(data.mine));
     } catch {
       setContainerPanel(null);
       setTileMsg("開けない");
@@ -2565,14 +2761,40 @@ export default function WorldBoxClient() {
         }),
       });
       const data = (await res.json().catch(() => ({}))) as {
-        profile?: PlayerProfile; container?: { slots?: ItemSlot[] }; error?: string;
+        profile?: PlayerProfile; container?: { slots?: ItemSlot[]; access?: AccessScope }; mine?: boolean; error?: string;
       };
       if (!res.ok) {
         setTileMsg(TILE_ERROR_LABEL[data.error ?? ""] ?? "動かせない");
         return;
       }
       if (data.profile) setInvProfile(data.profile);
-      if (data.container) setContainerSlots(data.container.slots ?? null);
+      if (data.container) {
+        setContainerSlots(data.container.slots ?? null);
+        setContainerAccess(data.container.access ?? "public");
+        if (typeof data.mine === "boolean") setContainerMine(data.mine);
+      }
+    } catch { /* noop */ }
+  };
+  /** ワールドコンテナの公開範囲を変更する（所有者のみ）。 */
+  const setContainerScope = async (access: AccessScope) => {
+    if (!containerPanel || containerPanel.space !== "world") return;
+    try {
+      const res = await fetch("/api/worldbox/containers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "set_access", x: containerPanel.x, y: containerPanel.y, access }),
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        container?: { slots?: ItemSlot[]; access?: AccessScope }; error?: string;
+      };
+      if (!res.ok) {
+        setTileMsg(TILE_ERROR_LABEL[data.error ?? ""] ?? "できない");
+        return;
+      }
+      if (data.container) {
+        setContainerAccess(data.container.access ?? access);
+        if (data.container.slots) setContainerSlots(data.container.slots);
+      }
     } catch { /* noop */ }
   };
   /** コンテナパネルのスロットタップ: 持ち上げ → 置く/交換（インベントリ整理と同じ）。 */
@@ -2601,7 +2823,31 @@ export default function WorldBoxClient() {
     void refreshInv();
     void refreshTiles();
     void refreshMobs();
+    const pingNearbySensors = () => {
+      if (spaceUiRef.current !== "world") return;
+      const selfId = selfIdRef.current;
+      if (!selfId) return;
+      const px = Math.floor(playerPosRef.current.x);
+      const py = Math.floor(playerPosRef.current.y);
+      let hasForeignSensor = false;
+      for (const [key, ov] of Object.entries(tilesRef.current)) {
+        if (!ov.block || !isMachineItem(ov.block.itemId) || ov.block.ownerId === selfId) continue;
+        const coord = parseTileKey(key);
+        if (!coord) continue;
+        if (Math.max(Math.abs(px - coord.x), Math.abs(py - coord.y)) <= MACHINE_SENSOR_RADIUS) {
+          hasForeignSensor = true;
+          break;
+        }
+      }
+      if (!hasForeignSensor) return;
+      void fetch("/api/worldbox/machines", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "ping_sensors" }),
+      }).catch(() => {});
+    };
     const timer = window.setInterval(() => {
+      pingNearbySensors();
       // WS push が健全な間は nations/tiles/mobs が push（poke 含む）で
       // 届くため取得しない。プロフィールは push 対象外なので従来どおり。
       if (wsHealthyNow()) {
@@ -2862,6 +3108,7 @@ export default function WorldBoxClient() {
     let dashKey: string | null = null;
     /** 最後に立っていた陸の位置（水中で力尽きた際の帰還先）。 */
     let lastLand = { x: spawn.x, y: spawn.y };
+    let rescueSyncUntil = 0;
     let wasSwimming = false;
     /** 今フレームの泳ぎ状態（描画の沈み・波紋用）。 */
     let playerSwimming = false;
@@ -2992,6 +3239,9 @@ export default function WorldBoxClient() {
         const free = findFreeNear(activeMap(), choice.state.x, choice.state.y, activeBlocked(), { swim: space === "world" });
         player.x = free.x;
         player.y = free.y;
+        if (space === "world" && !isWaterAt(worldMap, free.x, free.y)) {
+          lastLand = { x: free.x, y: free.y };
+        }
         cam.x = free.x;
         cam.y = free.y;
         setSpaceUi(space);
@@ -3051,7 +3301,7 @@ export default function WorldBoxClient() {
       if (tabSuperseded) return;
       if (!rtSocket || rtSocket.readyState !== WebSocket.OPEN) return;
       try {
-        rtSocket.send(JSON.stringify({ t: "hb", x: player.x, y: player.y, vx: player.vx, vy: player.vy, face: player.face, space, party: myPartyKeyRef.current || undefined, role: invRef.current?.role ?? "free", rank: invRef.current ? masteryRankOf(invRef.current, invRef.current.role) : 1, sit: sitTileRef.current ? true : undefined }));
+        rtSocket.send(JSON.stringify({ t: "hb", x: player.x, y: player.y, vx: player.vx, vy: player.vy, face: player.face, space, party: myPartyKeyRef.current || undefined, role: invRef.current?.role ?? "free", rank: invRef.current ? masteryRankOf(invRef.current, invRef.current.role) : 1, title: invRef.current?.title || undefined, sit: sitTileRef.current ? true : undefined }));
       } catch { /* noop */ }
     };
     /** 中継への接続（トークン取得→接続→受信→再接続）。失敗してもポーリングが続く。 */
@@ -3203,6 +3453,9 @@ export default function WorldBoxClient() {
             void nationsRefreshRef.current(true);
           } else if (msg.t === "sync" && msg.kind === "party") {
             void refreshPartyRef.current(true);
+          } else if (msg.t === "sync" && msg.kind === "trade") {
+            void refreshTradeRef.current();
+            notifyTradeChanged();
           } else if (msg.t === "sync" && msg.kind === "instances") {
             // インスタンス状態（洞窟の枯渇・遺跡の個人状態・ダンジョンの
             // ボス進行など）が他人の行為で変わった: 今いる空間の状態を
@@ -3278,6 +3531,7 @@ export default function WorldBoxClient() {
         party: myPartyKeyRef.current || undefined,
         role: invRef.current?.role ?? "free",
         rank: invRef.current ? masteryRankOf(invRef.current, invRef.current.role) : 1,
+        title: invRef.current?.title || undefined,
         sit: sitTileRef.current ? true : undefined,
         tab: tabSession.tab,
         tabAt: tabSession.tabAt,
@@ -3303,6 +3557,7 @@ export default function WorldBoxClient() {
      * findFreeNear を通さない（着地のずれで再却下の連鎖になるため）。
      * 次回ハートビートは保管位置と一致し、受け入れられる。 */
     const snapBackToServer = (x: number, y: number, targetSpace: string) => {
+      if (Date.now() < rescueSyncUntil) return;
       if (targetSpace !== space) return;
       player.x = x;
       player.y = y;
@@ -3396,6 +3651,7 @@ export default function WorldBoxClient() {
       if (!loggedIn) return;
       // 中継が未接続なら再接続を試みる（再試行時刻を過ぎたときだけ）
       if (!rtSocket && Date.now() >= rtRetryAt) void connectRealtime();
+      if (Date.now() < rescueSyncUntil) return;
       const now = performance.now();
       const movedDist = Math.hypot(player.x - lastHeartbeatPos.x, player.y - lastHeartbeatPos.y);
       const moving = Math.hypot(player.vx, player.vy) > 0.1 || movedDist > 0.05;
@@ -3771,12 +4027,15 @@ export default function WorldBoxClient() {
         // 屋台: タップでパネルを開く（出品の確認・出品・取り下げ・購入）
         setStallInfo(undefined);
         setStallPanel({ x: t.x, y: t.y, selItemId: selItem && !selItem.tool ? selItem.id : null, mine: view.block.mine });
+        const reqId = ++stallReqRef.current;
         void (async () => {
           try {
             const res = await fetch(`/api/worldbox/stalls?x=${t.x}&y=${t.y}`, { headers: { Accept: "application/json" } });
             const data = (await res.json().catch(() => ({}))) as { stall?: typeof stallInfo };
+            if (stallReqRef.current !== reqId) return;
             setStallInfo(res.ok ? (data.stall ?? null) : null);
           } catch {
+            if (stallReqRef.current !== reqId) return;
             setStallInfo(null);
           }
         })();
@@ -3857,7 +4116,14 @@ export default function WorldBoxClient() {
       if (!act) {
         // 自分のブロックを素手（何も選んでいない状態）でタップしたら要塞化パネルを開く
         if (view.block?.mine && !selItem) {
-          setFortifyPanel({ x: t.x, y: t.y, itemId: view.block.itemId, fort: view.block.fort });
+          const ov = tilesRef.current[tileKey(t.x, t.y)];
+          setFortifyPanel({
+            x: t.x,
+            y: t.y,
+            itemId: view.block.itemId,
+            fort: view.block.fort,
+            gateAccess: ov?.gateAccess ?? "public",
+          });
           return true;
         }
         // 隣接タップで何も起きない場合は理由を出す（素材は置けない・その地形には置けない等）。
@@ -3933,6 +4199,7 @@ export default function WorldBoxClient() {
                 name: other.track.entry.name || "プレイヤー",
                 role: (other.track.entry.role ?? "free") as AdventureRoleId,
                 rank: other.track.entry.rank ?? 1,
+                title: other.track.entry.title || undefined,
               });
               return;
             }
@@ -4050,7 +4317,7 @@ export default function WorldBoxClient() {
       name: string | null,
       nationColor: string | null = null,
       swim = false,
-      plate: { roleSymbol: string; rank: number } | null = null,
+      plate: { roleSymbol: string; rank: number; title?: string } | null = null,
       sit = false,
     ) => {
       const size = TILE * AVATAR_TILES;
@@ -4101,12 +4368,14 @@ export default function WorldBoxClient() {
         }
       }
       if (name) {
-        // ネームプレート: ユニオン色の枠 + Discord マーク + 役職シンボル + 名前 + 熟練ドット
+        // ネームプレート: ユニオン色の枠 + Discord マーク + 役職シンボル + 称号 + 名前 + 熟練ドット
         c.font = "600 11px sans-serif";
+        const titleText = plate?.title ? `[${plate.title}] ` : "";
+        const titleW = titleText ? c.measureText(titleText).width : 0;
         const nameW = c.measureText(name).width;
         const symbolW = plate ? c.measureText(plate.roleSymbol).width : 0;
         const glyphW = 11;
-        const plateW = 6 + glyphW + (plate ? 3 + symbolW : 0) + 4 + nameW + 6;
+        const plateW = 6 + glyphW + (plate ? 3 + symbolW : 0) + 4 + titleW + nameW + 6;
         const plateH = plate && plate.rank > 1 ? 24 : 17;
         const top = sy - size + sink - bob - plateH - 4;
         const left = sx - plateW / 2;
@@ -4133,6 +4402,14 @@ export default function WorldBoxClient() {
           c.fillStyle = "#ffd75e";
           c.fillText(plate.roleSymbol, tx, top + 12.5);
           tx += symbolW + 4;
+        }
+        if (titleText) {
+          c.lineWidth = 3;
+          c.strokeStyle = "rgba(10,16,10,0.65)";
+          c.strokeText(titleText, tx, top + 12.5);
+          c.fillStyle = "#ffd75e";
+          c.fillText(titleText, tx, top + 12.5);
+          tx += titleW;
         }
         c.lineWidth = 3;
         c.strokeStyle = "rgba(10,16,10,0.65)";
@@ -4232,6 +4509,9 @@ export default function WorldBoxClient() {
       const free = findFreeNear(activeMap(), x, y, activeBlocked(), { swim: space === "world" });
       player.x = free.x;
       player.y = free.y;
+      if (space === "world" && !isWaterAt(worldMap, free.x, free.y)) {
+        lastLand = { x: free.x, y: free.y };
+      }
       player.vx = 0;
       player.vy = 0;
       cam.x = free.x;
@@ -4712,7 +4992,7 @@ export default function WorldBoxClient() {
       const floorOvNow = space === "world" ? tilesRef.current[tileKey(Math.floor(player.x), Math.floor(player.y))] : undefined;
       const onBridgeNow = floorOvNow?.block?.itemId === "bridge_block" && isOverrideActive(floorOvNow, Date.now());
       const inWaterNow = space === "world" && !onBridgeNow && isWaterAt(worldMap, player.x, player.y);
-      if (space === "world" && !inWaterNow) lastLand = { x: player.x, y: player.y };
+      if (space === "world" && !inWaterNow && !onBridgeNow) lastLand = { x: player.x, y: player.y };
       if (inWaterNow !== wasSwimming) {
         splashes.push({ x: player.x, y: player.y, at: now });
         spawnBurst(fxSys, "splash", player.x, player.y);
@@ -4728,6 +5008,10 @@ export default function WorldBoxClient() {
       }
       playerSwimming = inWaterNow;
       if (inWaterNow && stamina.value <= 0) {
+        const px = player.x;
+        const py = player.y;
+        const lx = lastLand.x;
+        const ly = lastLand.y;
         stamina = rescueStamina(stamina);
         player.x = lastLand.x;
         player.y = lastLand.y;
@@ -4740,7 +5024,37 @@ export default function WorldBoxClient() {
         splashes.push({ x: player.x, y: player.y, at: now });
         spawnBurst(fxSys, "warp", player.x, player.y - 0.3);
         playWbSe("warp");
-        saveNow();
+        saveLocal();
+        if (loggedIn && !tabSuperseded) {
+          rescueSyncUntil = Date.now() + 3000;
+          void fetch("/api/worldbox/vitals", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Accept: "application/json" },
+            body: JSON.stringify({ action: "swim_rescue", px, py, lx, ly }),
+          })
+            .then(async (res) => {
+              if (!res.ok || disposed) return;
+              const data = (await res.json()) as { rescue?: { x: number; y: number } };
+              if (!disposed && data.rescue && space === "world") {
+                player.x = data.rescue.x;
+                player.y = data.rescue.y;
+                lastLand = { x: data.rescue.x, y: data.rescue.y };
+                cam.x = data.rescue.x;
+                cam.y = data.rescue.y;
+                lastTileKey = `world:${Math.floor(data.rescue.x)},${Math.floor(data.rescue.y)}`;
+                lastHeartbeatPos = { x: data.rescue.x, y: data.rescue.y };
+                lastSaved = { x: data.rescue.x, y: data.rescue.y, at: performance.now() };
+                lastRestHeartbeatAt = performance.now();
+                lastHeartbeatAt = performance.now();
+                saveLocal();
+                rescueSyncUntil = 0;
+                sendWsHeartbeat();
+                if (!rtAggOn) sendHeartbeat();
+              }
+            })
+            .catch(() => { /* noop */ })
+            .finally(() => { rescueSyncUntil = 0; });
+        }
       }
       // モブ接触: 占有範囲までチェビシェフ距離1以内を接触とする。
       // 敵対は接触開始時（継続中は1秒間隔）だけ軽いノックバック＋hit バーストを出し、
@@ -5588,7 +5902,7 @@ export default function WorldBoxClient() {
               // 足元は当たり円の底（中心 + 半径）に合わせる（中心に置くと手前で止まって見える）
               space !== "world" ? Math.round(lobbyOy + o.track.ry * TILE) + TILE * PLAYER_RADIUS : toScreenY(o.track.ry) + TILE * PLAYER_RADIUS,
               o.track.entry.face, o.phase, Math.min(1, Math.hypot(o.track.entry.vx, o.track.entry.vy) / WALK_SPEED), o.track.entry.name || null, nationColor, oSwim,
-              { roleSymbol: roleById((o.track.entry.role ?? "free") as AdventureRoleId).symbol, rank: o.track.entry.rank ?? 1 },
+              { roleSymbol: roleById((o.track.entry.role ?? "free") as AdventureRoleId).symbol, rank: o.track.entry.rank ?? 1, title: o.track.entry.title || undefined },
               o.track.entry.sit === true,
             ),
         });
@@ -6437,6 +6751,51 @@ export default function WorldBoxClient() {
               bctx.stroke();
             }
           }
+          // 設置道標（旗・看板）
+          const mapNowMs = Date.now();
+          for (const [k, ov] of Object.entries(tilesRef.current)) {
+            if (!ov?.block || !isOverrideActive(ov, mapNowMs)) continue;
+            const itemId = ov.block.itemId;
+            if (itemId !== "flag_red" && itemId !== "flag_blue" && itemId !== "sign_board") continue;
+            const coord = parseTileKey(k);
+            if (!coord) continue;
+            const mx = toMapX(coord.x + 0.5);
+            const my = toMapY(coord.y + 0.5);
+            if (mx < -8 || my < -8 || mx > bm.width + 8 || my > bm.height + 8) continue;
+            if (itemId === "sign_board") {
+              bctx.fillStyle = "#eab308";
+              bctx.strokeStyle = "rgba(0,0,0,0.7)";
+              bctx.lineWidth = 1;
+              bctx.fillRect(mx - 2.5, my - 2.5, 5, 5);
+              bctx.strokeRect(mx - 2.5, my - 2.5, 5, 5);
+            } else {
+              bctx.fillStyle = itemId === "flag_red" ? "#e5484d" : "#0091ff";
+              bctx.strokeStyle = "rgba(255,255,255,0.85)";
+              bctx.lineWidth = 1;
+              bctx.beginPath();
+              bctx.moveTo(mx - 2, my - 4);
+              bctx.lineTo(mx + 4, my - 1.5);
+              bctx.lineTo(mx - 2, my + 1);
+              bctx.closePath();
+              bctx.fill();
+              bctx.stroke();
+            }
+          }
+          // 自宅ベッドマーカー（緑＋白枠、タップで帰還できる）
+          const homePos = invRef.current?.respawn;
+          if (homePos) {
+            const hx = toMapX(homePos.x);
+            const hy = toMapY(homePos.y);
+            if (hx >= -8 && hy >= -8 && hx <= bm.width + 8 && hy <= bm.height + 8) {
+              bctx.fillStyle = "#46a758";
+              bctx.strokeStyle = "rgba(255,255,255,0.9)";
+              bctx.lineWidth = 1.5;
+              bctx.beginPath();
+              bctx.arc(hx, hy, 4.5, 0, Math.PI * 2);
+              bctx.fill();
+              bctx.stroke();
+            }
+          }
           // 他のプレイヤー
           bctx.fillStyle = "#ffffff";
           for (const o of others.values()) {
@@ -6633,6 +6992,12 @@ export default function WorldBoxClient() {
       label: guildShopOpen ? "ギルドショップを閉じる" : "ギルドショップ",
       show: spaceUi === "lobby",
       run: () => setGuildShopOpen((v) => !v),
+    },
+    {
+      id: "codex",
+      label: codexOpen ? "冒険手帳を閉じる" : "冒険手帳",
+      show: true,
+      run: () => setCodexOpen((v) => !v),
     },
     {
       id: "economy",
@@ -6850,7 +7215,9 @@ export default function WorldBoxClient() {
             )}
             <div style={{ borderTop: "1px solid rgba(255,255,255,0.18)", paddingTop: 6 }}>
               <div style={{ fontSize: 12, display: "flex", gap: 6 }}>
-                <span style={{ flex: 1 }}>{SEASON_NAMES[seasonOf(Date.now())]}</span>
+                <span style={{ flex: 1 }}>
+                  {SEASON_NAMES[seasonOf(Date.now())]} ・ {WEATHER_NAMES[weatherAt(Math.floor(Date.now() / 1000))]}
+                </span>
                 <span style={{ opacity: 0.75 }}>あと{seasonDaysLeft(Date.now())}日</span>
               </div>
             </div>
@@ -7196,6 +7563,44 @@ export default function WorldBoxClient() {
             </button>
           </div>
         )}
+        {tradeView && !tradePanelOpen && (tradeView.status === "pending" || tradeView.status === "open") && (
+          <div
+            style={{
+              position: "absolute",
+              top: partyUi.invite ? "calc(114px + env(safe-area-inset-top, 0px))" : "calc(64px + env(safe-area-inset-top, 0px))",
+              left: "50%", transform: "translateX(-50%)",
+              display: "flex", alignItems: "center", gap: 8, padding: "6px 10px",
+              borderRadius: 10, background: "rgba(10,12,24,0.9)", color: "#fff", fontSize: 13, zIndex: 5,
+            }}
+          >
+            {tradeView.status === "pending" && tradeView.selfSide === "b" ? (
+              <>
+                <span>{tradeView.partner.name} から取引</span>
+                <button
+                  type="button"
+                  style={btn}
+                  onClick={() => { void respondTradeInvite("accept", tradeView.id); }}
+                >
+                  開く
+                </button>
+                <button
+                  type="button"
+                  style={btn}
+                  onClick={() => { void respondTradeInvite("decline", tradeView.id); }}
+                >
+                  断る
+                </button>
+              </>
+            ) : (
+              <>
+                <span>取引中: {tradeView.partner.name}</span>
+                <button type="button" style={btn} onClick={() => setTradePanelOpen(true)}>
+                  開く
+                </button>
+              </>
+            )}
+          </div>
+        )}
         {spaceUi === "world" && nearDungeonEntrance && (
           <div
             style={{
@@ -7261,9 +7666,24 @@ export default function WorldBoxClient() {
             }}
           >
             <span aria-hidden style={{ color: "#ffd75e", fontSize: 15 }}>{roleById(playerCard.role).symbol}</span>
+            {playerCard.title && (
+              <span style={{ fontSize: 11, color: "#ffd75e", border: "1px solid rgba(255,215,94,0.45)", borderRadius: 6, padding: "1px 5px", whiteSpace: "nowrap" }}>
+                [{playerCard.title}]
+              </span>
+            )}
             <strong style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{playerCard.name}</strong>
             <span aria-hidden style={{ color: "#f2c53c", fontSize: 9, letterSpacing: 1 }}>{"●".repeat(playerCard.rank)}</span>
             <span style={{ fontSize: 12, opacity: 0.8 }}>{roleById(playerCard.role).name}</span>
+            <button
+              type="button"
+              style={btn}
+              onClick={() => {
+                void startTradeWith(playerCard.id);
+                setPlayerCard(null);
+              }}
+            >
+              取引
+            </button>
             {partyUi.isLeader && partyUi.party && (
               <button
                 type="button"
@@ -7382,6 +7802,24 @@ export default function WorldBoxClient() {
             {tileMsg}
           </div>
         )}
+        {gateConfigPrompt && !fortifyPanel && !containerPanel && !machinePanel && (
+          <button
+            type="button"
+            style={{
+              ...btn,
+              position: "absolute", left: "50%", bottom: "calc(92px + env(safe-area-inset-bottom, 0px))",
+              transform: "translateX(-50%)", zIndex: 4,
+              background: "rgba(16,20,18,0.88)", borderColor: "rgba(255,210,62,0.7)",
+            }}
+            onClick={() => {
+              const p = gateConfigPrompt;
+              setGateConfigPrompt(null);
+              setFortifyPanel(p);
+            }}
+          >
+            門設定
+          </button>
+        )}
       {storageOpen && invProfile && (
         <div className="wb-panel" style={{ ...panelOverlay, width: "min(330px, calc(100% - 20px))" }}>
           <div style={{ ...stickyPanelHead, display: "flex", alignItems: "center", gap: 8 }}>
@@ -7440,6 +7878,28 @@ export default function WorldBoxClient() {
               閉じる
             </button>
           </div>
+          {containerPanel.space === "world" && containerMine && (
+            <div style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 8, flexWrap: "wrap" }}>
+              <span style={{ fontSize: 12, opacity: 0.8 }}>公開範囲</span>
+              {ACCESS_SCOPES.map((scope) => (
+                <button
+                  key={scope}
+                  type="button"
+                  style={{
+                    ...btn,
+                    minHeight: 30,
+                    padding: "2px 10px",
+                    fontSize: 12,
+                    ...(containerAccess === scope ? { background: "rgba(255,210,62,0.22)", borderColor: "rgba(255,210,62,0.8)" } : {}),
+                  }}
+                  aria-pressed={containerAccess === scope}
+                  onClick={() => { void setContainerScope(scope); }}
+                >
+                  {accessScopeLabel(scope)}
+                </button>
+              ))}
+            </div>
+          )}
           <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 4, marginTop: 8 }}>
             {containerGridSlots.map((slot, i) => renderPanelSlot("container", i, slot))}
           </div>
@@ -7481,12 +7941,14 @@ export default function WorldBoxClient() {
 
       {stallPanel && (
         <div style={panelOverlay} className="wb-panel">
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <strong>屋台</strong>
-            <span style={{ flex: 1 }} />
-            <button type="button" style={btn} onClick={() => setStallPanel(null)}>
-              閉じる
-            </button>
+          <div style={stickyPanelHead}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <strong>屋台</strong>
+              <span style={{ flex: 1 }} />
+              <button type="button" style={btn} onClick={() => setStallPanel(null)}>
+                閉じる
+              </button>
+            </div>
           </div>
           {stallInfo === undefined ? (
             <div style={{ marginTop: 10, fontSize: 13 }}>…</div>
@@ -7569,12 +8031,14 @@ export default function WorldBoxClient() {
       )}
       {signEdit && (
         <div style={panelOverlay} className="wb-panel">
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <strong>看板</strong>
-            <span style={{ flex: 1 }} />
-            <button type="button" style={btn} onClick={() => setSignEdit(null)}>
-              閉じる
-            </button>
+          <div style={stickyPanelHead}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <strong>看板</strong>
+              <span style={{ flex: 1 }} />
+              <button type="button" style={btn} onClick={() => setSignEdit(null)}>
+                閉じる
+              </button>
+            </div>
           </div>
           <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
             <input
@@ -7601,12 +8065,14 @@ export default function WorldBoxClient() {
       )}
       {fortifyPanel && (
         <div style={panelOverlay} className="wb-panel">
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <strong>要塞化</strong>
-            <span style={{ flex: 1 }} />
-            <button type="button" style={btn} onClick={() => setFortifyPanel(null)}>
-              閉じる
-            </button>
+          <div style={stickyPanelHead}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <strong>要塞化</strong>
+              <span style={{ flex: 1 }} />
+              <button type="button" style={btn} onClick={() => setFortifyPanel(null)}>
+                閉じる
+              </button>
+            </div>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10, fontSize: 13 }}>
             <ItemIcon id={fortifyPanel.itemId} size={20} />
@@ -7624,7 +8090,7 @@ export default function WorldBoxClient() {
                   await postTileAction("fortify", p.x, p.y);
                   const ov = tilesRef.current[tileKey(p.x, p.y)];
                   if (ov?.block) {
-                    setFortifyPanel({ ...p, fort: ov.block.fort ?? 0 });
+                    setFortifyPanel({ ...p, fort: ov.block.fort ?? 0, gateAccess: ov.gateAccess ?? p.gateAccess });
                   }
                 })();
               }}
@@ -7634,6 +8100,38 @@ export default function WorldBoxClient() {
                 : `強化 +${FORTIFY_HP_STEP}（${FORTIFY_COST}コイン）`}
             </button>
           </div>
+          {isGateItem(fortifyPanel.itemId) && (
+            <div style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 10, flexWrap: "wrap" }}>
+              <span style={{ fontSize: 12, opacity: 0.8 }}>開閉権限</span>
+              {ACCESS_SCOPES.map((scope) => {
+                const active = (fortifyPanel.gateAccess ?? "public") === scope;
+                return (
+                  <button
+                    key={scope}
+                    type="button"
+                    style={{
+                      ...btn,
+                      minHeight: 30,
+                      padding: "2px 10px",
+                      fontSize: 12,
+                      ...(active ? { background: "rgba(255,210,62,0.22)", borderColor: "rgba(255,210,62,0.8)" } : {}),
+                    }}
+                    aria-pressed={active}
+                    onClick={() => {
+                      const p = fortifyPanel;
+                      void (async () => {
+                        await postTileAction("set_gate_access", p.x, p.y, undefined, undefined, undefined, scope);
+                        const ov = tilesRef.current[tileKey(p.x, p.y)];
+                        setFortifyPanel((cur) => (cur ? { ...cur, gateAccess: ov?.gateAccess ?? scope } : cur));
+                      })();
+                    }}
+                  >
+                    {accessScopeLabel(scope)}
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
       {seedPicker && invProfile && (
@@ -7725,6 +8223,11 @@ export default function WorldBoxClient() {
                 ポーター X {porterUi.x} / Y {porterUi.y}
               </button>
             )}
+            {invProfile?.respawn && (
+              <button type="button" style={btn} onClick={() => void teleportToHome()}>
+                自宅 X {Math.floor(invProfile.respawn.x)} / Y {Math.floor(invProfile.respawn.y)}
+              </button>
+            )}
             <span style={{ flex: 1 }} />
             <button type="button" style={btn} onClick={() => setMapView(false)}>
               閉じる
@@ -7736,9 +8239,10 @@ export default function WorldBoxClient() {
             height={BIGMAP_SIZE}
             aria-label="周辺マップ（大きく表示）"
             onClick={(e) => {
-              // ポーターのマーカー付近のタップでも移動できる
+              // ポーター・自宅マーカー付近のタップでも移動できる
               const porter = porterUi;
-              if (!porter) return;
+              const home = invProfile?.respawn;
+              if (!porter && !home) return;
               const rect = e.currentTarget.getBoundingClientRect();
               if (rect.width <= 0) return;
               const px = (e.clientX - rect.left) * (BIGMAP_SIZE / rect.width);
@@ -7746,8 +8250,12 @@ export default function WorldBoxClient() {
               const pos = playerPosRef.current;
               const wx = Math.floor(pos.x) - BIGMAP_TILES / 2 + px / BIGMAP_SCALE;
               const wy = Math.floor(pos.y) - BIGMAP_TILES / 2 + py / BIGMAP_SCALE;
-              if (Math.max(Math.abs(wx - (porter.x + 0.5)), Math.abs(wy - (porter.y + 0.5))) <= 3) {
+              if (porter && Math.max(Math.abs(wx - (porter.x + 0.5)), Math.abs(wy - (porter.y + 0.5))) <= 3) {
                 void teleportToPorter();
+                return;
+              }
+              if (home && Math.max(Math.abs(wx - home.x), Math.abs(wy - home.y)) <= 3) {
+                void teleportToHome();
               }
             }}
             style={{
@@ -7762,6 +8270,23 @@ export default function WorldBoxClient() {
       {/* パネルの開閉は左上の ≡ メニューに統合（ボタン行は置かない） */}
 
       {showEconomy && <WorldBoxEconomyPanel space={spaceUi} station={stationUi} genre={stationGenre} worldStationKinds={worldStationKinds} onClose={() => setShowEconomy(false)} />}
+      {codexOpen && (
+        <WorldBoxCodexPanel
+          profile={invProfile}
+          onProfileChange={setInvProfile}
+          onClose={() => setCodexOpen(false)}
+        />
+      )}
+      {tradePanelOpen && (
+        <WorldBoxTradePanel
+          initialTrade={tradeView}
+          profile={invProfile}
+          onTradeUpdate={setTradeView}
+          onProfileChange={setInvProfile}
+          onRefreshProfile={() => { void invRefreshRef.current(); }}
+          onClose={() => setTradePanelOpen(false)}
+        />
+      )}
       {telescopeOpen && (
         <div style={{ position: "absolute", inset: 0, pointerEvents: "none", zIndex: 6 }}>
           <div
@@ -7866,6 +8391,7 @@ export default function WorldBoxClient() {
         <WorldBoxMachinePanel
           x={machinePanel.x}
           y={machinePanel.y}
+          profile={invProfile}
           onProfileChange={(profile) => setInvProfile(profile)}
           onClose={() => setMachinePanel(null)}
         />

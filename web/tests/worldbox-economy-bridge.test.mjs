@@ -468,7 +468,7 @@ export function isPresenceEnabled() { return true; }
 export async function findPresenceOwnerKey(id) { return map.has(id) ? map.get(id) : null; }
 `);
 await import(presenceStubUrl); // ルートはもう presence-online を読まないため、状態だけ先に作る
-const profileSwapUrl = bundleModule(["worldbox/items.ts", "worldbox/profile.ts"], ["swapSlots", "moveSlot", "countItem", "removeItem", "ENHANCE_BASE_COST", "ENHANCE_MATERIALS", "ENHANCE_MAX_LEVEL"]);
+const profileSwapUrl = bundleModule(["worldbox/items.ts", "worldbox/profile.ts"], ["swapSlots", "moveSlot", "countItem", "removeItem", "ENHANCE_BASE_COST", "ENHANCE_MATERIALS", "ENHANCE_MAX_LEVEL", "bumpProfileStat"]);
 const rolesUrl = bundleModule(["worldbox/items.ts", "worldbox/profile.ts", "worldbox/roles.ts"], ["addMasteryXp"]);
 const shopsRealUrl = bundleModule(["worldbox/items.ts", "worldbox/shops.ts"], ["checkBuyGenre", "checkBuySold", "checkDailyStock", "dailyPriceFor", "shopDayKeyOf"]);
 // 日次ローテーションは日付依存なので、このブリッジテストでは中立化する
@@ -483,6 +483,11 @@ export function shopDayKeyOf() { return "test-day"; }
 `);
 const itemsOnlyUrl = bundleModule(["worldbox/items.ts"], ["itemById", "recipeById", "recipeKind"]);
 const tentStubUrl = dataUrl(`export const TENT_MAX_TIER = 2; export const TENT_TIERS = [{ w: 13, h: 10, price: 0 }, { w: 17, h: 13, price: 3000 }, { w: 22, h: 17, price: 10000 }];`);
+const achievementsUrl = dataUrl(transpile("worldbox/achievements.ts").replaceAll('"./profile"', JSON.stringify(profileSwapUrl)));
+const progressOnlineStubUrl = dataUrl(`
+export function dispatchProgressEffects() {}
+export async function notifyAchievementDiscord() {}
+`);
 
 const profileRoute = await import(
   dataUrl(
@@ -500,7 +505,9 @@ const profileRoute = await import(
       .replaceAll('"@/lib/worldbox/profile-online"', JSON.stringify(profileOnlineStubUrl))
       .replaceAll('"@/lib/worldbox/profile"', JSON.stringify(profileSwapUrl))
       .replaceAll('"@/lib/worldbox/user-lock"', JSON.stringify(userLockUrl))
-      .replaceAll('"@/lib/worldbox/roles"', JSON.stringify(rolesUrl)),
+      .replaceAll('"@/lib/worldbox/roles"', JSON.stringify(rolesUrl))
+      .replaceAll('"@/lib/worldbox/achievements"', JSON.stringify(achievementsUrl))
+      .replaceAll('"@/lib/worldbox/progress-online"', JSON.stringify(progressOnlineStubUrl)),
   ),
 );
 const URL_P = "http://localhost/api/worldbox/profile";

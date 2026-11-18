@@ -246,6 +246,11 @@ export class NextResponse {
   }
 }
 `);
+const achievementsUrl = dataUrl(transpile("worldbox/achievements.ts").replaceAll('"./profile"', JSON.stringify(profileUrl)));
+const progressOnlineStubUrl = dataUrl(`
+export function dispatchProgressEffects() {}
+export async function notifyAchievementDiscord() {}
+`);
 const profileRoute = await import(
   dataUrl(
     transpile("api/worldbox/profile/route.ts", rootDir + "/app")
@@ -262,7 +267,9 @@ const profileRoute = await import(
       .replaceAll('"@/lib/worldbox/shops"', JSON.stringify(shopsUrl))
       .replaceAll('"@/lib/worldbox/station-online"', JSON.stringify(stationOnlineUrl))
       .replaceAll('"@/lib/worldbox/profile-online"', JSON.stringify(profileOnlineUrl))
-      .replaceAll('"@/lib/worldbox/user-lock"', JSON.stringify(userLockUrl)),
+      .replaceAll('"@/lib/worldbox/user-lock"', JSON.stringify(userLockUrl))
+      .replaceAll('"@/lib/worldbox/achievements"', JSON.stringify(achievementsUrl))
+      .replaceAll('"@/lib/worldbox/progress-online"', JSON.stringify(progressOnlineStubUrl)),
   ),
 );
 const rolesRoute = await import(

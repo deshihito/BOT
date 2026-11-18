@@ -439,6 +439,8 @@ const warpRoute = await import(routeMod("api/worldbox/warp/route.ts", {
   "@/lib/auth": authUrl,
   "@/lib/worldbox/mapgen": mapgenUrl,
   "@/lib/worldbox/nations-online": nationsOnlineUrl,
+  "@/lib/worldbox/profile-online": profileOnlineUrl,
+  "@/lib/worldbox/user-lock": userLockUrl,
   "@/lib/worldbox/warp": warpUrl,
   "@/lib/worldbox/warp-online": warpOnlineUrl,
   "@/lib/worldbox/save": saveUrl,

@@ -6,13 +6,14 @@ import { listPresence } from "@/lib/worldbox/presence-online";
 import { presenceIdFor } from "@/lib/worldbox/presence";
 import { parseSave } from "@/lib/worldbox/save";
 import { loadWorldBoxSave } from "@/lib/worldbox/save-online";
-import { addItem, bestToolItem, wearTool } from "@/lib/worldbox/profile";
+import { addItem, bestToolItem, bumpProfileStat, wearTool } from "@/lib/worldbox/profile";
+import { dispatchProgressEffects } from "@/lib/worldbox/progress-online";
 import { playerAttack } from "@/lib/worldbox/arena";
 import { mobById } from "@/lib/worldbox/mobs";
 import { isNightPhase, phaseAtTime } from "@/lib/worldbox/daynight";
 import {
   applyMobAttack, mobDistance, mobExistsAt, mobKeyOf, resolveMobPosition, visibleMobs,
-  MOB_ATTACK_MAX_DISTANCE, type MobState,
+  rollBossAssistLoot, BOSS_ASSIST_MIN_SIZE, MOB_ATTACK_MAX_DISTANCE, type MobState,
 } from "@/lib/worldbox/combat";
 import { isMobsEnabled, loadMobState, loadMobStates, storeMobState } from "@/lib/worldbox/mobs-online";
 import {
@@ -28,6 +29,8 @@ import { loadPartyOf } from "@/lib/worldbox/party-online";
 import { DUNGEON_CLEAR_EARN } from "@/lib/worldbox/instances";
 import { buildEconomyOp } from "@/lib/worldbox/economy-bridge";
 import { enqueueEconomyOpOnce, isEconomyEnabled } from "@/lib/worldbox/economy-bridge-online";
+import { loadNationsState } from "@/lib/worldbox/nations-online";
+import { enqueueUnionDiscordEvent } from "@/lib/worldbox/chat-online";
 import { withUserLock } from "@/lib/worldbox/user-lock";
 
 export const runtime = "nodejs";
@@ -52,6 +55,7 @@ function sameOrigin(request: Request) {
 }
 
 function clampIntParam(raw: string | null, min: number, max: number, fallback: number): number {
+  if (raw !== null && raw.trim() === "") return fallback;
   const n = raw === null ? NaN : Number(raw);
   if (!Number.isFinite(n)) return fallback;
   return Math.max(min, Math.min(max, Math.floor(n)));
@@ -240,30 +244,32 @@ export async function POST(request: Request) {
     keyPrefix = `${dungeonSpace}#${partyKey}|`;
     dungeonCtx = { floor1, partyKey, session: ds, floor };
   }
-  if (caveSpace && instPost) {
-    // インスタンス内モブ: 配置は生成/個人状態が正。地表配置の検証は使わない。
-    if (instPost.kind === "ruins") {
-      const personal = await loadRuinsPersonal(caveSpace, ownerKey, weekKeyOf(now));
-      if (!personal.summons.some((m) => m.mobId === def.id && m.x === x && m.y === y)) {
-        return NextResponse.json({ error: "unknown_mob" }, { status: 400, headers: NO_STORE });
+  if (!dungeonSpace) {
+    if (caveSpace && instPost) {
+      // インスタンス内モブ: 配置は生成/個人状態が正。地表配置の検証は使わない。
+      if (instPost.kind === "ruins") {
+        const personal = await loadRuinsPersonal(caveSpace, ownerKey, weekKeyOf(now));
+        if (!personal.summons.some((m) => m.mobId === def.id && m.x === x && m.y === y)) {
+          return NextResponse.json({ error: "unknown_mob" }, { status: 400, headers: NO_STORE });
+        }
+      } else {
+        if (def.instanceOnly && def.instanceOnly !== "cave") {
+          return NextResponse.json({ error: "unknown_mob" }, { status: 400, headers: NO_STORE });
+        }
+        const cave = buildCaveLayer(MAP_SEED, instPost.entranceX, instPost.entranceY, instPost.layer);
+        if (!cave.mobs.some((m) => m.mobId === def.id && m.x === x && m.y === y)) {
+          return NextResponse.json({ error: "unknown_mob" }, { status: 400, headers: NO_STORE });
+        }
       }
+      keyPrefix = `${caveSpace}|`;
     } else {
-      if (def.instanceOnly && def.instanceOnly !== "cave") {
+      if (def.instanceOnly) {
         return NextResponse.json({ error: "unknown_mob" }, { status: 400, headers: NO_STORE });
       }
-      const cave = buildCaveLayer(MAP_SEED, instPost.entranceX, instPost.entranceY, instPost.layer);
-      if (!cave.mobs.some((m) => m.mobId === def.id && m.x === x && m.y === y)) {
+      const isNight = isNightPhase(phaseAtTime(now / 1000));
+      if (!mobExistsAt(MAP_SEED, def.id, x, y, isNight)) {
         return NextResponse.json({ error: "unknown_mob" }, { status: 400, headers: NO_STORE });
       }
-    }
-    keyPrefix = `${caveSpace}|`;
-  } else {
-    if (def.instanceOnly) {
-      return NextResponse.json({ error: "unknown_mob" }, { status: 400, headers: NO_STORE });
-    }
-    const isNight = isNightPhase(phaseAtTime(now / 1000));
-    if (!mobExistsAt(MAP_SEED, def.id, x, y, isNight)) {
-      return NextResponse.json({ error: "unknown_mob" }, { status: 400, headers: NO_STORE });
     }
   }
 
@@ -300,97 +306,175 @@ export async function POST(request: Request) {
   }
 
   const key = keyPrefix + mobKeyOf(placed);
+  const profile = await loadProfile(ownerKey);
+  const attackPower = playerAttack(profile.items, profile.enhance) * (profile.role === "blade" ? 1.25 : 1);
   // 同一個体への並行攻撃を直列化する（S4）: ロック無しだと二重タップで
   // 同じ個体を2回倒してドロップと熟練 XP を二重に得られる。
-  return withUserLock(`mob:${key}`, async () => {
-        const state = await loadMobState(key);
-        const profile = await loadProfile(ownerKey);
-        const attackPower = playerAttack(profile.items, profile.enhance) * (profile.role === "blade" ? 1.25 : 1);
-        const result = applyMobAttack(effDef, state, attackPower, now, Math.random, key);
-        if ("error" in result) {
-          return NextResponse.json({ error: result.error }, { status: 409, headers: NO_STORE });
-        }
-        if (!(await storeMobState(key, result.state))) {
-          return NextResponse.json({ error: "mobs_failed" }, { status: 500, headers: NO_STORE });
-        }
-        if (result.dead && dungeonCtx && instPost) {
-          // 番人はダンジョンの鍵を落とす
-          if (dungeonCtx.floor.keyHolder.mobId === def.id && dungeonCtx.floor.keyHolder.x === x && dungeonCtx.floor.keyHolder.y === y) {
-            result.gained.dungeon_key = (result.gained.dungeon_key ?? 0) + 1;
-          }
-          // フロアボス撃破で階段が開く。最終ボスはクリア処理（週1 earn を全員へ）
-          const isBossAnchor = dungeonCtx.floor.boss.mobId === def.id && dungeonCtx.floor.boss.x === x && dungeonCtx.floor.boss.y === y;
-          if (isBossAnchor) {
-            const floorNo = instPost.layer + 1;
-            const nextSession = {
-              ...dungeonCtx.session,
-              floorBossDead: { ...dungeonCtx.session.floorBossDead, [String(floorNo)]: true },
-              bossDead: dungeonCtx.session.bossDead || floorNo >= 4,
-            };
-            await storeDungeonSession(dungeonCtx.floor1, nextSession);
-            if (floorNo >= 4 && isEconomyEnabled()) {
-              const week = weekKeyOf(now);
-              for (const memberKey of nextSession.members) {
-                if (nextSession.departed.includes(memberKey) || nextSession.dead.includes(memberKey)) continue;
-                if (!memberKey.startsWith("discord:")) continue;
-                if ((await loadDungeonClearWeek(memberKey)) === week) continue;
-                // 週1回の報酬は決定的 ID で冪等化する（#953 の規則: 同時撃破でも二重に払わない）
-                const op = buildEconomyOp(
-                  { kind: "earn", userKey: memberKey, discordId: memberKey.slice("discord:".length), amount: DUNGEON_CLEAR_EARN, reason: "dungeon_clear" },
-                  `dungeon-clear-${week}-${memberKey.slice("discord:".length)}`,
-                  now,
-                );
-                if (op && (await enqueueEconomyOpOnce(op))) {
-                  await storeDungeonClearWeek(memberKey, week);
-                }
-              }
+  // 循環待ち（roles ルートは ownerKey→mob の順で取得する）を防ぐため、
+  // モブ状態のロック解放後にユーザー単位ロックを取ってプロフィールを更新する。
+  const mobOutcome = await withUserLock(`mob:${key}`, async () => {
+    const state = await loadMobState(key);
+    const result = applyMobAttack(effDef, state, attackPower, now, Math.random, key, ownerKey);
+    if ("error" in result) {
+      return NextResponse.json({ error: result.error }, { status: 409, headers: NO_STORE });
+    }
+    if (!(await storeMobState(key, result.state))) {
+      return NextResponse.json({ error: "mobs_failed" }, { status: 500, headers: NO_STORE });
+    }
+    let isDungeonFinalBoss = false;
+    if (result.dead && dungeonCtx && instPost) {
+      // 番人はダンジョンの鍵を落とす
+      if (dungeonCtx.floor.keyHolder.mobId === def.id && dungeonCtx.floor.keyHolder.x === x && dungeonCtx.floor.keyHolder.y === y) {
+        result.gained.dungeon_key = (result.gained.dungeon_key ?? 0) + 1;
+      }
+      // フロアボス撃破で階段が開く。最終ボスはクリア処理（週1 earn を全員へ）
+      const isBossAnchor = dungeonCtx.floor.boss.mobId === def.id && dungeonCtx.floor.boss.x === x && dungeonCtx.floor.boss.y === y;
+      if (isBossAnchor) {
+        const floorNo = instPost.layer + 1;
+        isDungeonFinalBoss = floorNo >= 4;
+        const latestDs = await loadDungeonSession(dungeonCtx.floor1, dungeonCtx.partyKey);
+        if (latestDs) dungeonCtx.session = latestDs;
+        const nextSession = {
+          ...dungeonCtx.session,
+          floorBossDead: { ...dungeonCtx.session.floorBossDead, [String(floorNo)]: true },
+          bossDead: dungeonCtx.session.bossDead || floorNo >= 4,
+        };
+        await storeDungeonSession(dungeonCtx.floor1, nextSession);
+        if (floorNo >= 4 && isEconomyEnabled()) {
+          const week = weekKeyOf(now);
+          for (const memberKey of nextSession.members) {
+            if (nextSession.departed.includes(memberKey) || nextSession.dead.includes(memberKey)) continue;
+            if (!memberKey.startsWith("discord:")) continue;
+            if ((await loadDungeonClearWeek(memberKey)) === week) continue;
+            // 週1回の報酬は決定的 ID で冪等化する（#953 の規則: 同時撃破でも二重に払わない）
+            const op = buildEconomyOp(
+              { kind: "earn", userKey: memberKey, discordId: memberKey.slice("discord:".length), amount: DUNGEON_CLEAR_EARN, reason: "dungeon_clear" },
+              `dungeon-clear-${week}-${memberKey.slice("discord:".length)}`,
+              now,
+            );
+            if (op && (await enqueueEconomyOpOnce(op))) {
+              await storeDungeonClearWeek(memberKey, week);
             }
           }
         }
-        if (result.dead && caveSpace && instPost?.kind === "ruins") {
-          // 倒した召喚モブは個人状態から消す（再出現しない）
-          const personal = await loadRuinsPersonal(caveSpace, ownerKey, weekKeyOf(now));
-          personal.summons = personal.summons.filter((m) => !(m.mobId === def.id && m.x === x && m.y === y));
-          await storeRuinsPersonal(caveSpace, ownerKey, personal);
+      }
+    }
+    if (result.dead && caveSpace && instPost?.kind === "ruins") {
+      // 倒した召喚モブは個人状態から消す（再出現しない）
+      const personal = await loadRuinsPersonal(caveSpace, ownerKey, weekKeyOf(now));
+      personal.summons = personal.summons.filter((m) => !(m.mobId === def.id && m.x === x && m.y === y));
+      await storeRuinsPersonal(caveSpace, ownerKey, personal);
+    }
+    return { result, isDungeonFinalBoss } as const;
+  });
+  if (mobOutcome instanceof NextResponse) return mobOutcome;
+  const { result, isDungeonFinalBoss } = mobOutcome;
+  let updatedProfile = null;
+  let beforeProfileForProgress = null;
+  let broke: string | null = null;
+  const profileErr = await withUserLock(ownerKey, async () => {
+    const profile = await loadProfile(ownerKey);
+    beforeProfileForProgress = profile;
+    let next = profile;
+    // 道具の耐久: 剣を持っていれば振るたびに最良の剣が摩耗する
+    // （素手の攻撃は摩耗なし）。従来は死亡時しかプロフィールを保存
+    // しなかったが、摩耗を積算するため剣がある場合は毎回保存する。
+    if (bestToolItem(profile, "sword")) {
+      const worn = wearTool(next, "sword");
+      next = worn.profile;
+      broke = worn.brokeItemId;
+    }
+    if (result.dead) {
+      if (Object.keys(result.gained).length > 0 || profile.role === "blade") {
+        for (const [itemId, count] of Object.entries(result.gained)) {
+          next = addItem(next, itemId, count);
         }
-        let updatedProfile = null;
-        let next = profile;
-        let broke: string | null = null;
-        // 道具の耐久: 剣を持っていれば振るたびに最良の剣が摩耗する
-        // （素手の攻撃は摩耗なし）。従来は死亡時しかプロフィールを保存
-        // しなかったが、摩耗を積算するため剣がある場合は毎回保存する。
-        if (bestToolItem(profile, "sword")) {
-          const worn = wearTool(next, "sword");
-          next = worn.profile;
-          broke = worn.brokeItemId;
-        }
-        if (result.dead && (Object.keys(result.gained).length > 0 || profile.role === "blade")) {
-          for (const [itemId, count] of Object.entries(result.gained)) {
+        if (profile.role === "blade") next = addMasteryXp(next, "blade", 3).profile;
+      }
+      next = bumpProfileStat(next, "kills", 1);
+      if (effDef.size >= BOSS_ASSIST_MIN_SIZE) next = bumpProfileStat(next, "bossKills", 1);
+      if (isDungeonFinalBoss) next = bumpProfileStat(next, "dungeons", 1);
+    }
+    if (next !== profile) {
+      if (!(await storeProfile(ownerKey, next))) {
+        return NextResponse.json({ error: "mobs_failed" }, { status: 500, headers: NO_STORE });
+      }
+      updatedProfile = next;
+    }
+    return null;
+  });
+  if (profileErr) return profileErr;
+  if (result.dead && beforeProfileForProgress && updatedProfile) {
+    dispatchProgressEffects({
+      ownerKey,
+      actorName: session.username?.trim() || "冒険者",
+      before: beforeProfileForProgress,
+      after: updatedProfile,
+      goalKind: "combat",
+      goalDelta: 1,
+      now,
+    });
+  }
+
+  // ボス共闘報酬: mob:${key} 解放後に各貢献者のユーザーロックを順に取って配布する
+  const assisters = result.dead ? (result.assisters ?? []) : [];
+  if (assisters.length > 0 && effDef.size >= BOSS_ASSIST_MIN_SIZE) {
+    for (const assisterKey of assisters) {
+      try {
+        await withUserLock(assisterKey, async () => {
+          const ap = await loadProfile(assisterKey);
+          const assistLoot = rollBossAssistLoot(effDef, Math.random);
+          let next = ap;
+          for (const [itemId, count] of Object.entries(assistLoot)) {
             next = addItem(next, itemId, count);
           }
-          if (profile.role === "blade") next = addMasteryXp(next, "blade", 3).profile;
+          if (ap.role === "blade") next = addMasteryXp(next, "blade", 3).profile;
+          if (next !== ap) await storeProfile(assisterKey, next);
+        });
+      } catch { /* 共闘者の保存失敗で討伐者の応答を止めない */ }
+    }
+  }
+
+  // Discord 連携先チャンネルへフィールドボス / ダンジョン最深部討伐を通知する（ベストエフォート）
+  const isFieldBossKill = result.dead && !caveSpace && !dungeonSpace && effDef.size >= BOSS_ASSIST_MIN_SIZE;
+  if (isFieldBossKill || isDungeonFinalBoss) {
+    const actorName = session.username?.trim() || "冒険者";
+    void loadNationsState()
+      .then((nations) => {
+        const guildId = nations.members?.[ownerKey]?.nationId;
+        if (!guildId) return;
+        if (isFieldBossKill) {
+          const coop = assisters.length > 0 ? `（共闘 ${assisters.length + 1}人）` : "";
+          return enqueueUnionDiscordEvent(
+            guildId,
+            "討伐速報",
+            `${actorName} が ${effDef.name}（座標 ${x}, ${y}）を討伐しました${coop}`,
+          );
         }
-        if (next !== profile) {
-          if (!(await storeProfile(ownerKey, next))) {
-            return NextResponse.json({ error: "mobs_failed" }, { status: 500, headers: NO_STORE });
-          }
-          updatedProfile = next;
-        }
-        return NextResponse.json(
-          {
-            ok: true,
-            key,
-            hp: result.hp,
-            maxHp: def.hp,
-            dead: result.dead,
-            // 復活時刻はサーバーの正を返す。クライアントが自時計で捏造すると
-            // 時計ズレで復活がずれる（S4）。dead でない場合は含めない。
-            ...(result.state.deadUntil !== undefined ? { deadUntil: result.state.deadUntil } : {}),
-            gained: result.gained,
-            ...(updatedProfile ? { profile: updatedProfile } : {}),
-            ...(broke ? { broke } : {}),
-          },
-          { headers: NO_STORE },
+        return enqueueUnionDiscordEvent(
+          guildId,
+          "ダンジョン制覇",
+          `${actorName} たちがダンジョン最深部（${effDef.name}）を踏破しました`,
         );
-  });
+      })
+      .catch(() => {});
+  }
+
+  return NextResponse.json(
+    {
+      ok: true,
+      key,
+      hp: result.hp,
+      maxHp: effDef.hp,
+      dead: result.dead,
+      // 復活時刻はサーバーの正を返す。クライアントが自時計で捏造すると
+      // 時計ズレで復活がずれる（S4）。dead でない場合は含めない。
+      ...(result.state.deadUntil !== undefined ? { deadUntil: result.state.deadUntil } : {}),
+      gained: result.gained,
+      ...(assisters.length > 0 ? { assistCount: assisters.length } : {}),
+      ...(updatedProfile ? { profile: updatedProfile } : {}),
+      ...(broke ? { broke } : {}),
+    },
+    { headers: NO_STORE },
+  );
 }

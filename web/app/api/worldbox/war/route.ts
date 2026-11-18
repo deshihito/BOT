@@ -16,6 +16,7 @@ import {
   isNationHiddenFrom, memberKeysOf, resolveMemberRole,
 } from "@/lib/worldbox/nation-settings";
 import { loadNationSettings, loadNationSettingsMap } from "@/lib/worldbox/nation-settings-online";
+import { enqueueUnionDiscordEvent } from "@/lib/worldbox/chat-online";
 
 export const runtime = "nodejs";
 
@@ -211,6 +212,18 @@ async function handlePost(
     );
     if (!result.ok) return err(result.error);
     if (!(await storeWarState(result.state))) return err("store_failed", 503);
+    void enqueueUnionDiscordEvent(
+      defender.guildId,
+      "戦争宣言",
+      `${attacker.name} から宣戦布告されました`,
+      `war-dec-def-${result.war.id}`,
+    );
+    void enqueueUnionDiscordEvent(
+      attacker.guildId,
+      "戦争宣言",
+      `${defender.name} へ宣戦布告しました`,
+      `war-dec-atk-${result.war.id}`,
+    );
     return NextResponse.json({ ok: true, war: warView(result.war) }, { headers: NO_STORE });
   }
 
@@ -235,6 +248,25 @@ async function handlePost(
       // settleDisbands が冪等に解散させる（回復経路）。
       const nationsNext = disbandNation(nationsState, war.defenderId);
       if (!(await storeNationsState(nationsNext))) return err("store_failed", 503);
+      void enqueueUnionDiscordEvent(
+        war.defenderId,
+        "国崩壊",
+        `${war.attackerName} によりマークが破壊されました`,
+        `war-end-def-${war.id}`,
+      );
+      void enqueueUnionDiscordEvent(
+        war.attackerId,
+        "戦争勝利",
+        `${war.defenderName} のマークを破壊しました`,
+        `war-end-atk-${war.id}`,
+      );
+    } else {
+      void enqueueUnionDiscordEvent(
+        war.defenderId,
+        "防衛警報",
+        `${war.attackerName} がマークを攻撃（残り ${result.war.markHp}/${result.war.markMax}）`,
+        `war-atk-${war.id}-${result.war.markHp}-${now}`,
+      );
     }
     return NextResponse.json(
       { ok: true, war: warView(result.war), destroyed: result.destroyed },

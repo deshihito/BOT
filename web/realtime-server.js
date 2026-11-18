@@ -69,27 +69,29 @@ function broadcast(space, exceptWs, obj) {
 // プレゼンス（ts 付きなら時刻基準）、無ければセーブ（ts 無しのため固定距離）。
 // 読み終わるまで受信ハートビートをためておき、未照合のまま通さない。
 
-/** プレゼンス値（JSON）→ { x, y, space, ts }。壊れていれば null。 */
+/** プレゼンス値（JSON）→ { x, y, space, ts, tpTs? }。壊れていれば null。 */
 function parsePresenceBaseline(raw) {
   if (typeof raw !== "string" || !raw) return null;
   try {
     const v = JSON.parse(raw);
     if (!v || typeof v.x !== "number" || typeof v.y !== "number" || typeof v.ts !== "number") return null;
     if (!Number.isFinite(v.x) || !Number.isFinite(v.y) || !Number.isFinite(v.ts)) return null;
-    return { x: v.x, y: v.y, space: typeof v.space === "string" ? v.space : "world", ts: v.ts };
+    const tpTs = typeof v.tpTs === "number" && Number.isFinite(v.tpTs) && v.tpTs > 0 ? v.tpTs : 0;
+    return { x: v.x, y: v.y, space: typeof v.space === "string" ? v.space : "world", ts: v.ts, ...(tpTs > 0 ? { tpTs } : {}) };
   } catch {
     return null;
   }
 }
 
-/** セーブ値（JSON）→ { x, y, space }（ts 無し）。壊れていれば null。 */
+/** セーブ値（JSON）→ { x, y, space, tpAt? }（ts 無し）。壊れていれば null。 */
 function parseSaveBaseline(raw) {
   if (typeof raw !== "string" || !raw) return null;
   try {
     const v = JSON.parse(raw);
     if (!v || typeof v.x !== "number" || typeof v.y !== "number") return null;
     if (!Number.isFinite(v.x) || !Number.isFinite(v.y)) return null;
-    return { x: v.x, y: v.y, space: typeof v.space === "string" ? v.space : "world" };
+    const tpAt = typeof v.tpAt === "number" && Number.isFinite(v.tpAt) && v.tpAt > 0 ? v.tpAt : 0;
+    return { x: v.x, y: v.y, space: typeof v.space === "string" ? v.space : "world", ...(tpAt > 0 ? { tpAt } : {}) };
   } catch {
     return null;
   }
@@ -99,33 +101,62 @@ function parseSaveBaseline(raw) {
 async function loadExternalBaseline(ownerKey) {
   if (!kvCfg || !ownerKey) return null;
   try {
-    const pres = parsePresenceBaseline(await botkv.kvGet(kvCfg, "worldbox_presence", ownerKey));
+    const [presRaw, saveRaw] = await Promise.all([
+      botkv.kvGet(kvCfg, "worldbox_presence", ownerKey),
+      botkv.kvGet(kvCfg, "worldbox_save", ownerKey),
+    ]);
+    const pres = parsePresenceBaseline(presRaw);
+    const save = parseSaveBaseline(saveRaw);
+    const presTp = pres?.tpTs ?? 0;
+    const presTs = pres?.ts ?? 0;
+    const saveTp = save?.tpAt ?? 0;
+    if (save && saveTp > presTp && saveTp >= presTs && Date.now() - saveTp < core.MOVEMENT_RESET_MS) {
+      return { x: save.x, y: save.y, space: save.space, ts: saveTp, tpAt: saveTp };
+    }
     if (pres) return pres;
-    return parseSaveBaseline(await botkv.kvGet(kvCfg, "worldbox_save", ownerKey));
+    return save;
+  } catch {
+    return null;
+  }
+}
+
+/** 却下発生時、直近でサーバー側テレポート（tpTs / tpAt）が起きていないか確認する。 */
+async function loadFreshTeleportBaseline(ownerKey, sinceTpTs, now) {
+  if (!kvCfg || !ownerKey) return null;
+  try {
+    const [presRaw, saveRaw] = await Promise.all([
+      botkv.kvGet(kvCfg, "worldbox_presence", ownerKey),
+      botkv.kvGet(kvCfg, "worldbox_save", ownerKey),
+    ]);
+    const pres = parsePresenceBaseline(presRaw);
+    const save = parseSaveBaseline(saveRaw);
+    const presTp = pres?.tpTs ?? 0;
+    const presTs = pres?.ts ?? 0;
+    const saveTp = save?.tpAt ?? 0;
+    const presValid = pres && presTp > sinceTpTs && now - presTp < core.MOVEMENT_RESET_MS;
+    const saveValid = save && saveTp > sinceTpTs && saveTp >= presTs && now - saveTp < core.MOVEMENT_RESET_MS;
+    if (saveValid && (!presValid || saveTp > presTp)) {
+      return { x: save.x, y: save.y, space: save.space, ts: saveTp, tpTs: saveTp };
+    }
+    if (presValid) {
+      return { x: pres.x, y: pres.y, space: pres.space, ts: pres.ts, tpTs: presTp };
+    }
+    return null;
   } catch {
     return null;
   }
 }
 
 if (wss) {
-  /** ハートビート1件の処理（中継・集約書き込み・配信）。却下された申告は
-   * 保存せず、送り主へ保管位置（jump）を返してそこへ戻させる。 */
-  const handleHeartbeat = (ws, info, msg, now) => {
-    const entry = core.acceptHeartbeat(room, info.pid, info.name, msg, now, info.baseline);
-    if (!entry) return;
-    if (entry.rejected) {
-      try {
-        ws.send(JSON.stringify({ t: "jump", x: entry.x, y: entry.y, space: entry.space }));
-      } catch { /* noop */ }
-      return;
-    }
+  const finishAccepted = (ws, info, entry, now) => {
     info.lastEntry = entry;
-    writePresenceKv(info, entry, false);
     const prevSpace = info.space;
-    info.space = entry.space;
     if (prevSpace && prevSpace !== entry.space) {
+      info.lastSpaceAt = now;
       broadcast(prevSpace, ws, { t: "bye", id: info.pid });
     }
+    writePresenceKv(info, entry, false);
+    info.space = entry.space;
     if (!info.joined) {
       info.joined = true;
       try {
@@ -135,9 +166,56 @@ if (wss) {
     broadcast(entry.space, ws, { t: "up", now, p: entry });
   };
 
+  /** ハートビート1件の処理（中継・集約書き込み・配信）。却下された申告は
+   * 保存せず、サーバーテレポートの有無を確認したうえで保管位置（jump）を返す。 */
+  const handleHeartbeat = (ws, info, msg, now) => {
+    const entry = core.acceptHeartbeat(room, info.pid, info.name, msg, now, info.baseline);
+    if (!entry) return;
+    if (entry.rejected) {
+      if (info.tpChecking) return;
+      if (kvCfg && info.ok && now - info.lastTpCheckAt >= 800) {
+        info.tpChecking = true;
+        info.lastTpCheckAt = now;
+        loadFreshTeleportBaseline(info.ok, Math.max(info.lastTpTs, info.lastSpaceAt), Date.now()).then((fresh) => {
+          info.tpChecking = false;
+          if (!clients.has(ws)) return;
+          if (fresh) {
+            info.lastTpTs = fresh.tpTs;
+            info.baseline = fresh;
+            core.setRoomBaseline(room, info.pid, info.name, fresh);
+            const retryNow = Math.max(now, Date.now());
+            const retry = core.acceptHeartbeat(room, info.pid, info.name, msg, retryNow, fresh);
+            if (retry && !retry.rejected) {
+              finishAccepted(ws, info, retry, retryNow);
+              return;
+            }
+          }
+          try {
+            const jx = fresh ? fresh.x : entry.x;
+            const jy = fresh ? fresh.y : entry.y;
+            const jspace = fresh ? fresh.space : entry.space;
+            ws.send(JSON.stringify({ t: "jump", x: jx, y: jy, space: jspace }));
+          } catch { /* noop */ }
+        }).catch(() => {
+          info.tpChecking = false;
+          if (!clients.has(ws)) return;
+          try {
+            ws.send(JSON.stringify({ t: "jump", x: entry.x, y: entry.y, space: entry.space }));
+          } catch { /* noop */ }
+        });
+        return;
+      }
+      try {
+        ws.send(JSON.stringify({ t: "jump", x: entry.x, y: entry.y, space: entry.space }));
+      } catch { /* noop */ }
+      return;
+    }
+    finishAccepted(ws, info, entry, now);
+  };
+
   wss.on("connection", (ws) => {
     const auth = ws._rtAuth;
-    const info = { pid: auth.pid, name: auth.name, ok: auth.ok ?? null, space: null, joined: false, lastMsgAt: 0, alive: true, lastEntry: null, baseline: undefined, pendingHbs: [] };
+    const info = { pid: auth.pid, name: auth.name, ok: auth.ok ?? null, space: null, joined: false, lastMsgAt: 0, alive: true, lastEntry: null, baseline: undefined, pendingHbs: [], lastTpTs: 0, lastSpaceAt: 0, lastTpCheckAt: 0, tpChecking: false };
     clients.set(ws, info);
     // タブ世代（同一アカウントの分身防止）: 旧世代の接続は受け付けず、
     // 世代交代時は旧世代の接続をすべて閉じる（閉じられた側は再接続しない）。
@@ -165,6 +243,7 @@ if (wss) {
         // 解決前に切断されていたら、ためた分は捨てる
         if (!clients.has(ws)) return;
         info.baseline = b;
+        info.lastTpTs = Math.max(b?.tpTs ?? 0, b?.tpAt ?? 0);
         const queued = info.pendingHbs.splice(0);
         for (const q of queued) handleHeartbeat(ws, info, q.msg, q.now);
       });
@@ -293,7 +372,7 @@ if (wss) {
   const writePresenceKv = (info, entry, force) => {
     if (!kvCfg || !info.ok) return;
     if (!core.planPresenceWrite(aggregator, info.pid, entry, Date.now(), force)) return;
-    botkv.kvSet(kvCfg, "worldbox_presence", info.ok, core.presenceKvValue(entry)).then(
+    botkv.kvSet(kvCfg, "worldbox_presence", info.ok, core.presenceKvValue(entry, info.lastTpTs)).then(
       () => {
         // 失敗が続いて集約を止めた後の復旧（書き込み自体は止めずに試し続け、
         // 成功が戻ったらクライアントへ再開を知らせる）
@@ -404,6 +483,16 @@ if (wss) {
           for (const pid of watchCore.economyTargetPids(prevValue, c.value)) pids.add(pid);
         }
         if (pids.size > 0) sendTo((info) => pids.has(info.pid), { t: "sync", kind: "economy" });
+      } else if (kind === "trade") {
+        // P2P 直接取引は当事者2人だけに通知する
+        const pids = new Set();
+        for (const c of changes) {
+          for (const pid of watchCore.tradeTargetPids(c.key, c.value)) pids.add(pid);
+          if (prev && prev.has(c.key)) {
+            for (const pid of watchCore.tradeTargetPids(c.key, prev.get(c.key))) pids.add(pid);
+          }
+        }
+        if (pids.size > 0) sendTo((info) => pids.has(info.pid), { t: "sync", kind: "trade" });
       }
     };
     watchCore.WATCH_PLAN.forEach((plan, idx) => {
@@ -431,7 +520,7 @@ if (wss) {
         setInterval(() => void run(), plan.intervalMs);
       }, 500 + idx * 300);
     });
-    console.log("[realtime] kv watch enabled (chat/party/requests/tiles/mobs/board/nations/instances/economy/objects/fishing/guildShop)");
+    console.log("[realtime] kv watch enabled (chat/party/requests/tiles/mobs/board/nations/instances/economy/objects/fishing/guildShop/trade)");
   } else {
     console.log("[realtime] kv watch disabled (bot api not configured)");
   }

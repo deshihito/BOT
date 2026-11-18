@@ -362,6 +362,9 @@ export class NextResponse {
   }
 }
 `);
+const apiChatOnlineStubUrl = dataUrl(`
+export async function enqueueUnionDiscordEvent() { return true; }
+`);
 const apiRequestsRoute = await import(
   dataUrl(
     transpile("api/worldbox/requests/route.ts", rootDir + "/app")
@@ -374,7 +377,9 @@ const apiRequestsRoute = await import(
       .replaceAll('"@/lib/worldbox/requests"', JSON.stringify(apiRequestsUrl))
       .replaceAll('"@/lib/worldbox/requests-online"', JSON.stringify(apiRequestsOnlineUrl))
       .replaceAll('"@/lib/worldbox/station-online"', JSON.stringify(apiStationOnlineUrl))
-      .replaceAll('"@/lib/worldbox/user-lock"', JSON.stringify(apiUserLockUrl)),
+      .replaceAll('"@/lib/worldbox/user-lock"', JSON.stringify(apiUserLockUrl))
+      .replaceAll('"@/lib/worldbox/items"', JSON.stringify(apiItemsUrl))
+      .replaceAll('"@/lib/worldbox/chat-online"', JSON.stringify(apiChatOnlineStubUrl)),
   ),
 );
 

@@ -59,6 +59,12 @@ class RecordFormatTest(unittest.TestCase):
         self.assertEqual(data["channelId"], CID)
         self.assertEqual(data["updatedAt"], NOW_MS)
 
+    def test_build_record_events_flag(self):
+        self.assertTrue(wl.parse_union_events(wl.build_union_settings_record("channel", CID, NOW_MS)))
+        muted = wl.build_union_settings_record("channel", CID, NOW_MS, events=False)
+        self.assertFalse(wl.parse_union_events(muted))
+        self.assertEqual(json.loads(muted)["events"], False)
+
     def test_build_record_global_and_none_have_null_channel(self):
         for mode in ("global", "none"):
             data = json.loads(wl.build_union_settings_record(mode, CID, NOW_MS))

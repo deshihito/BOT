@@ -6,11 +6,13 @@ import { isFishingEnabled, loadAllCaughtAt, loadCaughtAt, storeCaughtAt } from "
 import { lootForObjectAt } from "@/lib/worldbox/objects";
 import { listPresence } from "@/lib/worldbox/presence-online";
 import { presenceIdFor } from "@/lib/worldbox/presence";
-import { addItem } from "@/lib/worldbox/profile";
+import { addItem, bumpProfileStat } from "@/lib/worldbox/profile";
 import { loadProfile, storeProfile } from "@/lib/worldbox/profile-online";
+import { dispatchProgressEffects } from "@/lib/worldbox/progress-online";
 import { parseSave } from "@/lib/worldbox/save";
 import { loadWorldBoxSave } from "@/lib/worldbox/save-online";
 import { withUserLock } from "@/lib/worldbox/user-lock";
+import { rollRainFishingBonus, weatherAt } from "@/lib/worldbox/weather";
 
 export const runtime = "nodejs";
 
@@ -40,6 +42,7 @@ export async function GET(request: Request) {
   const q = new URL(request.url).searchParams;
   const nums = ["x0", "y0", "x1", "y1"].map((k) => {
     const v = q.get(k);
+    if (v !== null && v.trim() === "") return NaN;
     return v === null ? NaN : Math.floor(Number(v));
   });
   if (nums.some((n) => !Number.isFinite(n))) return err("invalid_rect", 400);
@@ -83,33 +86,63 @@ export async function POST(request: Request) {
   const ownerKey = sessionOwnerKey(session);
   if (!fishingSpotAt(MAP_SEED, x, y)) return err("no_spot", 404);
 
-  return withUserLock(ownerKey, async () => {
-    const profile = await loadProfile(ownerKey);
-    if ((profile.items["fishing_rod"] ?? 0) <= 0) return err("tool_required", 409);
-    // 隣接検証（プレゼンス → セーブ）
-    const selfId = presenceIdFor(ownerKey);
-    const now = Date.now();
-    const entries = await listPresence();
-    const entry = entries.find((e) => e.id === selfId && e.space === "world" && now - e.ts <= 15_000);
-    let pos: { x: number; y: number } | null = entry ? { x: entry.x, y: entry.y } : null;
-    if (!pos) {
-      const saved = parseSave(await loadWorldBoxSave(ownerKey));
-      if (saved && saved.space === "world") pos = { x: saved.x, y: saved.y };
-    }
-    if (!pos) return err("position_unknown", 409);
-    if (Math.max(Math.abs(Math.floor(pos.x) - x), Math.abs(Math.floor(pos.y) - y)) > MAX_ACTION_DISTANCE) {
-      return err("too_far", 409);
-    }
-    const caughtAt = await loadCaughtAt(x, y);
-    if (!fishingReady(caughtAt, now)) return err("not_respawned", 409);
-    const loot = lootForObjectAt(MAP_SEED, "fishing_spot", x, y, fishingNonce(caughtAt, now));
-    if (!loot) return err("no_spot", 404);
-    let next = profile;
-    for (const [itemId, count] of Object.entries(loot.gained)) {
-      next = addItem(next, itemId, count);
-    }
-    if (!(await storeProfile(ownerKey, next))) return err("store_failed", 503);
-    await storeCaughtAt(x, y, now);
-    return NextResponse.json({ ok: true, gained: loot.gained, profile: next }, { headers: NO_STORE });
-  });
+  return withUserLock(`fishing:${x},${y}`, () =>
+    withUserLock(ownerKey, async () => {
+      const profile = await loadProfile(ownerKey);
+      if ((profile.items["fishing_rod"] ?? 0) <= 0) return err("tool_required", 409);
+      // 隣接検証（プレゼンス → セーブ）
+      const selfId = presenceIdFor(ownerKey);
+      const now = Date.now();
+      const entries = await listPresence();
+      const entry = entries.find((e) => e.id === selfId && e.space === "world" && now - e.ts <= 15_000);
+      let pos: { x: number; y: number } | null = entry ? { x: entry.x, y: entry.y } : null;
+      if (!pos) {
+        const saved = parseSave(await loadWorldBoxSave(ownerKey));
+        if (saved && saved.space === "world") pos = { x: saved.x, y: saved.y };
+      }
+      if (!pos) return err("position_unknown", 409);
+      if (Math.max(Math.abs(Math.floor(pos.x) - x), Math.abs(Math.floor(pos.y) - y)) > MAX_ACTION_DISTANCE) {
+        return err("too_far", 409);
+      }
+      const caughtAt = await loadCaughtAt(x, y);
+      if (!fishingReady(caughtAt, now)) return err("not_respawned", 409);
+      const loot = lootForObjectAt(MAP_SEED, "fishing_spot", x, y, fishingNonce(caughtAt, now));
+      if (!loot) return err("no_spot", 404);
+      const weather = weatherAt(Math.floor(now / 1000));
+      const bonus = rollRainFishingBonus(weather);
+      const gained: Record<string, number> = { ...loot.gained };
+      for (const [itemId, count] of Object.entries(bonus)) {
+        gained[itemId] = (gained[itemId] ?? 0) + count;
+      }
+      let next = profile;
+      for (const [itemId, count] of Object.entries(gained)) {
+        next = addItem(next, itemId, count);
+      }
+      next = bumpProfileStat(next, "fishes", 1);
+      if (!(await storeProfile(ownerKey, next))) return err("store_failed", 503);
+      if (!(await storeCaughtAt(x, y, now))) {
+        await storeProfile(ownerKey, profile);
+        return err("store_failed", 503);
+      }
+      dispatchProgressEffects({
+        ownerKey,
+        actorName: session.username?.trim() || "冒険者",
+        before: profile,
+        after: next,
+        goalKind: "gather",
+        goalDelta: 1,
+        now,
+      });
+      return NextResponse.json(
+        {
+          ok: true,
+          gained,
+          profile: next,
+          weather,
+          ...(Object.keys(bonus).length > 0 ? { rainBonus: true } : {}),
+        },
+        { headers: NO_STORE },
+      );
+    }),
+  );
 }
