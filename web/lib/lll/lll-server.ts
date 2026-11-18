@@ -13,24 +13,38 @@ import { createHash, randomBytes } from "node:crypto";
 import { isBotApiConfigured, kvGet, tableSelect, tableUpsert } from "../bot-api";
 import { logfareApiKeys } from "../one-prompter/one-prompter-server";
 import {
+  ACHIEVEMENTS,
   COLLECTION_CAP,
+  DAILY_MISSIONS,
   DUPLICATE_SHARDS,
   LADDER_TIERS,
+  LOGIN_BONUS_REWARDS,
   MAX_LEVEL,
+  MAX_LIMIT_BREAK,
+  RIVAL_GHOST_PRESETS,
   STARTER_CARDS,
+  abyssEnemyDeck,
+  abyssRewards,
   appraiseDeterministic,
+  awakenCost,
+  cardPowerScore,
+  dismantleShards,
   fallbackWords,
   ladderDeck,
   levelUpCost,
+  limitBreakCost,
+  nextTier,
   validateAiWords,
   type AiWords,
   type ImageFeatures,
   type LllCard,
   type LllTier,
+  type RewardBundle,
 } from "./lll-game";
 import {
   applyAction,
   applyTacticPlay,
+  autoPlayerTurn,
   createBattle,
   type BattleState,
   type PlayerAction,
@@ -50,25 +64,49 @@ export class LllError extends Error {
   }
 }
 
+export type DailyProgress = {
+  scout: number;
+  wins: number;
+  tactics: number;
+  weakHits: number;
+};
+
 export type LllProfile = {
   token: string;
   cards: LllCard[];
   teamIds: string[];
   shards: number;
   lumen: number;
+  tickets: number;
   clearedTiers: number[];
   wins: number;
   losses: number;
   draws: number;
   createdAt: number;
-  /** 高密度化: 選択中の戦術プリセットデッキID（lll-tactics の TACTIC_DECKS のキー）。 */
+  /** 高密度化: 選択中の戦術プリセットデッキID（"custom" なら customTacticDeck を使用）。 */
   tacticDeckId: string;
+  customTacticDeck: Record<string, number> | null;
+  playerName: string;
+  favoriteCardId: string | null;
+  lockedCardIds: string[];
+  loginStreak: number;
+  lastLoginDate: string | null;
+  dailyDate: string;
+  dailyProgress: DailyProgress;
+  dailyClaimed: string[];
+  achievementsClaimed: string[];
+  abyssBestFloor: number;
+  pvpRating: number;
 };
 
 type LllBattleRecord = {
   battleId: string;
   token: string;
   tierIndex: number;
+  mode: "ladder" | "abyss" | "pvp";
+  floor?: number;
+  rivalId?: string;
+  rivalRating?: number;
   state: BattleState;
   rewarded: boolean;
   createdAt: number;
@@ -127,6 +165,10 @@ function randomSeed(): number {
   return randomBytes(4).readUInt32LE(0);
 }
 
+function jstDateString(offsetDays = 0): string {
+  return new Date(Date.now() + 9 * 3600_000 + offsetDays * 86_400_000).toISOString().slice(0, 10);
+}
+
 function isProfile(value: unknown): value is LllProfile {
   if (!value || typeof value !== "object") return false;
   const p = value as Partial<LllProfile>;
@@ -135,21 +177,65 @@ function isProfile(value: unknown): value is LllProfile {
 
 /** kv から読んだ旧形式プロフィールに不足フィールドの既定値を補う。 */
 function normalizeProfile(value: LllProfile): LllProfile {
+  const today = jstDateString();
+  const dp = (value as Partial<LllProfile>).dailyProgress;
+  const customDeck = (value as Partial<LllProfile>).customTacticDeck;
+  const validTactic =
+    typeof value.tacticDeckId === "string" &&
+    (value.tacticDeckId in TACTIC_DECKS || (value.tacticDeckId === "custom" && customDeck != null))
+      ? value.tacticDeckId
+      : "chain";
   return {
     token: value.token,
     cards: Array.isArray(value.cards) ? value.cards : [],
     teamIds: Array.isArray(value.teamIds) ? value.teamIds : [],
     shards: typeof value.shards === "number" ? value.shards : 0,
     lumen: typeof value.lumen === "number" ? value.lumen : 0,
+    tickets: typeof (value as Partial<LllProfile>).tickets === "number" ? (value as Partial<LllProfile>).tickets! : 3,
     clearedTiers: Array.isArray(value.clearedTiers) ? value.clearedTiers : [],
     wins: typeof value.wins === "number" ? value.wins : 0,
     losses: typeof value.losses === "number" ? value.losses : 0,
     draws: typeof value.draws === "number" ? value.draws : 0,
     createdAt: typeof value.createdAt === "number" ? value.createdAt : Date.now(),
-    tacticDeckId:
-      typeof value.tacticDeckId === "string" && value.tacticDeckId in TACTIC_DECKS
-        ? value.tacticDeckId
-        : "chain",
+    tacticDeckId: validTactic,
+    customTacticDeck: customDeck && typeof customDeck === "object" ? customDeck : null,
+    playerName:
+      typeof (value as Partial<LllProfile>).playerName === "string" && (value as Partial<LllProfile>).playerName!.trim()
+        ? (value as Partial<LllProfile>).playerName!.trim().slice(0, 16)
+        : "調律者",
+    favoriteCardId:
+      typeof (value as Partial<LllProfile>).favoriteCardId === "string"
+        ? (value as Partial<LllProfile>).favoriteCardId!
+        : null,
+    lockedCardIds: Array.isArray((value as Partial<LllProfile>).lockedCardIds)
+      ? (value as Partial<LllProfile>).lockedCardIds!
+      : [],
+    loginStreak:
+      typeof (value as Partial<LllProfile>).loginStreak === "number" ? (value as Partial<LllProfile>).loginStreak! : 0,
+    lastLoginDate:
+      typeof (value as Partial<LllProfile>).lastLoginDate === "string"
+        ? (value as Partial<LllProfile>).lastLoginDate!
+        : null,
+    dailyDate:
+      typeof (value as Partial<LllProfile>).dailyDate === "string" ? (value as Partial<LllProfile>).dailyDate! : today,
+    dailyProgress: {
+      scout: typeof dp?.scout === "number" ? dp.scout : 0,
+      wins: typeof dp?.wins === "number" ? dp.wins : 0,
+      tactics: typeof dp?.tactics === "number" ? dp.tactics : 0,
+      weakHits: typeof dp?.weakHits === "number" ? dp.weakHits : 0,
+    },
+    dailyClaimed: Array.isArray((value as Partial<LllProfile>).dailyClaimed)
+      ? (value as Partial<LllProfile>).dailyClaimed!
+      : [],
+    achievementsClaimed: Array.isArray((value as Partial<LllProfile>).achievementsClaimed)
+      ? (value as Partial<LllProfile>).achievementsClaimed!
+      : [],
+    abyssBestFloor:
+      typeof (value as Partial<LllProfile>).abyssBestFloor === "number"
+        ? (value as Partial<LllProfile>).abyssBestFloor!
+        : 0,
+    pvpRating:
+      typeof (value as Partial<LllProfile>).pvpRating === "number" ? (value as Partial<LllProfile>).pvpRating! : 1000,
   };
 }
 
@@ -237,6 +323,10 @@ async function loadBattle(battleId: string): Promise<LllBattleRecord | null> {
           battleId: stored.battleId,
           token: stored.token,
           tierIndex: typeof stored.tierIndex === "number" ? stored.tierIndex : 0,
+          mode: stored.mode === "abyss" || stored.mode === "pvp" ? stored.mode : "ladder",
+          floor: typeof stored.floor === "number" ? stored.floor : undefined,
+          rivalId: typeof stored.rivalId === "string" ? stored.rivalId : undefined,
+          rivalRating: typeof stored.rivalRating === "number" ? stored.rivalRating : undefined,
           state: stored.state,
           rewarded: stored.rewarded === true,
           createdAt: typeof stored.createdAt === "number" ? stored.createdAt : Date.now(),
@@ -265,34 +355,79 @@ async function requireBattle(token: string, battleId: string): Promise<LllBattle
   return record;
 }
 
+function grantRewards(profile: LllProfile, reward: RewardBundle): void {
+  profile.shards += reward.shards;
+  profile.lumen += reward.lumen;
+  profile.tickets += reward.tickets;
+}
+
+function syncDailyAndLogin(profile: LllProfile): { day: number; reward: RewardBundle } | null {
+  const today = jstDateString();
+  if (profile.dailyDate !== today) {
+    profile.dailyDate = today;
+    profile.dailyProgress = { scout: 0, wins: 0, tactics: 0, weakHits: 0 };
+    profile.dailyClaimed = [];
+  }
+  if (profile.lastLoginDate !== today) {
+    const yesterday = jstDateString(-1);
+    const nextStreak =
+      profile.lastLoginDate === yesterday ? ((profile.loginStreak || 0) % LOGIN_BONUS_REWARDS.length) + 1 : 1;
+    profile.loginStreak = nextStreak;
+    profile.lastLoginDate = today;
+    const reward = LOGIN_BONUS_REWARDS[(nextStreak - 1) % LOGIN_BONUS_REWARDS.length];
+    grantRewards(profile, reward);
+    return { day: nextStreak, reward };
+  }
+  return null;
+}
+
 // --- プロフィール ---
 
 export async function getOrCreateProfile(
   token?: string | null,
-): Promise<{ token: string; profile: LllProfile }> {
+): Promise<{ token: string; profile: LllProfile; loginBonus: { day: number; reward: RewardBundle } | null }> {
   return serialize(async () => {
     if (typeof token === "string" && token.length >= 16 && token.length <= 64) {
       const existing = await loadProfile(token);
-      if (existing) return { token: existing.token, profile: existing };
+      if (existing) {
+        const loginBonus = syncDailyAndLogin(existing);
+        if (loginBonus) await persistProfile(existing);
+        return { token: existing.token, profile: existing, loginBonus };
+      }
     }
     const newToken = newPlayerToken();
     const cards = deepClone(STARTER_CARDS) as LllCard[];
+    const today = jstDateString();
     const profile: LllProfile = {
       token: newToken,
       cards,
       teamIds: cards.map((card) => card.id),
       shards: 0,
       lumen: 0,
+      tickets: 3,
       clearedTiers: [],
       wins: 0,
       losses: 0,
       draws: 0,
       createdAt: Date.now(),
       tacticDeckId: "chain",
+      customTacticDeck: null,
+      playerName: "調律者",
+      favoriteCardId: cards[0]?.id ?? null,
+      lockedCardIds: [],
+      loginStreak: 0,
+      lastLoginDate: null,
+      dailyDate: today,
+      dailyProgress: { scout: 0, wins: 0, tactics: 0, weakHits: 0 },
+      dailyClaimed: [],
+      achievementsClaimed: [],
+      abyssBestFloor: 0,
+      pvpRating: 1000,
     };
+    const loginBonus = syncDailyAndLogin(profile);
     profiles.set(newToken, profile);
     await persistProfile(profile);
-    return { token: newToken, profile };
+    return { token: newToken, profile, loginBonus };
   });
 }
 
@@ -477,6 +612,7 @@ export type AppraiseResult = {
   card: LllCard | null;
   duplicated: boolean;
   shardsGained: number;
+  limitBroken?: boolean;
   aiUsed: boolean;
 };
 
@@ -491,14 +627,20 @@ export async function appraise(
     const imageBytes = Buffer.from(payloadBase64, "base64");
     if (imageBytes.length === 0) throw new LllError(400, "画像データを読み取れませんでした。");
     const imageSha = createHash("sha256").update(imageBytes).digest("hex");
+    profile.dailyProgress.scout += 1;
 
-    // 同一画像の再スカウトはカードを増やさず欠片に変換する（既存カードのティア基準）
+    // 同一画像の再スカウトはカードを増やさず欠片＋自動限界突破に変換する
     const existing = profile.cards.find((card) => card.imageHash === imageSha);
     if (existing) {
       const shardsGained = duplicateShardsFor(existing.tier);
       profile.shards += shardsGained;
+      let limitBroken = false;
+      if ((existing.limitBreak ?? 0) < MAX_LIMIT_BREAK) {
+        existing.limitBreak = (existing.limitBreak ?? 0) + 1;
+        limitBroken = true;
+      }
       await persistProfile(profile);
-      return { profile, card: null, duplicated: true, shardsGained, aiUsed: false };
+      return { profile, card: null, duplicated: true, shardsGained, limitBroken, aiUsed: false };
     }
     if (profile.cards.length >= COLLECTION_CAP) {
       throw new LllError(400, "バインダーがいっぱいです");
@@ -521,7 +663,63 @@ export async function appraise(
   });
 }
 
-// --- チーム編成・強化 ---
+const SUMMON_GLYPHS: Record<LllCard["element"], string[]> = {
+  fire: ["炎", "焔", "龍"],
+  water: ["星", "雫", "蒼"],
+  wind: ["嵐", "翠", "羽"],
+  earth: ["岩", "翠", "盾"],
+  light: ["光", "剣", "聖"],
+  dark: ["月", "影", "冠"],
+};
+
+/** スカウト券を1枚消費してエリート以上確定の英霊を召喚する（画像不要ガチャ）。 */
+export async function ticketSummon(token: string): Promise<AppraiseResult> {
+  return serialize(async () => {
+    const profile = await requireProfile(token);
+    if (profile.tickets < 1) throw new LllError(400, "スカウト券が足りません。");
+    if (profile.cards.length >= COLLECTION_CAP) {
+      throw new LllError(400, "バインダーがいっぱいです");
+    }
+    profile.tickets -= 1;
+    profile.dailyProgress.scout += 1;
+
+    const raw = randomBytes(16);
+    const seedHex = raw.toString("hex");
+    const u = (idx: number) => raw[idx] / 255;
+    const isLegend = raw[0] < 52; // 約20%でレジェンド、残り80%エリート
+    const features: ImageFeatures = {
+      hue: Math.round((raw[1] / 255) * 360),
+      saturation: isLegend ? 0.85 + u(2) * 0.14 : 0.65 + u(2) * 0.3,
+      brightness: 0.35 + u(3) * 0.45,
+      colorVariance: isLegend ? 0.5 + u(4) * 0.45 : 0.35 + u(4) * 0.5,
+      edgeComplexity: isLegend ? 0.65 + u(5) * 0.3 : 0.45 + u(5) * 0.45,
+      warmth: u(6),
+      coolness: 1 - u(6),
+      pixelHash: seedHex.slice(0, 8),
+    };
+    const words = fallbackWords(features, seedHex);
+    const card = appraiseDeterministic(features, seedHex, words, Date.now());
+    card.id = `summon_${seedHex.slice(0, 14)}`;
+    card.tier = isLegend ? "legend" : "elite";
+    // エリート以上確定の最低保証を担保
+    const minTotal = isLegend ? 410 : 350;
+    const currentTotal = card.stats.hp + card.stats.atk + card.stats.def + card.stats.spd;
+    if (currentTotal < minTotal) {
+      const bonus = Math.ceil((minTotal - currentTotal) / 4);
+      card.stats.hp += bonus;
+      card.stats.atk += bonus;
+      card.stats.def += bonus;
+      card.stats.spd += bonus;
+    }
+    const glyphs = SUMMON_GLYPHS[card.element];
+    card.glyph = glyphs[raw[7] % glyphs.length];
+    profile.cards.push(card);
+    await persistProfile(profile);
+    return { profile, card, duplicated: false, shardsGained: 0, aiUsed: false };
+  });
+}
+
+// --- チーム編成・強化・コレクション管理 ---
 
 export async function setTeam(token: string, teamIds: string[]): Promise<LllProfile> {
   return serialize(async () => {
@@ -558,6 +756,154 @@ export async function growCard(
   });
 }
 
+export async function limitBreakCard(
+  token: string,
+  cardId: string,
+): Promise<{ profile: LllProfile; card: LllCard }> {
+  return serialize(async () => {
+    const profile = await requireProfile(token);
+    const card = profile.cards.find((c) => c.id === cardId);
+    if (!card) throw new LllError(404, "カードが見つかりません。");
+    const currentLb = card.limitBreak ?? 0;
+    if (currentLb >= MAX_LIMIT_BREAK) throw new LllError(400, "限界突破は最大です。");
+    const cost = limitBreakCost(currentLb);
+    if (profile.shards < cost) throw new LllError(400, "欠片が足りません。");
+    profile.shards -= cost;
+    card.limitBreak = currentLb + 1;
+    await persistProfile(profile);
+    return { profile, card };
+  });
+}
+
+export async function awakenCard(
+  token: string,
+  cardId: string,
+): Promise<{ profile: LllProfile; card: LllCard }> {
+  return serialize(async () => {
+    const profile = await requireProfile(token);
+    const card = profile.cards.find((c) => c.id === cardId);
+    if (!card) throw new LllError(404, "カードが見つかりません。");
+    const next = nextTier(card.tier);
+    const cost = awakenCost(card.tier);
+    if (!next || !cost) throw new LllError(400, "これ以上覚醒できません。");
+    if (profile.shards < cost.shards) throw new LllError(400, "欠片が足りません。");
+    if (profile.lumen < cost.lumen) throw new LllError(400, "ルーメンが足りません。");
+    profile.shards -= cost.shards;
+    profile.lumen -= cost.lumen;
+    card.tier = next;
+    card.awakened = true;
+    // 覚醒ボーナスで基礎ステータスを底上げ（総量500上限内）
+    const total = card.stats.hp + card.stats.atk + card.stats.def + card.stats.spd;
+    const room = Math.max(0, 500 - total);
+    const addEach = Math.min(14, Math.floor(room / 4));
+    card.stats.hp += addEach;
+    card.stats.atk += addEach;
+    card.stats.def += addEach;
+    card.stats.spd += addEach;
+    await persistProfile(profile);
+    return { profile, card };
+  });
+}
+
+export async function dismantleCards(
+  token: string,
+  cardIds: string[],
+): Promise<{ profile: LllProfile; shardsGained: number; removedIds: string[] }> {
+  return serialize(async () => {
+    const profile = await requireProfile(token);
+    const uniqueIds = [...new Set(cardIds)];
+    if (uniqueIds.length === 0) throw new LllError(400, "分解するカードを選択してください。");
+    const lockedSet = new Set(profile.lockedCardIds);
+    const teamSet = new Set(profile.teamIds);
+    const toRemove: LllCard[] = [];
+    for (const id of uniqueIds) {
+      const card = profile.cards.find((c) => c.id === id);
+      if (!card) throw new LllError(404, "分解対象のカードが見つかりません。");
+      if (teamSet.has(id)) throw new LllError(400, "チーム編成中のカードは分解できません。");
+      if (lockedSet.has(id)) throw new LllError(400, "保護中のカードは分解できません。");
+      toRemove.push(card);
+    }
+    if (profile.cards.length - toRemove.length < 3) {
+      throw new LllError(400, "手持ちが3枚未満になるため分解できません。");
+    }
+    let shardsGained = 0;
+    const removeSet = new Set(uniqueIds);
+    for (const card of toRemove) shardsGained += dismantleShards(card);
+    profile.cards = profile.cards.filter((c) => !removeSet.has(c.id));
+    if (profile.favoriteCardId && removeSet.has(profile.favoriteCardId)) {
+      profile.favoriteCardId = profile.teamIds[0] ?? profile.cards[0]?.id ?? null;
+    }
+    profile.shards += shardsGained;
+    await persistProfile(profile);
+    return { profile, shardsGained, removedIds: uniqueIds };
+  });
+}
+
+export async function toggleLockCard(
+  token: string,
+  cardId: string,
+): Promise<{ profile: LllProfile; locked: boolean }> {
+  return serialize(async () => {
+    const profile = await requireProfile(token);
+    if (!profile.cards.some((c) => c.id === cardId)) throw new LllError(404, "カードが見つかりません。");
+    const exists = profile.lockedCardIds.includes(cardId);
+    profile.lockedCardIds = exists
+      ? profile.lockedCardIds.filter((id) => id !== cardId)
+      : [...profile.lockedCardIds, cardId];
+    await persistProfile(profile);
+    return { profile, locked: !exists };
+  });
+}
+
+export async function setFavoriteCard(token: string, cardId: string): Promise<LllProfile> {
+  return serialize(async () => {
+    const profile = await requireProfile(token);
+    if (!profile.cards.some((c) => c.id === cardId)) throw new LllError(404, "カードが見つかりません。");
+    profile.favoriteCardId = cardId;
+    await persistProfile(profile);
+    return profile;
+  });
+}
+
+export async function setPlayerName(token: string, name: string): Promise<LllProfile> {
+  return serialize(async () => {
+    const profile = await requireProfile(token);
+    const cleaned = name.trim().slice(0, 16);
+    if (!cleaned) throw new LllError(400, "プレイヤー名を入力してください。");
+    profile.playerName = cleaned;
+    await persistProfile(profile);
+    return profile;
+  });
+}
+
+export async function setCustomTacticDeck(
+  token: string,
+  counts: Record<string, number>,
+): Promise<LllProfile> {
+  return serialize(async () => {
+    const profile = await requireProfile(token);
+    let total = 0;
+    const normalized: Record<string, number> = {};
+    for (const [cardId, rawCount] of Object.entries(counts)) {
+      if (!TACTIC_CARD_BY_ID.has(cardId)) {
+        throw new LllError(400, `不明な戦術カードIDです: ${cardId}`);
+      }
+      if (!Number.isInteger(rawCount) || rawCount < 0 || rawCount > 3) {
+        throw new LllError(400, "同名カードは0〜3枚にしてください。");
+      }
+      if (rawCount > 0) {
+        normalized[cardId] = rawCount;
+        total += rawCount;
+      }
+    }
+    if (total !== 30) throw new LllError(400, `戦術デッキはちょうど30枚にしてください（現在 ${total} 枚）。`);
+    profile.customTacticDeck = normalized;
+    profile.tacticDeckId = "custom";
+    await persistProfile(profile);
+    return profile;
+  });
+}
+
 export async function exchangeLumen(
   token: string,
 ): Promise<{ profile: LllProfile; shardsGained: number; lumenSpent: number }> {
@@ -571,7 +917,72 @@ export async function exchangeLumen(
   });
 }
 
-// --- バトル（アリーナ） ---
+// --- ミッション / 実績 ---
+
+function isAchievementEligible(profile: LllProfile, id: string): boolean {
+  switch (id) {
+    case "ach_cards_5":
+      return profile.cards.length >= 5;
+    case "ach_cards_12":
+      return profile.cards.length >= 12;
+    case "ach_wins_5":
+      return profile.wins >= 5;
+    case "ach_legend_1":
+      return profile.cards.some((c) => c.tier === "legend");
+    case "ach_lv10_1":
+      return profile.cards.some((c) => c.level >= MAX_LEVEL);
+    case "ach_abyss_5":
+      return profile.abyssBestFloor >= 5;
+    default:
+      return false;
+  }
+}
+
+export async function claimMission(
+  token: string,
+  kind: "daily" | "achievement",
+  id: string,
+): Promise<{ profile: LllProfile; reward: RewardBundle }> {
+  return serialize(async () => {
+    const profile = await requireProfile(token);
+    syncDailyAndLogin(profile);
+    if (kind === "daily") {
+      const def = DAILY_MISSIONS.find((m) => m.id === id);
+      if (!def) throw new LllError(404, "デイリーミッションが見つかりません。");
+      if (profile.dailyClaimed.includes(id)) throw new LllError(400, "この報酬は受け取り済みです。");
+      if ((profile.dailyProgress[def.metric] ?? 0) < def.target) {
+        throw new LllError(400, "まだ達成条件を満たしていません。");
+      }
+      profile.dailyClaimed = [...profile.dailyClaimed, id];
+      grantRewards(profile, def.reward);
+      await persistProfile(profile);
+      return { profile, reward: def.reward };
+    }
+    const ach = ACHIEVEMENTS.find((a) => a.id === id);
+    if (!ach) throw new LllError(404, "実績が見つかりません。");
+    if (profile.achievementsClaimed.includes(id)) throw new LllError(400, "この実績報酬は受け取り済みです。");
+    if (!isAchievementEligible(profile, id)) throw new LllError(400, "実績条件を満たしていません。");
+    profile.achievementsClaimed = [...profile.achievementsClaimed, id];
+    grantRewards(profile, ach.reward);
+    await persistProfile(profile);
+    return { profile, reward: ach.reward };
+  });
+}
+
+// --- バトル（アリーナ / 深淵 / 模擬PvP） ---
+
+function resolvePlayerTacticList(profile: LllProfile, tacticDeckId?: string): string[] | null {
+  const chosen = tacticDeckId ?? profile.tacticDeckId;
+  if (chosen === "custom") {
+    if (!profile.customTacticDeck) return tacticDeckList("chain");
+    const out: string[] = [];
+    for (const [cardId, count] of Object.entries(profile.customTacticDeck)) {
+      for (let i = 0; i < count; i++) out.push(cardId);
+    }
+    return out.length === 30 ? out : tacticDeckList("chain");
+  }
+  return tacticDeckList(chosen);
+}
 
 function tierRewards(tierIndex: number): { winShards: number; winLumen: number; loseShards: number } {
   const fallback = SPEC_TIER_REWARDS[tierIndex] ?? { winShards: 0, winLumen: 0, loseShards: 0 };
@@ -615,11 +1026,6 @@ function battleOutcome(state: BattleState): BattleOutcome {
   return "draw";
 }
 
-/**
- * クライアントへ返す対戦状態。エンジンの正本は秘匿しない方針だが、
- * 高密度化では相手の手札・両者の山札の並び・自分の設置内容など
- * 「伏せられている情報」だけは枚数に置き換えて返す（正本は record.state）。
- */
 function publicBattle(state: BattleState): BattleState {
   const view = deepClone(state);
   if (view.tactics) {
@@ -642,13 +1048,71 @@ function publicBattle(state: BattleState): BattleState {
   return view;
 }
 
-/** 終局していたら報酬を1回だけ付与する（行動・戦術プレイ共通）。 */
+function trackEventsInProfile(profile: LllProfile, state: BattleState, fromLogIndex: number): void {
+  const events = state.log.slice(fromLogIndex);
+  for (const ev of events) {
+    if (ev.type === "damage" && ev.actorKey?.startsWith("player_") && typeof ev.affinity === "number" && ev.affinity >= 1.25) {
+      profile.dailyProgress.weakHits += 1;
+    }
+  }
+}
+
+/** 終局していたら報酬を1回だけ付与する（モード別・行動・戦術プレイ共通）。 */
 async function settleIfFinished(profile: LllProfile, record: LllBattleRecord): Promise<void> {
   const next = record.state;
   if (next.phase !== "finished" || record.rewarded) return;
   record.rewarded = true;
-  const rewards = tierRewards(record.tierIndex);
   const outcome = battleOutcome(next);
+
+  if (record.mode === "abyss") {
+    const floor = record.floor ?? 1;
+    const rew = abyssRewards(floor);
+    if (outcome === "win") {
+      const firstClear = floor > profile.abyssBestFloor;
+      const mult = firstClear ? 1.5 : 1;
+      profile.shards += Math.round(rew.shards * mult);
+      profile.lumen += Math.round(rew.lumen * mult);
+      if (firstClear) {
+        profile.tickets += rew.tickets;
+        profile.abyssBestFloor = floor;
+      }
+      profile.wins += 1;
+      profile.dailyProgress.wins += 1;
+    } else if (outcome === "lose") {
+      profile.shards += Math.max(4, Math.floor(rew.shards * 0.25));
+      profile.losses += 1;
+    } else {
+      profile.shards += Math.max(3, Math.floor(rew.shards * 0.2));
+      profile.draws += 1;
+    }
+    await persistProfile(profile);
+    return;
+  }
+
+  if (record.mode === "pvp") {
+    const rivalRating = record.rivalRating ?? 1000;
+    const expected = 1 / (1 + 10 ** ((rivalRating - profile.pvpRating) / 400));
+    const score = outcome === "win" ? 1 : outcome === "draw" ? 0.5 : 0;
+    const delta = Math.round(32 * (score - expected));
+    profile.pvpRating = Math.max(800, profile.pvpRating + delta);
+    if (outcome === "win") {
+      profile.shards += 24;
+      profile.lumen += 90;
+      profile.wins += 1;
+      profile.dailyProgress.wins += 1;
+    } else if (outcome === "lose") {
+      profile.shards += 8;
+      profile.lumen += 20;
+      profile.losses += 1;
+    } else {
+      profile.shards += 12;
+      profile.draws += 1;
+    }
+    await persistProfile(profile);
+    return;
+  }
+
+  const rewards = tierRewards(record.tierIndex);
   if (outcome === "win") {
     const firstClear = !profile.clearedTiers.includes(record.tierIndex);
     const multiplier = firstClear ? 2 : 1;
@@ -656,6 +1120,7 @@ async function settleIfFinished(profile: LllProfile, record: LllBattleRecord): P
     profile.lumen += rewards.winLumen * multiplier;
     if (firstClear) profile.clearedTiers = [...profile.clearedTiers, record.tierIndex].sort((a, b) => a - b);
     profile.wins += 1;
+    profile.dailyProgress.wins += 1;
   } else if (outcome === "lose") {
     profile.shards += rewards.loseShards;
     profile.losses += 1;
@@ -664,6 +1129,26 @@ async function settleIfFinished(profile: LllProfile, record: LllBattleRecord): P
     profile.draws += 1;
   }
   await persistProfile(profile);
+}
+
+function getValidatedTeam(profile: LllProfile): LllCard[] {
+  const teamCards: LllCard[] = [];
+  for (const id of profile.teamIds) {
+    const card = profile.cards.find((c) => c.id === id);
+    if (card) teamCards.push(card);
+  }
+  if (teamCards.length !== 3) throw new LllError(400, "チームは3枚で編成してください。");
+  return teamCards;
+}
+
+function applyTacticSelection(profile: LllProfile, tacticDeckId?: string): void {
+  if (tacticDeckId === undefined) return;
+  const valid =
+    tacticDeckId in TACTIC_DECKS || (tacticDeckId === "custom" && profile.customTacticDeck !== null);
+  if (!valid) throw new LllError(400, "戦術デッキの指定が正しくありません。");
+  if (tacticDeckId !== profile.tacticDeckId) {
+    profile.tacticDeckId = tacticDeckId;
+  }
 }
 
 export async function startBattle(
@@ -680,27 +1165,18 @@ export async function startBattle(
     if (tierIndex > highestUnlocked) {
       throw new LllError(400, "このティアはまだ解放されていません。");
     }
-    const teamCards: LllCard[] = [];
-    for (const id of profile.teamIds) {
-      const card = profile.cards.find((c) => c.id === id);
-      if (card) teamCards.push(card);
-    }
-    if (teamCards.length !== 3) throw new LllError(400, "チームは3枚で編成してください。");
-    // 戦術デッキ: 指定があれば選択として保存し、無ければ前回の選択を使う
-    if (tacticDeckId !== undefined && !(tacticDeckId in TACTIC_DECKS)) {
-      throw new LllError(400, "戦術デッキの指定が正しくありません。");
-    }
-    if (tacticDeckId !== undefined && tacticDeckId !== profile.tacticDeckId) {
-      profile.tacticDeckId = tacticDeckId;
-      await persistProfile(profile);
-    }
+    const teamCards = getValidatedTeam(profile);
+    applyTacticSelection(profile, tacticDeckId);
+    await persistProfile(profile);
     const enemyDeckId = ENEMY_TACTIC_DECK_BY_TIER[tierIndex] ?? null;
     const battleId = newBattleId();
     let state: BattleState;
     try {
       state = createBattle(battleId, deepClone(teamCards), ladderDeck(tierIndex), tierIndex, randomSeed(), {
+        mode: "ladder",
+        title: LADDER_TIERS[tierIndex]?.name,
         tacticDecks: {
-          player: tacticDeckList(profile.tacticDeckId),
+          player: resolvePlayerTacticList(profile),
           cpu: enemyDeckId ? tacticDeckList(enemyDeckId) : null,
         },
       });
@@ -712,6 +1188,161 @@ export async function startBattle(
       battleId,
       token,
       tierIndex,
+      mode: "ladder",
+      state,
+      rewarded: false,
+      createdAt: now,
+      updatedAt: now,
+    };
+    battles.set(battleId, record);
+    await persistBattle(record);
+    return { battleId, battle: publicBattle(state) };
+  });
+}
+
+export async function startAbyssBattle(
+  token: string,
+  floor: number,
+  tacticDeckId?: string,
+): Promise<{ battleId: string; battle: BattleState }> {
+  return serialize(async () => {
+    const profile = await requireProfile(token);
+    if (!Number.isInteger(floor) || floor < 1 || floor > profile.abyssBestFloor + 1) {
+      throw new LllError(400, "この階層はまだ解放されていません。");
+    }
+    const teamCards = getValidatedTeam(profile);
+    applyTacticSelection(profile, tacticDeckId);
+    await persistProfile(profile);
+    const enemyDeckId = floor >= 10 ? "pursuit" : floor >= 4 ? "chain" : null;
+    const battleId = newBattleId();
+    let state: BattleState;
+    try {
+      state = createBattle(battleId, deepClone(teamCards), abyssEnemyDeck(floor), Math.min(7, floor), randomSeed(), {
+        mode: "abyss",
+        floor,
+        title: `深淵 第${floor}階層${floor % 5 === 0 ? "（BOSS）" : ""}`,
+        tacticDecks: {
+          player: resolvePlayerTacticList(profile),
+          cpu: enemyDeckId ? tacticDeckList(enemyDeckId) : null,
+        },
+      });
+    } catch (error) {
+      throw new LllError(400, error instanceof Error ? error.message : "対戦を開始できませんでした。");
+    }
+    const now = Date.now();
+    const record: LllBattleRecord = {
+      battleId,
+      token,
+      tierIndex: Math.min(7, floor),
+      mode: "abyss",
+      floor,
+      state,
+      rewarded: false,
+      createdAt: now,
+      updatedAt: now,
+    };
+    battles.set(battleId, record);
+    await persistBattle(record);
+    return { battleId, battle: publicBattle(state) };
+  });
+}
+
+export type PvpRivalSummary = {
+  id: string;
+  playerName: string;
+  title: string;
+  rating: number;
+  tacticDeckId: string;
+  powerScore: number;
+  cards: LllCard[];
+};
+
+function resolveCachedRivalMap(excludeToken: string): Map<string, PvpRivalSummary> {
+  const map = new Map<string, PvpRivalSummary>();
+  for (const preset of RIVAL_GHOST_PRESETS) {
+    const powerScore = preset.cards.reduce((sum, c) => sum + cardPowerScore(c), 0);
+    map.set(preset.id, {
+      id: preset.id,
+      playerName: preset.playerName,
+      title: preset.title,
+      rating: preset.rating,
+      tacticDeckId: preset.tacticDeckId,
+      powerScore,
+      cards: deepClone(preset.cards),
+    });
+  }
+  let added = 0;
+  for (const p of profiles.values()) {
+    if (p.token === excludeToken || added >= 5) continue;
+    const team: LllCard[] = [];
+    for (const id of p.teamIds) {
+      const c = p.cards.find((card) => card.id === id);
+      if (c) team.push(c);
+    }
+    if (team.length !== 3) continue;
+    const id = `player_${createHash("sha256").update(p.token).digest("hex").slice(0, 12)}`;
+    const powerScore = team.reduce((sum, c) => sum + cardPowerScore(c), 0);
+    map.set(id, {
+      id,
+      playerName: p.playerName || "調律者",
+      title: `模擬対戦ユーザー (${p.wins}勝)`,
+      rating: p.pvpRating || 1000,
+      tacticDeckId: p.tacticDeckId in TACTIC_DECKS ? p.tacticDeckId : "chain",
+      powerScore,
+      cards: deepClone(team).map((c) => {
+        const copy = { ...c };
+        delete copy.imageDataUrl; // 帯域節約
+        return copy;
+      }),
+    });
+    added += 1;
+  }
+  return map;
+}
+
+export async function listPvpRivals(token: string): Promise<PvpRivalSummary[]> {
+  return serialize(async () => {
+    await requireProfile(token);
+    return [...resolveCachedRivalMap(token).values()];
+  });
+}
+
+export async function startPvpBattle(
+  token: string,
+  rivalId: string,
+  tacticDeckId?: string,
+): Promise<{ battleId: string; battle: BattleState }> {
+  return serialize(async () => {
+    const profile = await requireProfile(token);
+    const rivals = resolveCachedRivalMap(token);
+    const rival = rivals.get(rivalId);
+    if (!rival) throw new LllError(404, "対戦相手が見つかりません。");
+    const teamCards = getValidatedTeam(profile);
+    applyTacticSelection(profile, tacticDeckId);
+    await persistProfile(profile);
+    const battleId = newBattleId();
+    let state: BattleState;
+    try {
+      state = createBattle(battleId, deepClone(teamCards), deepClone(rival.cards), 7, randomSeed(), {
+        mode: "pvp",
+        rivalName: rival.playerName,
+        title: `模擬PvP vs ${rival.playerName}`,
+        tacticDecks: {
+          player: resolvePlayerTacticList(profile),
+          cpu: tacticDeckList(rival.tacticDeckId),
+        },
+      });
+    } catch (error) {
+      throw new LllError(400, error instanceof Error ? error.message : "対戦を開始できませんでした。");
+    }
+    const now = Date.now();
+    const record: LllBattleRecord = {
+      battleId,
+      token,
+      tierIndex: 7,
+      mode: "pvp",
+      rivalId,
+      rivalRating: rival.rating,
       state,
       rewarded: false,
       createdAt: now,
@@ -734,6 +1365,7 @@ export async function battleAction(
     if (record.state.phase === "finished" && record.rewarded) {
       return { battle: publicBattle(record.state), profile };
     }
+    const prevLogLen = record.state.log.length;
     let next: BattleState;
     try {
       next = applyAction(record.state, action);
@@ -742,7 +1374,9 @@ export async function battleAction(
     }
     record.state = next;
     record.updatedAt = Date.now();
+    trackEventsInProfile(profile, next, prevLogLen);
     await settleIfFinished(profile, record);
+    await persistProfile(profile);
     await persistBattle(record);
     return { battle: publicBattle(record.state), profile };
   });
@@ -760,13 +1394,45 @@ export async function battleTactic(
     if (record.state.phase === "finished" && record.rewarded) {
       return { battle: publicBattle(record.state), profile };
     }
+    const prevLogLen = record.state.log.length;
     try {
       applyTacticPlay(record.state, cardId);
     } catch (error) {
       throw new LllError(400, error instanceof Error ? error.message : "戦術カードを使えませんでした。");
     }
+    profile.dailyProgress.tactics += 1;
     record.updatedAt = Date.now();
+    trackEventsInProfile(profile, record.state, prevLogLen);
     await settleIfFinished(profile, record);
+    await persistProfile(profile);
+    await persistBattle(record);
+    return { battle: publicBattle(record.state), profile };
+  });
+}
+
+/** オートバトル1手（サーバー権威で戦術＋最善手を実行）。 */
+export async function battleAutoStep(
+  token: string,
+  battleId: string,
+): Promise<{ battle: BattleState; profile: LllProfile }> {
+  return serialize(async () => {
+    const profile = await requireProfile(token);
+    const record = await requireBattle(token, battleId);
+    if (record.state.phase === "finished" && record.rewarded) {
+      return { battle: publicBattle(record.state), profile };
+    }
+    const prevLogLen = record.state.log.length;
+    let next: BattleState;
+    try {
+      next = autoPlayerTurn(record.state);
+    } catch (error) {
+      throw new LllError(400, error instanceof Error ? error.message : "オート進行に失敗しました。");
+    }
+    record.state = next;
+    record.updatedAt = Date.now();
+    trackEventsInProfile(profile, next, prevLogLen);
+    await settleIfFinished(profile, record);
+    await persistProfile(profile);
     await persistBattle(record);
     return { battle: publicBattle(record.state), profile };
   });
@@ -845,9 +1511,15 @@ export function validateImageDataUrl(value: unknown): string {
   return match[1];
 }
 
-export function parseAppraiseBody(body: unknown): { token: string; features: ImageFeatures; imageDataUrl: string } {
+export function parseAppraiseBody(body: unknown): {
+  token: string;
+  ticketSummon?: boolean;
+  features?: ImageFeatures;
+  imageDataUrl?: string;
+} {
   const data = asBody(body);
   const token = parseToken(data.token);
+  if (data.action === "ticket") return { token, ticketSummon: true };
   const features = parseFeatures(data.features);
   if (typeof data.imageDataUrl !== "string") throw new LllError(400, "画像データが正しくありません。");
   // 形式・サイズの本検証は appraise() 内（validateImageDataUrl）で行う
@@ -869,30 +1541,75 @@ export function parseTeamBody(body: unknown): { token: string; teamIds: string[]
 
 export type GrowRequest =
   | { token: string; action: "levelup"; cardId: string }
+  | { token: string; action: "limitBreak"; cardId: string }
+  | { token: string; action: "awaken"; cardId: string }
+  | { token: string; action: "dismantle"; cardIds: string[] }
+  | { token: string; action: "lock"; cardId: string }
+  | { token: string; action: "favorite"; cardId: string }
+  | { token: string; action: "customDeck"; counts: Record<string, number> }
+  | { token: string; action: "playerName"; name: string }
   | { token: string; action: "exchange" };
 
 export function parseGrowBody(body: unknown): GrowRequest {
   const data = asBody(body);
   const token = parseToken(data.token);
   if (data.action === "exchange") return { token, action: "exchange" };
+  if (data.action === "dismantle") {
+    if (!Array.isArray(data.cardIds) || !data.cardIds.every((id) => typeof id === "string" && id.length > 0)) {
+      throw new LllError(400, "分解するカードの指定が正しくありません。");
+    }
+    return { token, action: "dismantle", cardIds: data.cardIds as string[] };
+  }
+  if (data.action === "customDeck") {
+    if (!data.counts || typeof data.counts !== "object" || Array.isArray(data.counts)) {
+      throw new LllError(400, "戦術デッキの形式が正しくありません。");
+    }
+    return { token, action: "customDeck", counts: data.counts as Record<string, number> };
+  }
+  if (data.action === "playerName") {
+    if (typeof data.name !== "string") throw new LllError(400, "プレイヤー名が正しくありません。");
+    return { token, action: "playerName", name: data.name };
+  }
   if (typeof data.cardId !== "string" || data.cardId.length === 0) {
     throw new LllError(400, "カードの指定が正しくありません。");
+  }
+  if (data.action === "limitBreak" || data.action === "awaken" || data.action === "lock" || data.action === "favorite") {
+    return { token, action: data.action, cardId: data.cardId };
   }
   return { token, action: "levelup", cardId: data.cardId };
 }
 
-export function parseBattleStartBody(body: unknown): { token: string; tierIndex: number; tacticDeckId?: string } {
+export function parseBattleStartBody(body: unknown): {
+  token: string;
+  mode?: "ladder" | "abyss" | "pvp";
+  tierIndex: number;
+  floor?: number;
+  rivalId?: string;
+  tacticDeckId?: string;
+} {
   const data = asBody(body);
   const token = parseToken(data.token);
-  if (typeof data.tierIndex !== "number" || !Number.isInteger(data.tierIndex)) {
-    throw new LllError(400, "ティアの指定が正しくありません。");
-  }
   let tacticDeckId: string | undefined;
   if (data.tacticDeckId !== undefined) {
-    if (typeof data.tacticDeckId !== "string" || !(data.tacticDeckId in TACTIC_DECKS)) {
+    if (typeof data.tacticDeckId !== "string" || (!(data.tacticDeckId in TACTIC_DECKS) && data.tacticDeckId !== "custom")) {
       throw new LllError(400, "戦術デッキの指定が正しくありません。");
     }
     tacticDeckId = data.tacticDeckId;
+  }
+  if (data.mode === "abyss") {
+    if (typeof data.floor !== "number" || !Number.isInteger(data.floor) || data.floor < 1) {
+      throw new LllError(400, "階層の指定が正しくありません。");
+    }
+    return { token, mode: "abyss", tierIndex: 0, floor: data.floor, tacticDeckId };
+  }
+  if (data.mode === "pvp") {
+    if (typeof data.rivalId !== "string" || data.rivalId.length === 0) {
+      throw new LllError(400, "対戦相手の指定が正しくありません。");
+    }
+    return { token, mode: "pvp", tierIndex: 7, rivalId: data.rivalId, tacticDeckId };
+  }
+  if (typeof data.tierIndex !== "number" || !Number.isInteger(data.tierIndex)) {
+    throw new LllError(400, "ティアの指定が正しくありません。");
   }
   return { token, tierIndex: data.tierIndex, tacticDeckId };
 }
@@ -914,7 +1631,8 @@ export function parsePlayerAction(value: unknown): PlayerAction {
 
 export type BattleRequestBody =
   | { token: string; battleId: string; kind: "action"; action: PlayerAction }
-  | { token: string; battleId: string; kind: "tactic"; cardId: string };
+  | { token: string; battleId: string; kind: "tactic"; cardId: string }
+  | { token: string; battleId: string; kind: "auto" };
 
 export function parseBattleActionBody(body: unknown): BattleRequestBody {
   const data = asBody(body);
@@ -923,6 +1641,9 @@ export function parseBattleActionBody(body: unknown): BattleRequestBody {
     throw new LllError(400, "対戦IDが正しくありません。");
   }
   const rawAction = data.action as Record<string, unknown> | undefined;
+  if (rawAction && typeof rawAction === "object" && rawAction.type === "auto") {
+    return { token, battleId: data.battleId, kind: "auto" };
+  }
   if (rawAction && typeof rawAction === "object" && rawAction.type === "tactic") {
     const cardId = rawAction.cardId;
     if (typeof cardId !== "string" || !TACTIC_CARD_BY_ID.has(cardId)) {
@@ -939,3 +1660,16 @@ export function parseBattleId(value: unknown): string {
   }
   return value;
 }
+
+export function parseMissionBody(body: unknown): { token: string; kind: "daily" | "achievement"; id: string } {
+  const data = asBody(body);
+  const token = parseToken(data.token);
+  if (data.kind !== "daily" && data.kind !== "achievement") {
+    throw new LllError(400, "ミッション種別が正しくありません。");
+  }
+  if (typeof data.id !== "string" || data.id.length === 0) {
+    throw new LllError(400, "ミッションIDが正しくありません。");
+  }
+  return { token, kind: data.kind, id: data.id };
+}
+

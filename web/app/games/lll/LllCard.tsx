@@ -35,6 +35,11 @@ export type LllCardView = {
   spd: number;
   skills: LllSkillView[];
   trait?: { name: string; kind: string; description: string } | null;
+  /** 強化・コレクション状態（任意）。 */
+  limitBreak?: number;
+  awakened?: boolean;
+  locked?: boolean;
+  favorite?: boolean;
   /** バトル用（任意）。 */
   hpBar?: boolean;
   cooldowns?: number[];
@@ -42,6 +47,8 @@ export type LllCardView = {
   shield?: number;
   defending?: boolean;
   alive?: boolean;
+  /** ダメージ予測ラベル（対象選択中にカードへ重ねて表示）。 */
+  forecastLabel?: string | null;
 };
 
 export const ELEMENT_LABEL: Record<LllElement, string> = {
@@ -118,6 +125,7 @@ export default function LllCard({
 }: Props) {
   const dead = view.alive === false;
   const hpPct = view.maxHp > 0 ? Math.max(0, Math.min(100, Math.round((view.hp / view.maxHp) * 100))) : 0;
+  const lb = Math.max(0, Math.min(5, view.limitBreak ?? 0));
   const classes = [
     "lll-card",
     `lll-card-${size}`,
@@ -160,8 +168,16 @@ export default function LllCard({
       }
       aria-label={view.name}
     >
+      {view.tier !== "normal" && !dead && <span className={`lll-foil lll-foil-${view.tier}`} aria-hidden="true" />}
       <div className="lll-card-head">
-        <span className="lll-card-name">{view.name}</span>
+        <span className="lll-card-name">
+          {view.name}
+          {lb > 0 && (
+            <span className="lll-lb-stars" aria-label={`限界突破+${lb}`}>
+              {"★".repeat(lb)}
+            </span>
+          )}
+        </span>
         <span className="lll-lv">Lv{view.level}</span>
       </div>
       <div className="lll-card-art">
@@ -174,12 +190,21 @@ export default function LllCard({
           </span>
         )}
         <span className={`lll-element lll-element-${view.element}`}>{ELEMENT_LABEL[view.element] ?? view.element}</span>
+        {(view.favorite || view.locked || view.awakened) && (
+          <span className="lll-card-icons">
+            {view.favorite && <span title="お気に入り">♥</span>}
+            {view.locked && <span title="保護中">🔒</span>}
+            {view.awakened && <span title="覚醒済み">✦</span>}
+          </span>
+        )}
         {view.shield !== undefined && view.shield > 0 && <span className="lll-shield-badge">盾{view.shield}</span>}
         {view.defending && <span className="lll-shield-badge lll-defend-badge">防御中</span>}
+        {view.forecastLabel && <span className="lll-forecast-badge">{view.forecastLabel}</span>}
       </div>
       {view.hpBar ? (
         <div className="lll-hpbar-wrap">
           <div className="lll-hpbar">
+            <span className="lll-hpbar-trail" style={{ width: `${hpPct}%` }} />
             <span className={`lll-hpbar-fill${hpPct <= 25 ? " lll-hpbar-low" : hpPct <= 50 ? " lll-hpbar-mid" : ""}`} style={{ width: `${hpPct}%` }} />
           </div>
           <span className="lll-hp-text">

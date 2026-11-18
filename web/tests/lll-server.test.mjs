@@ -76,6 +76,19 @@ const server = await loadBundle(
     "parseFeatures",
     "parseBattleStartBody",
     "parseBattleActionBody",
+    "ticketSummon",
+    "limitBreakCard",
+    "awakenCard",
+    "dismantleCards",
+    "toggleLockCard",
+    "setFavoriteCard",
+    "setPlayerName",
+    "setCustomTacticDeck",
+    "claimMission",
+    "startAbyssBattle",
+    "listPvpRivals",
+    "startPvpBattle",
+    "battleAutoStep",
   ],
   PREFIX,
 );
@@ -374,3 +387,92 @@ function logfareApiKeys() { return []; }
   const legacy = await db.getProfile("kv-only-token");
   assert.equal(legacy.tacticDeckId, "pursuit");
 });
+
+test("ソシャゲ化: チケット召喚・重複自動凸・限界突破・覚醒・ロック・推し・分解・カスタムデッキ", async () => {
+  const { token, profile, loginBonus } = await server.getOrCreateProfile(null);
+  assert.ok(loginBonus, "初回セッションでログインボーナスが付く");
+  assert.ok(profile.tickets >= 3, "初期スカウト券が付与される");
+
+  // チケット召喚
+  const summoned = await server.ticketSummon(token);
+  assert.ok(summoned.card);
+  assert.ok(summoned.card.tier === "elite" || summoned.card.tier === "legend");
+  assert.equal(summoned.profile.cards.length, 4);
+
+  // 重複スカウトで自動限界突破
+  await server.appraise(token, FEATURES, IMG_A);
+  const dup = await server.appraise(token, FEATURES, IMG_A);
+  assert.equal(dup.duplicated, true);
+  assert.equal(dup.limitBroken, true);
+  const dupCard = dup.profile.cards.find((c) => c.imageDataUrl === IMG_A);
+  assert.equal(dupCard.limitBreak, 1);
+
+  // ロック・推し・名前変更
+  const locked = await server.toggleLockCard(token, dupCard.id);
+  assert.equal(locked.locked, true);
+  await assert.rejects(() => server.dismantleCards(token, [dupCard.id]), server.LllError);
+  await server.toggleLockCard(token, dupCard.id);
+
+  const fav = await server.setFavoriteCard(token, dupCard.id);
+  assert.equal(fav.favoriteCardId, dupCard.id);
+  const named = await server.setPlayerName(token, "星導士");
+  assert.equal(named.playerName, "星導士");
+
+  // 分解で欠片を増やし、限界突破・覚醒
+  const dis = await server.dismantleCards(token, [dupCard.id]);
+  assert.ok(dis.shardsGained >= 5);
+
+  const starterId = dis.profile.teamIds[0];
+  // チケット消費分と欠片補充のため追加重複
+  for (let i = 0; i < 6; i++) {
+    await server.appraise(token, FEATURES, IMG_B);
+  }
+  const lb = await server.limitBreakCard(token, starterId);
+  assert.equal(lb.card.limitBreak, 1);
+
+  // デイリースカウトミッション受取（scout >= 1 は達成済み）
+  const claimed = await server.claimMission(token, "daily", "daily_scout_1");
+  assert.ok(claimed.reward.shards > 0);
+  await assert.rejects(() => server.claimMission(token, "daily", "daily_scout_1"), server.LllError);
+
+  // カスタム30枚デッキ保存
+  const counts = { A1: 3, A2: 3, A3: 3, A4: 3, A5: 3, A6: 3, A7: 3, A8: 3, B1: 3, B2: 3 };
+  const decked = await server.setCustomTacticDeck(token, counts);
+  assert.equal(decked.tacticDeckId, "custom");
+  await assert.rejects(() => server.setCustomTacticDeck(token, { A1: 3 }), server.LllError);
+});
+
+test("深淵の試練 & 模擬PvP & オート進行", async () => {
+  const { token } = await server.getOrCreateProfile(null);
+  await assert.rejects(() => server.startAbyssBattle(token, 2), server.LllError);
+
+  const abyss = await server.startAbyssBattle(token, 1);
+  assert.equal(abyss.battle.mode, "abyss");
+  assert.equal(abyss.battle.floor, 1);
+
+  // オート進行で終局まで進める
+  let cur = abyss.battle;
+  let guard = 0;
+  while (cur.phase === "battle" && guard++ < 80) {
+    const res = await server.battleAutoStep(token, abyss.battleId);
+    cur = res.battle;
+  }
+  assert.equal(cur.phase, "finished");
+
+  // 模擬PvPライバル取得＆開始＆オート進行
+  const rivals = await server.listPvpRivals(token);
+  assert.ok(rivals.length >= 3);
+  const pvp = await server.startPvpBattle(token, rivals[0].id);
+  assert.equal(pvp.battle.mode, "pvp");
+  let pvpCur = pvp.battle;
+  let pvpGuard = 0;
+  let latestProfile = null;
+  while (pvpCur.phase === "battle" && pvpGuard++ < 80) {
+    const res = await server.battleAutoStep(token, pvp.battleId);
+    pvpCur = res.battle;
+    latestProfile = res.profile;
+  }
+  assert.equal(pvpCur.phase, "finished");
+  assert.ok(latestProfile);
+});
+

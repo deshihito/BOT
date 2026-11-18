@@ -1,28 +1,77 @@
 "use client";
-// LLL クライアント。画像スカウト（特徴量抽出+鑑定）→ バインダー（3枚編成+強化）
-// → アリーナ（3v3 ターン制、サーバー権威）の3ビューを1枚のダークな
-// テーブル面の上で切り替える。セッションは匿名トークン方式で
-// localStorage["lll-player-token"] に保持する（BALKU 流儀）。
-// サウンドは lib/lll-sound（Web Audio 合成、並行実装中）の公開関数だけを使う。
-import { useCallback, useEffect, useRef, useState } from "react";
+// LLL クライアント（ソシャゲ版 + 3D対応）。
+// ホーム（推し3D観賞・ログインボーナス・ミッション・実績）
+// → スカウト（画像鑑定 & チケット召喚 & 3D召喚スピン）
+// → バインダー（絞り込み・並び替え・一括分解・強化・限界突破・覚醒・ロック・推し設定・3枚編成）
+// → アリーナ（ラダー / 深淵の試練 / 模擬PvP、3Dバトルアリーナ / 2D切替、カットイン・AUTO進行・戦術デッキ編成）
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import dynamic from "next/dynamic";
+import Link from "next/link";
 import {
   loadSoundSettings as loadSoundSettingsRaw,
   playSe as playSeRaw,
   saveSoundSettings as saveSoundSettingsRaw,
+  setBgmScene as setBgmSceneRaw,
   startBgm as startBgmRaw,
   stopBgm as stopBgmRaw,
   unlockAudio,
+  type BgmScene,
 } from "@/lib/lll/lll-sound";
-import LllCard, { TIER_LABEL, type LllCardView } from "./LllCard";
-import { buildPlaybackSteps, stepDurationMs, type PlaybackStep } from "@/lib/lll/lll-playback";
+import {
+  ACHIEVEMENTS,
+  DAILY_MISSIONS,
+  MAX_LEVEL,
+  MAX_LIMIT_BREAK,
+  awakenCost,
+  cardPowerScore,
+  dismantleShards,
+  effectiveStats,
+  levelUpCost,
+  limitBreakCost,
+  nextTier,
+  predictDamageRange,
+  type LllElement,
+  type LllTier,
+  type RewardBundle,
+} from "@/lib/lll/lll-game";
+import LllCard, { ELEMENT_LABEL, TIER_LABEL } from "./LllCard";
+import { buildPlaybackSteps, stepDurationMs, type PlaybackStep, type PlaybackVfx } from "@/lib/lll/lll-playback";
 import { TACTIC_CARD_BY_ID, TACTIC_DECKS } from "@/lib/lll/lll-tactics";
+import { useGamesNav } from "../GamesShell";
+import LllHomeView from "./LllHomeView";
+import { CustomDeckModal, DropRatesModal, LoginBonusModal } from "./LllModals";
+import {
+  actorToView,
+  cardToView,
+  checkAchievementDone,
+  type AppraiseResult,
+  type Battle,
+  type BattleActor,
+  type CardT,
+  type Profile,
+  type PvpRival,
+  type Tab,
+} from "./LllTypes";
+import type { BattleSceneActor } from "./LllBattleScene3D";
+import type { ThreeCardInput } from "./LllThreeTextures";
+import "./lll.css";
 
-/* --- サウンド（公開関数の型は並行実装側に合わせ、ここでは薄く包む） --- */
+const LllBattleScene3D = dynamic(() => import("./LllBattleScene3D"), { ssr: false });
+const LllCard3DViewer = dynamic(() => import("./LllCard3DViewer"), { ssr: false });
+
+/* --- サウンド --- */
 type SoundSettings = { bgm: boolean; se: boolean };
 const loadSoundSettings = loadSoundSettingsRaw as unknown as () => SoundSettings;
 const saveSoundSettings = saveSoundSettingsRaw as unknown as (s: SoundSettings) => void;
 const startBgm = startBgmRaw as unknown as () => void;
 const stopBgm = stopBgmRaw as unknown as () => void;
+function setBgmScene(scene: BgmScene): void {
+  try {
+    setBgmSceneRaw(scene);
+  } catch {
+    // 音が出なくても進行は止めない
+  }
+}
 function playSe(name: string): void {
   try {
     (playSeRaw as unknown as (n: string) => void)(name);
@@ -31,97 +80,6 @@ function playSe(name: string): void {
   }
 }
 
-/* --- API 契約の型（サーバー JSON と一致させる） --- */
-type Skill = { name: string; kind: string; power: number; cooldown: number; ap: number; description: string };
-type CardT = {
-  id: string;
-  name: string;
-  flavor: string;
-  element: LllCardView["element"];
-  tier: LllCardView["tier"];
-  stats: { hp: number; atk: number; def: number; spd: number };
-  skills: Skill[];
-  trait: { name: string; kind: string; description: string };
-  imageDataUrl?: string;
-  glyph?: string;
-  level: number;
-};
-type Profile = {
-  token?: string;
-  cards: CardT[];
-  teamIds: string[];
-  shards: number;
-  lumen: number;
-  clearedTiers: number[];
-  wins: number;
-  losses: number;
-  draws: number;
-  createdAt: number;
-  tacticDeckId?: string;
-};
-/** 戦術カード層の表示用ビュー（サーバーの publicBattle がマスクした形）。 */
-type TacticSideView = {
-  hand: string[];
-  handCount?: number;
-  deckCount: number;
-  discard: string[];
-  tp: number;
-  reserves: string[];
-  reserveCount?: number;
-};
-type TacticsView = {
-  player: TacticSideView;
-  cpu: TacticSideView;
-  turn: { actorKey: string; cardsPlayed: number; dmgCount: number };
-};
-type BattleActor = {
-  key: string;
-  side: "player" | "cpu";
-  name: string;
-  element: LllCardView["element"];
-  tier: LllCardView["tier"];
-  level: number;
-  glyph?: string;
-  imageDataUrl?: string;
-  maxHp: number;
-  hp: number;
-  atk: number;
-  def: number;
-  spd: number;
-  skills: Skill[];
-  trait?: { name: string; kind: string; description: string };
-  cooldowns: number[];
-  statuses: { kind: string; turns: number }[];
-  shield: number;
-  defending: boolean;
-  alive: boolean;
-};
-type BattleLog = {
-  type: string;
-  text: string;
-  actorKey?: string;
-  targetKey?: string;
-  amount?: number;
-  hpAfter?: number;
-  shieldAfter?: number;
-  affinity?: number;
-  statusKind?: string;
-};
-type Battle = {
-  id: string;
-  tierIndex: number;
-  round: number;
-  actors: BattleActor[];
-  queue: string[];
-  queuePos: number;
-  phase: "battle" | "finished";
-  winner?: string | null;
-  log: BattleLog[];
-  tactics?: TacticsView;
-};
-type AppraiseResult = { card: CardT | null; duplicated: boolean; shardsGained: number; aiUsed: boolean };
-// サーバー（lll-server parseFeatures）の検証に合わせ、数値フィールドのみで送る。
-// 画素ハッシュはサーバーが画像バイト列の SHA-256 から決定的に導出する（仕様 §2）。
 type ImageFeatures = {
   hue: number;
   saturation: number;
@@ -133,6 +91,9 @@ type ImageFeatures = {
 };
 
 const TOKEN_KEY = "lll-player-token";
+const SPEED_KEY = "lll-battle-speed";
+const TUTORIAL_KEY = "lll-tutorial-battle";
+const VIEW3D_KEY = "lll-view-3d";
 
 /* --- アリーナのラダー（仕様 §4.1 のローカル写し） --- */
 const TIERS = [
@@ -147,34 +108,38 @@ const TIERS = [
 ] as const;
 
 const ALLY_TARGET_KINDS = new Set(["heal", "shield"]);
+const TIER_RANK: Record<LllTier, number> = { normal: 1, elite: 2, legend: 3 };
 
-/* --- 正規化（所持カード / バトルアクター → 統一カード表示） --- */
-function cardToView(card: CardT): LllCardView {
+function cardToThreeInput(card: CardT): ThreeCardInput {
+  const eff = effectiveStats(card);
   return {
     id: card.id,
     name: card.name,
-    flavor: card.flavor,
     element: card.element,
     tier: card.tier,
     level: card.level,
+    limitBreak: card.limitBreak ?? 0,
     glyph: card.glyph,
     imageDataUrl: card.imageDataUrl,
-    hp: card.stats.hp,
-    maxHp: card.stats.hp,
-    atk: card.stats.atk,
-    def: card.stats.def,
-    spd: card.stats.spd,
-    skills: card.skills,
-    trait: card.trait,
+    hp: eff.hp,
+    maxHp: eff.hp,
+    atk: eff.atk,
+    def: eff.def,
+    spd: eff.spd,
+    showHpBar: false,
   };
 }
-function actorToView(actor: BattleActor): LllCardView {
+
+function actorToThreeInput(actor: BattleActor): BattleSceneActor {
   return {
     id: actor.key,
+    key: actor.key,
+    side: actor.side,
     name: actor.name,
     element: actor.element,
     tier: actor.tier,
     level: actor.level,
+    limitBreak: actor.limitBreak ?? 0,
     glyph: actor.glyph,
     imageDataUrl: actor.imageDataUrl,
     hp: actor.hp,
@@ -182,14 +147,11 @@ function actorToView(actor: BattleActor): LllCardView {
     atk: actor.atk,
     def: actor.def,
     spd: actor.spd,
-    skills: actor.skills,
-    trait: actor.trait ?? null,
-    hpBar: true,
-    cooldowns: actor.cooldowns,
-    statuses: actor.statuses,
     shield: actor.shield,
     defending: actor.defending,
     alive: actor.alive,
+    statuses: actor.statuses,
+    showHpBar: true,
   };
 }
 
@@ -212,8 +174,6 @@ function loadImageFromFile(file: File): Promise<HTMLImageElement> {
 
 async function processImage(file: File): Promise<{ imageDataUrl: string; features: ImageFeatures }> {
   const img = await loadImageFromFile(file);
-  // 長辺 512px に縮小して JPEG 化（カードアートとして保持する data URL）。
-  // サーバー上限（data URL 400,000文字）に収まるよう段階的に落とす。
   const encodeJpeg = (maxDim: number, quality: number): string => {
     const scale = Math.min(1, maxDim / Math.max(img.naturalWidth, img.naturalHeight));
     const canvas = document.createElement("canvas");
@@ -229,7 +189,6 @@ async function processImage(file: File): Promise<{ imageDataUrl: string; feature
   if (imageDataUrl.length > 380_000) imageDataUrl = encodeJpeg(384, 0.6);
   if (imageDataUrl.length > 380_000) imageDataUrl = encodeJpeg(320, 0.55);
 
-  // 特徴量は 48x48 のサンプル面で抽出する
   const S = 48;
   const sample = document.createElement("canvas");
   sample.width = S;
@@ -260,7 +219,6 @@ async function processImage(file: File): Promise<{ imageDataUrl: string; feature
     const lum = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
     lums[i] = lum;
     sumBright += lum;
-    // 色相（円平均で赤の折り返しを避ける）
     if (mx !== mn) {
       let hueDeg: number;
       if (mx === r) hueDeg = 60 * (((g - b) / (mx - mn)) % 6);
@@ -275,8 +233,7 @@ async function processImage(file: File): Promise<{ imageDataUrl: string; feature
   const avgBright = sumBright / count;
   let varSum = 0;
   for (let i = 0; i < count; i++) varSum += (lums[i] - avgBright) ** 2;
-  const variance = Math.sqrt(varSum / count); // 明度の標準偏差 0..1
-  // エッジ複雑度: 右隣との明度差の平均
+  const variance = Math.sqrt(varSum / count);
   let edgeSum = 0;
   let edgeCount = 0;
   for (let y = 0; y < S; y++) {
@@ -305,29 +262,35 @@ async function processImage(file: File): Promise<{ imageDataUrl: string; feature
   };
 }
 
-type Tab = "scout" | "binder" | "arena";
 type PendingSkill = { skill: 0 | 1 | "basic" | "defend"; targetSide: "player" | "cpu" | null; label: string };
 type FloatNum = { id: number; targetKey: string; text: string; kind: string };
 type SpeedMode = "1x" | "2x" | "instant";
-const SPEED_KEY = "lll-battle-speed";
-const TUTORIAL_KEY = "lll-tutorial-battle";
+type ArenaMode = "ladder" | "abyss" | "pvp";
+type BinderSort = "power" | "level" | "tier" | "recent";
 
 export default function LllClient() {
+  const { prefix } = useGamesNav();
   const [token, setToken] = useState<string | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
-  const [tab, setTab] = useState<Tab>("scout");
+  const [tab, setTab] = useState<Tab>("home");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [sound, setSound] = useState<SoundSettings>({ bgm: true, se: true });
+  const [use3D, setUse3D] = useState(true);
+  const [webglFailed, setWebglFailed] = useState(false);
+
+  // モーダル
+  const [loginBonus, setLoginBonus] = useState<{ day: number; reward: RewardBundle } | null>(null);
+  const [showRates, setShowRates] = useState(false);
+  const [showDeckModal, setShowDeckModal] = useState(false);
+
   // スカウト
   const [dragOver, setDragOver] = useState(false);
   const [appraising, setAppraising] = useState(false);
   const [result, setResult] = useState<AppraiseResult | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+
   // バインダー
-  // サーバーの /team は「3枚の異なるカード」ちょうどの編成だけを受け付けるため、
-  // 3枚未満の編成変更（外す/入れ替え途中）は pendingTeam として手元に保持し、
-  // 3枚そろった時点で初めて POST する。
   const [pendingTeam, setPendingTeam] = useState<string[] | null>(null);
   const [pickedCardId, setPickedCardId] = useState<string | null>(null);
   const [detailCardId, setDetailCardId] = useState<string | null>(null);
@@ -335,22 +298,34 @@ export default function LllClient() {
   const [hotSlot, setHotSlot] = useState<number | null>(null);
   const teamSlotRefs = useRef<(HTMLDivElement | null)[]>([]);
   const binderTrackRef = useRef<{ cardId: string; name: string; startX: number; startY: number; active: boolean } | null>(null);
+  const [filterElement, setFilterElement] = useState<"all" | LllElement>("all");
+  const [filterTier, setFilterTier] = useState<"all" | LllTier>("all");
+  const [sortBy, setSortBy] = useState<BinderSort>("power");
+  const [dismantleMode, setDismantleMode] = useState(false);
+  const [dismantleIds, setDismantleIds] = useState<string[]>([]);
+
   // アリーナ
+  const [arenaMode, setArenaMode] = useState<ArenaMode>("ladder");
   const [selectedTier, setSelectedTier] = useState(0);
+  const [abyssFloor, setAbyssFloor] = useState(1);
+  const [pvpRivals, setPvpRivals] = useState<PvpRival[]>([]);
+  const [selectedRivalId, setSelectedRivalId] = useState<string | null>(null);
   const [selectedDeck, setSelectedDeck] = useState<string>("chain");
   const [battle, setBattle] = useState<Battle | null>(null);
   const [pending, setPending] = useState<PendingSkill | null>(null);
+  const [autoMode, setAutoMode] = useState(false);
   const [hitKeys, setHitKeys] = useState<Record<string, true>>({});
   const [floats, setFloats] = useState<FloatNum[]>([]);
   const battleRef = useRef<Battle | null>(null);
   battleRef.current = battle;
-  const battleStartRef = useRef<{ shards: number; lumen: number; clearedBefore: boolean } | null>(null);
+  const battleStartRef = useRef<{ shards: number; lumen: number; tickets: number; rating: number; clearedBefore: boolean } | null>(null);
   const finishSeRef = useRef<string | null>(null);
   const floatIdRef = useRef(0);
   const battleTrackRef = useRef<{ actorKey: string; startX: number; startY: number; active: boolean } | null>(null);
   const [battleDrag, setBattleDrag] = useState<{ actorKey: string; x: number; y: number } | null>(null);
   const suppressClickRef = useRef(false);
-  // 逐次再生（1イベント=1拍）。displayBattle が表示中の間は入力をロックする
+
+  // 逐次再生 & 3D VFX & カットイン
   const [displayBattle, setDisplayBattle] = useState<Battle | null>(null);
   const [speed, setSpeed] = useState<SpeedMode>("1x");
   const speedRef = useRef<SpeedMode>("1x");
@@ -359,18 +334,28 @@ export default function LllClient() {
   const [playbackInfo, setPlaybackInfo] = useState<{ index: number; total: number; actorKey: string | null } | null>(null);
   const [lungeKey, setLungeKey] = useState<string | null>(null);
   const [shieldFlashKeys, setShieldFlashKeys] = useState<Record<string, true>>({});
-  // 初回ガイド戦（戦績0の Tier0 初戦、最初の3手だけ）
+  const [cutInBanner, setCutInBanner] = useState<{ actorName: string; skillName: string; element: string } | null>(null);
+  const [sceneVfx, setSceneVfx] = useState<PlaybackVfx | null>(null);
+  const [sceneVfxNonce, setSceneVfxNonce] = useState(0);
+  const [sceneShake, setSceneShake] = useState<0 | 1 | 2 | 3>(0);
+
+  // 初回ガイド戦
   const [guideBattle, setGuideBattle] = useState(false);
   const guideBattleRef = useRef(false);
   const [guideTurnsUsed, setGuideTurnsUsed] = useState(0);
   const guideTurnsUsedRef = useRef(0);
 
-  // 戦術デッキの選択はプロフィール保存値に追随する（対戦開始時にサーバーへ送る）
   useEffect(() => {
-    if (profile?.tacticDeckId && profile.tacticDeckId in TACTIC_DECKS) {
+    if (profile?.tacticDeckId && (profile.tacticDeckId in TACTIC_DECKS || profile.tacticDeckId === "custom")) {
       setSelectedDeck(profile.tacticDeckId);
     }
   }, [profile?.tacticDeckId]);
+
+  useEffect(() => {
+    if (profile && typeof profile.abyssBestFloor === "number") {
+      setAbyssFloor((prev) => Math.max(prev, (profile.abyssBestFloor ?? 0) + 1));
+    }
+  }, [profile]);
 
   const postJson = useCallback(async (url: string, body: unknown): Promise<{ res: Response; data: Record<string, unknown> }> => {
     const res = await fetch(url, {
@@ -390,7 +375,7 @@ export default function LllClient() {
       try {
         stored = localStorage.getItem(TOKEN_KEY);
       } catch {
-        // 保存が無くても新規発行される
+        // 読めなければ新規発行
       }
       try {
         const { res, data } = await postJson("/api/lll/session", stored ? { token: stored } : {});
@@ -401,10 +386,14 @@ export default function LllClient() {
         try {
           localStorage.setItem(TOKEN_KEY, nextToken);
         } catch {
-          // 保存できなくても今回のセッションでは遊べる
+          // 保存できなくてもセッション継続
         }
         setToken(nextToken);
         setProfile(nextProfile);
+        if (data.loginBonus && typeof data.loginBonus === "object") {
+          setLoginBonus(data.loginBonus as { day: number; reward: RewardBundle });
+          playSe("claim");
+        }
       } catch {
         if (!cancelled) setError("接続できませんでした。ページを再読み込みしてください。");
       }
@@ -414,10 +403,21 @@ export default function LllClient() {
     };
   }, [postJson]);
 
-  /* --- サウンド初期化 --- */
+  /* --- サウンド・設定の初期化 --- */
   useEffect(() => {
     try {
       setSound(loadSoundSettings());
+    } catch {
+      // 既定値のまま
+    }
+    try {
+      const rawSpeed = localStorage.getItem(SPEED_KEY);
+      if (rawSpeed === "2x" || rawSpeed === "instant" || rawSpeed === "1x") {
+        setSpeed(rawSpeed);
+        speedRef.current = rawSpeed;
+      }
+      const raw3d = localStorage.getItem(VIEW3D_KEY);
+      if (raw3d === "0") setUse3D(false);
     } catch {
       // 既定値のまま
     }
@@ -426,6 +426,17 @@ export default function LllClient() {
     return () => window.removeEventListener("pointerdown", unlock);
   }, []);
 
+  /* --- BGM シーン同期 --- */
+  useEffect(() => {
+    if (tab === "arena" && battle?.phase === "battle") {
+      setBgmScene(battle.mode === "abyss" || battle.tierIndex >= 6 ? "boss" : "battle");
+    } else if (tab === "scout") {
+      setBgmScene("scout");
+    } else {
+      setBgmScene("home");
+    }
+  }, [tab, battle?.phase, battle?.mode, battle?.tierIndex]);
+
   /* --- 逐次再生タイマーの後片付け --- */
   useEffect(() => {
     return () => {
@@ -433,17 +444,23 @@ export default function LllClient() {
     };
   }, []);
 
-  /* --- 再生速度の読み込み --- */
-  useEffect(() => {
+  const canUse3D = use3D && !webglFailed;
+
+  const toggle3D = () => {
+    if (webglFailed) return;
+    const next = !use3D;
+    setUse3D(next);
     try {
-      const raw = localStorage.getItem(SPEED_KEY);
-      if (raw === "2x" || raw === "instant" || raw === "1x") {
-        setSpeed(raw);
-        speedRef.current = raw;
-      }
+      localStorage.setItem(VIEW3D_KEY, next ? "1" : "0");
     } catch {
-      // 既定の1倍のまま
+      // 保存できなくても切替は適用
     }
+    playSe("tap");
+  };
+
+  const handle3DFail = useCallback(() => {
+    setWebglFailed(true);
+    setUse3D(false);
   }, []);
 
   const changeSpeed = (next: SpeedMode) => {
@@ -452,7 +469,7 @@ export default function LllClient() {
     try {
       localStorage.setItem(SPEED_KEY, next);
     } catch {
-      // 保存できなくても今回の対戦では有効
+      // 保存できなくても適用
     }
     playSe("tap");
   };
@@ -464,7 +481,7 @@ export default function LllClient() {
     try {
       saveSoundSettings(next);
     } catch {
-      // 保存に失敗しても切り替え自体は続ける
+      // 保存に失敗しても切り替え継続
     }
     if (key === "bgm") {
       if (next.bgm) startBgm();
@@ -480,7 +497,92 @@ export default function LllClient() {
     setPickedCardId(null);
   };
 
-  /* --- スカウト --- */
+  /* --- PvP ライバル一覧取得 --- */
+  const fetchPvpRivals = useCallback(async () => {
+    if (!token) return;
+    try {
+      const { res, data } = await postJson("/api/lll/pvp", { token });
+      if (res.ok && Array.isArray(data.rivals)) {
+        const list = data.rivals as PvpRival[];
+        setPvpRivals(list);
+        if (list.length > 0) {
+          setSelectedRivalId((prev) => (prev && list.some((r) => r.id === prev) ? prev : list[0].id));
+        }
+      }
+    } catch {
+      // 失敗時は既存リストを維持
+    }
+  }, [postJson, token]);
+
+  useEffect(() => {
+    if (tab === "arena" && arenaMode === "pvp" && !battle && token) {
+      void fetchPvpRivals();
+    }
+  }, [tab, arenaMode, battle, token, fetchPvpRivals]);
+
+  /* --- ホーム: 名前変更・ミッション受取 --- */
+  const savePlayerName = async (name: string) => {
+    if (!token || busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      const { res, data } = await postJson("/api/lll/grow", { token, action: "playerName", name });
+      if (!res.ok) {
+        setError(typeof data.error === "string" ? data.error : "名前を変更できませんでした。");
+        playSe("error");
+        return;
+      }
+      setProfile(data.profile as Profile);
+      playSe("claim");
+    } catch {
+      setError("通信に失敗しました。");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const claimMission = async (kind: "daily" | "achievement", id: string) => {
+    if (!token || busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      const { res, data } = await postJson("/api/lll/mission", { token, kind, id });
+      if (!res.ok) {
+        setError(typeof data.error === "string" ? data.error : "報酬を受け取れませんでした。");
+        playSe("error");
+        return;
+      }
+      setProfile(data.profile as Profile);
+      playSe("claim");
+    } catch {
+      setError("通信に失敗しました。");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /* --- スカウト（画像 & チケット召喚） --- */
+  const handleAppraiseResponse = (api: { res: Response; data: Record<string, unknown> }, errFallback: string) => {
+    if (!api.res.ok) {
+      setError(typeof api.data.error === "string" ? api.data.error : errFallback);
+      playSe("error");
+      return;
+    }
+    const nextProfile = api.data.profile as Profile;
+    const nextResult: AppraiseResult = {
+      card: (api.data.card as CardT | null) ?? null,
+      duplicated: api.data.duplicated === true,
+      shardsGained: typeof api.data.shardsGained === "number" ? api.data.shardsGained : 0,
+      limitBroken: api.data.limitBroken === true,
+      aiUsed: api.data.aiUsed === true,
+    };
+    setProfile(nextProfile);
+    setResult(nextResult);
+    if (nextResult.duplicated) playSe(nextResult.limitBroken ? "awaken" : "coin");
+    else if (nextResult.card?.tier === "legend") playSe("legend");
+    else playSe("stamp");
+  };
+
   const appraiseFile = async (file: File) => {
     if (!token || !profile || appraising) return;
     if (!file.type.startsWith("image/")) {
@@ -492,32 +594,12 @@ export default function LllClient() {
     setAppraising(true);
     setResult(null);
     setError("");
-    playSe("flip");
+    playSe("summon");
     try {
       const { imageDataUrl, features } = await processImage(file);
-      // 裏面フリップ（約900ms）と鑑定リクエストを並行させ、両方揃ってから開ける
       const flipWait = new Promise((resolve) => setTimeout(resolve, 900));
-      const [api] = await Promise.all([
-        postJson("/api/lll/appraise", { token, features, imageDataUrl }),
-        flipWait,
-      ]);
-      if (!api.res.ok) {
-        setError(typeof api.data.error === "string" ? api.data.error : "鑑定できませんでした。");
-        playSe("error");
-        return;
-      }
-      const nextProfile = api.data.profile as Profile;
-      const nextResult: AppraiseResult = {
-        card: (api.data.card as CardT | null) ?? null,
-        duplicated: api.data.duplicated === true,
-        shardsGained: typeof api.data.shardsGained === "number" ? api.data.shardsGained : 0,
-        aiUsed: api.data.aiUsed === true,
-      };
-      setProfile(nextProfile);
-      setResult(nextResult);
-      if (nextResult.duplicated) playSe("coin");
-      else if (nextResult.card?.tier === "legend") playSe("win");
-      else playSe("stamp");
+      const [api] = await Promise.all([postJson("/api/lll/appraise", { token, features, imageDataUrl }), flipWait]);
+      handleAppraiseResponse(api, "鑑定できませんでした。");
     } catch {
       setError("鑑定に失敗しました。別の画像で試してください。");
       playSe("error");
@@ -526,17 +608,35 @@ export default function LllClient() {
     }
   };
 
-  /* --- バインダー: チーム編成 --- */
+  const summonWithTicket = async () => {
+    if (!token || !profile || appraising || (profile.tickets ?? 0) < 1) return;
+    unlockAudio();
+    setAppraising(true);
+    setResult(null);
+    setError("");
+    playSe("summon");
+    try {
+      const flipWait = new Promise((resolve) => setTimeout(resolve, 900));
+      const [api] = await Promise.all([postJson("/api/lll/appraise", { token, action: "ticket" }), flipWait]);
+      handleAppraiseResponse(api, "チケット召喚に失敗しました。");
+    } catch {
+      setError("通信に失敗しました。");
+      playSe("error");
+    } finally {
+      setAppraising(false);
+    }
+  };
+
+  /* --- バインダー: チーム編成・強化・限界突破・覚醒・分解・保護・推し --- */
   const effectiveTeamIds: string[] = pendingTeam ?? profile?.teamIds ?? [];
   const saveTeam = async (teamIds: string[]) => {
     if (!token || !profile) return;
     if (teamIds.length !== 3 || new Set(teamIds).size !== 3) {
-      // 3枚そろうまではサーバーへ送らず、手元の編成として保持する
       setPendingTeam(teamIds);
       return;
     }
     const prevProfile = profile;
-    setProfile({ ...profile, teamIds }); // 楽観的に先に反映する
+    setProfile({ ...profile, teamIds });
     try {
       const { res, data } = await postJson("/api/lll/team", { token, teamIds });
       if (!res.ok) {
@@ -568,7 +668,6 @@ export default function LllClient() {
   const removeFromTeam = (cardId: string) => {
     if (!profile) return;
     playSe("tap");
-    // 外す操作は3枚未満になるため即POSTせず、再編成が3枚そろうまで手元保持
     setPendingTeam(effectiveTeamIds.filter((id) => id !== cardId));
   };
 
@@ -582,15 +681,15 @@ export default function LllClient() {
     return null;
   };
 
-  // バインダーのポインタドラッグ（タップ操作はフォールバックとして全て残す）
   const binderDragHandlers = (card: CardT) => ({
     onPointerDown: (e: React.PointerEvent) => {
+      if (dismantleMode) return;
       if (e.button !== undefined && e.button > 0) return;
       binderTrackRef.current = { cardId: card.id, name: card.name, startX: e.clientX, startY: e.clientY, active: false };
       try {
         (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
       } catch {
-        // キャプチャできなくても要素上で追える
+        // capture不可でも追跡可能
       }
     },
     onPointerMove: (e: React.PointerEvent) => {
@@ -624,10 +723,24 @@ export default function LllClient() {
     },
   });
 
+  const toggleDismantleSelect = (card: CardT) => {
+    if (!profile) return;
+    const isProtected = effectiveTeamIds.includes(card.id) || profile.teamIds.includes(card.id) || (profile.lockedCardIds?.includes(card.id) ?? false);
+    if (isProtected) {
+      playSe("error");
+      return;
+    }
+    playSe("tap");
+    setDismantleIds((prev) => (prev.includes(card.id) ? prev.filter((id) => id !== card.id) : [...prev, card.id]));
+  };
+
   const tapCollectionCard = (card: CardT) => {
     if (suppressClickRef.current) return;
+    if (dismantleMode) {
+      toggleDismantleSelect(card);
+      return;
+    }
     if (pickedCardId === card.id) {
-      // 2回目のタップで詳細を開く
       setDetailCardId(card.id);
       playSe("tap");
       return;
@@ -636,71 +749,122 @@ export default function LllClient() {
     playSe("tap");
   };
 
-  /* --- 強化 / 両替 --- */
-  const growCard = async (card: CardT) => {
-    if (!token || busy || card.level >= 10) return;
+  const runGrowAction = async (body: Record<string, unknown>, seName: string, fallbackErr: string) => {
+    if (!token || busy) return false;
     setBusy(true);
     setError("");
     try {
-      const { res, data } = await postJson("/api/lll/grow", { token, cardId: card.id });
+      const { res, data } = await postJson("/api/lll/grow", { token, ...body });
       if (!res.ok) {
-        setError(typeof data.error === "string" ? data.error : "強化できませんでした。");
+        setError(typeof data.error === "string" ? data.error : fallbackErr);
         playSe("error");
-        return;
+        return false;
       }
       setProfile(data.profile as Profile);
-      playSe("levelup");
+      playSe(seName);
+      return true;
     } catch {
       setError("通信に失敗しました。");
+      return false;
     } finally {
       setBusy(false);
     }
   };
 
-  const exchangeLumen = async () => {
-    if (!token || busy || !profile || profile.lumen < 50) return;
-    setBusy(true);
-    setError("");
-    try {
-      const { res, data } = await postJson("/api/lll/grow", { token, action: "exchange" });
-      if (!res.ok) {
-        setError(typeof data.error === "string" ? data.error : "両替できませんでした。");
-        playSe("error");
-        return;
-      }
-      setProfile(data.profile as Profile);
-      playSe("coin");
-    } catch {
-      setError("通信に失敗しました。");
-    } finally {
-      setBusy(false);
+  const growCard = (card: CardT) => {
+    if (card.level >= MAX_LEVEL) return;
+    void runGrowAction({ cardId: card.id }, "levelup", "強化できませんでした。");
+  };
+
+  const limitBreakCard = (card: CardT) => {
+    if ((card.limitBreak ?? 0) >= MAX_LIMIT_BREAK) return;
+    void runGrowAction({ action: "limitBreak", cardId: card.id }, "levelup", "限界突破できませんでした。");
+  };
+
+  const awakenCard = (card: CardT) => {
+    if (!nextTier(card.tier)) return;
+    void runGrowAction({ action: "awaken", cardId: card.id }, "awaken", "覚醒できませんでした。");
+  };
+
+  const toggleLockCard = (cardId: string) => {
+    void runGrowAction({ action: "lock", cardId }, "tap", "ロックを変更できませんでした。");
+  };
+
+  const setFavoriteCard = (cardId: string) => {
+    void runGrowAction({ action: "favorite", cardId }, "claim", "推しカードに設定できませんでした。");
+  };
+
+  const executeDismantle = async () => {
+    if (dismantleIds.length === 0) return;
+    const ok = await runGrowAction({ action: "dismantle", cardIds: dismantleIds }, "coin", "分解できませんでした。");
+    if (ok) {
+      setDismantleIds([]);
+      setDismantleMode(false);
     }
   };
 
-  /* --- アリーナ --- */
+  const exchangeLumen = () => {
+    if (!profile || profile.lumen < 50) return;
+    void runGrowAction({ action: "exchange" }, "coin", "両替できませんでした。");
+  };
+
+  const saveCustomDeck = async (counts: Record<string, number>) => {
+    const ok = await runGrowAction({ action: "customDeck", counts }, "claim", "カスタムデッキを保存できませんでした。");
+    if (ok) {
+      setSelectedDeck("custom");
+      setShowDeckModal(false);
+    }
+  };
+
+  /* --- アリーナ: バトル開始（ラダー / 深淵 / PvP） --- */
   const maxCleared = profile ? profile.clearedTiers.reduce((m, t) => Math.max(m, t), -1) : -1;
 
-  const startBattle = async (tierIndex: number) => {
+  const beginBattleRequest = async (opts: {
+    mode: ArenaMode;
+    tierIndex?: number;
+    floor?: number;
+    rivalId?: string;
+    clearedBefore?: boolean;
+  }) => {
     if (!token || !profile || busy) return;
+    unlockAudio();
     setBusy(true);
     setError("");
     setPending(null);
     stopPlayback();
-    battleStartRef.current = { shards: profile.shards, lumen: profile.lumen, clearedBefore: profile.clearedTiers.includes(tierIndex) };
-    // ガイド戦の判定: 戦績が全て0で、まだガイドを終えていないプレイヤーの Tier0 初戦だけ
+    battleStartRef.current = {
+      shards: profile.shards,
+      lumen: profile.lumen,
+      tickets: profile.tickets ?? 0,
+      rating: profile.pvpRating ?? 1000,
+      clearedBefore: opts.clearedBefore ?? false,
+    };
+
     let tutorialDone = false;
     try {
       tutorialDone = localStorage.getItem(TUTORIAL_KEY) === "done";
     } catch {
-      // 読めなければガイドなし扱いにしない（戦績0の判定が残る）
+      // 既定のまま
     }
-    const isGuide = tierIndex === 0 && profile.wins + profile.losses + profile.draws === 0 && !tutorialDone;
+    const isGuide =
+      opts.mode === "ladder" &&
+      (opts.tierIndex ?? 0) === 0 &&
+      profile.wins + profile.losses + profile.draws === 0 &&
+      !tutorialDone;
     guideBattleRef.current = isGuide;
     setGuideBattle(isGuide);
     guideTurnsUsedRef.current = 0;
     setGuideTurnsUsed(0);
+
     try {
-      const { res, data } = await postJson("/api/lll/battle/start", { token, tierIndex, tacticDeckId: selectedDeck });
+      const { res, data } = await postJson("/api/lll/battle/start", {
+        token,
+        mode: opts.mode,
+        tierIndex: opts.tierIndex ?? 0,
+        floor: opts.floor,
+        rivalId: opts.rivalId,
+        tacticDeckId: selectedDeck,
+      });
       if (!res.ok) {
         setError(typeof data.error === "string" ? data.error : "対戦を開始できませんでした。");
         playSe("error");
@@ -717,7 +881,6 @@ export default function LllClient() {
   };
 
   /* --- 逐次再生（1イベント = 1拍） --- */
-
   const clearPlaybackTimer = () => {
     if (playbackTimerRef.current) {
       clearTimeout(playbackTimerRef.current);
@@ -731,9 +894,9 @@ export default function LllClient() {
     setPlaybackInfo(null);
     setDisplayBattle(null);
     setLungeKey(null);
+    setCutInBanner(null);
   };
 
-  /** 再生を終え、サーバーの最終状態と報酬をそのまま反映する。 */
   const finishPlayback = useCallback(() => {
     const pb = playbackRef.current;
     clearPlaybackTimer();
@@ -741,90 +904,107 @@ export default function LllClient() {
     setPlaybackInfo(null);
     setDisplayBattle(null);
     setLungeKey(null);
+    setCutInBanner(null);
     if (!pb) return;
     setBattle(pb.next);
     if (pb.nextProfile) setProfile(pb.nextProfile);
   }, []);
 
-  /** step を1拍ぶん表示する（数字・シェイク・SE・振動はこのタイミングで発火）。 */
-  const showPlaybackStep = useCallback((index: number) => {
-    const pb = playbackRef.current;
-    if (!pb) return;
-    if (index >= pb.steps.length) {
-      finishPlayback();
-      return;
-    }
-    const step = pb.steps[index];
-    pb.index = index;
-    setPlaybackInfo({ index, total: pb.steps.length, actorKey: step.event.actorKey ?? step.event.targetKey ?? null });
-    // 表示状態: アクターはステップ適用後、ログはこのイベントまで、phase は再生中は battle 固定
-    setDisplayBattle((prevDisplay) => {
-      const base = prevDisplay ?? battleRef.current;
-      if (!base) return base;
-      const byKey = new Map(step.actors.map((a) => [a.key, a]));
-      return {
-        ...pb.next,
-        phase: "battle",
-        round: base.round,
-        queue: base.queue,
-        queuePos: base.queuePos,
-        winner: null,
-        actors: pb.next.actors.map((nextActor) => {
-          const mid = byKey.get(nextActor.key);
-          if (!mid) return nextActor;
-          return {
-            ...nextActor,
-            hp: mid.hp,
-            shield: mid.shield,
-            alive: mid.alive,
-            statuses: mid.statuses.map((s) => ({ ...s })),
-            // CD と防御表示はこのイベント列では追わない（最終状態で確定する）
-            cooldowns: (base.actors.find((a) => a.key === nextActor.key)?.cooldowns ?? nextActor.cooldowns) as number[],
-            defending: base.actors.find((a) => a.key === nextActor.key)?.defending ?? nextActor.defending,
-          };
-        }),
-        log: [...(battleRef.current?.log ?? []), ...pb.next.log.slice(pb.prevLogLength, pb.prevLogLength + index + 1)],
-      };
-    });
-    // 攻撃側の前進（info の技宣言と damage の着弾で出す）
-    const attackerKey = step.event.actorKey;
-    if (attackerKey && (step.event.type === "damage" || step.event.type === "info")) {
-      setLungeKey(attackerKey);
-      setTimeout(() => setLungeKey((k) => (k === attackerKey ? null : k)), 260);
-    }
-    // 被弾シェイク
-    if (step.float && (step.event.type === "damage" || step.event.type === "trait" || step.event.type === "status") && step.float.targetKey) {
-      const key = step.float.targetKey;
-      setHitKeys({ [key]: true });
-      setTimeout(() => setHitKeys((h) => (h[key] ? {} : h)), 480);
-    }
-    // シールド/防御バッジの点滅
-    if (step.shieldFlashKey) {
-      const key = step.shieldFlashKey;
-      setShieldFlashKeys({ [key]: true });
-      setTimeout(() => setShieldFlashKeys((h) => (h[key] ? {} : h)), 380);
-    }
-    // フロート（数字・状態名・撃破）
-    if (step.float) {
-      floatIdRef.current += 1;
-      const id = floatIdRef.current;
-      const entry: FloatNum = { id, targetKey: step.float.targetKey, text: step.float.text, kind: step.float.kind };
-      setFloats((f) => [...f.slice(-8), entry]);
-      setTimeout(() => setFloats((f) => f.filter((x) => x.id !== id)), 1100);
-    }
-    if (step.se) playSe(step.se);
-    if (step.vibrate) {
-      try {
-        navigator.vibrate?.(step.vibrate);
-      } catch {
-        // 振動できない環境では何もしない
+  const showPlaybackStep = useCallback(
+    (index: number) => {
+      const pb = playbackRef.current;
+      if (!pb) return;
+      if (index >= pb.steps.length) {
+        finishPlayback();
+        return;
       }
-    }
-    const dur = speedRef.current === "2x" ? stepDurationMs(step, "2x") : step.durationMs;
-    playbackTimerRef.current = setTimeout(() => showPlaybackStep(index + 1), dur);
-  }, [finishPlayback]);
+      const step = pb.steps[index];
+      pb.index = index;
+      setPlaybackInfo({ index, total: pb.steps.length, actorKey: step.event.actorKey ?? step.event.targetKey ?? null });
+      setDisplayBattle((prevDisplay) => {
+        const base = prevDisplay ?? battleRef.current;
+        if (!base) return base;
+        const byKey = new Map(step.actors.map((a) => [a.key, a]));
+        return {
+          ...pb.next,
+          phase: "battle",
+          round: base.round,
+          queue: base.queue,
+          queuePos: base.queuePos,
+          winner: null,
+          actors: pb.next.actors.map((nextActor) => {
+            const mid = byKey.get(nextActor.key);
+            if (!mid) return nextActor;
+            return {
+              ...nextActor,
+              hp: mid.hp,
+              shield: mid.shield,
+              alive: mid.alive,
+              statuses: mid.statuses.map((s) => ({ ...s })),
+              cooldowns: (base.actors.find((a) => a.key === nextActor.key)?.cooldowns ?? nextActor.cooldowns) as number[],
+              defending: base.actors.find((a) => a.key === nextActor.key)?.defending ?? nextActor.defending,
+            };
+          }),
+          log: [...(battleRef.current?.log ?? []), ...pb.next.log.slice(pb.prevLogLength, pb.prevLogLength + index + 1)],
+        };
+      });
 
-  /** 盤面タップ: 現在の拍を即時完了して次の拍へ進める。 */
+      // カットイン表示
+      if (step.cutIn) {
+        const actorObj = pb.next.actors.find((a) => a.key === step.cutIn?.actorKey);
+        setCutInBanner({
+          actorName: actorObj?.name ?? "",
+          skillName: step.cutIn.skillName,
+          element: step.cutIn.element,
+        });
+      } else {
+        setCutInBanner(null);
+      }
+
+      // 3D VFX 発火
+      if (step.vfx || step.shakeIntensity > 0) {
+        setSceneVfx(step.vfx);
+        setSceneShake(step.shakeIntensity);
+        setSceneVfxNonce((n) => n + 1);
+      }
+
+      // 2D 前進・シェイク・シールドフラッシュ・フロート
+      const attackerKey = step.event.actorKey;
+      if (attackerKey && (step.event.type === "damage" || step.event.type === "info")) {
+        setLungeKey(attackerKey);
+        setTimeout(() => setLungeKey((k) => (k === attackerKey ? null : k)), 260);
+      }
+      if (step.float && (step.event.type === "damage" || step.event.type === "trait" || step.event.type === "status") && step.float.targetKey) {
+        const key = step.float.targetKey;
+        setHitKeys({ [key]: true });
+        setTimeout(() => setHitKeys((h) => (h[key] ? {} : h)), 480);
+      }
+      if (step.shieldFlashKey) {
+        const key = step.shieldFlashKey;
+        setShieldFlashKeys({ [key]: true });
+        setTimeout(() => setShieldFlashKeys((h) => (h[key] ? {} : h)), 380);
+      }
+      if (step.float) {
+        floatIdRef.current += 1;
+        const id = floatIdRef.current;
+        const entry: FloatNum = { id, targetKey: step.float.targetKey, text: step.float.text, kind: step.float.kind };
+        setFloats((f) => [...f.slice(-8), entry]);
+        setTimeout(() => setFloats((f) => f.filter((x) => x.id !== id)), 1100);
+      }
+      if (step.se) playSe(step.se);
+      if (step.vibrate) {
+        try {
+          navigator.vibrate?.(step.vibrate);
+        } catch {
+          // ignore
+        }
+      }
+      const dur = speedRef.current === "2x" ? stepDurationMs(step, "2x") : step.durationMs;
+      playbackTimerRef.current = setTimeout(() => showPlaybackStep(index + 1), dur);
+    },
+    [finishPlayback],
+  );
+
   const advancePlayback = () => {
     const pb = playbackRef.current;
     if (!pb) return;
@@ -832,20 +1012,21 @@ export default function LllClient() {
     showPlaybackStep(pb.index + 1);
   };
 
-  /** 前状態→次状態をイベント単位で再生する。再生しない場合は false。 */
-  const startPlayback = (prev: Battle, next: Battle, nextProfile: Profile | null): boolean => {
-    if (speedRef.current === "instant") return false;
-    const newEvents = next.log.slice(prev.log.length);
-    if (newEvents.length < 2) return false;
-    const steps = buildPlaybackSteps(prev.actors, newEvents);
-    if (steps.length < 2) return false;
-    playbackRef.current = { steps, index: 0, next, nextProfile, prevLogLength: prev.log.length };
-    showPlaybackStep(0);
-    return true;
-  };
+  const startPlayback = useCallback(
+    (prev: Battle, next: Battle, nextProfile: Profile | null): boolean => {
+      if (speedRef.current === "instant") return false;
+      const newEvents = next.log.slice(prev.log.length);
+      if (newEvents.length < 2) return false;
+      const steps = buildPlaybackSteps(prev.actors, newEvents);
+      if (steps.length < 2) return false;
+      playbackRef.current = { steps, index: 0, next, nextProfile, prevLogLength: prev.log.length };
+      showPlaybackStep(0);
+      return true;
+    },
+    [showPlaybackStep],
+  );
 
-  /** 新しいバトル状態に対して被弾シェイクとダメージ数字を付ける（一斉表示モード用）。 */
-  const applyBattleFx = (prev: Battle | null, next: Battle) => {
+  const applyBattleFx = useCallback((prev: Battle | null, next: Battle) => {
     if (!prev) return;
     const hits: Record<string, true> = {};
     const newFloats: FloatNum[] = [];
@@ -867,13 +1048,17 @@ export default function LllClient() {
     if (Object.keys(hits).length > 0) {
       setHitKeys(hits);
       setTimeout(() => setHitKeys({}), 480);
+      const firstHit = Object.keys(hits)[0];
+      setSceneVfx({ kind: "attack", element: "light", toKey: firstHit });
+      setSceneShake(1);
+      setSceneVfxNonce((n) => n + 1);
     }
     if (newFloats.length > 0) {
       setFloats((f) => [...f.slice(-8), ...newFloats]);
       const ids = newFloats.map((f) => f.id);
       setTimeout(() => setFloats((f) => f.filter((x) => !ids.includes(x.id))), 950);
     }
-  };
+  }, []);
 
   const sendAction = async (action: { skill: 0 | 1 | "basic" | "defend"; targetKey?: string }) => {
     const current = battleRef.current;
@@ -886,7 +1071,6 @@ export default function LllClient() {
       setGuideTurnsUsed(guideTurnsUsedRef.current);
     }
     try {
-      // 契約フィールド（skill/targetKey）に加え、サーバー検証が要求する type も併記する
       const actionPayload = {
         type: action.skill === "basic" ? "basic" : action.skill === "defend" ? "defend" : "skill",
         ...action,
@@ -899,7 +1083,6 @@ export default function LllClient() {
       }
       const next = data.battle as Battle;
       const nextProfile = (data.profile as Profile | undefined) ?? null;
-      // 逐次再生が始まったら、最終状態と報酬は再生完了時に反映する
       if (!startPlayback(current, next, nextProfile)) {
         playSe("hit");
         applyBattleFx(current, next);
@@ -913,7 +1096,6 @@ export default function LllClient() {
     }
   };
 
-  /** 戦術カードのプレイ。手番は進まないので、再生後に同じアクターの戦術フェイズが続く。 */
   const sendTactic = async (cardId: string) => {
     const current = battleRef.current;
     if (!token || !current || busy || playbackRef.current || current.phase !== "battle") return;
@@ -950,6 +1132,42 @@ export default function LllClient() {
   const isPlayerTurn = currentActor?.side === "player";
   const currentStunned = !!currentActor?.statuses.some((s) => s.kind === "stun");
 
+  /* --- AUTO バトルループ --- */
+  useEffect(() => {
+    if (!autoMode || !token || !battle || battle.phase !== "battle" || !isPlayerTurn || displayBattle || busy) return;
+    const timer = setTimeout(() => {
+      const cur = battleRef.current;
+      if (!cur || cur.phase !== "battle" || playbackRef.current) return;
+      void (async () => {
+        setBusy(true);
+        setPending(null);
+        try {
+          const { res, data } = await postJson("/api/lll/battle/action", {
+            token,
+            battleId: cur.id,
+            action: { type: "auto" },
+          });
+          if (!res.ok) {
+            setAutoMode(false);
+            return;
+          }
+          const next = data.battle as Battle;
+          const nextProfile = (data.profile as Profile | undefined) ?? null;
+          if (!startPlayback(cur, next, nextProfile)) {
+            applyBattleFx(cur, next);
+            setBattle(next);
+            if (nextProfile) setProfile(nextProfile);
+          }
+        } catch {
+          setAutoMode(false);
+        } finally {
+          setBusy(false);
+        }
+      })();
+    }, 240);
+    return () => clearTimeout(timer);
+  }, [autoMode, token, battle, isPlayerTurn, displayBattle, busy, postJson, startPlayback, applyBattleFx]);
+
   const chooseSkill = (skill: 0 | 1 | "basic" | "defend") => {
     if (!currentActor || !isPlayerTurn || busy || playbackRef.current) return;
     playSe("tap");
@@ -977,7 +1195,25 @@ export default function LllClient() {
     void sendAction({ skill: pending.skill, ...(pending.skill === "defend" ? {} : { targetKey: actor.key }) });
   };
 
-  // 現在アクターを敵へドラッグ → 通常攻撃（タップ列の代替導線）
+  const tapActorByKey = useCallback(
+    (key: string) => {
+      if (displayBattle) {
+        const pb = playbackRef.current;
+        if (pb) {
+          clearPlaybackTimer();
+          showPlaybackStep(pb.index + 1);
+        }
+        return;
+      }
+      const cur = battleRef.current;
+      const actor = cur?.actors.find((a) => a.key === key);
+      if (!actor || !pending || !isPlayerTurn || busy || !actor.alive || actor.side !== pending.targetSide) return;
+      void sendAction({ skill: pending.skill, ...(pending.skill === "defend" ? {} : { targetKey: actor.key }) });
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [displayBattle, pending, isPlayerTurn, busy, showPlaybackStep],
+  );
+
   const battleDragHandlers = (actor: BattleActor) => ({
     onPointerDown: (e: React.PointerEvent) => {
       if (!isPlayerTurn || busy || playbackRef.current || actor.key !== currentActor?.key || e.button > 0) return;
@@ -985,7 +1221,7 @@ export default function LllClient() {
       try {
         (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
       } catch {
-        // キャプチャできなくても追える
+        // ignore
       }
     },
     onPointerMove: (e: React.PointerEvent) => {
@@ -1020,27 +1256,44 @@ export default function LllClient() {
     },
   });
 
-  // 終局SE（勝ち/負け/引分を一度だけ）
+  // 終局 SE
   useEffect(() => {
     if (!battle || battle.phase !== "finished") return;
     if (finishSeRef.current === battle.id) return;
     finishSeRef.current = battle.id;
-    playSe(battle.winner === "player" ? "win" : battle.winner === "draw" ? "click" : "lose");
+    playSe(battle.winner === "player" ? "win" : battle.winner === "draw" ? "tap" : "lose");
     if (guideBattleRef.current) {
       guideBattleRef.current = false;
       try {
         localStorage.setItem(TUTORIAL_KEY, "done");
       } catch {
-        // 保存できなくても戦績が付くため、次回は戦績判定でガイド対象から外れる
+        // ignore
       }
     }
   }, [battle]);
 
-  /* --- 描画部品 --- */
-  const detailCard = detailCardId ? profile?.cards.find((c) => c.id === detailCardId) ?? null : null;
+  /* --- バインダー絞り込み・並び替え --- */
+  const filteredCards = useMemo(() => {
+    if (!profile) return [];
+    const list = profile.cards.filter((c) => {
+      if (filterElement !== "all" && c.element !== filterElement) return false;
+      if (filterTier !== "all" && c.tier !== filterTier) return false;
+      return true;
+    });
+    return [...list].sort((a, b) => {
+      if (sortBy === "power") return cardPowerScore(b) - cardPowerScore(a);
+      if (sortBy === "level") return b.level - a.level || cardPowerScore(b) - cardPowerScore(a);
+      if (sortBy === "tier") return (TIER_RANK[b.tier] ?? 0) - (TIER_RANK[a.tier] ?? 0) || cardPowerScore(b) - cardPowerScore(a);
+      return (b.createdAt ?? 0) - (a.createdAt ?? 0);
+    });
+  }, [profile, filterElement, filterTier, sortBy]);
 
-  // ガイド戦の推奨手（最初の3手だけ）: 回復が要る味方がいれば回復技、
-  // なければ使用可能な最大威力の攻撃技、どちらも無ければ通常攻撃。
+  const dismantleGain = useMemo(() => {
+    if (!profile || dismantleIds.length === 0) return 0;
+    const set = new Set(dismantleIds);
+    return profile.cards.filter((c) => set.has(c.id)).reduce((s, c) => s + dismantleShards(c), 0);
+  }, [profile, dismantleIds]);
+
   const guideActive = guideBattle && guideTurnsUsed < 3 && !displayBattle;
   const guideRecommendation: { skill: 0 | 1 | "basic"; targetKey: string | null } | null = (() => {
     if (!guideActive || !currentActor || !battle || battle.phase !== "battle") return null;
@@ -1063,13 +1316,41 @@ export default function LllClient() {
     return { skill: best.skill, targetKey: lowestEnemy?.key ?? null };
   })();
 
+  const forecastForActor = (actor: BattleActor): string | null => {
+    if (!pending || !currentActor || !isPlayerTurn || displayBattle || !actor.alive || actor.side !== pending.targetSide) return null;
+    if (pending.targetSide === "cpu") {
+      const power = pending.skill === "basic" ? 40 : currentActor.skills[pending.skill as 0 | 1]?.power ?? 40;
+      const dmg = predictDamageRange(
+        {
+          atk: currentActor.atk,
+          element: currentActor.element,
+          traitKind: currentActor.trait?.kind,
+          overdrive: currentActor.statuses.some((s) => s.kind === "overdrive"),
+          buffMult: currentActor.buffMult,
+        },
+        {
+          def: actor.def,
+          element: actor.element,
+          traitKind: actor.trait?.kind,
+          defending: actor.defending,
+          guardBreak: actor.statuses.some((s) => s.kind === "guard_break"),
+        },
+        power,
+      );
+      const tag = dmg.affinity >= 1.25 ? "弱点 " : dmg.affinity <= 0.8 ? "耐性 " : "";
+      return `${tag}${dmg.min}〜${dmg.max}`;
+    }
+    return "味方対象";
+  };
+
   const renderActor = (actor: BattleActor) => {
     const targetable = !!pending && pending.targetSide === actor.side && actor.alive && isPlayerTurn && !displayBattle;
     const guideTarget = !!pending && guideRecommendation?.skill === pending.skill && guideRecommendation?.targetKey === actor.key;
+    const forecastLabel = forecastForActor(actor);
     return (
       <div key={actor.key} className="lll-actor-wrap">
         <LllCard
-          view={actorToView(actor)}
+          view={actorToView(actor, forecastLabel)}
           size="sm"
           dataKey={actor.key}
           current={currentActor?.key === actor.key && battle?.phase === "battle"}
@@ -1096,23 +1377,40 @@ export default function LllClient() {
 
   if (!profile) {
     return (
-      <div className="lll-table">
-        <p className="lll-loading">読み込み中…</p>
-        {error && (
-          <p className="lll-error" role="alert">
-            {error}
-          </p>
-        )}
+      <div className="lll-shell">
+        <div className="lll-table">
+          <p className="lll-loading">読み込み中…</p>
+          {error && (
+            <p className="lll-error" role="alert">
+              {error}
+            </p>
+          )}
+        </div>
       </div>
     );
   }
 
+  const detailCard = detailCardId ? profile.cards.find((c) => c.id === detailCardId) ?? null : null;
   const teamCards = effectiveTeamIds
     .map((id) => profile.cards.find((c) => c.id === id))
     .filter((c): c is CardT => !!c);
+  const teamPower = teamCards.reduce((sum, c) => sum + cardPowerScore(c), 0);
+  const homeBadgeCount =
+    DAILY_MISSIONS.filter((m) => {
+      const cur = profile.dailyProgress?.[m.metric] ?? 0;
+      return cur >= m.target && !(profile.dailyClaimed?.includes(m.id) ?? false);
+    }).length +
+    ACHIEVEMENTS.filter(
+      (a) => checkAchievementDone(profile, a.id) && !(profile.achievementsClaimed?.includes(a.id) ?? false),
+    ).length;
   const scoutCue = profile.cards.length <= 3;
   const shownBattle = displayBattle ?? battle;
-  // 結果画面の戦績3項目（バトルログのイベント集計）
+
+  const targetableKeys =
+    pending && isPlayerTurn && !displayBattle && shownBattle
+      ? shownBattle.actors.filter((a) => a.alive && a.side === pending.targetSide).map((a) => a.key)
+      : [];
+
   const battleRecap = (() => {
     if (!battle || battle.phase !== "finished") return null;
     let totalDamage = 0;
@@ -1141,70 +1439,103 @@ export default function LllClient() {
     return { totalDamage, maxHit, maxHitLabel, mvp };
   })();
 
+  const viewer3DForCard = (card: CardT, mode: "inspect" | "summon" = "inspect") => (
+    <LllCard3DViewer
+      key={`${card.id}-${mode}-${card.tier}-${card.level}-${card.limitBreak ?? 0}`}
+      card={cardToThreeInput(card)}
+      mode={mode}
+      height={mode === "summon" ? 310 : 280}
+      onFail={handle3DFail}
+      fallback={<LllCard view={cardToView(card, profile)} size="lg" />}
+    />
+  );
+
+  const render2DArenaBoard = () => (
+    <>
+      <div className="lll-battle-row">{(shownBattle ?? battle)!.actors.filter((a) => a.side === "cpu").map(renderActor)}</div>
+      <div className="lll-battle-row">{(shownBattle ?? battle)!.actors.filter((a) => a.side === "player").map(renderActor)}</div>
+    </>
+  );
+
   return (
-    <div className="lll-table">
-      {/* ヘッダーストリップ（タイトル/通貨/サウンド/タブは全てテーブルの上） */}
-      <div className="lll-head">
-        <div className="lll-title-group">
-          <span className="lll-logo">LLL</span>
-          <span className="lll-hero">想像を、切り札に。</span>
+    <div className="lll-shell">
+      <div className="lll-table">
+        {/* ヘッダーストリップ */}
+        <div className="lll-head">
+          <div className="lll-title-group">
+            <span className="lll-logo">LLL</span>
+            <span className="lll-hero">想像を、切り札に。</span>
+          </div>
+          <div className="lll-currencies">
+            <span className="lll-chip lll-chip-shards">◆ 欠片 {profile.shards}</span>
+            <span className="lll-chip lll-chip-lumen">● ルーメン {profile.lumen}</span>
+            <span className="lll-chip lll-chip-ticket">🎫 券 {profile.tickets ?? 0}</span>
+            <span className="lll-chip lll-chip-rating">Rate {profile.pvpRating ?? 1000}</span>
+          </div>
+          <div className="lll-soundbar" role="group" aria-label="表示とサウンド設定">
+            <button
+              type="button"
+              className={`lll-snd-btn${canUse3D ? " lll-snd-on" : ""}`}
+              aria-pressed={canUse3D}
+              disabled={webglFailed}
+              onClick={toggle3D}
+              title={webglFailed ? "WebGL非対応のため2D表示中" : "3D / 2D 表示切替"}
+            >
+              3D {canUse3D ? "ON" : "OFF"}
+            </button>
+            <button
+              type="button"
+              className={`lll-snd-btn${sound.bgm ? " lll-snd-on" : ""}`}
+              aria-pressed={sound.bgm}
+              onClick={() => toggleSound("bgm")}
+            >
+              ♪ BGM {sound.bgm ? "ON" : "OFF"}
+            </button>
+            <button
+              type="button"
+              className={`lll-snd-btn${sound.se ? " lll-snd-on" : ""}`}
+              aria-pressed={sound.se}
+              onClick={() => toggleSound("se")}
+            >
+              SE {sound.se ? "ON" : "OFF"}
+            </button>
+          </div>
         </div>
-        <div className="lll-currencies">
-          <span className="lll-chip lll-chip-shards">◆ 欠片 {profile.shards}</span>
-          <span className="lll-chip lll-chip-lumen">● ルーメン {profile.lumen}</span>
-        </div>
-        <div className="lll-soundbar" role="group" aria-label="サウンド設定">
-          <button
-            type="button"
-            className={`lll-snd-btn${sound.bgm ? " lll-snd-on" : ""}`}
-            aria-pressed={sound.bgm}
-            onClick={() => toggleSound("bgm")}
-          >
-            ♪ BGM {sound.bgm ? "ON" : "OFF"}
-          </button>
-          <button
-            type="button"
-            className={`lll-snd-btn${sound.se ? " lll-snd-on" : ""}`}
-            aria-pressed={sound.se}
-            onClick={() => toggleSound("se")}
-          >
-            SE {sound.se ? "ON" : "OFF"}
-          </button>
-        </div>
-      </div>
-      <nav className="lll-tabs" aria-label="ビュー切替">
-        {(
-          [
-            ["scout", "スカウト"],
-            ["binder", "バインダー"],
-            ["arena", "⚔ アリーナ"],
-          ] as [Tab, string][]
-        ).map(([key, label]) => (
-          <button
-            key={key}
-            type="button"
-            className={`lll-tab${tab === key ? " lll-tab-active" : ""}`}
-            aria-pressed={tab === key}
-            onClick={() => switchTab(key)}
-          >
-            {label}
-            {key === "arena" && battle?.phase === "battle" ? " ●" : ""}
-          </button>
-        ))}
-      </nav>
-      {error && (
-        <p className="lll-error" role="alert">
-          {error}
-        </p>
-      )}
+
+        {error && (
+          <p className="lll-error" role="alert">
+            {error}
+          </p>
+        )}
+
+        <div className="lll-main-stage">
+          {/* ===== ホーム ===== */}
+          {tab === "home" && (
+            <LllHomeView
+              profile={profile}
+              busy={busy}
+              canUse3D={canUse3D}
+              viewer3D={(card) => viewer3DForCard(card, "inspect")}
+              onSavePlayerName={(name) => void savePlayerName(name)}
+              onClaimMission={(kind, id) => void claimMission(kind, id)}
+              onSwitchTab={switchTab}
+              onInspectCard={(cardId) => setDetailCardId(cardId)}
+            />
+          )}
 
       {/* ===== スカウト ===== */}
       {tab === "scout" && (
         <section className="lll-scout">
+          <div className="lll-panel-head" style={{ width: "100%" }}>
+            <span className="lll-chip">所持カード {profile.cards.length}/60</span>
+            <button type="button" className="lll-btn" onClick={() => setShowRates(true)}>
+              提供割合・仕様
+            </button>
+          </div>
           {scoutCue && !appraising && !result && (
             <ol className="lll-cue" aria-label="はじめの3ステップ">
-              <li className="lll-cue-active">1 画像を置く</li>
-              <li>2 鑑定</li>
+              <li className="lll-cue-active">1 画像またはスカウト券</li>
+              <li>2 3D鑑定召喚</li>
               <li>3 切り札完成</li>
             </ol>
           )}
@@ -1214,25 +1545,39 @@ export default function LllClient() {
                 <span>✦</span>
                 <span className="lll-cardback-logo">LLL</span>
               </div>
-              <p className="lll-appraising">鑑定中…</p>
+              <p className="lll-appraising">召喚鑑定中…</p>
             </div>
           ) : result ? (
             <div className="lll-reveal">
               {result.duplicated || !result.card ? (
                 <div className="lll-dup-box">
                   <span className="lll-stamp lll-stamp-dup">重複</span>
-                  <p className="lll-dup-text">見覚えのある1枚だった。</p>
-                  <span className="lll-chip lll-chip-shards">◆ 欠片 +{result.shardsGained}</span>
+                  <p className="lll-dup-text">
+                    {result.limitBroken ? "見覚えのある1枚！同名カードが自動で限界突破しました！" : "見覚えのある1枚だった。"}
+                  </p>
+                  <div className="lll-currencies">
+                    <span className="lll-chip lll-chip-shards">◆ 欠片 +{result.shardsGained}</span>
+                    {result.limitBroken && <span className="lll-chip lll-chip-picked">★ 限界突破 +1</span>}
+                  </div>
                 </div>
               ) : (
-                <div className="lll-reveal-card">
-                  <LllCard view={cardToView(result.card)} size="lg" />
+                <div className="lll-reveal-card" style={{ width: "100%", maxWidth: 320 }}>
+                  {canUse3D ? (
+                    viewer3DForCard(result.card, "summon")
+                  ) : (
+                    <LllCard view={cardToView(result.card, profile)} size="lg" />
+                  )}
                   <span className={`lll-stamp lll-stamp-${result.card.tier}`}>{TIER_LABEL[result.card.tier]}</span>
                   {result.card.tier === "legend" && <span className="lll-legend-flash" aria-hidden="true" />}
                 </div>
               )}
               {!result.duplicated && result.card && (
-                <span className="lll-chip">{result.aiUsed ? "AI鑑定" : "自動鑑定"}</span>
+                <div className="lll-currencies">
+                  <span className="lll-chip">{result.aiUsed ? "AI鑑定" : "召喚鑑定"}</span>
+                  <span className="lll-chip">
+                    {result.card.name} ({ELEMENT_LABEL[result.card.element]})
+                  </span>
+                </div>
               )}
               <div className="lll-actions">
                 <button
@@ -1243,8 +1588,17 @@ export default function LllClient() {
                     fileInputRef.current?.click();
                   }}
                 >
-                  もう一度スカウト
+                  画像でもう一度
                 </button>
+                {(profile.tickets ?? 0) >= 1 && (
+                  <button
+                    type="button"
+                    className="lll-btn lll-btn-primary"
+                    onClick={() => void summonWithTicket()}
+                  >
+                    🎫 券で召喚（残{profile.tickets}）
+                  </button>
+                )}
                 {result.card && (
                   <button type="button" className="lll-btn" onClick={() => switchTab("binder")}>
                     バインダーで編成
@@ -1253,35 +1607,54 @@ export default function LllClient() {
               </div>
             </div>
           ) : (
-            <div
-              className={`lll-dropzone${dragOver ? " lll-dropzone-hot" : ""}${scoutCue ? " lll-dropzone-cue" : ""}`}
-              role="button"
-              tabIndex={0}
-              aria-label="画像をドロップ、またはクリックして選択"
-              onClick={() => fileInputRef.current?.click()}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") {
+            <div className="lll-scout-grid">
+              <div
+                className={`lll-dropzone${dragOver ? " lll-dropzone-hot" : ""}${scoutCue ? " lll-dropzone-cue" : ""}`}
+                role="button"
+                tabIndex={0}
+                aria-label="画像をドロップ、またはクリックして選択"
+                onClick={() => fileInputRef.current?.click()}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    fileInputRef.current?.click();
+                  }
+                }}
+                onDragOver={(e) => {
                   e.preventDefault();
-                  fileInputRef.current?.click();
-                }
-              }}
-              onDragOver={(e) => {
-                e.preventDefault();
-                setDragOver(true);
-              }}
-              onDragLeave={() => setDragOver(false)}
-              onDrop={(e) => {
-                e.preventDefault();
-                setDragOver(false);
-                const file = e.dataTransfer.files?.[0];
-                if (file) void appraiseFile(file);
-              }}
-            >
-              <span className="lll-dropzone-glyph" aria-hidden="true">
-                ✦
-              </span>
-              <span className="lll-dropzone-label">画像をここにドロップ</span>
-              <span className="lll-dropzone-sub">タップで選択もできます</span>
+                  setDragOver(true);
+                }}
+                onDragLeave={() => setDragOver(false)}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  setDragOver(false);
+                  const file = e.dataTransfer.files?.[0];
+                  if (file) void appraiseFile(file);
+                }}
+              >
+                <span className="lll-dropzone-glyph" aria-hidden="true">
+                  ✦
+                </span>
+                <span className="lll-dropzone-label">画像スカウト（ドロップ/選択）</span>
+                <span className="lll-dropzone-sub">どんな画像も固有の切り札に鑑定</span>
+              </div>
+
+              <div className="lll-ticket-card">
+                <span className="lll-dropzone-glyph" aria-hidden="true">
+                  🎫
+                </span>
+                <strong>SR以上確定 スカウト券召喚</strong>
+                <span className="lll-mission-meta">エリート80% / レジェンド20%（重複時は限界突破）</span>
+                <span className="lll-chip lll-chip-ticket">所持スカウト券：{profile.tickets ?? 0}枚</span>
+                <button
+                  type="button"
+                  className="lll-btn lll-btn-primary"
+                  disabled={appraising || (profile.tickets ?? 0) < 1}
+                  onClick={() => void summonWithTicket()}
+                >
+                  🎫 1枚使って召喚
+                </button>
+              </div>
             </div>
           )}
           <input
@@ -1306,10 +1679,11 @@ export default function LllClient() {
             {pendingTeam && <span className="lll-chip lll-chip-picked">編成中：あと{3 - pendingTeam.length}枚で確定</span>}
             <span className="lll-chip">所持 {profile.cards.length}/60</span>
             {pickedCardId && <span className="lll-chip lll-chip-picked">置くスロットを選んでください（もう一度タップで詳細）</span>}
-            <button type="button" className="lll-btn lll-btn-exchange" onClick={() => void exchangeLumen()} disabled={busy || profile.lumen < 50}>
+            <button type="button" className="lll-btn lll-btn-exchange" onClick={exchangeLumen} disabled={busy || profile.lumen < 50}>
               ルーメン両替 50 → 欠片5
             </button>
           </div>
+
           <div className="lll-team-slots">
             {[0, 1, 2].map((i) => {
               const card = teamCards[i];
@@ -1325,7 +1699,7 @@ export default function LllClient() {
                   }}
                 >
                   {card ? (
-                    <LllCard view={cardToView(card)} size="md" onClick={() => setDetailCardId(card.id)}>
+                    <LllCard view={cardToView(card, profile)} size="md" onClick={() => setDetailCardId(card.id)}>
                       <button
                         type="button"
                         className="lll-remove-chip"
@@ -1348,21 +1722,90 @@ export default function LllClient() {
               );
             })}
           </div>
+
+          {/* 絞り込み・並び替え・一括分解ツールバー */}
+          <div className="lll-filterbar">
+            <select
+              className="lll-select"
+              aria-label="属性で絞り込み"
+              value={filterElement}
+              onChange={(e) => setFilterElement(e.target.value as "all" | LllElement)}
+            >
+              <option value="all">全属性</option>
+              {(["fire", "water", "wind", "earth", "light", "dark"] as LllElement[]).map((el) => (
+                <option key={el} value={el}>
+                  {ELEMENT_LABEL[el]}属性
+                </option>
+              ))}
+            </select>
+            <select
+              className="lll-select"
+              aria-label="ティアで絞り込み"
+              value={filterTier}
+              onChange={(e) => setFilterTier(e.target.value as "all" | LllTier)}
+            >
+              <option value="all">全ティア</option>
+              <option value="legend">レジェンド</option>
+              <option value="elite">エリート</option>
+              <option value="normal">ノーマル</option>
+            </select>
+            <select
+              className="lll-select"
+              aria-label="並び替え"
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value as BinderSort)}
+            >
+              <option value="power">戦力順</option>
+              <option value="level">Lv順</option>
+              <option value="tier">ティア順</option>
+              <option value="recent">入手順</option>
+            </select>
+            <button
+              type="button"
+              className={`lll-btn${dismantleMode ? " lll-btn-danger" : ""}`}
+              onClick={() => {
+                setDismantleMode((v) => !v);
+                setDismantleIds([]);
+                setPickedCardId(null);
+                playSe("tap");
+              }}
+            >
+              {dismantleMode ? "分解モード終了" : "一括分解"}
+            </button>
+          </div>
+
+          {dismantleMode && (
+            <div className="lll-dismantle-bar">
+              <span>分解するカードを選択（チーム内・🔒保護カードは除外）: {dismantleIds.length}枚選択中</span>
+              <span className="lll-chip lll-chip-shards">獲得予定 ◆+{dismantleGain}</span>
+              <button
+                type="button"
+                className="lll-btn lll-btn-danger"
+                disabled={busy || dismantleIds.length === 0}
+                onClick={() => void executeDismantle()}
+              >
+                選択を分解する
+              </button>
+            </div>
+          )}
+
           <div className="lll-collection">
-            {profile.cards.map((card) => {
+            {filteredCards.map((card) => {
               const inTeam = effectiveTeamIds.includes(card.id);
+              const dismantleSelected = dismantleMode && dismantleIds.includes(card.id);
               return (
                 <LllCard
                   key={card.id}
-                  view={cardToView(card)}
+                  view={cardToView(card, profile)}
                   size="sm"
-                  selected={pickedCardId === card.id}
+                  selected={dismantleSelected || (!dismantleMode && pickedCardId === card.id)}
                   dimmed={inTeam}
-                  draggableClass
+                  draggableClass={!dismantleMode}
                   onClick={() => tapCollectionCard(card)}
                   {...binderDragHandlers(card)}
                 >
                   {inTeam && <span className="lll-team-badge">チーム内</span>}
+                  {dismantleSelected && <span className="lll-team-badge">分解選択</span>}
                 </LllCard>
               );
             })}
@@ -1379,40 +1822,134 @@ export default function LllClient() {
                 <span className="lll-chip">⚔ {profile.wins}勝</span>
                 <span className="lll-chip">敗北 {profile.losses}</span>
                 <span className="lll-chip">引分 {profile.draws}</span>
+                <span className="lll-chip lll-chip-rating">PvPレート {profile.pvpRating ?? 1000}</span>
+                <span className="lll-chip">深淵最高 {profile.abyssBestFloor ?? 0}F</span>
                 <span className="lll-chip">チーム {teamCards.length}/3</span>
               </div>
-              <div className="lll-ladder">
-                {TIERS.map((tier, i) => {
-                  const unlocked = i <= maxCleared + 1;
-                  const cleared = profile.clearedTiers.includes(i);
-                  return (
+
+              <div className="lll-mode-tabs" role="tablist" aria-label="対戦モード">
+                {(
+                  [
+                    ["ladder", "ラダー戦"],
+                    ["abyss", "深淵の試練"],
+                    ["pvp", "模擬PvP"],
+                  ] as [ArenaMode, string][]
+                ).map(([m, label]) => (
+                  <button
+                    key={m}
+                    type="button"
+                    role="tab"
+                    aria-selected={arenaMode === m}
+                    className={`lll-btn${arenaMode === m ? " lll-btn-primary" : ""}`}
+                    onClick={() => {
+                      setArenaMode(m);
+                      playSe("tap");
+                    }}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+
+              {arenaMode === "ladder" && (
+                <div className="lll-ladder">
+                  {TIERS.map((tier, i) => {
+                    const unlocked = i <= maxCleared + 1;
+                    const cleared = profile.clearedTiers.includes(i);
+                    return (
+                      <button
+                        key={tier.name}
+                        type="button"
+                        className={`lll-tier-row${selectedTier === i ? " lll-tier-selected" : ""}${unlocked ? "" : " lll-tier-locked"}`}
+                        disabled={!unlocked}
+                        aria-pressed={selectedTier === i}
+                        onClick={() => {
+                          setSelectedTier(i);
+                          playSe("tap");
+                        }}
+                      >
+                        <span className="lll-tier-name">
+                          {tier.name}
+                          {cleared && <span className="lll-tier-clear">✓ クリア</span>}
+                          {!unlocked && <span aria-hidden="true"> （未開放）</span>}
+                        </span>
+                        <span className="lll-tier-meta">敵 Lv{tier.enemyLv}</span>
+                        <span className="lll-tier-reward">
+                          勝利 ◆{tier.winShards} / ●{tier.winLumen}
+                          {cleared ? "" : "（初回2倍）"} ・ 敗北 ◆{tier.loseShards}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+
+              {arenaMode === "abyss" && (
+                <div className="lll-abyss-card">
+                  <div className="lll-mission-info">
+                    <strong>深淵の試練 — 第 {abyssFloor} 階層</strong>
+                    <span className="lll-mission-meta">
+                      5階層ごとに強敵ボス登場（スカウト券確定ドロップ！）。到達済み最大 {(profile.abyssBestFloor ?? 0) + 1}F まで挑戦可能。
+                    </span>
+                  </div>
+                  <div className="lll-soundbar">
                     <button
-                      key={tier.name}
                       type="button"
-                      className={`lll-tier-row${selectedTier === i ? " lll-tier-selected" : ""}${unlocked ? "" : " lll-tier-locked"}`}
-                      disabled={!unlocked}
-                      aria-pressed={selectedTier === i}
+                      className="lll-snd-btn"
+                      disabled={abyssFloor <= 1}
+                      onClick={() => setAbyssFloor((f) => Math.max(1, f - 1))}
+                    >
+                      －1F
+                    </button>
+                    <button
+                      type="button"
+                      className="lll-snd-btn lll-snd-on"
+                      disabled={abyssFloor >= (profile.abyssBestFloor ?? 0) + 1}
+                      onClick={() => setAbyssFloor((f) => Math.min((profile.abyssBestFloor ?? 0) + 1, f + 1))}
+                    >
+                      ＋1F
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {arenaMode === "pvp" && (
+                <div className="lll-ladder">
+                  {pvpRivals.map((rival) => (
+                    <button
+                      key={rival.id}
+                      type="button"
+                      className={`lll-pvp-card${selectedRivalId === rival.id ? " lll-pvp-selected" : ""}`}
                       onClick={() => {
-                        setSelectedTier(i);
+                        setSelectedRivalId(rival.id);
                         playSe("tap");
                       }}
                     >
-                      <span className="lll-tier-name">
-                        {tier.name}
-                        {cleared && <span className="lll-tier-clear">✓ クリア</span>}
-                        {!unlocked && <span aria-hidden="true"> （未開放）</span>}
-                      </span>
-                      <span className="lll-tier-meta">敵 Lv{tier.enemyLv}</span>
-                      <span className="lll-tier-reward">
-                        勝利 ◆{tier.winShards} / ●{tier.winLumen}
-                        {cleared ? "" : "（初回2倍）"} ・ 敗北 ◆{tier.loseShards}
-                      </span>
+                      <div className="lll-mission-info" style={{ textAlign: "left" }}>
+                        <strong>
+                          {rival.playerName}（{rival.title}）
+                        </strong>
+                        <span className="lll-mission-meta">
+                          {rival.cards.map((c) => `${c.name}(Lv${c.level})`).join(" / ")}
+                        </span>
+                      </div>
+                      <div className="lll-currencies">
+                        <span className="lll-chip lll-chip-rating">Rate {rival.rating}</span>
+                        <span className="lll-chip">戦力 {rival.powerScore}</span>
+                      </div>
                     </button>
-                  );
-                })}
-              </div>
+                  ))}
+                  {pvpRivals.length === 0 && <p className="lll-mission-meta">対戦相手を読み込み中…</p>}
+                </div>
+              )}
+
               <div className="lll-deckpick" role="group" aria-label="戦術デッキ">
-                <span className="lll-actionbar-label">戦術デッキ（30枚）</span>
+                <div className="lll-panel-head" style={{ gridColumn: "1 / -1" }}>
+                  <span className="lll-actionbar-label">戦術デッキ（30枚）</span>
+                  <button type="button" className="lll-btn" onClick={() => setShowDeckModal(true)}>
+                    カスタムデッキ編成
+                  </button>
+                </div>
                 {Object.entries(TACTIC_DECKS).map(([deckId, deck]) => (
                   <button
                     key={deckId}
@@ -1428,18 +1965,46 @@ export default function LllClient() {
                     <span className="lll-deck-desc">{deck.description}</span>
                   </button>
                 ))}
-                <p className="lll-deck-note">
-                  対戦中は各アクターの行動前に戦術カードを切れる。手札4枚で始まり、ラウンドごとに2枚引いて TP は5に戻る（Tier4以上の敵も戦術デッキを持つ）。
-                </p>
+                {profile.customTacticDeck && (
+                  <button
+                    type="button"
+                    className={`lll-deck-btn${selectedDeck === "custom" ? " lll-deck-selected" : ""}`}
+                    aria-pressed={selectedDeck === "custom"}
+                    onClick={() => {
+                      setSelectedDeck("custom");
+                      playSe("tap");
+                    }}
+                  >
+                    <span className="lll-deck-name">✦ マイカスタム30枚</span>
+                    <span className="lll-deck-desc">自作の30枚戦術デッキで出撃する。</span>
+                  </button>
+                )}
               </div>
+
               <div className="lll-actions">
                 <button
                   type="button"
                   className="lll-btn lll-btn-primary lll-btn-big"
-                  disabled={busy || teamCards.length < 3}
-                  onClick={() => void startBattle(selectedTier)}
+                  disabled={busy || teamCards.length < 3 || (arenaMode === "pvp" && !selectedRivalId)}
+                  onClick={() => {
+                    if (arenaMode === "abyss") {
+                      void beginBattleRequest({ mode: "abyss", floor: abyssFloor });
+                    } else if (arenaMode === "pvp" && selectedRivalId) {
+                      void beginBattleRequest({ mode: "pvp", rivalId: selectedRivalId });
+                    } else {
+                      void beginBattleRequest({
+                        mode: "ladder",
+                        tierIndex: selectedTier,
+                        clearedBefore: profile.clearedTiers.includes(selectedTier),
+                      });
+                    }
+                  }}
                 >
-                  対戦開始
+                  {arenaMode === "abyss"
+                    ? `深淵 第${abyssFloor}階層へ`
+                    : arenaMode === "pvp"
+                      ? "ゴーストライバルと対戦"
+                      : "対戦開始"}
                 </button>
                 {teamCards.length < 3 && <span className="lll-chip">バインダーで3枚編成してください</span>}
               </div>
@@ -1452,14 +2017,40 @@ export default function LllClient() {
               }}
             >
               <div className="lll-battle-side-label">
-                <span className="lll-chip lll-chip-enemy">CPU ・ {TIERS[battle.tierIndex]?.name ?? ""}</span>
+                <span className="lll-chip lll-chip-enemy">
+                  {battle.title ?? `CPU ・ ${TIERS[battle.tierIndex]?.name ?? ""}`}
+                </span>
                 {battle.tactics && battle.tactics.cpu.deckCount + (battle.tactics.cpu.handCount ?? 0) > 0 && (
                   <span className="lll-chip">
                     CPU 手札 {battle.tactics.cpu.handCount ?? 0} ・ 山札 {battle.tactics.cpu.deckCount}
                     {(battle.tactics.cpu.reserveCount ?? 0) > 0 ? ` ・ 設置 ${battle.tactics.cpu.reserveCount}` : ""}
                   </span>
                 )}
-                <div className="lll-speedbar" role="group" aria-label="再生速度">
+                <div className="lll-speedbar" role="group" aria-label="再生・オート操作">
+                  <button
+                    type="button"
+                    className={`lll-snd-btn${autoMode ? " lll-snd-on" : ""}`}
+                    aria-pressed={autoMode}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setAutoMode((v) => !v);
+                      playSe("tap");
+                    }}
+                  >
+                    AUTO {autoMode ? "ON" : "OFF"}
+                  </button>
+                  <button
+                    type="button"
+                    className={`lll-snd-btn${canUse3D ? " lll-snd-on" : ""}`}
+                    aria-pressed={canUse3D}
+                    disabled={webglFailed}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      toggle3D();
+                    }}
+                  >
+                    {canUse3D ? "3D" : "2D"}
+                  </button>
                   {(["1x", "2x", "instant"] as SpeedMode[]).map((mode) => (
                     <button
                       key={mode}
@@ -1476,32 +2067,97 @@ export default function LllClient() {
                   ))}
                 </div>
               </div>
-              <div className="lll-battle-row">{(shownBattle ?? battle).actors.filter((a) => a.side === "cpu").map(renderActor)}</div>
+
+              <div className="lll-battle-stage">
+                {cutInBanner && (
+                  <div className="lll-cutin-banner" aria-live="polite">
+                    <span className="lll-cutin-actor">{cutInBanner.actorName}</span>
+                    <span className="lll-cutin-skill">{cutInBanner.skillName}</span>
+                  </div>
+                )}
+
+                {canUse3D ? (
+                  <>
+                    <LllBattleScene3D
+                      actors={(shownBattle ?? battle).actors.map(actorToThreeInput)}
+                      currentActorKey={
+                        displayBattle
+                          ? playbackInfo?.actorKey ?? null
+                          : currentActor?.key ?? null
+                      }
+                      targetableKeys={targetableKeys}
+                      guideTargetKey={
+                        pending && guideRecommendation?.skill === pending.skill
+                          ? guideRecommendation.targetKey
+                          : null
+                      }
+                      vfx={sceneVfx}
+                      vfxNonce={sceneVfxNonce}
+                      shakeIntensity={sceneShake}
+                      isBossOrAbyss={battle.mode === "abyss" || battle.tierIndex >= 6}
+                      onActorTap={tapActorByKey}
+                      onFail={handle3DFail}
+                      fallback={render2DArenaBoard()}
+                    />
+                    {pending && targetableKeys.length > 0 && (
+                      <div className="lll-actions" aria-label="対象クイック選択">
+                        {(shownBattle ?? battle).actors
+                          .filter((a) => targetableKeys.includes(a.key))
+                          .map((a) => {
+                            const fc = forecastForActor(a);
+                            return (
+                              <button
+                                key={a.key}
+                                type="button"
+                                className="lll-btn lll-btn-primary"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  tapActor(a);
+                                }}
+                              >
+                                {a.name} (HP {a.hp}/{a.maxHp}){fc ? ` [${fc}]` : ""}
+                              </button>
+                            );
+                          })}
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  render2DArenaBoard()
+                )}
+              </div>
+
               <div className="lll-queue" aria-label="行動順">
                 {(shownBattle ?? battle).queue.map((key, i) => {
                   const actor = (shownBattle ?? battle).actors.find((a) => a.key === key);
                   if (!actor) return null;
                   const nowKey = displayBattle
-                    ? (playbackInfo?.actorKey ?? key)
+                    ? playbackInfo?.actorKey ?? key
                     : (shownBattle ?? battle).queue[(shownBattle ?? battle).queuePos];
                   const done = !displayBattle && i < (shownBattle ?? battle).queuePos;
                   return (
-                    <span key={`${key}-${i}`} className={`lll-queue-chip${key === nowKey ? " lll-queue-chip-now" : ""}${done ? " lll-queue-chip-done" : ""}${actor.alive ? "" : " lll-queue-chip-dead"}`}>
+                    <span
+                      key={`${key}-${i}`}
+                      className={`lll-queue-chip${key === nowKey ? " lll-queue-chip-now" : ""}${done ? " lll-queue-chip-done" : ""}${actor.alive ? "" : " lll-queue-chip-dead"}`}
+                    >
                       {actor.name}
                     </span>
                   );
                 })}
               </div>
+
               <div className="lll-logstrip" aria-live="polite">
                 <span className="lll-chip">R{(shownBattle ?? battle).round}</span>
-                {[...(shownBattle ?? battle).log].slice(-3).reverse().map((entry, i) => (
-                  <p key={`${(shownBattle ?? battle).log.length}-${i}`} className={`lll-logline${i === 0 ? " lll-logline-latest" : ""}`}>
-                    {entry.text}
-                  </p>
-                ))}
+                {[...(shownBattle ?? battle).log]
+                  .slice(-3)
+                  .reverse()
+                  .map((entry, i) => (
+                    <p key={`${(shownBattle ?? battle).log.length}-${i}`} className={`lll-logline${i === 0 ? " lll-logline-latest" : ""}`}>
+                      {entry.text}
+                    </p>
+                  ))}
                 {(shownBattle ?? battle).log.length === 0 && <p className="lll-logline">対戦開始</p>}
               </div>
-              <div className="lll-battle-row">{(shownBattle ?? battle).actors.filter((a) => a.side === "player").map(renderActor)}</div>
 
               {battle.phase === "finished" ? (
                 <div className="lll-result">
@@ -1516,27 +2172,99 @@ export default function LllClient() {
                       {profile.lumen - battleStartRef.current.lumen !== 0 && (
                         <span className="lll-chip lll-chip-lumen">● ルーメン +{profile.lumen - battleStartRef.current.lumen}</span>
                       )}
+                      {(profile.tickets ?? 0) - battleStartRef.current.tickets > 0 && (
+                        <span className="lll-chip lll-chip-ticket">
+                          🎫 券 +{(profile.tickets ?? 0) - battleStartRef.current.tickets}
+                        </span>
+                      )}
+                      {battle.mode === "pvp" && (profile.pvpRating ?? 1000) !== battleStartRef.current.rating && (
+                        <span className="lll-chip lll-chip-rating">
+                          Rate {(profile.pvpRating ?? 1000) - battleStartRef.current.rating >= 0 ? "+" : ""}
+                          {(profile.pvpRating ?? 1000) - battleStartRef.current.rating}
+                        </span>
+                      )}
                     </div>
                   )}
                   {battleRecap && battleRecap.totalDamage > 0 && (
                     <div className="lll-currencies" aria-label="戦績">
                       <span className="lll-chip">与ダメージ {battleRecap.totalDamage}</span>
                       {battleRecap.maxHit > 0 && <span className="lll-chip">最大の一撃 {battleRecap.maxHitLabel} {battleRecap.maxHit}</span>}
-                      {battleRecap.mvp && <span className="lll-chip">最もダメージを出したカード {battleRecap.mvp.name}（{battleRecap.mvp.total}）</span>}
+                      {battleRecap.mvp && <span className="lll-chip">MVP {battleRecap.mvp.name}（{battleRecap.mvp.total}）</span>}
                     </div>
                   )}
                   <div className="lll-actions">
-                    {battle.winner === "player" && battleStartRef.current && !battleStartRef.current.clearedBefore && battle.tierIndex < TIERS.length - 1 ? (
+                    {battle.mode === "abyss" ? (
                       <>
-                        <button type="button" className="lll-btn lll-btn-primary" disabled={busy} onClick={() => void startBattle(battle.tierIndex + 1)}>
+                        {battle.winner === "player" && (
+                          <button
+                            type="button"
+                            className="lll-btn lll-btn-primary"
+                            disabled={busy}
+                            onClick={() => {
+                              const nextFloor = (battle.floor ?? abyssFloor) + 1;
+                              setAbyssFloor(nextFloor);
+                              void beginBattleRequest({ mode: "abyss", floor: nextFloor });
+                            }}
+                          >
+                            次の階層（{(battle.floor ?? abyssFloor) + 1}F）へ
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          className="lll-btn"
+                          disabled={busy}
+                          onClick={() => void beginBattleRequest({ mode: "abyss", floor: battle.floor ?? abyssFloor })}
+                        >
+                          同じ階層へ
+                        </button>
+                      </>
+                    ) : battle.mode === "pvp" ? (
+                      <button
+                        type="button"
+                        className="lll-btn lll-btn-primary"
+                        disabled={busy || !selectedRivalId}
+                        onClick={() => selectedRivalId && void beginBattleRequest({ mode: "pvp", rivalId: selectedRivalId })}
+                      >
+                        もう一度対戦
+                      </button>
+                    ) : battle.winner === "player" && battleStartRef.current && !battleStartRef.current.clearedBefore && battle.tierIndex < TIERS.length - 1 ? (
+                      <>
+                        <button
+                          type="button"
+                          className="lll-btn lll-btn-primary"
+                          disabled={busy}
+                          onClick={() =>
+                            void beginBattleRequest({
+                              mode: "ladder",
+                              tierIndex: battle.tierIndex + 1,
+                              clearedBefore: profile.clearedTiers.includes(battle.tierIndex + 1),
+                            })
+                          }
+                        >
                           次のティア（{TIERS[battle.tierIndex + 1].name}）へ
                         </button>
-                        <button type="button" className="lll-btn" disabled={busy} onClick={() => void startBattle(battle.tierIndex)}>
+                        <button
+                          type="button"
+                          className="lll-btn"
+                          disabled={busy}
+                          onClick={() => void beginBattleRequest({ mode: "ladder", tierIndex: battle.tierIndex, clearedBefore: true })}
+                        >
                           もう一度
                         </button>
                       </>
                     ) : (
-                      <button type="button" className="lll-btn lll-btn-primary" disabled={busy} onClick={() => void startBattle(battle.tierIndex)}>
+                      <button
+                        type="button"
+                        className="lll-btn lll-btn-primary"
+                        disabled={busy}
+                        onClick={() =>
+                          void beginBattleRequest({
+                            mode: "ladder",
+                            tierIndex: battle.tierIndex,
+                            clearedBefore: profile.clearedTiers.includes(battle.tierIndex),
+                          })
+                        }
+                      >
                         {guideBattle && battle.winner === "cpu" ? "もう一度（同じ相手）" : "もう一度"}
                       </button>
                     )}
@@ -1546,6 +2274,7 @@ export default function LllClient() {
                       onClick={() => {
                         setBattle(null);
                         setPending(null);
+                        setAutoMode(false);
                         playSe("tap");
                       }}
                     >
@@ -1572,87 +2301,89 @@ export default function LllClient() {
                 </div>
               ) : isPlayerTurn && currentActor ? (
                 <>
-                {battle.tactics && (
-                  <div className="lll-tactics" aria-label="戦術カード">
-                    <span className="lll-chip lll-chip-tp">TP {battle.tactics.player.tp} / 5</span>
-                    <span className="lll-chip">山札 {battle.tactics.player.deckCount} ・ 捨札 {battle.tactics.player.discard.length}</span>
-                    {battle.tactics.player.reserves.map((cardId, i) => (
-                      <span key={`res-${cardId}-${i}`} className="lll-chip lll-chip-reserve">
-                        設置中：{TACTIC_CARD_BY_ID.get(cardId)?.name ?? cardId}
+                  {battle.tactics && (
+                    <div className="lll-tactics" aria-label="戦術カード">
+                      <span className="lll-chip lll-chip-tp">TP {battle.tactics.player.tp} / 5</span>
+                      <span className="lll-chip">
+                        山札 {battle.tactics.player.deckCount} ・ 捨札 {battle.tactics.player.discard.length}
                       </span>
-                    ))}
-                    <div className="lll-hand">
-                      {battle.tactics.player.hand.length === 0 && <span className="lll-chip">手札なし（行動のみ）</span>}
-                      {battle.tactics.player.hand.map((cardId, i) => {
-                        const def = TACTIC_CARD_BY_ID.get(cardId);
-                        if (!def) return null;
-                        const unaffordable = def.cost > (battle.tactics?.player.tp ?? 0);
-                        return (
-                          <button
-                            key={`${cardId}-${i}`}
-                            type="button"
-                            className="lll-tactic-btn"
-                            disabled={busy || unaffordable}
-                            title={def.text}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              void sendTactic(cardId);
-                            }}
-                          >
-                            <span className="lll-tactic-name">{def.name}</span>
-                            <span className="lll-tactic-meta">
-                              {def.reserve ? "設置" : def.tags.join("・")} ・ TP{def.cost}
-                            </span>
-                          </button>
-                        );
-                      })}
+                      {battle.tactics.player.reserves.map((cardId, i) => (
+                        <span key={`res-${cardId}-${i}`} className="lll-chip lll-chip-reserve">
+                          設置中：{TACTIC_CARD_BY_ID.get(cardId)?.name ?? cardId}
+                        </span>
+                      ))}
+                      <div className="lll-hand">
+                        {battle.tactics.player.hand.length === 0 && <span className="lll-chip">手札なし（行動のみ）</span>}
+                        {battle.tactics.player.hand.map((cardId, i) => {
+                          const def = TACTIC_CARD_BY_ID.get(cardId);
+                          if (!def) return null;
+                          const unaffordable = def.cost > (battle.tactics?.player.tp ?? 0);
+                          return (
+                            <button
+                              key={`${cardId}-${i}`}
+                              type="button"
+                              className="lll-tactic-btn"
+                              disabled={busy || unaffordable}
+                              title={def.text}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                void sendTactic(cardId);
+                              }}
+                            >
+                              <span className="lll-tactic-name">{def.name}</span>
+                              <span className="lll-tactic-meta">
+                                {def.reserve ? "設置" : def.tags.join("・")} ・ TP{def.cost}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <span className="lll-tactics-hint">戦術カードは行動の前に何枚でも切れる（TP の範囲で）。カード名に触れると効果文が出る。</span>
                     </div>
-                    <span className="lll-tactics-hint">戦術カードは行動の前に何枚でも切れる（TP の範囲で）。カード名に触れると効果文が出る。</span>
-                  </div>
-                )}
-                <div className="lll-actionbar">
-                  <span className="lll-actionbar-label">
-                    {currentStunned ? `${currentActor.name} はスタン中：戦術のみ使える（下のボタンは手番を渡す）` : `${currentActor.name} の行動`}
-                  </span>
-                  {guideActive && <span className="lll-chip lll-chip-picked">ガイド中 あと{3 - guideTurnsUsed}手</span>}
-                  <button
-                    type="button"
-                    className={`lll-btn${pending?.skill === "basic" ? " lll-btn-primary" : ""}${guideRecommendation?.skill === "basic" ? " lll-btn-guide" : ""}`}
-                    disabled={busy}
-                    onClick={() => chooseSkill("basic")}
-                  >
-                    通常攻撃
-                  </button>
-                  {([0, 1] as const).map((idx) => {
-                    const skill = currentActor.skills[idx];
-                    if (!skill) return null;
-                    const cd = currentActor.cooldowns[idx] ?? 0;
-                    return (
-                      <button
-                        key={idx}
-                        type="button"
-                        className={`lll-btn${pending?.skill === idx ? " lll-btn-primary" : ""}${guideRecommendation?.skill === idx ? " lll-btn-guide" : ""}`}
-                        disabled={busy || cd > 0}
-                        onClick={() => chooseSkill(idx)}
-                        title={skill.description}
-                      >
-                        {skill.name}
-                        <span className="lll-btn-meta">{cd > 0 ? `CD ${cd}` : `威力${skill.power}`}</span>
-                      </button>
-                    );
-                  })}
-                  <button type="button" className="lll-btn lll-btn-danger" disabled={busy} onClick={() => chooseSkill("defend")}>
-                    防御
-                  </button>
-                  {pending && (
-                    <>
-                      <span className="lll-chip lll-chip-picked">{pending.label}: 対象を選んでください</span>
-                      <button type="button" className="lll-btn" onClick={() => setPending(null)}>
-                        やめる
-                      </button>
-                    </>
                   )}
-                </div>
+                  <div className="lll-actionbar">
+                    <span className="lll-actionbar-label">
+                      {currentStunned ? `${currentActor.name} はスタン中：戦術のみ使える（下のボタンは手番を渡す）` : `${currentActor.name} の行動`}
+                    </span>
+                    {guideActive && <span className="lll-chip lll-chip-picked">ガイド中 あと{3 - guideTurnsUsed}手</span>}
+                    <button
+                      type="button"
+                      className={`lll-btn${pending?.skill === "basic" ? " lll-btn-primary" : ""}${guideRecommendation?.skill === "basic" ? " lll-btn-guide" : ""}`}
+                      disabled={busy}
+                      onClick={() => chooseSkill("basic")}
+                    >
+                      通常攻撃
+                    </button>
+                    {([0, 1] as const).map((idx) => {
+                      const skill = currentActor.skills[idx];
+                      if (!skill) return null;
+                      const cd = currentActor.cooldowns[idx] ?? 0;
+                      return (
+                        <button
+                          key={idx}
+                          type="button"
+                          className={`lll-btn${pending?.skill === idx ? " lll-btn-primary" : ""}${guideRecommendation?.skill === idx ? " lll-btn-guide" : ""}`}
+                          disabled={busy || cd > 0}
+                          onClick={() => chooseSkill(idx)}
+                          title={skill.description}
+                        >
+                          {skill.name}
+                          <span className="lll-btn-meta">{cd > 0 ? `CD ${cd}` : `威力${skill.power}`}</span>
+                        </button>
+                      );
+                    })}
+                    <button type="button" className="lll-btn lll-btn-danger" disabled={busy} onClick={() => chooseSkill("defend")}>
+                      防御
+                    </button>
+                    {pending && (
+                      <>
+                        <span className="lll-chip lll-chip-picked">{pending.label}: 対象を選んでください</span>
+                        <button type="button" className="lll-btn" onClick={() => setPending(null)}>
+                          やめる
+                        </button>
+                      </>
+                    )}
+                  </div>
                 </>
               ) : (
                 <p className="lll-loading">相手の行動中…</p>
@@ -1661,67 +2392,229 @@ export default function LllClient() {
           )}
         </section>
       )}
+        </div>
 
-      {/* ===== 詳細オーバーレイ（テーブルの上に開く） ===== */}
-      {detailCard && (
-        <div
-          className="lll-overlay"
-          role="dialog"
-          aria-label={`${detailCard.name}の詳細`}
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setDetailCardId(null);
-          }}
-        >
-          <div className="lll-detail">
-            <LllCard view={cardToView(detailCard)} size="lg" />
-            <div className="lll-detail-info">
-              <p className="lll-flavor-lg">{detailCard.flavor}</p>
-              <ul className="lll-detail-skills">
-                {detailCard.skills.map((skill, i) => (
-                  <li key={`${skill.name}-${i}`}>
-                    <strong>{skill.name}</strong>
-                    <span>
-                      威力{skill.power} ・ CD{skill.cooldown} ・ AP{skill.ap}
-                    </span>
-                    <p>{skill.description}</p>
-                  </li>
-                ))}
-                <li>
-                  <strong>✦ {detailCard.trait.name}</strong>
-                  <p>{detailCard.trait.description}</p>
-                </li>
-              </ul>
-              <div className="lll-actions lll-detail-actions">
-                <button
-                  type="button"
-                  className="lll-btn lll-btn-primary"
-                  disabled={busy || detailCard.level >= 10 || profile.shards < 8 * detailCard.level}
-                  onClick={() => void growCard(detailCard)}
-                >
-                  {detailCard.level >= 10 ? "Lv MAX" : `強化（欠片 ${8 * detailCard.level}）`}
-                </button>
-                {effectiveTeamIds.includes(detailCard.id) ? (
-                  <button type="button" className="lll-btn lll-btn-danger" onClick={() => removeFromTeam(detailCard.id)}>
-                    チームから外す
-                  </button>
+        {/* ソシャゲ式ボトムドックナビゲーション */}
+        <nav className="lll-dock" aria-label="メインメニュー">
+          {(
+            [
+              ["home", "🏛", "ホーム", homeBadgeCount > 0 ? String(homeBadgeCount) : null],
+              ["scout", "✦", "スカウト", (profile.tickets ?? 0) > 0 ? String(profile.tickets) : null],
+              ["binder", "🃏", "バインダー", pendingTeam ? `${pendingTeam.length}/3` : null],
+              ["arena", "⚔", "アリーナ", battle?.phase === "battle" ? "進行中" : null],
+            ] as [Tab, string, string, string | null][]
+          ).map(([key, icon, label, badge]) => (
+            <button
+              key={key}
+              type="button"
+              className={`lll-dock-btn${tab === key ? " lll-dock-btn-active" : ""}`}
+              aria-pressed={tab === key}
+              onClick={() => switchTab(key)}
+            >
+              <span className="lll-dock-icon" aria-hidden="true">
+                {icon}
+              </span>
+              <span className="lll-dock-label">{label}</span>
+              {badge && <span className="lll-dock-badge">{badge}</span>}
+            </button>
+          ))}
+        </nav>
+
+        {/* ===== 詳細オーバーレイ（3Dホロ表示 + 強化・限界突破・覚醒・ロック・推し） ===== */}
+        {detailCard && (
+          <div
+            className="lll-overlay"
+            role="dialog"
+            aria-label={`${detailCard.name}の詳細`}
+            onClick={(e) => {
+              if (e.target === e.currentTarget) setDetailCardId(null);
+            }}
+          >
+            <div className="lll-detail">
+              <div style={{ width: "100%", maxWidth: 260 }}>
+                {canUse3D ? (
+                  viewer3DForCard(detailCard, "inspect")
                 ) : (
+                  <LllCard view={cardToView(detailCard, profile)} size="lg" />
+                )}
+              </div>
+              <div className="lll-detail-info">
+                <div className="lll-currencies">
+                  <span className="lll-chip">{TIER_LABEL[detailCard.tier]}</span>
+                  <span className="lll-chip">{ELEMENT_LABEL[detailCard.element]}</span>
+                  <span className="lll-chip">戦力 {cardPowerScore(detailCard)}</span>
+                  <span className="lll-chip">限界突破 ★{detailCard.limitBreak ?? 0}/{MAX_LIMIT_BREAK}</span>
+                </div>
+                <p className="lll-flavor-lg">{detailCard.flavor}</p>
+                <ul className="lll-detail-skills">
+                  {detailCard.skills.map((skill, i) => (
+                    <li key={`${skill.name}-${i}`}>
+                      <strong>{skill.name}</strong>
+                      <span>
+                        威力{skill.power} ・ CD{skill.cooldown} ・ AP{skill.ap}
+                      </span>
+                      <p>{skill.description}</p>
+                    </li>
+                  ))}
+                  <li>
+                    <strong>✦ {detailCard.trait.name}</strong>
+                    <p>{detailCard.trait.description}</p>
+                  </li>
+                </ul>
+                <div className="lll-actions lll-detail-actions">
+                  <button
+                    type="button"
+                    className="lll-btn lll-btn-primary"
+                    disabled={busy || detailCard.level >= MAX_LEVEL || profile.shards < levelUpCost(detailCard.level)}
+                    onClick={() => growCard(detailCard)}
+                  >
+                    {detailCard.level >= MAX_LEVEL ? "Lv MAX" : `強化（欠片 ${levelUpCost(detailCard.level)}）`}
+                  </button>
+                  <button
+                    type="button"
+                    className="lll-btn lll-btn-primary"
+                    disabled={
+                      busy ||
+                      (detailCard.limitBreak ?? 0) >= MAX_LIMIT_BREAK ||
+                      profile.shards < limitBreakCost(detailCard.limitBreak ?? 0)
+                    }
+                    onClick={() => limitBreakCard(detailCard)}
+                  >
+                    {(detailCard.limitBreak ?? 0) >= MAX_LIMIT_BREAK
+                      ? "限界突破 MAX"
+                      : `限界突破 +1（欠片 ${limitBreakCost(detailCard.limitBreak ?? 0)}）`}
+                  </button>
+                  {(() => {
+                    const nTier = nextTier(detailCard.tier);
+                    const cost = awakenCost(detailCard.tier);
+                    if (!nTier || !cost) return null;
+                    return (
+                      <button
+                        type="button"
+                        className="lll-btn lll-btn-primary"
+                        disabled={busy || profile.shards < cost.shards || profile.lumen < cost.lumen}
+                        onClick={() => awakenCard(detailCard)}
+                      >
+                        {TIER_LABEL[nTier]}へ覚醒（◆{cost.shards} ●{cost.lumen}）
+                      </button>
+                    );
+                  })()}
                   <button
                     type="button"
                     className="lll-btn"
-                    disabled={effectiveTeamIds.length >= 3}
-                    onClick={() => assignToSlot(detailCard.id, effectiveTeamIds.length)}
+                    disabled={busy}
+                    onClick={() => toggleLockCard(detailCard.id)}
                   >
-                    チームに入れる
+                    {profile.lockedCardIds?.includes(detailCard.id) ? "🔒 ロック解除" : "🔒 保護ロック"}
                   </button>
-                )}
-                <button type="button" className="lll-btn" onClick={() => setDetailCardId(null)}>
-                  閉じる
-                </button>
+                  <button
+                    type="button"
+                    className="lll-btn"
+                    disabled={busy || profile.favoriteCardId === detailCard.id}
+                    onClick={() => setFavoriteCard(detailCard.id)}
+                  >
+                    {profile.favoriteCardId === detailCard.id ? "♥ 推し設定中" : "♥ 推しに設定"}
+                  </button>
+                  {effectiveTeamIds.includes(detailCard.id) ? (
+                    <button type="button" className="lll-btn lll-btn-danger" onClick={() => removeFromTeam(detailCard.id)}>
+                      チームから外す
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className="lll-btn"
+                      disabled={effectiveTeamIds.length >= 3}
+                      onClick={() => assignToSlot(detailCard.id, effectiveTeamIds.length)}
+                    >
+                      チームに入れる
+                    </button>
+                  )}
+                  <button type="button" className="lll-btn" onClick={() => setDetailCardId(null)}>
+                    閉じる
+                  </button>
+                </div>
               </div>
             </div>
           </div>
+        )}
+
+        {/* モーダル群 */}
+        {loginBonus && <LoginBonusModal bonus={loginBonus} onClose={() => setLoginBonus(null)} />}
+        {showRates && <DropRatesModal onClose={() => setShowRates(false)} />}
+        {showDeckModal && (
+          <CustomDeckModal
+            initialCounts={profile.customTacticDeck ?? {}}
+            busy={busy}
+            onSave={(counts) => void saveCustomDeck(counts)}
+            onClose={() => setShowDeckModal(false)}
+          />
+        )}
+      </div>
+
+      {/* 独立ゲームフッター（AGOBOT 風のゆとりあるグループ配置） */}
+      <footer className="lll-footer" aria-label="LLL フッター">
+        <div className="lll-footer-inner">
+          <div className="lll-footer-brand">
+            <span className="lll-footer-logo">✦ LLL</span>
+            <p className="lll-footer-tagline">想像を、切り札に。写真とAIと3Dで紡ぐカードバトル。</p>
+            <div className="lll-footer-stats">
+              <span>調律者: {profile.playerName ?? "調律者"}</span>
+              <span>総戦力 {teamPower}</span>
+              <span>Rate {profile.pvpRating ?? 1000}</span>
+              <span>深淵 {profile.abyssBestFloor ?? 0}F</span>
+            </div>
+          </div>
+
+          <div className="lll-footer-groups">
+            <nav className="lll-footer-group" aria-label="ゲームメニュー">
+              <p className="lll-footer-group-title">ゲームメニュー</p>
+              <button type="button" className="lll-footer-link" onClick={() => switchTab("home")}>
+                ホームロビー
+              </button>
+              <button type="button" className="lll-footer-link" onClick={() => switchTab("scout")}>
+                スカウト召喚
+              </button>
+              <button type="button" className="lll-footer-link" onClick={() => switchTab("binder")}>
+                バインダー編成
+              </button>
+              <button type="button" className="lll-footer-link" onClick={() => switchTab("arena")}>
+                アリーナ・深淵・PvP
+              </button>
+            </nav>
+
+            <nav className="lll-footer-group" aria-label="サポート・設定">
+              <p className="lll-footer-group-title">サポート・設定</p>
+              <button type="button" className="lll-footer-link" onClick={() => setShowRates(true)}>
+                提供割合・仕様
+              </button>
+              <button type="button" className="lll-footer-link" onClick={() => setShowDeckModal(true)}>
+                カスタム戦術デッキ
+              </button>
+              <button type="button" className="lll-footer-link" disabled={webglFailed} onClick={toggle3D}>
+                3D表示: {canUse3D ? "ON" : "OFF"}
+              </button>
+              <button type="button" className="lll-footer-link" onClick={() => toggleSound("bgm")}>
+                BGM: {sound.bgm ? "ON" : "OFF"}
+              </button>
+              <button type="button" className="lll-footer-link" onClick={() => toggleSound("se")}>
+                SE: {sound.se ? "ON" : "OFF"}
+              </button>
+            </nav>
+
+            <nav className="lll-footer-group" aria-label="AGOBOT">
+              <p className="lll-footer-group-title">AGOBOT</p>
+              <Link className="lll-footer-link" href={`${prefix}/games`}>
+                ゲーム一覧へ戻る
+              </Link>
+            </nav>
+          </div>
         </div>
-      )}
+
+        <div className="lll-footer-bottom">
+          <span>LLL — Loci / Lumen / Legacy</span>
+          <span>所持カード {profile.cards.length}/60 ・ 連続ログイン {profile.loginStreak ?? 1}日目</span>
+        </div>
+      </footer>
 
       {/* ドラッグ中の飛行体 */}
       {binderDrag && (

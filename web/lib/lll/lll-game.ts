@@ -36,6 +36,10 @@ export type LllCard = {
   glyph?: string;
   imageHash?: string;
   level: number;
+  /** 限界突破段階 0〜5（未設定は0扱い）。1凸につき実効ステータス +5%。 */
+  limitBreak?: number;
+  /** レアリティ覚醒済みフラグ（normal→elite→legend へ昇格した場合に true）。 */
+  awakened?: boolean;
   createdAt: number;
 };
 export type ImageFeatures = {
@@ -72,10 +76,19 @@ export const TIER_BUDGET: Record<LllTier, { base: number; min: number }> = {
 export const STAT_TOTAL_CAP = 500;
 /** レベルの上限。 */
 export const MAX_LEVEL = 10;
+/** 限界突破の上限（0〜5凸）。 */
+export const MAX_LIMIT_BREAK = 5;
 /** 所持上限。 */
 export const COLLECTION_CAP = 60;
 /** 同一画像の再スカウトで変換される強化の欠片。 */
 export const DUPLICATE_SHARDS: Record<LllTier, number> = { normal: 5, elite: 15, legend: 40 };
+/** 分解時に返還される基本欠片数。 */
+export const DISMANTLE_SHARDS: Record<LllTier, number> = { normal: 4, elite: 12, legend: 35 };
+/** レアリティ覚醒（昇格）のコスト。 */
+export const AWAKEN_COST: Record<"normal" | "elite", { shards: number; lumen: number }> = {
+  normal: { shards: 40, lumen: 120 },
+  elite: { shards: 100, lumen: 320 },
+};
 
 /* --- 決定的ハッシュ / 乱数 --- */
 
@@ -360,17 +373,81 @@ export function evolutionStage(card: Pick<LllCard, "level">): 0 | 1 | 2 {
 
 const EVOLUTION_MULTIPLIER = [1, 1.1, 1.21] as const;
 
-/** レベル倍率（×(1+0.08×(Lv-1))、四捨五入）→ 進化倍率の順で適用した実効ステータス。 */
+/** レベル倍率（×(1+0.08×(Lv-1))、四捨五入）→ 進化倍率 → 限界突破倍率（+5%/凸）の順で適用した実効ステータス。 */
 export function effectiveStats(card: LllCard): { hp: number; atk: number; def: number; spd: number } {
   const levelScale = 1 + 0.08 * (clamp(card.level, 1, MAX_LEVEL) - 1);
   const evolution = EVOLUTION_MULTIPLIER[evolutionStage(card)];
-  const apply = (value: number) => Math.round(Math.round(value * levelScale) * evolution);
+  const lb = clamp(Math.floor(card.limitBreak ?? 0), 0, MAX_LIMIT_BREAK);
+  const lbScale = 1 + 0.05 * lb;
+  const apply = (value: number) => {
+    const base = Math.round(Math.round(value * levelScale) * evolution);
+    return lb > 0 ? Math.round(base * lbScale) : base;
+  };
   return { hp: apply(card.stats.hp), atk: apply(card.stats.atk), def: apply(card.stats.def), spd: apply(card.stats.spd) };
 }
 
 /** 現在Lvから次Lvへ上げるコスト（欠片）。 */
 export function levelUpCost(level: number): number {
   return 8 * level;
+}
+
+/** 現在凸数から次の限界突破へ上げるコスト（欠片）。 */
+export function limitBreakCost(limitBreak: number): number {
+  return 12 * (clamp(Math.floor(limitBreak), 0, MAX_LIMIT_BREAK) + 1);
+}
+
+/** 次のレアリティティア。legend なら null。 */
+export function nextTier(tier: LllTier): LllTier | null {
+  if (tier === "normal") return "elite";
+  if (tier === "elite") return "legend";
+  return null;
+}
+
+/** レアリティ覚醒コスト。legend なら null。 */
+export function awakenCost(tier: LllTier): { shards: number; lumen: number } | null {
+  if (tier === "normal") return AWAKEN_COST.normal;
+  if (tier === "elite") return AWAKEN_COST.elite;
+  return null;
+}
+
+/** 分解時に得られる欠片（レベルや凸の一部も還元）。 */
+export function dismantleShards(card: Pick<LllCard, "tier" | "level" | "limitBreak">): number {
+  const base = DISMANTLE_SHARDS[card.tier] ?? 4;
+  const lvBonus = Math.max(0, (card.level ?? 1) - 1) * 3;
+  const lbBonus = Math.max(0, card.limitBreak ?? 0) * 6;
+  return base + lvBonus + lbBonus;
+}
+
+/** カードの総合戦闘力（表示用スコア）。 */
+export function cardPowerScore(card: LllCard): number {
+  const s = effectiveStats(card);
+  const tierBonus = card.tier === "legend" ? 1.15 : card.tier === "elite" ? 1.07 : 1;
+  return Math.round((s.hp * 0.8 + s.atk * 1.4 + s.def * 1.1 + s.spd * 1.1) * tierBonus);
+}
+
+/** UI用のダメージ予測（バトル式の 0.8〜1.2 乱数幅）。 */
+export function predictDamageRange(
+  attacker: { atk: number; element: LllElement; traitKind?: string; overdrive?: boolean; buffMult?: number },
+  target: { def: number; element: LllElement; traitKind?: string; defending?: boolean; guardBreak?: boolean },
+  power: number,
+): { min: number; max: number; affinity: number } {
+  let atk = attacker.atk;
+  if (attacker.traitKind === "focus") atk *= 1.1;
+  if (attacker.overdrive) atk *= 1.3;
+  if (attacker.buffMult && attacker.buffMult > 0) atk *= attacker.buffMult;
+  const def = target.def * (target.guardBreak ? 0.6 : 1);
+  const affinity = affinityMultiplier(attacker.element, target.element);
+  const base =
+    power *
+    (atk / Math.max(1, atk + def)) *
+    affinity *
+    (target.defending ? 0.5 : 1) *
+    (target.traitKind === "guard" ? 0.9 : 1);
+  return {
+    min: Math.max(1, Math.floor(base * 0.8)),
+    max: Math.max(1, Math.floor(base * 1.2)),
+    affinity,
+  };
 }
 
 /* --- スターター（仕様 §1。初回付与の3枚、紋章グラフィック） --- */
@@ -498,3 +575,147 @@ export function ladderDeck(tierIndex: number): LllCard[] {
     };
   });
 }
+
+/* --- 深淵の試練（エンドコンテンツ連戦） --- */
+
+const ABYSS_ELEMENTS: LllElement[] = ["fire", "water", "wind", "earth", "light", "dark"];
+const ABYSS_PREFIXES = ["深淵の", "虚無の", "星骸の", "黄昏の", "永久の", "禁忌の", "蒼穹の", "煉獄の"];
+const ABYSS_TITLES = ["監視者", "守護龍", "剣聖", "魔導卿", "使徒", "星詠み", "影騎士", "覇者"];
+
+/** 深淵の試練（階層 1..N）の敵3体デッキ。5階層ごとにボス階。 */
+export function abyssEnemyDeck(floor: number): LllCard[] {
+  const f = Math.max(1, Math.floor(floor));
+  const isBoss = f % 5 === 0;
+  const cardTier: LllTier = isBoss || f >= 12 ? "legend" : f >= 5 ? "elite" : "normal";
+  const baseTotal = Math.min(STAT_TOTAL_CAP, 300 + f * 18 + (isBoss ? 40 : 0));
+  const level = clamp(Math.min(MAX_LEVEL, 2 + Math.floor(f * 0.7)), 1, MAX_LEVEL);
+  const limitBreak = clamp(Math.floor(Math.max(0, f - 8) / 3), 0, MAX_LIMIT_BREAK);
+  const weightSets = [
+    { hp: 1.25, atk: 0.85, def: 1.05, spd: 0.75 },
+    { hp: 0.95, atk: 1.3, def: 0.8, spd: 0.95 },
+    { hp: 0.9, atk: 1.05, def: 0.85, spd: 1.3 },
+  ];
+  return [0, 1, 2].map((slot) => {
+    const seedKey = `abyss:${f}:${slot}`;
+    const element = ABYSS_ELEMENTS[Math.floor(seeded01(`${seedKey}:el`) * ABYSS_ELEMENTS.length)];
+    const prefix = pickBySeed(ABYSS_PREFIXES, `${seedKey}:pre`);
+    const title = isBoss && slot === 1 ? "深淵魔王" : pickBySeed(ABYSS_TITLES, `${seedKey}:tit`);
+    const total = clamp(baseTotal + (slot === 1 && isBoss ? 30 : 0), 100, STAT_TOTAL_CAP);
+    const stats = distributeStats(total, weightSets[slot]);
+    const pools = SKILL_POOLS[element];
+    const skillNames = ELEMENT_SKILL_NAMES[element];
+    return {
+      id: `abyss_${f}_${slot}`,
+      name: `${prefix}${title}`,
+      flavor: isBoss ? `深淵第${f}階層を統べる守護主。` : `深淵第${f}階層に潜む影。`,
+      element,
+      tier: cardTier,
+      kind: "action" as const,
+      stats,
+      skills: [
+        makeSkill(pickBySeed(skillNames, `${seedKey}:s1`), pickBySeed(pools.first, `${seedKey}:k1`), 55, slot % 2),
+        makeSkill(pickBySeed(skillNames, `${seedKey}:s2`), pickBySeed(pools.second, `${seedKey}:k2`), 85, 2),
+      ],
+      trait: makeTrait(pickBySeed(TRAIT_NAMES[element], `${seedKey}:t`), pickBySeed(pools.traits, `${seedKey}:tk`)),
+      glyph: ELEMENT_GLYPH[element],
+      level,
+      limitBreak,
+      createdAt: 0,
+    };
+  });
+}
+
+/** 深淵の試練クリア時の報酬。 */
+export function abyssRewards(floor: number): { shards: number; lumen: number; tickets: number } {
+  const f = Math.max(1, Math.floor(floor));
+  const isBoss = f % 5 === 0;
+  return {
+    shards: 12 + f * 4 + (isBoss ? 25 : 0),
+    lumen: 35 + f * 12 + (isBoss ? 80 : 0),
+    tickets: isBoss ? 1 : 0,
+  };
+}
+
+/* --- 模擬 PvP ゴーストライバル（規定ライバル） --- */
+
+export type RivalGhostPreset = {
+  id: string;
+  playerName: string;
+  title: string;
+  rating: number;
+  tacticDeckId: "chain" | "echo" | "pursuit";
+  cards: LllCard[];
+};
+
+export const RIVAL_GHOST_PRESETS: RivalGhostPreset[] = [
+  {
+    id: "ghost_iris",
+    playerName: "イリス",
+    title: "蒼穹の鑑定士",
+    rating: 1120,
+    tacticDeckId: "chain",
+    cards: ladderDeck(2).map((c, idx) => ({ ...c, id: `ghost_iris_${idx}`, level: 5, limitBreak: 1 })),
+  },
+  {
+    id: "ghost_ren",
+    playerName: "レン",
+    title: "残響の構築者",
+    rating: 1340,
+    tacticDeckId: "echo",
+    cards: ladderDeck(4).map((c, idx) => ({ ...c, id: `ghost_ren_${idx}`, level: 7, limitBreak: 2, tier: "elite" })),
+  },
+  {
+    id: "ghost_kuro",
+    playerName: "クロウ",
+    title: "深淵の戦術家",
+    rating: 1580,
+    tacticDeckId: "pursuit",
+    cards: ladderDeck(7).map((c, idx) => ({ ...c, id: `ghost_kuro_${idx}`, level: 10, limitBreak: 3, tier: "legend" })),
+  },
+];
+
+/* --- ログインボーナス / ミッション / 実績（ソシャゲ循環） --- */
+
+export type RewardBundle = { shards: number; lumen: number; tickets: number };
+
+export const LOGIN_BONUS_REWARDS: RewardBundle[] = [
+  { shards: 15, lumen: 50, tickets: 1 },
+  { shards: 20, lumen: 60, tickets: 0 },
+  { shards: 25, lumen: 80, tickets: 1 },
+  { shards: 30, lumen: 100, tickets: 0 },
+  { shards: 40, lumen: 120, tickets: 1 },
+  { shards: 50, lumen: 150, tickets: 0 },
+  { shards: 80, lumen: 250, tickets: 2 },
+];
+
+export type DailyMissionDef = {
+  id: string;
+  title: string;
+  metric: "scout" | "wins" | "tactics" | "weakHits";
+  target: number;
+  reward: RewardBundle;
+};
+
+export const DAILY_MISSIONS: DailyMissionDef[] = [
+  { id: "daily_scout_1", title: "画像を1回スカウトする", metric: "scout", target: 1, reward: { shards: 12, lumen: 40, tickets: 0 } },
+  { id: "daily_win_2", title: "バトルで2回勝利する", metric: "wins", target: 2, reward: { shards: 20, lumen: 70, tickets: 1 } },
+  { id: "daily_tactic_5", title: "戦術カードを累計5枚使う", metric: "tactics", target: 5, reward: { shards: 15, lumen: 50, tickets: 0 } },
+  { id: "daily_weak_3", title: "属性弱点を3回突く", metric: "weakHits", target: 3, reward: { shards: 18, lumen: 60, tickets: 0 } },
+];
+
+export type AchievementDef = {
+  id: string;
+  title: string;
+  description: string;
+  reward: RewardBundle;
+};
+
+export const ACHIEVEMENTS: AchievementDef[] = [
+  { id: "ach_cards_5", title: "鑑定の見習い", description: "カードを5枚以上所持する", reward: { shards: 20, lumen: 60, tickets: 1 } },
+  { id: "ach_cards_12", title: "記憶の収集家", description: "カードを12枚以上所持する", reward: { shards: 45, lumen: 140, tickets: 2 } },
+  { id: "ach_wins_5", title: "アリーナの挑戦者", description: "通算5勝を達成する", reward: { shards: 30, lumen: 90, tickets: 1 } },
+  { id: "ach_legend_1", title: "黄金の切り札", description: "レジェンドカードを所持または覚醒させる", reward: { shards: 50, lumen: 160, tickets: 2 } },
+  { id: "ach_lv10_1", title: "極致の一枚", description: "カードをLv10まで強化する", reward: { shards: 60, lumen: 180, tickets: 1 } },
+  { id: "ach_abyss_5", title: "深淵踏破者", description: "深淵の試練 第5階層をクリアする", reward: { shards: 75, lumen: 240, tickets: 2 } },
+];
+

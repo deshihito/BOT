@@ -73,6 +73,15 @@ const game = await loadBundle(
     "PLAYBACK_DURATIONS",
     "buildPlaybackSteps",
     "stepDurationMs",
+    "MAX_LIMIT_BREAK",
+    "limitBreakCost",
+    "nextTier",
+    "awakenCost",
+    "dismantleShards",
+    "predictDamageRange",
+    "abyssEnemyDeck",
+    "abyssRewards",
+    "autoPlayerTurn",
   ],
 );
 
@@ -439,3 +448,60 @@ test("高密度化: 両軍デッキ付きの対戦は終局し、同一シード
     assert.ok(a.log.length < 6000, `seed ${seed} のログが膨らみすぎ: ${a.log.length}`);
   }
 });
+
+test("ソシャゲ化: 限界突破・覚醒コスト・分解還元・ダメ予測", () => {
+  const base = { ...game.STARTER_CARDS[0], level: 1, limitBreak: 0 };
+  const lb2 = { ...base, limitBreak: 2 };
+  const s0 = game.effectiveStats(base);
+  const s2 = game.effectiveStats(lb2);
+  assert.ok(s2.atk > s0.atk && s2.hp > s0.hp, "限界突破で実効ステータスが上がる");
+  assert.equal(game.limitBreakCost(0), 12);
+  assert.equal(game.limitBreakCost(game.MAX_LIMIT_BREAK), 72);
+  assert.equal(game.nextTier("normal"), "elite");
+  assert.equal(game.nextTier("elite"), "legend");
+  assert.equal(game.nextTier("legend"), null);
+  assert.ok(game.awakenCost("normal")?.shards > 0);
+  assert.equal(game.awakenCost("legend"), null);
+  assert.ok(game.dismantleShards(lb2) > game.dismantleShards(base));
+
+  const weak = game.predictDamageRange({ atk: 80, element: "fire" }, { def: 50, element: "wind" }, 60);
+  const neutral = game.predictDamageRange({ atk: 80, element: "fire" }, { def: 50, element: "fire" }, 60);
+  assert.ok(weak.min <= weak.max);
+  assert.equal(weak.affinity, 1.25);
+  assert.ok(weak.max > neutral.max);
+});
+
+test("深淵の試練 & オート行動: 階層スケールと自動ターン進行", () => {
+  const f1 = game.abyssEnemyDeck(1);
+  const f10 = game.abyssEnemyDeck(10);
+  assert.equal(f1.length, 3);
+  assert.equal(f10.length, 3);
+  assert.ok(f10[1].level > f1[1].level);
+  assert.equal(game.abyssRewards(4).tickets, 0);
+  assert.equal(game.abyssRewards(5).tickets, 1);
+
+  const state = densityBattle(77);
+  assert.equal(game.currentActor(state).side, "player");
+  game.autoPlayerTurn(state);
+  assert.ok(state.log.length > 0);
+});
+
+test("逐次再生 VFX & カットイン: 強襲・弱点・カットイン尺が設定される", () => {
+  const prevActors = [
+    { key: "player_0", side: "player", hp: 100, maxHp: 100, shield: 0, alive: true, statuses: [] },
+    { key: "cpu_0", side: "cpu", hp: 100, maxHp: 100, shield: 0, alive: true, statuses: [] },
+  ];
+  const steps = game.buildPlaybackSteps(prevActors, [
+    { type: "info", text: "テスト必殺「星砕き」", actorKey: "player_0", cutIn: true, skillName: "星砕き", element: "light" },
+    { type: "damage", text: "90ダメージ", actorKey: "player_0", targetKey: "cpu_0", amount: 90, hpAfter: 10, affinity: 1.25, element: "light", skillPower: 90 },
+  ]);
+  assert.equal(steps.length, 2);
+  assert.ok(steps[0].cutIn && steps[0].cutIn.skillName === "星砕き");
+  assert.ok(steps[0].durationMs >= 680);
+  assert.equal(steps[0].se, "cutin");
+  assert.equal(steps[1].se, "weak");
+  assert.equal(steps[1].shakeIntensity, 3);
+  assert.equal(steps[1].vfx?.kind, "attack");
+  assert.equal(steps[1].vfx?.strong, true);
+});
+
