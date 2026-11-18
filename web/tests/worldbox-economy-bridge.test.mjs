@@ -440,8 +440,9 @@ function bundleModule(files, names) {
 }
 const profileEcoUrl = bundleModule(
   ["worldbox/items.ts", "worldbox/profile.ts", "worldbox/vitals.ts", "worldbox/economy.ts"],
-  ["buyItem", "sellItem", "eatItem", "doWork", "craftItem", "craftFromInputs", "resolveSteal"],
+  ["buyItem", "sellItem", "eatItem", "doWork", "craftItem", "craftFromInputs", "resolveSteal", "buyToken", "sellToken"],
 );
+const exchangeUrl = bundleModule(["worldbox/exchange.ts"], ["tokenPriceAt"]);
 const bridgeOnlineStubUrl = dataUrl(`
 const state = (globalThis.__wbBridge = { ops: [], balances: new Map(), failEnqueue: false });
 export function isEconomyEnabled() { return true; }
@@ -497,6 +498,7 @@ const profileRoute = await import(
       .replaceAll('"@/lib/worldbox/economy-bridge-online"', JSON.stringify(bridgeOnlineStubUrl))
       .replaceAll('"@/lib/worldbox/economy-bridge"', JSON.stringify(economyUrl))
       .replaceAll('"@/lib/worldbox/economy"', JSON.stringify(profileEcoUrl))
+      .replaceAll('"@/lib/worldbox/exchange"', JSON.stringify(exchangeUrl))
       .replaceAll('"@/lib/worldbox/presence-online"', JSON.stringify(presenceStubUrl))
       .replaceAll('"@/lib/worldbox/shops"', JSON.stringify(shopsUrl))
       .replaceAll('"@/lib/worldbox/items"', JSON.stringify(itemsOnlyUrl))
@@ -634,6 +636,54 @@ test("API(profile): steal は保護対象とクールダウンを拒否する", 
 });
 
 // ---------- クライアント配線 ----------
+
+test("API(profile): token_buy は取引所の前でだけ通り、spend(token_buy) オプとトークンを積む", async () => {
+  resetBridgeState();
+  globalThis.__wbBridge.balances.set(ME, 100000);
+  const cookie = sessionCookie(ME, "eco-user");
+  // 取引所の前でなければ 409
+  globalThis.__wbStationValue = "shop";
+  const denied = await profileRoute.POST(apiRequest(URL_P, "POST", cookie, { action: "token_buy", count: 2 }));
+  assert.equal(denied.status, 409);
+  assert.equal((await denied.json()).error, "not_at_exchange");
+  assert.equal(globalThis.__wbBridge.ops.length, 0);
+  // 取引所の前: 価格は決定的（テスト時は実価格を読む）
+  globalThis.__wbStationValue = "exchange";
+  const res = await profileRoute.POST(apiRequest(URL_P, "POST", cookie, { action: "token_buy", count: 2 }));
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  const price = body.tokenPrice;
+  assert.ok(Number.isInteger(price) && price >= 30 && price <= 300);
+  const ops = globalThis.__wbBridge.ops;
+  assert.equal(ops.length, 1);
+  assert.equal(ops[0].kind, "spend");
+  assert.equal(ops[0].reason, "token_buy");
+  assert.equal(ops[0].amount, price * 2);
+  assert.equal(globalThis.__wbProfiles.get(MY_KEY)?.items?.ago_token, 2);
+  globalThis.__wbStationValue = "shop";
+});
+
+test("API(profile): token_sell は earn(token_sell) オプを積み、通常売却ではトークンを売れない", async () => {
+  resetBridgeState();
+  globalThis.__wbStationValue = "exchange";
+  globalThis.__wbProfiles.set(MY_KEY, { coins: 100, hunger: 100, items: { ago_token: 3 }, stealActorAt: 0, stealTargetAt: 0 });
+  const cookie = sessionCookie(ME, "eco-user");
+  const res = await profileRoute.POST(apiRequest(URL_P, "POST", cookie, { action: "token_sell", count: 2 }));
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  const ops = globalThis.__wbBridge.ops;
+  assert.equal(ops.length, 1);
+  assert.equal(ops[0].kind, "earn");
+  assert.equal(ops[0].reason, "token_sell");
+  assert.equal(ops[0].amount, body.tokenPrice * 2);
+  assert.equal(globalThis.__wbProfiles.get(MY_KEY)?.items?.ago_token, 1);
+  // 通常の売却（sell）ではアゴトークンを売れない
+  globalThis.__wbStationValue = "shop";
+  const sell = await profileRoute.POST(apiRequest(URL_P, "POST", cookie, { action: "sell", itemId: "ago_token", count: 1 }));
+  assert.equal(sell.status, 409);
+  assert.equal((await sell.json()).error, "not_sellable");
+  assert.equal(globalThis.__wbProfiles.get(MY_KEY)?.items?.ago_token, 1);
+});
 
 test("クライアント: 経済パネルに残高・銀行タブ・処理中表示がある", () => {
   const client = fs.readFileSync(path.join(rootDir, "app/games/worldbox/WorldBoxClient.tsx"), "utf8");

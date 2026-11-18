@@ -30,11 +30,14 @@ const ACTION_SE: Record<string, WbSeName> = {
   eat: "harvest",
   enhance: "success",
   steal: "coin",
+  token_buy: "coin",
+  token_sell: "coin",
 };
 
-type Tab = "bag" | "shop" | "sell" | "craft" | "steal" | "bank";
+type Tab = "bag" | "shop" | "sell" | "craft" | "steal" | "bank" | "exchange";
 type LoadState = "loading" | "ready" | "guest" | "unavailable";
 type StealTarget = { id: string; name: string };
+type TokenInfo = { price: number; prevPrice: number; history: { tick: number; price: number }[] };
 
 const ERROR_LABEL: Record<string, string> = {
   not_enough_coins: "コインが足りません",
@@ -57,6 +60,8 @@ const ERROR_LABEL: Record<string, string> = {
   not_sold: "販売していません",
   not_at_workbench: "作業台の前にいません",
   not_at_bank: "銀行の前にいません",
+  not_at_exchange: "取引所の前にいません",
+  not_sellable: "取引所でのみ売れます",
 };
 
 const OP_KIND_LABEL: Record<EconomyOp["kind"], string> = {
@@ -136,10 +141,13 @@ export default function WorldBoxEconomyPanel({ space, station, genre, worldStati
   const canWork = (kind: StationKind) => atLobbySmith || worldKinds.has(kind);
   const atWorkbench = atLobbySmith || worldKinds.size > 0;
   const atBank = inLobby && station === "bank";
+  const atExchange = inLobby && station === "exchange";
   const [profile, setProfile] = useState<PlayerProfile | null>(null);
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [tab, setTab] = useState<Tab>("bag");
   const [targets, setTargets] = useState<StealTarget[]>([]);
+  const [tokenInfo, setTokenInfo] = useState<TokenInfo | null>(null);
+  const [tokenCount, setTokenCount] = useState("1");
   const [msg, setMsg] = useState("");
   const [busy, setBusy] = useState(false);
   const [balance, setBalance] = useState<number | null>(null);
@@ -170,6 +178,11 @@ export default function WorldBoxEconomyPanel({ space, station, genre, worldStati
   useEffect(() => {
     if (atSellShop) setTab("sell");
   }, [atSellShop]);
+
+  // 取引所の前にいる間は取引所タブを既定にする
+  useEffect(() => {
+    if (atExchange) setTab("exchange");
+  }, [atExchange]);
 
   const refreshBridge = useCallback(async () => {
     try {
@@ -217,11 +230,21 @@ export default function WorldBoxEconomyPanel({ space, station, genre, worldStati
     } catch { /* 対象が読めなくても他の機能は使える */ }
   }, [space]);
 
+  const refreshToken = useCallback(async () => {
+    try {
+      const res = await fetch("/api/worldbox/exchange", { headers: { Accept: "application/json" } });
+      if (!res.ok) return;
+      const data = (await res.json()) as TokenInfo;
+      if (aliveRef.current) setTokenInfo(data);
+    } catch { /* 価格が読めなくても他の機能は使える */ }
+  }, []);
+
   useEffect(() => {
     aliveRef.current = true;
     void refreshProfile();
     void refreshBridge();
     void refreshTargets();
+    void refreshToken();
     // 経済オプ確定の push で残高・履歴を即時更新する
     const off = onEconomyApplied(() => { void refreshProfile(); void refreshBridge(); });
     return () => {
@@ -232,7 +255,7 @@ export default function WorldBoxEconomyPanel({ space, station, genre, worldStati
       for (const t of enhanceFlashTimersRef.current) window.clearTimeout(t);
       enhanceFlashTimersRef.current = [];
     };
-  }, [refreshProfile, refreshBridge, refreshTargets]);
+  }, [refreshProfile, refreshBridge, refreshTargets, refreshToken]);
 
   const act = async (payload: Record<string, unknown>, describe: (data: Record<string, unknown>) => string) => {
     setBusy(true);
@@ -440,7 +463,7 @@ export default function WorldBoxEconomyPanel({ space, station, genre, worldStati
   // 施設の前にいないタブを開いたままにしない（その施設へ行くと使える）
   // 販売品目の無い店（鍛冶屋は合成・強化専用）ではショップタブ自体を出さない
   const tabAllowed = (t: Tab): boolean =>
-    t === "shop" ? atShop && shopItems.length > 0 : t === "sell" ? atSellShop : t === "craft" ? atWorkbench : t === "bank" ? atBank : true;
+    t === "shop" ? atShop && shopItems.length > 0 : t === "sell" ? atSellShop : t === "craft" ? atWorkbench : t === "bank" ? atBank : t === "exchange" ? atExchange : true;
   const activeTab: Tab = tabAllowed(tab) ? tab : "bag";
   const tabBtn = (t: Tab, label: string) => (
     <button
@@ -478,6 +501,7 @@ export default function WorldBoxEconomyPanel({ space, station, genre, worldStati
           {atSellShop && tabBtn("sell", "売却")}
           {atWorkbench && tabBtn("craft", "合成")}
           {tabBtn("steal", "steal")}
+          {atExchange && tabBtn("exchange", "取引所")}
           {atBank && tabBtn("bank", "銀行")}
         </div>
       </div>
@@ -816,6 +840,70 @@ export default function WorldBoxEconomyPanel({ space, station, genre, worldStati
           ))}
         </div>
       )}
+
+      {activeTab === "exchange" && (() => {
+        const price = tokenInfo?.price ?? null;
+        const prev = tokenInfo?.prevPrice ?? null;
+        const diff = price !== null && prev !== null ? price - prev : 0;
+        const ownedTokens = profile.items["ago_token"] ?? 0;
+        const count = Math.max(1, Math.floor(Number(tokenCount) || 0));
+        const history = tokenInfo?.history ?? [];
+        const hMax = Math.max(...history.map((h) => h.price), 1);
+        const hMin = Math.min(...history.map((h) => h.price), 0);
+        const points = history
+          .map((h, i) => `${(i / Math.max(1, history.length - 1)) * 260},${36 - ((h.price - hMin) / Math.max(1, hMax - hMin)) * 32}`)
+          .join(" ");
+        const trade = async (action: "token_buy" | "token_sell") => {
+          await act({ action, count }, (d) => {
+            const p = typeof d.tokenPrice === "number" ? d.tokenPrice : price ?? 0;
+            return action === "token_buy"
+              ? `アゴトークン ${count} 枚を ${p * count} コインで買いました`
+              : `アゴトークン ${count} 枚を ${p * count} コインで売りました`;
+          });
+          void refreshToken();
+        };
+        return (
+          <div style={{ marginTop: 6 }}>
+            <div style={row}>
+              <strong>アゴトークン</strong>
+              <span style={{ fontSize: 18 }}>
+                {price === null ? "—" : price}
+                <span style={{ fontSize: 12 }}> コイン</span>
+              </span>
+              {price !== null && prev !== null && (
+                <span style={{ color: diff > 0 ? "#7ee787" : diff < 0 ? "#ff9c9c" : "inherit", fontSize: 12 }}>
+                  {diff > 0 ? `+${diff}` : diff}
+                </span>
+              )}
+              <span style={{ flex: 1 }} />
+              <span>保有 {ownedTokens} 枚</span>
+            </div>
+            {history.length > 1 && (
+              <svg viewBox="0 0 260 40" style={{ width: "100%", height: 40, display: "block" }} aria-hidden="true">
+                <polyline points={points} fill="none" stroke="#ffd23e" strokeWidth="1.5" />
+              </svg>
+            )}
+            <div style={row}>
+              <input
+                type="number"
+                min={1}
+                max={99}
+                value={tokenCount}
+                onChange={(e) => setTokenCount(e.target.value)}
+                style={{ width: 72, minHeight: 36, padding: "4px 8px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.25)", background: "rgba(255,255,255,0.06)", color: "inherit" }}
+              />
+              <span>枚</span>
+              <span style={{ flex: 1 }} />
+              <button type="button" style={btn} disabled={busy || price === null} onClick={() => void trade("token_buy")}>
+                買う{price !== null ? `（${price * count}）` : ""}
+              </button>
+              <button type="button" style={btn} disabled={busy || price === null || ownedTokens <= 0} onClick={() => void trade("token_sell")}>
+                売る{price !== null ? `（${price * count}）` : ""}
+              </button>
+            </div>
+          </div>
+        );
+      })()}
 
       {activeTab === "bank" && (
         <div style={{ marginTop: 6 }}>

@@ -158,7 +158,7 @@ function floorAt(x: number, y: number): number {
 
 // ---------- オブジェクト配置 ----------
 
-export type LobbyStation = "board" | "shop" | "bank" | "casino" | "arena" | "smith" | "guild" | "fountain" | "rest" | "arcade" | "race" | "sell" | "telescope" | "piano";
+export type LobbyStation = "board" | "shop" | "bank" | "casino" | "arena" | "smith" | "guild" | "fountain" | "rest" | "arcade" | "race" | "sell" | "telescope" | "piano" | "exchange";
 
 export type LobbyObject = {
   sprite: string;
@@ -216,6 +216,9 @@ put("vending", 32, 32);
 row("bank_counter", 33, 34, 17, { station: "bank" });
 put("vault", 35, 17, { station: "bank" });
 put("atm", 35, 18, { station: "bank" });
+
+// --- 取引所（銀行の南東）: アゴトークンの売買カウンター ---
+row("shop_counter", 35, 36, 19, { station: "exchange" });
 
 // --- ショップ翼（左）: カウンター2列＋店員レーン、什器の間仕切りで小部屋状に ---
 // 店ごとに品目ジャンルが違う（左上から 道具屋・建築屋・家具屋・食料屋・種素材屋）。
@@ -369,6 +372,7 @@ export const LOBBY_NPCS: readonly { x: number; y: number }[] = [
   { x: 5, y: 19 }, { x: 9, y: 19 }, { x: 13, y: 19 }, // 北カウンターの店員レーン
   { x: 5, y: 28 }, { x: 13, y: 28 }, { x: 15, y: 28 }, // 南カウンターの店員レーン（15 は買取カウンター）
   { x: 74, y: 24 }, // 競馬場の馬券カウンターの係員レーン
+  { x: 36, y: 18 }, // 取引所カウンターの係員レーン
 ];
 
 /** ロビー入場地点（ワープパッドの北、広場側）。 */

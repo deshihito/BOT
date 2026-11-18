@@ -2,9 +2,10 @@ import { addMasteryXp } from "@/lib/worldbox/roles";
 import { NextResponse } from "next/server";
 import { getRequestSession, publicOrigin, sessionOwnerKey } from "@/lib/auth";
 import {
-  buyItem, craftFromInputs, craftItem, eatItem, resolveSteal, sellItem,
+  buyItem, buyToken, craftFromInputs, craftItem, eatItem, resolveSteal, sellItem, sellToken,
   type CoinMovement, type EconomyError,
 } from "@/lib/worldbox/economy";
+import { tokenPriceAt } from "@/lib/worldbox/exchange";
 import { buildEconomyOp, type EconomyOp } from "@/lib/worldbox/economy-bridge";
 import {
   deleteEconomyOp, deleteEconomyOpLedger, findEconomyOp, isEconomyEnabled, readUserBalance, submitEconomyOp, waitForOpDone,
@@ -42,6 +43,9 @@ export const runtime = "nodejs";
 //   （場所制約: ロビー鍛冶屋の作業台の前にいること。サーバー側で検証）
 // POST { action: "work" }: 労働は廃止（2026-11-16）。常に拒否する
 // POST { action: "steal", targetId }: いま同じ空間にいる相手から steal
+// POST { action: "token_buy" | "token_sell", count }: 取引所でアゴトークンを売買
+//   （場所制約: ロビーの取引所の前にいること。価格は exchange.ts の
+//    決定的価格（5分ティック）で、サーバー側が読んで遷移へ渡す）
 // プロフィールの保存先は bot_kv（名前空間 worldbox_profiles、
 // キー = 所有者キー）。コインが動くアクションは Discord ログイン必須。
 // Bot API 未設定なら 503。
@@ -233,6 +237,11 @@ async function handlePost(request: Request, session: AuthedSession) {
     return station === "shop" || station === "smith" || station === "sell"
       ? null
       : statusError("not_at_shop", 409);
+  };
+
+  /** 取引所の場所制約: 取引所（station "exchange"）の前にいなければ 409。 */
+  const exchangeGate = async () => {
+    return (await loadMyLobbyStation(ownerKey)) === "exchange" ? null : statusError("not_at_exchange", 409);
   };
 
   switch (data.action) {
@@ -454,6 +463,24 @@ async function handlePost(request: Request, session: AuthedSession) {
     case "work": {
       // 労働は廃止（2026-11-16 ユーザー指示）。どの経路からも実行できない。
       return errorResponse("work_disabled");
+    }
+    case "token_buy": {
+      const gate = coinGate();
+      if ("response" in gate) return gate.response;
+      const place = await exchangeGate();
+      if (place) return place;
+      const balance = await readUserBalance(gate.discordId);
+      if (balance === null) return statusError("economy_unavailable", 503);
+      const price = tokenPriceAt(Date.now());
+      return saveWithCoin(buyToken(current, data.count, price, balance), gate.discordId, { tokenPrice: price });
+    }
+    case "token_sell": {
+      const gate = coinGate();
+      if ("response" in gate) return gate.response;
+      const place = await exchangeGate();
+      if (place) return place;
+      const price = tokenPriceAt(Date.now());
+      return saveWithCoin(sellToken(current, data.count, price), gate.discordId, { tokenPrice: price });
     }
     case "steal": {
       // steal（2026-11-16 に一旦廃止、2026-11-18 のユーザー指示で復活）。

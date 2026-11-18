@@ -768,6 +768,7 @@ const STATION_LABEL: Record<LobbyStation, string> = {
   piano: "ピアノ",
   sell: "売却専用ショップ",
   telescope: "望遠鏡",
+  exchange: "取引所",
 };
 
 export default function WorldBoxClient() {
@@ -7323,7 +7324,7 @@ export default function WorldBoxClient() {
                 {guildBoardOpen ? "閉じる" : "開く"}
               </button>
             )}
-            {(stationUi === "shop" || stationUi === "bank" || stationUi === "smith" || stationUi === "sell") && (
+            {(stationUi === "shop" || stationUi === "bank" || stationUi === "smith" || stationUi === "sell" || stationUi === "exchange") && (
               <button
                 type="button"
                 style={{ ...btn, minHeight: hud.buttonMinHeight, padding: "2px 10px" }}
