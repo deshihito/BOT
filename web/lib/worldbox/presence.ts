@@ -28,6 +28,8 @@ export const SNAP_DISTANCE = 6;
 const MAX_VELOCITY = 16;
 /** 表示名の上限文字数。 */
 export const PRESENCE_NAME_MAX = 24;
+/** 装備称号の上限文字数。 */
+export const PRESENCE_TITLE_MAX = 12;
 /** 移動連続性: 正規の最大移動速度（タイル/秒）。ダッシュ 7.0 + 約40%の余裕。 */
 export const MAX_MOVE_SPEED = 10;
 /** 移動連続性: 許容距離に足す余裕（タイル）。ノックバック（最大2〜3）と埋没救済の小幅なずれを吸収する。 */
@@ -182,6 +184,8 @@ export type Heartbeat = {
   tab?: string;
   /** そのタブを開いた時刻（ミリ秒）。タブ世代の新旧判定に使う。 */
   tabAt?: number;
+  /** 装備中の称号（ネームプレート表示用・未設定は省略）。 */
+  title?: string;
 };
 
 export type PresenceEntry = Heartbeat & {
@@ -213,6 +217,11 @@ function sanitizeName(raw: unknown): string {
   return raw.replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, PRESENCE_NAME_MAX);
 }
 
+function sanitizeTitle(raw: unknown): string {
+  if (typeof raw !== "string") return "";
+  return raw.replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, PRESENCE_TITLE_MAX);
+}
+
 /**
  * ハートビート body を検証・整形する。位置が数値でなければ null。
  * 範囲外の値は空間の範囲へ丸める（却下ではなく補正）。
@@ -223,6 +232,7 @@ export function sanitizeHeartbeat(raw: unknown, bounds: CoordBounds): Heartbeat 
   if (typeof v.x !== "number" || !Number.isFinite(v.x)) return null;
   if (typeof v.y !== "number" || !Number.isFinite(v.y)) return null;
   const vel = (n: unknown) => (typeof n === "number" && Number.isFinite(n) ? clampNum(n, -MAX_VELOCITY, MAX_VELOCITY) : 0);
+  const title = sanitizeTitle(v.title);
   return {
     name: sanitizeName(v.name),
     x: clampNum(v.x, bounds.minX, bounds.maxX),
@@ -234,6 +244,7 @@ export function sanitizeHeartbeat(raw: unknown, bounds: CoordBounds): Heartbeat 
     role: typeof v.role === "string" && ["blade", "guard", "scout", "miner", "medic", "teleporter"].includes(v.role) ? v.role : "free",
     rank: typeof v.rank === "number" && Number.isFinite(v.rank) ? Math.max(1, Math.min(5, Math.floor(v.rank))) : 1,
     party: typeof v.party === "string" ? v.party.slice(0, 48) : "",
+    ...(title ? { title } : {}),
     ...(v.sit === true ? { sit: true } : {}),
     ...(typeof v.tab === "string" && v.tab.length > 0 ? { tab: v.tab.slice(0, 64) } : {}),
     ...(typeof v.tabAt === "number" && Number.isFinite(v.tabAt) && v.tabAt > 0 ? { tabAt: v.tabAt } : {}),

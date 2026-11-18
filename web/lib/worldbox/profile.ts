@@ -117,6 +117,12 @@ export type PlayerProfile = {
   /** PvP で倒された死亡通知（次回 sync で本人へ配送し、サーバーが消す）。
    * pendingTeleport（リスポーン地点）と対でセットされる。 */
   lastDeath: { at: number; dropped: Record<string, number> } | null;
+  /** 最後に自宅（ベッド）ワープを使った時刻（epoch ms）。クールダウン管理用。 */
+  homeWarpAt?: number;
+  /** 累計の行動統計（実績・称号判定用）。未記録はキーごと省略。 */
+  stats?: Record<string, number>;
+  /** ネームプレートに表示する装備中の称号。未設定は省略。 */
+  title?: string;
 };
 
 function emptySlots(size: number): ItemSlot[] {
@@ -279,6 +285,9 @@ export function parseProfile(raw: unknown): PlayerProfile {
     storage: data.storage as ItemSlot[],
   });
   const role: AdventureRoleId = isAdventureRoleId(data.role) ? data.role : "free";
+  const homeWarpAt = clampInt(data.homeWarpAt, 0, Number.MAX_SAFE_INTEGER, 0);
+  const stats = parseStats(data.stats);
+  const title = parseTitle(data.title);
   return {
     coins: clampInt(data.coins, 0, Number.MAX_SAFE_INTEGER, DEFAULT_PROFILE.coins),
     hunger: clampVital(data.hunger, 0, HUNGER_MAX, DEFAULT_PROFILE.hunger),
@@ -311,6 +320,9 @@ export function parseProfile(raw: unknown): PlayerProfile {
     toolHp: parseToolHp(data.toolHp),
     discoveredRecipes: parseDiscoveredRecipes(data.discoveredRecipes),
     spawnProtectedUntil: clampInt(data.spawnProtectedUntil, 0, Number.MAX_SAFE_INTEGER, 0),
+    ...(homeWarpAt > 0 ? { homeWarpAt } : {}),
+    ...(Object.keys(stats).length > 0 ? { stats } : {}),
+    ...(title ? { title } : {}),
   };
 }
 
@@ -363,6 +375,39 @@ function parseLastDeath(raw: unknown): { at: number; dropped: Record<string, num
     }
   }
   return { at: Math.floor(v.at), dropped };
+}
+
+/** 行動統計の復元（正の整数のみ・上限あり）。 */
+const PROFILE_STAT_KEYS = new Set([
+  "chops", "mines", "harvests", "places", "fortifies",
+  "crafts", "smelts", "cooks", "weaves", "enhances",
+  "kills", "bossKills", "dungeons", "trades", "fishes",
+]);
+
+export function parseStats(raw: unknown): Record<string, number> {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const out: Record<string, number> = {};
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (!PROFILE_STAT_KEYS.has(k)) continue;
+    if (typeof v !== "number" || !Number.isFinite(v) || v <= 0) continue;
+    out[k] = Math.min(1_000_000_000, Math.floor(v));
+  }
+  return out;
+}
+
+export function parseTitle(raw: unknown): string {
+  if (typeof raw !== "string") return "";
+  return raw.replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, 12);
+}
+
+/** 行動統計のカウンタを 1 以上加算した新しいプロフィールを返す（純粋関数）。 */
+export function bumpProfileStat(profile: PlayerProfile, key: string, by = 1): PlayerProfile {
+  if (!PROFILE_STAT_KEYS.has(key) || by <= 0 || !Number.isFinite(by)) return profile;
+  const inc = Math.floor(by);
+  if (inc <= 0) return profile;
+  const prev = profile.stats ?? {};
+  const nextVal = Math.min(1_000_000_000, (prev[key] ?? 0) + inc);
+  return { ...profile, stats: { ...prev, [key]: nextVal } };
 }
 
 /** 発見済みレシピの復元（文字列だけ通し、重複を除いて上限で切る）。 */
@@ -455,6 +500,8 @@ function parsePoint(raw: unknown): RespawnPoint | null {
 
 export function serializeProfile(profile: PlayerProfile): string {
   const inv = invOf(profile);
+  const stats = parseStats(profile.stats);
+  const title = parseTitle(profile.title);
   return JSON.stringify({
     coins: clampInt(profile.coins, 0, Number.MAX_SAFE_INTEGER, 0),
     hunger: clampVital(profile.hunger, 0, HUNGER_MAX, 0),
@@ -491,6 +538,11 @@ export function serializeProfile(profile: PlayerProfile): string {
     toolHp: parseToolHp(profile.toolHp),
     discoveredRecipes: parseDiscoveredRecipes(profile.discoveredRecipes),
     spawnProtectedUntil: clampInt(profile.spawnProtectedUntil, 0, Number.MAX_SAFE_INTEGER, 0),
+    ...(typeof profile.homeWarpAt === "number" && profile.homeWarpAt > 0
+      ? { homeWarpAt: clampInt(profile.homeWarpAt, 0, Number.MAX_SAFE_INTEGER, 0) }
+      : {}),
+    ...(Object.keys(stats).length > 0 ? { stats } : {}),
+    ...(title ? { title } : {}),
   });
 }
 

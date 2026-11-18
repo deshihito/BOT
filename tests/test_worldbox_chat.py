@@ -215,3 +215,37 @@ def test_poll_claim_lost_race_skips_send():
     worker = chat.WorldBoxChatWorker(kv=kv, channel_sender=sender)
     assert asyncio.run(worker.poll_once()) == 0
     assert sent == []
+
+
+def test_event_entry_length_and_event_sender_dispatch():
+    long_text = "x" * (chat.TEXT_MAX_EVENT + 20)
+    parsed_event = chat.parse_outbox_entry(entry(kind="event", text=long_text))
+    assert parsed_event is not None
+    assert parsed_event["kind"] == "event"
+    assert len(parsed_event["text"]) == chat.TEXT_MAX_EVENT
+
+    parsed_chat = chat.parse_outbox_entry(entry(text=long_text))
+    assert parsed_chat is not None
+    assert parsed_chat["kind"] == "chat"
+    assert len(parsed_chat["text"]) == chat.TEXT_MAX_CHAT
+
+    chats = []
+    events = []
+
+    async def chat_sender(channel_id, name, text):
+        chats.append((channel_id, name, text))
+        return True
+
+    async def event_sender(channel_id, name, text):
+        events.append((channel_id, name, text))
+        return True
+
+    kv = FakeKV({
+        "c1": entry(id="c1", text="会話"),
+        "e1": entry(id="e1", kind="event", name="戦争", text="宣戦布告", at=int(time.time() * 1000) + 1),
+    })
+    worker = chat.WorldBoxChatWorker(kv=kv, channel_sender=chat_sender, event_sender=event_sender)
+    assert asyncio.run(worker.poll_once()) == 2
+    assert chats == [("123456789012345678", "でし", "会話")]
+    assert events == [("123456789012345678", "戦争", "宣戦布告")]
+    assert sorted(kv.deleted) == ["c1", "e1"]

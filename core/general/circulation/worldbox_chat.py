@@ -32,6 +32,8 @@ ENTRY_MAX_AGE_SECONDS = 24 * 60 * 60
 CLAIM_STALE_SECONDS = 90.0
 
 _CHANNEL_ID_RE = re.compile(r"^\d{17,20}$")
+TEXT_MAX_CHAT = 120
+TEXT_MAX_EVENT = 240
 
 
 def _now_seconds() -> float:
@@ -71,13 +73,16 @@ def parse_outbox_entry(raw: Any) -> dict[str, Any] | None:
     status = raw.get("status")
     if status not in (None, "pending", "sending"):
         return None
+    kind = "event" if raw.get("kind") == "event" else "chat"
+    max_len = TEXT_MAX_EVENT if kind == "event" else TEXT_MAX_CHAT
     claim = raw.get("claim")
     return {
         "id": entry_id,
         "channelId": channel_id,
         "name": name[:24],
-        "text": text[:120],
+        "text": text[:max_len],
         "at": float(at),
+        "kind": kind,
         "status": status or "pending",
         "claim": claim if isinstance(claim, dict) else None,
     }
@@ -138,11 +143,13 @@ class WorldBoxChatWorker:
         *,
         kv: Any,
         channel_sender: Callable[[str, str, str], Awaitable[bool]],
+        event_sender: Callable[[str, str, str], Awaitable[bool]] | None = None,
     ) -> None:
         # kv: core.support.storage.KVStore（load_all / delete を使う）
         self._kv = kv
         # channel_sender(channel_id, name, text) -> 投稿できたら True
         self._channel_sender = channel_sender
+        self._event_sender = event_sender or channel_sender
         self._remote_down = False
 
     async def poll_once(self) -> int:
@@ -180,7 +187,8 @@ class WorldBoxChatWorker:
                 token = await self._claim(key, entry)
                 if token is None:
                     continue
-                ok = await self._channel_sender(entry["channelId"], entry["name"], entry["text"])
+                sender = self._event_sender if entry.get("kind") == "event" else self._channel_sender
+                ok = await sender(entry["channelId"], entry["name"], entry["text"])
                 if ok:
                     try:
                         await self._kv.delete(key)

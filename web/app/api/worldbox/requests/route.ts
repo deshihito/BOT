@@ -13,6 +13,8 @@ import {
 } from "@/lib/worldbox/requests";
 import { isRequestsEnabled, loadRequestsState, storeRequestsState } from "@/lib/worldbox/requests-online";
 import { loadMyLobbyStation } from "@/lib/worldbox/station-online";
+import { itemById } from "@/lib/worldbox/items";
+import { enqueueUnionDiscordEvent } from "@/lib/worldbox/chat-online";
 
 export const runtime = "nodejs";
 
@@ -178,6 +180,13 @@ async function handlePost(request: Request, session: AuthedSession) {
         await storeRequestsState(state);
         return statusError("economy_failed", 503);
       }
+      const itemName = itemById(result.request.itemId)?.name ?? result.request.itemId;
+      void enqueueUnionDiscordEvent(
+        guildId,
+        "ギルド依頼",
+        `${result.request.posterName} が ${itemName} ×${result.request.count} を募集（報酬 ${result.request.reward}コイン）`,
+        `req-post-${requestId}`,
+      );
       return NextResponse.json(
         { requests: view(result.state, guildId, ownerKey), request: result.request },
         { headers: NO_STORE },
@@ -230,6 +239,13 @@ async function handlePost(request: Request, session: AuthedSession) {
           { status: 409, headers: NO_STORE },
         );
       }
+      const itemName = itemById(result.request.itemId)?.name ?? result.request.itemId;
+      void enqueueUnionDiscordEvent(
+        guildId,
+        "依頼達成",
+        `${session.username} が ${result.request.posterName} の依頼（${itemName} ×${result.request.count}）を納品`,
+        `req-ful-${data.requestId}`,
+      );
       return NextResponse.json(
         {
           requests: view(result.state, guildId, ownerKey),

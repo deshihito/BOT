@@ -142,6 +142,11 @@ export function parseMobKey(key: unknown): { mobId: string; x: number; y: number
   return { mobId: m[1], x: Number(m[2]), y: Number(m[3]) };
 }
 
+/** 共闘報酬・討伐速報の対象となるフィールドボスの最小サイズ（7 = 巨大・超巨大）。 */
+export const BOSS_ASSIST_MIN_SIZE = 7;
+/** 共闘報酬の受け取り上限人数（倒した本人を除く）。 */
+export const BOSS_ASSIST_MAX_RECIPIENTS = 8;
+
 /** サーバーに保存する個体状態。未保存 = 満タンで生存。 */
 export type MobState = {
   hp: number;
@@ -149,7 +154,23 @@ export type MobState = {
   deadUntil?: number;
   /** 凍結中の解除時刻（ms）。アイスランスで付く。 */
   frozenUntil?: number;
+  /** ボスへの累積与ダメージ（ownerKey → dmg）。討伐・復活時に消える。 */
+  dmg?: Record<string, number>;
 };
+
+function parseMobDmg(raw: unknown): Record<string, number> | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const out: Record<string, number> = {};
+  let count = 0;
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (k.length === 0 || k.length > 64) continue;
+    if (typeof v !== "number" || !Number.isFinite(v) || v <= 0) continue;
+    out[k] = Math.floor(v);
+    count += 1;
+    if (count >= 32) break;
+  }
+  return count > 0 ? out : undefined;
+}
 
 export function parseMobState(raw: unknown): MobState | null {
   let v: unknown = raw;
@@ -157,11 +178,13 @@ export function parseMobState(raw: unknown): MobState | null {
     try { v = JSON.parse(raw); } catch { return null; }
   }
   if (typeof v !== "object" || v === null) return null;
-  const o = v as { hp?: unknown; deadUntil?: unknown; frozenUntil?: unknown };
+  const o = v as { hp?: unknown; deadUntil?: unknown; frozenUntil?: unknown; dmg?: unknown };
   if (typeof o.hp !== "number" || !Number.isFinite(o.hp)) return null;
   const st: MobState = { hp: Math.max(0, Math.floor(o.hp)) };
   if (typeof o.deadUntil === "number" && Number.isFinite(o.deadUntil)) st.deadUntil = o.deadUntil;
   if (typeof o.frozenUntil === "number" && Number.isFinite(o.frozenUntil)) st.frozenUntil = o.frozenUntil;
+  const dmg = parseMobDmg(o.dmg);
+  if (dmg && st.deadUntil === undefined) st.dmg = dmg;
   return st;
 }
 
@@ -266,7 +289,24 @@ export type MobAttackResult = {
   dead: boolean;
   /** 倒したときに落ちたアイテム（itemId → 個数）。 */
   gained: Record<string, number>;
+  /** ボス共闘時の貢献者キー（倒した本人を除く、与ダメージ順）。 */
+  assisters?: string[];
 };
+
+/** フィールドボス共闘の貢献報酬を抽選する（通常ドロップの半分規模、最低1個）。 */
+export function rollBossAssistLoot(def: MobDef, rng: () => number): Record<string, number> {
+  const gained: Record<string, number> = {};
+  for (const entry of def.loot) {
+    if (rng() >= entry.chance * 0.5) continue;
+    const rolled = entry.min + Math.floor(rng() * (entry.max - entry.min + 1));
+    const n = Math.max(1, Math.floor(rolled * 0.5));
+    gained[entry.itemId] = (gained[entry.itemId] ?? 0) + n;
+  }
+  if (Object.keys(gained).length === 0 && def.loot.length > 0) {
+    gained[def.loot[0].itemId] = 1;
+  }
+  return gained;
+}
 
 /** 攻撃を1回適用する。乱数は注入する（ドロップ抽選）。 */
 export function applyMobAttack(
@@ -276,21 +316,53 @@ export function applyMobAttack(
   now: number,
   rng: () => number,
   mobKey?: string,
+  attackerKey?: string,
 ): MobAttackResult | { error: "mob_dead" } {
   const cur = mobHpNow(def, state, now);
   if (!cur.alive) return { error: "mob_dead" };
-  const hp = Math.max(0, cur.hp - Math.max(1, Math.floor(power)));
-  if (hp > 0) return { state: { hp }, hp, dead: false, gained: {} };
+  const dmgDone = Math.min(cur.hp, Math.max(1, Math.floor(power)));
+  const hp = Math.max(0, cur.hp - dmgDone);
+  let nextDmg: Record<string, number> | undefined;
+  if (def.size >= BOSS_ASSIST_MIN_SIZE && attackerKey) {
+    const prevDmg = state?.deadUntil !== undefined && now >= state.deadUntil ? undefined : state?.dmg;
+    const merged: Record<string, number> = { ...(prevDmg ?? {}) };
+    merged[attackerKey] = (merged[attackerKey] ?? 0) + dmgDone;
+    const top = Object.entries(merged)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 32);
+    if (top.length > 0) nextDmg = Object.fromEntries(top);
+  }
+  if (hp > 0) {
+    return {
+      state: { hp, ...(nextDmg ? { dmg: nextDmg } : {}) },
+      hp,
+      dead: false,
+      gained: {},
+    };
+  }
   const gained: Record<string, number> = {};
   for (const entry of def.loot) {
     if (rng() >= entry.chance) continue;
     const n = entry.min + Math.floor(rng() * (entry.max - entry.min + 1));
     if (n > 0) gained[entry.itemId] = (gained[entry.itemId] ?? 0) + n;
   }
+  const assisters = nextDmg
+    ? Object.entries(nextDmg)
+        .filter(([k, v]) => k !== attackerKey && v > 0)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, BOSS_ASSIST_MAX_RECIPIENTS)
+        .map(([k]) => k)
+    : [];
   // 再出現は基本15分＋個体キー決定的な追加遅延（0〜10分）で同時復活を分散する。
   // deadUntil に加算済みの値を保存するので、mobHpNow 側は deadUntil 判定だけで一貫する。
   const delay = mobKey ? mobRespawnDelayMs(mobKey) : 0;
-  return { state: { hp: 0, deadUntil: now + MOB_RESPAWN_MS + delay }, hp: 0, dead: true, gained };
+  return {
+    state: { hp: 0, deadUntil: now + MOB_RESPAWN_MS + delay },
+    hp: 0,
+    dead: true,
+    gained,
+    ...(assisters.length > 0 ? { assisters } : {}),
+  };
 }
 
 /** 指定アンカー（中心タイル）における占有タイルキー一覧（"x,y"）。 */

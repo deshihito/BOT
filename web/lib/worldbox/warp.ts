@@ -62,3 +62,13 @@ export function porterTileError(tileId: number, hasBlock: boolean): "blocked_til
 export function porterDestination(map: TopDownMap, porter: UnionPorter): { x: number; y: number } {
   return findFreeNear(map, porter.x + 0.5, porter.y + 0.5, undefined, { swim: true });
 }
+
+/** 自宅ワープ: 被弾直後の戦闘離脱を防ぐ猶予（15秒）。 */
+export const HOME_WARP_COMBAT_COOLDOWN_MS = 15_000;
+/** 自宅ワープの再使用待機時間（60秒）。 */
+export const HOME_WARP_COOLDOWN_MS = 60_000;
+
+/** 自宅（ベッド）ワープの着地点: リスポーン座標の周辺で立てる場所へ寄せる。 */
+export function homeDestination(map: TopDownMap, respawn: { x: number; y: number }): { x: number; y: number } {
+  return findFreeNear(map, respawn.x, respawn.y, undefined, { swim: true });
+}

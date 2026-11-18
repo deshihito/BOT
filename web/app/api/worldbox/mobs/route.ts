@@ -6,13 +6,14 @@ import { listPresence } from "@/lib/worldbox/presence-online";
 import { presenceIdFor } from "@/lib/worldbox/presence";
 import { parseSave } from "@/lib/worldbox/save";
 import { loadWorldBoxSave } from "@/lib/worldbox/save-online";
-import { addItem, bestToolItem, wearTool } from "@/lib/worldbox/profile";
+import { addItem, bestToolItem, bumpProfileStat, wearTool } from "@/lib/worldbox/profile";
+import { dispatchProgressEffects } from "@/lib/worldbox/progress-online";
 import { playerAttack } from "@/lib/worldbox/arena";
 import { mobById } from "@/lib/worldbox/mobs";
 import { isNightPhase, phaseAtTime } from "@/lib/worldbox/daynight";
 import {
   applyMobAttack, mobDistance, mobExistsAt, mobKeyOf, resolveMobPosition, visibleMobs,
-  MOB_ATTACK_MAX_DISTANCE, type MobState,
+  rollBossAssistLoot, BOSS_ASSIST_MIN_SIZE, MOB_ATTACK_MAX_DISTANCE, type MobState,
 } from "@/lib/worldbox/combat";
 import { isMobsEnabled, loadMobState, loadMobStates, storeMobState } from "@/lib/worldbox/mobs-online";
 import {
@@ -28,6 +29,8 @@ import { loadPartyOf } from "@/lib/worldbox/party-online";
 import { DUNGEON_CLEAR_EARN } from "@/lib/worldbox/instances";
 import { buildEconomyOp } from "@/lib/worldbox/economy-bridge";
 import { enqueueEconomyOpOnce, isEconomyEnabled } from "@/lib/worldbox/economy-bridge-online";
+import { loadNationsState } from "@/lib/worldbox/nations-online";
+import { enqueueUnionDiscordEvent } from "@/lib/worldbox/chat-online";
 import { withUserLock } from "@/lib/worldbox/user-lock";
 
 export const runtime = "nodejs";
@@ -311,13 +314,14 @@ export async function POST(request: Request) {
   // モブ状態のロック解放後にユーザー単位ロックを取ってプロフィールを更新する。
   const mobOutcome = await withUserLock(`mob:${key}`, async () => {
     const state = await loadMobState(key);
-    const result = applyMobAttack(effDef, state, attackPower, now, Math.random, key);
+    const result = applyMobAttack(effDef, state, attackPower, now, Math.random, key, ownerKey);
     if ("error" in result) {
       return NextResponse.json({ error: result.error }, { status: 409, headers: NO_STORE });
     }
     if (!(await storeMobState(key, result.state))) {
       return NextResponse.json({ error: "mobs_failed" }, { status: 500, headers: NO_STORE });
     }
+    let isDungeonFinalBoss = false;
     if (result.dead && dungeonCtx && instPost) {
       // 番人はダンジョンの鍵を落とす
       if (dungeonCtx.floor.keyHolder.mobId === def.id && dungeonCtx.floor.keyHolder.x === x && dungeonCtx.floor.keyHolder.y === y) {
@@ -327,6 +331,7 @@ export async function POST(request: Request) {
       const isBossAnchor = dungeonCtx.floor.boss.mobId === def.id && dungeonCtx.floor.boss.x === x && dungeonCtx.floor.boss.y === y;
       if (isBossAnchor) {
         const floorNo = instPost.layer + 1;
+        isDungeonFinalBoss = floorNo >= 4;
         const latestDs = await loadDungeonSession(dungeonCtx.floor1, dungeonCtx.partyKey);
         if (latestDs) dungeonCtx.session = latestDs;
         const nextSession = {
@@ -360,14 +365,16 @@ export async function POST(request: Request) {
       personal.summons = personal.summons.filter((m) => !(m.mobId === def.id && m.x === x && m.y === y));
       await storeRuinsPersonal(caveSpace, ownerKey, personal);
     }
-    return { result } as const;
+    return { result, isDungeonFinalBoss } as const;
   });
   if (mobOutcome instanceof NextResponse) return mobOutcome;
-  const { result } = mobOutcome;
+  const { result, isDungeonFinalBoss } = mobOutcome;
   let updatedProfile = null;
+  let beforeProfileForProgress = null;
   let broke: string | null = null;
   const profileErr = await withUserLock(ownerKey, async () => {
     const profile = await loadProfile(ownerKey);
+    beforeProfileForProgress = profile;
     let next = profile;
     // 道具の耐久: 剣を持っていれば振るたびに最良の剣が摩耗する
     // （素手の攻撃は摩耗なし）。従来は死亡時しかプロフィールを保存
@@ -377,11 +384,16 @@ export async function POST(request: Request) {
       next = worn.profile;
       broke = worn.brokeItemId;
     }
-    if (result.dead && (Object.keys(result.gained).length > 0 || profile.role === "blade")) {
-      for (const [itemId, count] of Object.entries(result.gained)) {
-        next = addItem(next, itemId, count);
+    if (result.dead) {
+      if (Object.keys(result.gained).length > 0 || profile.role === "blade") {
+        for (const [itemId, count] of Object.entries(result.gained)) {
+          next = addItem(next, itemId, count);
+        }
+        if (profile.role === "blade") next = addMasteryXp(next, "blade", 3).profile;
       }
-      if (profile.role === "blade") next = addMasteryXp(next, "blade", 3).profile;
+      next = bumpProfileStat(next, "kills", 1);
+      if (effDef.size >= BOSS_ASSIST_MIN_SIZE) next = bumpProfileStat(next, "bossKills", 1);
+      if (isDungeonFinalBoss) next = bumpProfileStat(next, "dungeons", 1);
     }
     if (next !== profile) {
       if (!(await storeProfile(ownerKey, next))) {
@@ -392,6 +404,62 @@ export async function POST(request: Request) {
     return null;
   });
   if (profileErr) return profileErr;
+  if (result.dead && beforeProfileForProgress && updatedProfile) {
+    dispatchProgressEffects({
+      ownerKey,
+      actorName: session.username?.trim() || "冒険者",
+      before: beforeProfileForProgress,
+      after: updatedProfile,
+      goalKind: "combat",
+      goalDelta: 1,
+      now,
+    });
+  }
+
+  // ボス共闘報酬: mob:${key} 解放後に各貢献者のユーザーロックを順に取って配布する
+  const assisters = result.dead ? (result.assisters ?? []) : [];
+  if (assisters.length > 0 && effDef.size >= BOSS_ASSIST_MIN_SIZE) {
+    for (const assisterKey of assisters) {
+      try {
+        await withUserLock(assisterKey, async () => {
+          const ap = await loadProfile(assisterKey);
+          const assistLoot = rollBossAssistLoot(effDef, Math.random);
+          let next = ap;
+          for (const [itemId, count] of Object.entries(assistLoot)) {
+            next = addItem(next, itemId, count);
+          }
+          if (ap.role === "blade") next = addMasteryXp(next, "blade", 3).profile;
+          if (next !== ap) await storeProfile(assisterKey, next);
+        });
+      } catch { /* 共闘者の保存失敗で討伐者の応答を止めない */ }
+    }
+  }
+
+  // Discord 連携先チャンネルへフィールドボス / ダンジョン最深部討伐を通知する（ベストエフォート）
+  const isFieldBossKill = result.dead && !caveSpace && !dungeonSpace && effDef.size >= BOSS_ASSIST_MIN_SIZE;
+  if (isFieldBossKill || isDungeonFinalBoss) {
+    const actorName = session.username?.trim() || "冒険者";
+    void loadNationsState()
+      .then((nations) => {
+        const guildId = nations.members?.[ownerKey]?.nationId;
+        if (!guildId) return;
+        if (isFieldBossKill) {
+          const coop = assisters.length > 0 ? `（共闘 ${assisters.length + 1}人）` : "";
+          return enqueueUnionDiscordEvent(
+            guildId,
+            "討伐速報",
+            `${actorName} が ${effDef.name}（座標 ${x}, ${y}）を討伐しました${coop}`,
+          );
+        }
+        return enqueueUnionDiscordEvent(
+          guildId,
+          "ダンジョン制覇",
+          `${actorName} たちがダンジョン最深部（${effDef.name}）を踏破しました`,
+        );
+      })
+      .catch(() => {});
+  }
+
   return NextResponse.json(
     {
       ok: true,
@@ -403,6 +471,7 @@ export async function POST(request: Request) {
       // 時計ズレで復活がずれる（S4）。dead でない場合は含めない。
       ...(result.state.deadUntil !== undefined ? { deadUntil: result.state.deadUntil } : {}),
       gained: result.gained,
+      ...(assisters.length > 0 ? { assistCount: assisters.length } : {}),
       ...(updatedProfile ? { profile: updatedProfile } : {}),
       ...(broke ? { broke } : {}),
     },

@@ -53,7 +53,11 @@ export async function GET(request: Request) {
       guildId: me.guildId,
       role: me.role,
       canEdit: me.role === "king" || me.role === "minister",
-      settings: { mode: settings.mode, channelId: settings.channelId },
+      settings: {
+        mode: settings.mode,
+        channelId: settings.channelId,
+        events: settings.events !== false,
+      },
       directory: directory
         ? { channels: directory.channels, globalChatChannelId: directory.globalChatChannelId }
         : null,
@@ -73,8 +77,13 @@ export async function POST(request: Request) {
   } catch {
     return err("invalid_request", 400);
   }
-  const mode = (body as { mode?: unknown } | null)?.mode;
-  const channelIdRaw = (body as { channelId?: unknown } | null)?.channelId;
+  const parsedBody = (body ?? {}) as { mode?: unknown; channelId?: unknown; events?: unknown };
+  const mode = parsedBody.mode;
+  const channelIdRaw = parsedBody.channelId;
+  const eventsRaw = parsedBody.events;
+  if (eventsRaw !== undefined && typeof eventsRaw !== "boolean") {
+    return err("invalid_request", 400);
+  }
   if (mode !== "global" && mode !== "channel" && mode !== "none") {
     return err("invalid_mode", 400);
   }
@@ -98,8 +107,13 @@ export async function POST(request: Request) {
       channelId = channelIdRaw;
     }
   }
-  if (!(await storeUnionChatSettings(me.guildId, { mode: m, channelId }))) {
+  const prev = await loadUnionChatSettings(me.guildId);
+  const events = typeof eventsRaw === "boolean" ? eventsRaw : prev.events !== false;
+  if (!(await storeUnionChatSettings(me.guildId, { mode: m, channelId, events }))) {
     return err("store_failed", 503);
   }
-  return NextResponse.json({ ok: true, settings: { mode: m, channelId } }, { headers: NO_STORE });
+  return NextResponse.json(
+    { ok: true, settings: { mode: m, channelId, events } },
+    { headers: NO_STORE },
+  );
 }

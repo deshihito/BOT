@@ -15,6 +15,8 @@ import { isStallsEnabled, loadStall, storeStall } from "@/lib/worldbox/stalls-on
 import { buildEconomyOp } from "@/lib/worldbox/economy-bridge";
 import { enqueueEconomyOp, isEconomyEnabled, readUserBalance } from "@/lib/worldbox/economy-bridge-online";
 import { withUserLock } from "@/lib/worldbox/user-lock";
+import { loadNationsState } from "@/lib/worldbox/nations-online";
+import { enqueueUnionDiscordEvent } from "@/lib/worldbox/chat-online";
 
 export const runtime = "nodejs";
 
@@ -185,6 +187,18 @@ export async function POST(request: Request) {
           await storeStall(x, y, stall);
           return errorResponse("store_failed", 503);
         }
+        const itemName = itemById(stall.itemId)?.name ?? stall.itemId;
+        void loadNationsState()
+          .then((nations) => {
+            const sellerGuild = nations.members[stall.ownerKey]?.nationId;
+            if (!sellerGuild) return;
+            return enqueueUnionDiscordEvent(
+              sellerGuild,
+              "屋台売上",
+              `${itemName} ×1 が ${stall.price}コインで売れました（残り ${nextStall ? nextStall.count : 0}）`,
+            );
+          })
+          .catch(() => {});
         return NextResponse.json(
           {
             stall: nextStall

@@ -2,18 +2,22 @@ import { NextResponse } from "next/server";
 import { getRequestSession, publicOrigin, sessionOwnerKey } from "@/lib/auth";
 import { WORLD_COORD_LIMIT, worldTileSource } from "@/lib/worldbox/mapgen";
 import { loadProfile, storeProfile } from "@/lib/worldbox/profile-online";
+import { bumpProfileStat } from "@/lib/worldbox/profile";
+import { dispatchProgressEffects } from "@/lib/worldbox/progress-online";
 import { listPresence } from "@/lib/worldbox/presence-online";
 import { presenceIdFor } from "@/lib/worldbox/presence";
 import { parseSave } from "@/lib/worldbox/save";
 import { loadWorldBoxSave } from "@/lib/worldbox/save-online";
 import {
-  applyDisplayAction, applyDrawWater, applyFlowerAction, applyFortify, applyMineBlock, applyPlaceBlock, applySetSign, applyTileAction, applyToggleGate, FORTIFY_COST, isOverrideActive, tileKey,
+  applyDisplayAction, applyDrawWater, applyFlowerAction, applyFortify, applyMineBlock, applyPlaceBlock, applySetGateAccess, applySetSign, applyTileAction, applyToggleGate, FORTIFY_COST, isGateItem, isOverrideActive, tileKey,
   type TileActionResult, type TileOverridesMap,
 } from "@/lib/worldbox/tiles";
 import { buildEconomyOp } from "@/lib/worldbox/economy-bridge";
 import {
   isEconomyEnabled, readUserBalance, submitEconomyOp, waitForOpDone,
 } from "@/lib/worldbox/economy-bridge-online";
+import { canAccessScope, parseAccessScope } from "@/lib/worldbox/acl";
+import { nationIdForPresenceId } from "@/lib/worldbox/nations";
 import { loadNationsState } from "@/lib/worldbox/nations-online";
 import { loadWarState } from "@/lib/worldbox/war-online";
 import { canBreakOthersBlock } from "@/lib/worldbox/war";
@@ -28,6 +32,7 @@ import { loadContainer, storeContainer } from "@/lib/worldbox/containers-online"
 import { withUserLock } from "@/lib/worldbox/user-lock";
 import { isTilesEnabled, loadTileOverride, loadTileOverrides, storeTileOverride } from "@/lib/worldbox/tiles-online";
 import { isSupplyConnected } from "@/lib/worldbox/rails";
+import { weatherGrowthMult } from "@/lib/worldbox/weather";
 
 export const runtime = "nodejs";
 
@@ -54,7 +59,7 @@ const MAX_ACTION_DISTANCE = 2;
 const BAD_REQUEST_ERRORS = new Set(["invalid_action", "invalid_request", "invalid_tile", "unknown_seed", "unknown_block"]);
 
 function errorStatus(error: string): number {
-  if (error === "not_owner") return 403;
+  if (error === "not_owner" || error === "not_allowed") return 403;
   return BAD_REQUEST_ERRORS.has(error) ? 400 : 409;
 }
 
@@ -166,7 +171,15 @@ export async function POST(request: Request) {
   } catch {
     return NextResponse.json({ error: "invalid_request" }, { status: 400, headers: NO_STORE });
   }
-  const fields = (body ?? {}) as { action?: unknown; x?: unknown; y?: unknown; seedId?: unknown; itemId?: unknown; text?: unknown };
+  const fields = (body ?? {}) as {
+    action?: unknown;
+    x?: unknown;
+    y?: unknown;
+    seedId?: unknown;
+    itemId?: unknown;
+    text?: unknown;
+    access?: unknown;
+  };
   const ownerKey = sessionOwnerKey(session);
   // 運用凍結中はタイルの書き換えを止める（荒らし対策）
   if (await loadFrozen()) {
@@ -224,11 +237,13 @@ export async function POST(request: Request) {
           );
         } else if (fields.action === "mine_block") {
           // 収納コンテナ（樽・宝箱）は中身が入っている間は回収できない
-          const blockItemId =
-            current && isOverrideActive(current, Date.now()) ? current.block?.itemId : undefined;
+          const nowMs = Date.now();
+          const activeBlock = current && isOverrideActive(current, nowMs) ? current.block : undefined;
+          const blockItemId = activeBlock?.itemId;
+          let containerState = null;
           if (blockItemId && isContainerItem(blockItemId)) {
-            const state = await loadContainer("world", tx, ty, blockItemId);
-            if (state && !containerIsEmpty(state)) {
+            containerState = await loadContainer("world", tx, ty, blockItemId);
+            if (containerState && !containerIsEmpty(containerState)) {
               return NextResponse.json({ error: "not_empty" }, { status: 409, headers: NO_STORE });
             }
             minedContainerItem = blockItemId;
@@ -252,20 +267,20 @@ export async function POST(request: Request) {
           // WAR_TERRITORY_RADIUS 以内にある防衛側国民のブロックだけ掘れる。
           // ブロック所有者の国は、所属マップの所有者キーから不透明 ID を
           // 逆引きして求める（プレゼンスに居ない所有者にも届く）。
+          const selfId = presenceIdFor(ownerKey);
+          const containerAccess = parseAccessScope(containerState?.access);
+          const needNationLookup =
+            activeBlock && (activeBlock.ownerId !== selfId) && (containerAccess !== "owner");
           let warBreakAllowed = false;
-          const activeBlock =
-            current && isOverrideActive(current, Date.now()) ? current.block : undefined;
-          if (activeBlock && activeBlock.ownerId !== presenceIdFor(ownerKey)) {
-            const [warState, nationsState] = await Promise.all([loadWarState(), loadNationsState()]);
+          let containerBreakAllowed = Boolean(blockItemId && isContainerItem(blockItemId) && containerAccess === "public");
+          if (activeBlock && activeBlock.ownerId !== selfId) {
+            const [warState, nationsState] = await Promise.all([
+              needNationLookup ? loadWarState() : Promise.resolve({ v: 1 as const, wars: {}, history: [], lastDeclaredAt: {} }),
+              loadNationsState(),
+            ]);
             const members = nationsState.members ?? {};
             const mine = members[ownerKey];
-            let ownerNationId: string | null = null;
-            for (const [memberKey, m] of Object.entries(members)) {
-              if (presenceIdFor(memberKey) === activeBlock.ownerId) {
-                ownerNationId = m.nationId;
-                break;
-              }
-            }
+            const ownerNationId = nationIdForPresenceId(nationsState, activeBlock.ownerId);
             const defender = ownerNationId ? (nationsState.nations ?? {})[ownerNationId] : undefined;
             // 期限も見る: この経路は expireWars を走らせないため、期限切れで
             // status が "active" のまま残った戦争でも掘れてしまう。
@@ -273,14 +288,20 @@ export async function POST(request: Request) {
               mine && defender &&
               canBreakOthersBlock(warState, mine.nationId, defender.guildId, tx, ty, defender.capital, Date.now()),
             );
+            if (blockItemId && isContainerItem(blockItemId) && containerAccess !== "public") {
+              containerBreakAllowed = canAccessScope(containerAccess, {
+                actorId: selfId,
+                ownerId: activeBlock.ownerId,
+                actorNationId: mine?.nationId ?? null,
+                ownerNationId,
+              });
+            }
           }
           result = applyMineBlock(
-            current, profile, map, ownerKey, fields.x, fields.y, Date.now(),
+            current, profile, map, ownerKey, fields.x, fields.y, nowMs,
             {
               warBreakAllowed,
-              // 収納コンテナは中身が全員共有の仕様に合わせ、回収も誰でも可
-              // （中身が空のときだけ、は上の not_empty 検証が担保する）
-              containerBreakAllowed: Boolean(blockItemId && isContainerItem(blockItemId)),
+              containerBreakAllowed,
             },
           );
         } else if (fields.action === "set_sign") {
@@ -304,9 +325,29 @@ export async function POST(request: Request) {
             current, profile, map, ownerKey, fields.x, fields.y, fields.action, Date.now(),
           );
         } else if (fields.action === "toggle_gate") {
-          // 門の開閉（誰でもできる。出入り口のため所有者制限は付けない）
+          // 門の開閉（gateAccess に応じてアクセス制御）
+          const nowMs = Date.now();
+          let gateAllowed = true;
+          if (current && isOverrideActive(current, nowMs) && current.block && isGateItem(current.block.itemId)) {
+            const scope = parseAccessScope(current.gateAccess);
+            if (scope !== "public") {
+              const selfId = presenceIdFor(ownerKey);
+              const nationsState = await loadNationsState();
+              gateAllowed = canAccessScope(scope, {
+                actorId: selfId,
+                ownerId: current.block.ownerId,
+                actorNationId: nationsState.members?.[ownerKey]?.nationId ?? null,
+                ownerNationId: nationIdForPresenceId(nationsState, current.block.ownerId),
+              });
+            }
+          }
           result = applyToggleGate(
-            current, profile, map, ownerKey, fields.x, fields.y, Date.now(),
+            current, profile, map, ownerKey, fields.x, fields.y, nowMs,
+            { gateAllowed },
+          );
+        } else if (fields.action === "set_gate_access") {
+          result = applySetGateAccess(
+            current, profile, map, ownerKey, fields.x, fields.y, fields.access, Date.now(),
           );
         } else if (fields.action === "fortify") {
           // 要塞化（仕様書 §8.4）: 状態遷移は applyFortify、価格の徴収は
@@ -341,19 +382,37 @@ export async function POST(request: Request) {
               supplyConnected = isSupplyConnected(activeOverrides, capital, tx, ty);
             }
           }
+          const nowMs = Date.now();
           result = applyTileAction(
             current, profile, map, ownerKey,
-            fields.action, fields.x, fields.y, fields.seedId, Date.now(),
-            { supplyConnected },
+            fields.action, fields.x, fields.y, fields.seedId, nowMs,
+            { supplyConnected, growthMult: weatherGrowthMult(Math.floor(nowMs / 1000)) },
           );
         }
         if (!result.ok) {
           return NextResponse.json({ error: result.error }, { status: errorStatus(result.error), headers: NO_STORE });
         }
+        let nextProfile = result.profile;
+        let goalDelta = 0;
+        if (fields.action === "chop" && (result.gained.wood ?? 0) > 0) {
+          nextProfile = bumpProfileStat(nextProfile, "chops", 1);
+          goalDelta = 1;
+        } else if (fields.action === "mine" && (result.gained.stone ?? 0) > 0) {
+          nextProfile = bumpProfileStat(nextProfile, "mines", 1);
+          goalDelta = 1;
+        } else if (fields.action === "harvest" && Object.keys(result.gained).length > 0) {
+          nextProfile = bumpProfileStat(nextProfile, "harvests", 1);
+          goalDelta = 1;
+        } else if (fields.action === "place_block") {
+          nextProfile = bumpProfileStat(nextProfile, "places", 1);
+          goalDelta = 1;
+        } else if (fields.action === "fortify") {
+          nextProfile = bumpProfileStat(nextProfile, "fortifies", 1);
+        }
         if (!(await storeTileOverride(tx, ty, result.override))) {
           return NextResponse.json({ error: "tiles_failed" }, { status: 500, headers: NO_STORE });
         }
-        if (!(await storeProfile(ownerKey, result.profile))) {
+        if (!(await storeProfile(ownerKey, nextProfile))) {
           await storeTileOverride(tx, ty, current);
           return NextResponse.json({ error: "tiles_failed" }, { status: 500, headers: NO_STORE });
         }
@@ -370,6 +429,15 @@ export async function POST(request: Request) {
           void bumpMetric("harvests", 1, Date.now());
           void recordFirstStep(ownerKey, "gather", Date.now());
         }
+        if (nextProfile !== profile) {
+          dispatchProgressEffects({
+            ownerKey,
+            actorName: session.username?.trim() || "冒険者",
+            before: profile,
+            after: nextProfile,
+            ...(goalDelta > 0 ? { goalKind: "gather" as const, goalDelta } : {}),
+          });
+        }
         // コンテナ/装置の状態は、ブロックが壊れて回収されたときだけ消す
         // （HP制のヒットではブロックが残るので状態も残す）
         const blockBroken = fields.action === "mine_block" && !result.override?.block;
@@ -382,7 +450,7 @@ export async function POST(request: Request) {
             tile: result.view,
             override: result.override,
             key: tileKey(tx, ty),
-            profile: result.profile,
+            profile: nextProfile,
             gained: result.gained,
             ...(result.broke ? { broke: result.broke } : {}),
           },

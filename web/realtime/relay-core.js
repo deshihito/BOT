@@ -13,6 +13,8 @@ const MAX_PLAYERS = 32;
 const MAX_VELOCITY = 16;
 /** 表示名の上限文字数。presence.ts の PRESENCE_NAME_MAX と一致。 */
 const NAME_MAX = 24;
+/** 装備称号の上限文字数。presence.ts の PRESENCE_TITLE_MAX と一致。 */
+const TITLE_MAX = 12;
 /** 中継トークンの有効期限（ミリ秒）。 */
 const TOKEN_TTL_MS = 10 * 60 * 1000;
 
@@ -60,6 +62,11 @@ function clampNum(v, min, max) {
   return Math.max(min, Math.min(max, v));
 }
 
+function sanitizeTitle(raw) {
+  if (typeof raw !== "string") return "";
+  return raw.replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, TITLE_MAX);
+}
+
 /** ハートビートを検証・整形する（presence.ts の sanitizeHeartbeat と同じ規則）。 */
 function sanitizeHeartbeat(raw) {
   if (!raw || typeof raw !== "object") return null;
@@ -68,6 +75,7 @@ function sanitizeHeartbeat(raw) {
   const space = sanitizeSpace(raw.space);
   const b = boundsForSpace(space);
   const vel = (n) => (typeof n === "number" && Number.isFinite(n) ? clampNum(n, -MAX_VELOCITY, MAX_VELOCITY) : 0);
+  const title = sanitizeTitle(raw.title);
   return {
     x: clampNum(raw.x, b.minX, b.maxX),
     y: clampNum(raw.y, b.minY, b.maxY),
@@ -80,6 +88,7 @@ function sanitizeHeartbeat(raw) {
     role: typeof raw.role === "string" && ROLE_IDS.includes(raw.role) ? raw.role : "free",
     rank: typeof raw.rank === "number" && Number.isFinite(raw.rank) ? Math.max(1, Math.min(5, Math.floor(raw.rank))) : 1,
     party: typeof raw.party === "string" ? raw.party.slice(0, 48) : "",
+    ...(title ? { title } : {}),
     // 座り（sit）も presence.ts と同じ規則で通す（落とすと他者に座り姿勢が伝わらず、bot_kv 集約書き込みでも欠落する）。
     ...(raw.sit === true ? { sit: true } : {}),
   };
@@ -240,6 +249,7 @@ function setRoomBaseline(room, id, name, baseline) {
     role: prev?.role ?? "free",
     rank: prev?.rank ?? 1,
     party: prev?.party ?? "",
+    ...(prev?.title ? { title: prev.title } : {}),
     ts,
   };
   table.set(id, entry);
@@ -369,6 +379,7 @@ function presenceKvValue(entry, tpTs) {
     role: entry.role ?? "free",
     rank: entry.rank ?? 1,
     party: entry.party ?? "",
+    ...(entry.title ? { title: entry.title } : {}),
     ...(entry.sit === true ? { sit: true } : {}),
   };
   const effTpTs = typeof tpTs === "number" && Number.isFinite(tpTs) && tpTs > 0

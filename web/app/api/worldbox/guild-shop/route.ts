@@ -22,6 +22,7 @@ import { parseSave } from "@/lib/worldbox/save";
 import { loadWorldBoxSave } from "@/lib/worldbox/save-online";
 import { withUserLock } from "@/lib/worldbox/user-lock";
 import { bumpMetric } from "@/lib/worldbox/metrics-online";
+import { enqueueUnionDiscordEvent } from "@/lib/worldbox/chat-online";
 
 export const runtime = "nodejs";
 
@@ -150,6 +151,7 @@ export async function POST(request: Request) {
     const myRole = await resolvedRole(nations, ownerKey);
     const isLeader = myRole === "king" || myRole === "minister";
     let rollbackOnFail: (() => Promise<void>) | null = null;
+    let afterStore: (() => void) | null = null;
     const respond = async (next: GuildShopState) => {
       // 完売した出品は保存前に取り除く。残しておくとパネルからは
       // 到達できず（在庫 0 は表示されない）state に溜まり続ける。
@@ -168,6 +170,7 @@ export async function POST(request: Request) {
       } else {
         if (!(await storeGuildShopState(pruned))) return err("store_failed", 503);
       }
+      afterStore?.();
       return NextResponse.json(
         { ok: true, ...view(pruned, nations, ownerKey), myGuildId: myGuild, myRole },
         { headers: NO_STORE },
@@ -350,6 +353,15 @@ export async function POST(request: Request) {
         );
         rollbackOnFail = async () => {
           await storeProfile(ownerKey, profile);
+        };
+        afterStore = () => {
+          const itemName = itemById(found.listing.itemId)?.name ?? found.listing.itemId;
+          void enqueueUnionDiscordEvent(
+            found.plot.guildId,
+            "ギルドショップ",
+            `${itemName} ×${count} が ${cost}コインで購入されました`,
+            `gshop-buy-${found.listing.id}-${newSold}`,
+          );
         };
         return respond({ ...state, plots });
       });
