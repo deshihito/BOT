@@ -71,6 +71,16 @@ export const SAME_SPACE_WARPS: readonly {
     sources: [{ x: 17, y: 62 }, { x: 18, y: 62 }],
     landing: { x: 17.5, y: 27.5 },
   },
+  {
+    space: "lobby",
+    sources: [{ x: 187, y: 127 }, { x: 188, y: 127 }],
+    landing: { x: 199.5, y: 128.5 },
+  },
+  {
+    space: "lobby",
+    sources: [{ x: 199, y: 130 }, { x: 200, y: 130 }],
+    landing: { x: 187.5, y: 125.5 },
+  },
 ];
 
 /**

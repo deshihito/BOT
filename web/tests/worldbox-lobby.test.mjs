@@ -77,13 +77,13 @@ const tile = (x, y) => wb.lobbyTileAt(lobby.tiles, x, y);
 
 // ---------- ロビー外形（図形の和集合） ----------
 
-test("lobby: 寸法は 126×64 で、タイル配列が一致する", () => {
-  assert.equal(wb.LOBBY_W, 126);
-  assert.equal(wb.LOBBY_H, 64);
-  assert.equal(lobby.tiles.length, 126 * 64);
+test("lobby: 寸法は 224×136 で、タイル配列が一致する", () => {
+  assert.equal(wb.LOBBY_W, 224);
+  assert.equal(wb.LOBBY_H, 136);
+  assert.equal(lobby.tiles.length, 224 * 136);
   // moveMap はタイル源（範囲外は岩＝固体）
   assert.equal(lobby.moveMap.tileAt(-1, 0), wb.T_ROCK);
-  assert.equal(lobby.moveMap.tileAt(126, 0), wb.T_ROCK);
+  assert.equal(lobby.moveMap.tileAt(224, 0), wb.T_ROCK);
 });
 
 test("lobby: 中央は大円の広場（内側は歩行可、リングが縁取る）", () => {
