@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { WEB_GAMES, getWebGame } from "@/lib/games-catalog";
 import { GameDetailHeader } from "../GamesChrome";
 import ChessClient from "../chess/ChessClient";
@@ -100,7 +100,8 @@ import KwordleClient from "../kwordle/KwordleClient";
 import WorldBoxClient from "../worldbox/WorldBoxClient";
 
 export function generateStaticParams() {
-  return WEB_GAMES.map((game) => ({ id: game.slug }));
+  // 外部リンクのタイトルはサイト内にページを持たないため対象外。
+  return WEB_GAMES.filter((game) => !game.externalHref).map((game) => ({ id: game.slug }));
 }
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
@@ -117,6 +118,7 @@ export default async function WebGamePage({ params }: { params: Promise<{ id: st
   const { id } = await params;
   const game = getWebGame(id);
   if (!game) notFound();
+  if (game.externalHref) redirect(game.externalHref);
   if (game.slug === "chess" && game.status === "playable") {
     return (
       <>

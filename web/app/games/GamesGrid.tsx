@@ -81,6 +81,13 @@ function GameCard({ game, prefix }: { game: WebGame; prefix: string }) {
   if (game.status !== "playable") {
     return <div className="game-card game-card-disabled">{inner}</div>;
   }
+  if (game.externalHref) {
+    return (
+      <a className="game-card" href={game.externalHref} target="_blank" rel="noreferrer">
+        {inner}
+      </a>
+    );
+  }
   return (
     <Link className="game-card" href={`${prefix}/games/${game.slug}`}>
       {inner}
@@ -214,7 +221,7 @@ export default function GamesGrid() {
   const demoted = visible.filter((game) => game.demoted && !game.genre);
 
   const pickRandom = () => {
-    const pool = WEB_GAMES.filter((g) => g.status === "playable");
+    const pool = WEB_GAMES.filter((g) => g.status === "playable" && !g.externalHref);
     if (pool.length === 0) return;
     setPicked(pool[Math.floor(Math.random() * pool.length)]);
   };
