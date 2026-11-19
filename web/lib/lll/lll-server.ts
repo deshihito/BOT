@@ -14,15 +14,23 @@ import { isBotApiConfigured, kvGet, tableSelect, tableUpsert } from "../bot-api"
 import { logfareApiKeys } from "../one-prompter/one-prompter-server";
 import {
   ACHIEVEMENTS,
+  ALL_TRAIT_KINDS,
   COLLECTION_CAP,
   DAILY_MISSIONS,
   DUPLICATE_SHARDS,
   LADDER_TIERS,
   LOGIN_BONUS_REWARDS,
+  MAX_EQUIPPED_RELICS,
   MAX_LEVEL,
   MAX_LIMIT_BREAK,
+  RELIC_BY_ID,
   RIVAL_GHOST_PRESETS,
+  SKILL2_KIND_LABEL,
   STARTER_CARDS,
+  TRAIT_DEFAULT_NAME,
+  TUNABLE_SKILL2_KINDS,
+  TUNE_SKILL2_COST,
+  TUNE_TRAIT_COST,
   abyssEnemyDeck,
   abyssRewards,
   appraiseDeterministic,
@@ -30,15 +38,23 @@ import {
   cardPowerScore,
   dismantleShards,
   fallbackWords,
+  fieldForAbyssFloor,
+  fieldForLadderTier,
+  fieldForPvpRival,
   ladderDeck,
   levelUpCost,
   limitBreakCost,
+  makeSkill,
+  makeTrait,
   nextTier,
   validateAiWords,
   type AiWords,
   type ImageFeatures,
   type LllCard,
+  type LllRelicDef,
+  type LllSkillKind,
   type LllTier,
+  type LllTraitKind,
   type RewardBundle,
 } from "./lll-game";
 import {
@@ -97,6 +113,10 @@ export type LllProfile = {
   achievementsClaimed: string[];
   abyssBestFloor: number;
   pvpRating: number;
+  /** 鍛造済みの遺物ID一覧。 */
+  unlockedRelics: string[];
+  /** 装備中の遺物ID一覧（最大2枠）。 */
+  equippedRelics: string[];
 };
 
 type LllBattleRecord = {
@@ -236,6 +256,14 @@ function normalizeProfile(value: LllProfile): LllProfile {
         : 0,
     pvpRating:
       typeof (value as Partial<LllProfile>).pvpRating === "number" ? (value as Partial<LllProfile>).pvpRating! : 1000,
+    unlockedRelics: Array.isArray((value as Partial<LllProfile>).unlockedRelics)
+      ? (value as Partial<LllProfile>).unlockedRelics!.filter((id) => typeof id === "string" && id in RELIC_BY_ID)
+      : [],
+    equippedRelics: Array.isArray((value as Partial<LllProfile>).equippedRelics)
+      ? (value as Partial<LllProfile>).equippedRelics!
+          .filter((id) => typeof id === "string" && id in RELIC_BY_ID)
+          .slice(0, MAX_EQUIPPED_RELICS)
+      : [],
   };
 }
 
@@ -423,6 +451,8 @@ export async function getOrCreateProfile(
       achievementsClaimed: [],
       abyssBestFloor: 0,
       pvpRating: 1000,
+      unlockedRelics: [],
+      equippedRelics: [],
     };
     const loginBonus = syncDailyAndLogin(profile);
     profiles.set(newToken, profile);
@@ -917,6 +947,98 @@ export async function exchangeLumen(
   });
 }
 
+// --- 遺物（アーティファクト）・カード調律 ---
+
+export async function craftRelic(
+  token: string,
+  relicId: string,
+): Promise<{ profile: LllProfile; relic: LllRelicDef }> {
+  return serialize(async () => {
+    const profile = await requireProfile(token);
+    const relic = RELIC_BY_ID[relicId];
+    if (!relic) throw new LllError(404, "遺物が見つかりません。");
+    if (profile.unlockedRelics.includes(relicId)) {
+      throw new LllError(400, "この遺物はすでに鍛造済みです。");
+    }
+    if (profile.shards < relic.craftShards) throw new LllError(400, "欠片が足りません。");
+    if (profile.lumen < relic.craftLumen) throw new LllError(400, "ルーメンが足りません。");
+    profile.shards -= relic.craftShards;
+    profile.lumen -= relic.craftLumen;
+    profile.unlockedRelics = [...profile.unlockedRelics, relicId];
+    if (profile.equippedRelics.length < MAX_EQUIPPED_RELICS) {
+      profile.equippedRelics = [...profile.equippedRelics, relicId];
+    }
+    await persistProfile(profile);
+    return { profile, relic };
+  });
+}
+
+export async function equipRelics(
+  token: string,
+  relicIds: string[],
+): Promise<{ profile: LllProfile }> {
+  return serialize(async () => {
+    const profile = await requireProfile(token);
+    const unique = [...new Set(relicIds)];
+    if (unique.length > MAX_EQUIPPED_RELICS) {
+      throw new LllError(400, `遺物は最大${MAX_EQUIPPED_RELICS}つまで装備できます。`);
+    }
+    for (const id of unique) {
+      if (!(id in RELIC_BY_ID)) throw new LllError(400, "不明な遺物IDです。");
+      if (!profile.unlockedRelics.includes(id)) {
+        throw new LllError(400, "未鍛造の遺物は装備できません。");
+      }
+    }
+    profile.equippedRelics = unique;
+    await persistProfile(profile);
+    return { profile };
+  });
+}
+
+export async function tuneCardTrait(
+  token: string,
+  cardId: string,
+  traitKind: LllTraitKind,
+): Promise<{ profile: LllProfile; card: LllCard }> {
+  return serialize(async () => {
+    const profile = await requireProfile(token);
+    const card = profile.cards.find((c) => c.id === cardId);
+    if (!card) throw new LllError(404, "カードが見つかりません。");
+    if (!ALL_TRAIT_KINDS.includes(traitKind)) throw new LllError(400, "特性の指定が正しくありません。");
+    if (card.trait.kind === traitKind) throw new LllError(400, "すでに同じ特性が設定されています。");
+    if (profile.shards < TUNE_TRAIT_COST.shards) throw new LllError(400, "欠片が足りません。");
+    if (profile.lumen < TUNE_TRAIT_COST.lumen) throw new LllError(400, "ルーメンが足りません。");
+    profile.shards -= TUNE_TRAIT_COST.shards;
+    profile.lumen -= TUNE_TRAIT_COST.lumen;
+    card.trait = makeTrait(TRAIT_DEFAULT_NAME[traitKind], traitKind);
+    await persistProfile(profile);
+    return { profile, card };
+  });
+}
+
+export async function tuneCardSkill2(
+  token: string,
+  cardId: string,
+  skillKind: LllSkillKind,
+): Promise<{ profile: LllProfile; card: LllCard }> {
+  return serialize(async () => {
+    const profile = await requireProfile(token);
+    const card = profile.cards.find((c) => c.id === cardId);
+    if (!card) throw new LllError(404, "カードが見つかりません。");
+    if (!TUNABLE_SKILL2_KINDS.includes(skillKind)) throw new LllError(400, "技2の効果種別が正しくありません。");
+    if (card.skills[1].kind === skillKind) throw new LllError(400, "すでに同じ効果種別の技2です。");
+    if (profile.shards < TUNE_SKILL2_COST.shards) throw new LllError(400, "欠片が足りません。");
+    if (profile.lumen < TUNE_SKILL2_COST.lumen) throw new LllError(400, "ルーメンが足りません。");
+    profile.shards -= TUNE_SKILL2_COST.shards;
+    profile.lumen -= TUNE_SKILL2_COST.lumen;
+    const prev = card.skills[1];
+    const baseName = prev.name?.trim() || SKILL2_KIND_LABEL[skillKind];
+    card.skills[1] = makeSkill(baseName, skillKind, prev.power || 85, prev.cooldown || 2);
+    await persistProfile(profile);
+    return { profile, card };
+  });
+}
+
 // --- ミッション / 実績 ---
 
 function isAchievementEligible(profile: LllProfile, id: string): boolean {
@@ -927,12 +1049,16 @@ function isAchievementEligible(profile: LllProfile, id: string): boolean {
       return profile.cards.length >= 12;
     case "ach_wins_5":
       return profile.wins >= 5;
+    case "ach_wins_10":
+      return profile.wins >= 10;
     case "ach_legend_1":
       return profile.cards.some((c) => c.tier === "legend");
     case "ach_lv10_1":
       return profile.cards.some((c) => c.level >= MAX_LEVEL);
     case "ach_abyss_5":
       return profile.abyssBestFloor >= 5;
+    case "ach_relic_1":
+      return profile.unlockedRelics.length >= 1;
     default:
       return false;
   }
@@ -1175,6 +1301,8 @@ export async function startBattle(
       state = createBattle(battleId, deepClone(teamCards), ladderDeck(tierIndex), tierIndex, randomSeed(), {
         mode: "ladder",
         title: LADDER_TIERS[tierIndex]?.name,
+        fieldId: fieldForLadderTier(tierIndex),
+        playerRelics: profile.equippedRelics,
         tacticDecks: {
           player: resolvePlayerTacticList(profile),
           cpu: enemyDeckId ? tacticDeckList(enemyDeckId) : null,
@@ -1221,6 +1349,8 @@ export async function startAbyssBattle(
         mode: "abyss",
         floor,
         title: `深淵 第${floor}階層${floor % 5 === 0 ? "（BOSS）" : ""}`,
+        fieldId: fieldForAbyssFloor(floor),
+        playerRelics: profile.equippedRelics,
         tacticDecks: {
           player: resolvePlayerTacticList(profile),
           cpu: enemyDeckId ? tacticDeckList(enemyDeckId) : null,
@@ -1327,6 +1457,8 @@ export async function startPvpBattle(
         mode: "pvp",
         rivalName: rival.playerName,
         title: `模擬PvP vs ${rival.playerName}`,
+        fieldId: fieldForPvpRival(rivalId),
+        playerRelics: profile.equippedRelics,
         tacticDecks: {
           player: resolvePlayerTacticList(profile),
           cpu: tacticDeckList(rival.tacticDeckId),
@@ -1548,12 +1680,28 @@ export type GrowRequest =
   | { token: string; action: "favorite"; cardId: string }
   | { token: string; action: "customDeck"; counts: Record<string, number> }
   | { token: string; action: "playerName"; name: string }
+  | { token: string; action: "craftRelic"; relicId: string }
+  | { token: string; action: "equipRelics"; relicIds: string[] }
+  | { token: string; action: "tuneTrait"; cardId: string; traitKind: LllTraitKind }
+  | { token: string; action: "tuneSkill2"; cardId: string; skillKind: LllSkillKind }
   | { token: string; action: "exchange" };
 
 export function parseGrowBody(body: unknown): GrowRequest {
   const data = asBody(body);
   const token = parseToken(data.token);
   if (data.action === "exchange") return { token, action: "exchange" };
+  if (data.action === "craftRelic") {
+    if (typeof data.relicId !== "string" || !(data.relicId in RELIC_BY_ID)) {
+      throw new LllError(400, "遺物の指定が正しくありません。");
+    }
+    return { token, action: "craftRelic", relicId: data.relicId };
+  }
+  if (data.action === "equipRelics") {
+    if (!Array.isArray(data.relicIds) || !data.relicIds.every((id) => typeof id === "string" && id.length > 0)) {
+      throw new LllError(400, "装備する遺物の指定が正しくありません。");
+    }
+    return { token, action: "equipRelics", relicIds: data.relicIds as string[] };
+  }
   if (data.action === "dismantle") {
     if (!Array.isArray(data.cardIds) || !data.cardIds.every((id) => typeof id === "string" && id.length > 0)) {
       throw new LllError(400, "分解するカードの指定が正しくありません。");
@@ -1572,6 +1720,18 @@ export function parseGrowBody(body: unknown): GrowRequest {
   }
   if (typeof data.cardId !== "string" || data.cardId.length === 0) {
     throw new LllError(400, "カードの指定が正しくありません。");
+  }
+  if (data.action === "tuneTrait") {
+    if (typeof data.traitKind !== "string" || !ALL_TRAIT_KINDS.includes(data.traitKind as LllTraitKind)) {
+      throw new LllError(400, "特性の指定が正しくありません。");
+    }
+    return { token, action: "tuneTrait", cardId: data.cardId, traitKind: data.traitKind as LllTraitKind };
+  }
+  if (data.action === "tuneSkill2") {
+    if (typeof data.skillKind !== "string" || !TUNABLE_SKILL2_KINDS.includes(data.skillKind as LllSkillKind)) {
+      throw new LllError(400, "技2の種別指定が正しくありません。");
+    }
+    return { token, action: "tuneSkill2", cardId: data.cardId, skillKind: data.skillKind as LllSkillKind };
   }
   if (data.action === "limitBreak" || data.action === "awaken" || data.action === "lock" || data.action === "favorite") {
     return { token, action: data.action, cardId: data.cardId };
@@ -1622,7 +1782,7 @@ export function parsePlayerAction(value: unknown): PlayerAction {
   // 契約は lll-battle の PlayerAction { skill, targetKey? }。
   // クライアントが併記する type は無視し、skill を正として検証する。
   const skill = data.skill;
-  if (skill !== 0 && skill !== 1 && skill !== "basic" && skill !== "defend") {
+  if (skill !== 0 && skill !== 1 && skill !== "basic" && skill !== "defend" && skill !== "burst") {
     throw new LllError(400, "操作の形式が正しくありません。");
   }
   const targetKey = typeof data.targetKey === "string" ? data.targetKey : undefined;

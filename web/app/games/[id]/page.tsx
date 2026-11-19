@@ -136,12 +136,9 @@ export default async function WebGamePage({ params }: { params: Promise<{ id: st
     );
   }
   if (game.slug === "lll" && game.status === "playable") {
-    return (
-      <>
-        <GameDetailHeader game={game} />
-        <LllClient />
-      </>
-    );
+    // LLL は WORLD BOX と同様に独立シェル（.lll-shell）で完結させるため、
+    // ゲーム詳細ヘッダー（パンくず・判断材料）も出さない。
+    return <LllClient />;
   }
   if (game.slug === "minesweeper" && game.status === "playable") {
     return (

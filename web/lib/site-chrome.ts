@@ -18,6 +18,9 @@ export const CHROMELESS_PATHS: readonly string[] = [
   // ゲーム画面のため、共通ヘッダー/フッターは出さない。戻り導線は
   // 画面内の ≡ メニューに一本化する（docs/world-box-shared.md）。
   "/games/worldbox",
+  // LLL（写真AIカードバトル）も独立シェル（.lll-shell）で画面幅を広く使い切るため、
+  // サイト共通ヘッダー/フッターは出さず、アプリバーと独立フッターに一本化する。
+  "/games/lll",
 ];
 
 /** 指定パスでサイト共通クロームを省くかどうか。 */

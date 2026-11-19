@@ -1,12 +1,53 @@
 "use client";
-// LLL クライアント（ソシャゲ版 + 3D対応）。
-// ホーム（推し3D観賞・ログインボーナス・ミッション・実績）
-// → スカウト（画像鑑定 & チケット召喚 & 3D召喚スピン）
-// → バインダー（絞り込み・並び替え・一括分解・強化・限界突破・覚醒・ロック・推し設定・3枚編成）
-// → アリーナ（ラダー / 深淵の試練 / 模擬PvP、3Dバトルアリーナ / 2D切替、カットイン・AUTO進行・戦術デッキ編成）
+// LLL クライアント（フルビューポート独立シェル + 3D対応 + 拡張バトルギミック）。
+// ハブ（整理された出撃拠点・属性共鳴・装備遺物サマリー）
+// → 出撃（ラダー / 深淵 / 模擬PvP、フィールド地脈・属性反応・共鳴バースト・3D/2D切替・戦術カード）
+// → 編成・遺物（3枚パーティ・属性共鳴・遺物鍛造＆2枠装備・強化・限界突破・覚醒・特性／技2調律）
+// → スカウト（画像鑑定 & チケット召喚）
+// → 図鑑・規則（属性相性循環図・属性反応・編成共鳴・フィールド地脈・共鳴バースト・ミッション＆実績）
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
+import {
+  ACHIEVEMENTS,
+  ALL_TRAIT_KINDS,
+  BATTLE_FIELD_BY_ID,
+  DAILY_MISSIONS,
+  MAX_EQUIPPED_RELICS,
+  MAX_LEVEL,
+  MAX_LIMIT_BREAK,
+  RELICS,
+  RELIC_BY_ID,
+  RESONANCE_BURST_INFO,
+  SKILL2_KIND_LABEL,
+  SKILL_DESCRIPTION,
+  TRAIT_DEFAULT_NAME,
+  TRAIT_DESCRIPTION,
+  TUNABLE_SKILL2_KINDS,
+  TUNE_SKILL2_COST,
+  TUNE_TRAIT_COST,
+  awakenCost,
+  cardPowerScore,
+  detectElementalReaction,
+  dismantleShards,
+  effectiveStats,
+  evaluatePartyResonance,
+  fieldForAbyssFloor,
+  fieldForLadderTier,
+  fieldForPvpRival,
+  levelUpCost,
+  limitBreakCost,
+  nextTier,
+  predictDamageRange,
+  type BattleFieldId,
+  type LllElement,
+  type LllSkillKind,
+  type LllTier,
+  type LllTraitKind,
+  type RewardBundle,
+} from "@/lib/lll/lll-game";
+import LllCard, { ELEMENT_LABEL, TIER_LABEL } from "./LllCard";
+import { buildPlaybackSteps, stepDurationMs, type PlaybackStep, type PlaybackVfx } from "@/lib/lll/lll-playback";
 import {
   loadSoundSettings as loadSoundSettingsRaw,
   playSe as playSeRaw,
@@ -17,34 +58,38 @@ import {
   unlockAudio,
   type BgmScene,
 } from "@/lib/lll/lll-sound";
-import {
-  ACHIEVEMENTS,
-  DAILY_MISSIONS,
-  MAX_LEVEL,
-  MAX_LIMIT_BREAK,
-  awakenCost,
-  cardPowerScore,
-  dismantleShards,
-  effectiveStats,
-  levelUpCost,
-  limitBreakCost,
-  nextTier,
-  predictDamageRange,
-  type LllElement,
-  type LllTier,
-  type RewardBundle,
-} from "@/lib/lll/lll-game";
-import LllCard, { ELEMENT_LABEL, TIER_LABEL } from "./LllCard";
-import { buildPlaybackSteps, stepDurationMs, type PlaybackStep, type PlaybackVfx } from "@/lib/lll/lll-playback";
 import { TACTIC_CARD_BY_ID, TACTIC_DECKS } from "@/lib/lll/lll-tactics";
 import { useGamesNav } from "../GamesShell";
+import LllCodexView from "./LllCodexView";
 import LllHomeView from "./LllHomeView";
+import {
+  IconBack,
+  IconBolt,
+  IconCodex,
+  IconCube,
+  IconDeck,
+  IconField,
+  IconHub,
+  IconLock,
+  IconLumen,
+  IconMusic,
+  IconRelic,
+  IconScout,
+  IconShard,
+  IconShield,
+  IconStar,
+  IconSwords,
+  IconTicket,
+  IconTune,
+  IconVolume,
+} from "./LllIcons";
 import { CustomDeckModal, DropRatesModal, LoginBonusModal } from "./LllModals";
 import {
   actorToView,
   cardToView,
   checkAchievementDone,
   type AppraiseResult,
+  type ArenaMode,
   type Battle,
   type BattleActor,
   type CardT,
@@ -109,6 +154,12 @@ const TIERS = [
 
 const ALLY_TARGET_KINDS = new Set(["heal", "shield"]);
 const TIER_RANK: Record<LllTier, number> = { normal: 1, elite: 2, legend: 3 };
+const RELIC_CAT_LABEL: Record<string, string> = {
+  offense: "攻撃",
+  defense: "防御",
+  tactics: "戦術",
+  resonance: "共鳴",
+};
 
 function cardToThreeInput(card: CardT): ThreeCardInput {
   const eff = effectiveStats(card);
@@ -262,22 +313,29 @@ async function processImage(file: File): Promise<{ imageDataUrl: string; feature
   };
 }
 
-type PendingSkill = { skill: 0 | 1 | "basic" | "defend"; targetSide: "player" | "cpu" | null; label: string };
+type PendingSkill = {
+  skill: 0 | 1 | "basic" | "defend" | "burst";
+  targetSide: "player" | "cpu" | null;
+  label: string;
+};
 type FloatNum = { id: number; targetKey: string; text: string; kind: string };
 type SpeedMode = "1x" | "2x" | "instant";
-type ArenaMode = "ladder" | "abyss" | "pvp";
 type BinderSort = "power" | "level" | "tier" | "recent";
 
 export default function LllClient() {
   const { prefix } = useGamesNav();
   const [token, setToken] = useState<string | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
-  const [tab, setTab] = useState<Tab>("home");
+  const [tab, setTab] = useState<Tab>("hub");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [sound, setSound] = useState<SoundSettings>({ bgm: true, se: true });
   const [use3D, setUse3D] = useState(true);
   const [webglFailed, setWebglFailed] = useState(false);
+
+  // プレイヤー名編集（トップバー内インライン）
+  const [editingName, setEditingName] = useState(false);
+  const [nameInput, setNameInput] = useState("");
 
   // モーダル
   const [loginBonus, setLoginBonus] = useState<{ day: number; reward: RewardBundle } | null>(null);
@@ -290,10 +348,12 @@ export default function LllClient() {
   const [result, setResult] = useState<AppraiseResult | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  // バインダー
+  // バインダー & 遺物工房 & 詳細調律
   const [pendingTeam, setPendingTeam] = useState<string[] | null>(null);
   const [pickedCardId, setPickedCardId] = useState<string | null>(null);
   const [detailCardId, setDetailCardId] = useState<string | null>(null);
+  const [detailTab, setDetailTab] = useState<"grow" | "tune">("grow");
+  const [showRelics, setShowRelics] = useState(true);
   const [binderDrag, setBinderDrag] = useState<{ cardId: string; x: number; y: number; name: string } | null>(null);
   const [hotSlot, setHotSlot] = useState<number | null>(null);
   const teamSlotRefs = useRef<(HTMLDivElement | null)[]>([]);
@@ -497,6 +557,20 @@ export default function LllClient() {
     setPickedCardId(null);
   };
 
+  const launchArena = (mode: ArenaMode) => {
+    playSe("tap");
+    setArenaMode(mode);
+    setTab("arena");
+    setDetailCardId(null);
+    setPickedCardId(null);
+  };
+
+  const openDetailCard = (cardId: string, subTab: "grow" | "tune" = "grow") => {
+    setDetailCardId(cardId);
+    setDetailTab(subTab);
+    playSe("tap");
+  };
+
   /* --- PvP ライバル一覧取得 --- */
   const fetchPvpRivals = useCallback(async () => {
     if (!token) return;
@@ -520,19 +594,21 @@ export default function LllClient() {
     }
   }, [tab, arenaMode, battle, token, fetchPvpRivals]);
 
-  /* --- ホーム: 名前変更・ミッション受取 --- */
+  /* --- プロフィール: 名前変更・ミッション受取 --- */
   const savePlayerName = async (name: string) => {
-    if (!token || busy) return;
+    const trimmed = name.trim();
+    if (!token || busy || !trimmed) return;
     setBusy(true);
     setError("");
     try {
-      const { res, data } = await postJson("/api/lll/grow", { token, action: "playerName", name });
+      const { res, data } = await postJson("/api/lll/grow", { token, action: "playerName", name: trimmed });
       if (!res.ok) {
         setError(typeof data.error === "string" ? data.error : "名前を変更できませんでした。");
         playSe("error");
         return;
       }
       setProfile(data.profile as Profile);
+      setEditingName(false);
       playSe("claim");
     } catch {
       setError("通信に失敗しました。");
@@ -627,7 +703,7 @@ export default function LllClient() {
     }
   };
 
-  /* --- バインダー: チーム編成・強化・限界突破・覚醒・分解・保護・推し --- */
+  /* --- バインダー: チーム編成・強化・調律・遺物 --- */
   const effectiveTeamIds: string[] = pendingTeam ?? profile?.teamIds ?? [];
   const saveTeam = async (teamIds: string[]) => {
     if (!token || !profile) return;
@@ -741,8 +817,7 @@ export default function LllClient() {
       return;
     }
     if (pickedCardId === card.id) {
-      setDetailCardId(card.id);
-      playSe("tap");
+      openDetailCard(card.id);
       return;
     }
     setPickedCardId(card.id);
@@ -791,7 +866,28 @@ export default function LllClient() {
   };
 
   const setFavoriteCard = (cardId: string) => {
-    void runGrowAction({ action: "favorite", cardId }, "claim", "推しカードに設定できませんでした。");
+    void runGrowAction({ action: "favorite", cardId }, "claim", "主力カードに設定できませんでした。");
+  };
+
+  const craftRelicAction = (relicId: string) => {
+    void runGrowAction({ action: "craftRelic", relicId }, "awaken", "遺物を鍛造できませんでした。");
+  };
+
+  const toggleEquipRelic = (relicId: string) => {
+    if (!profile) return;
+    const current = profile.equippedRelics ?? [];
+    const next = current.includes(relicId)
+      ? current.filter((id) => id !== relicId)
+      : [...current, relicId].slice(0, MAX_EQUIPPED_RELICS);
+    void runGrowAction({ action: "equipRelics", relicIds: next }, "tap", "遺物装備を変更できませんでした。");
+  };
+
+  const tuneTraitAction = (cardId: string, traitKind: LllTraitKind) => {
+    void runGrowAction({ action: "tuneTrait", cardId, traitKind }, "awaken", "特性を調律できませんでした。");
+  };
+
+  const tuneSkill2Action = (cardId: string, skillKind: LllSkillKind) => {
+    void runGrowAction({ action: "tuneSkill2", cardId, skillKind }, "awaken", "技2を調律できませんでした。");
   };
 
   const executeDismantle = async () => {
@@ -949,7 +1045,6 @@ export default function LllClient() {
         };
       });
 
-      // カットイン表示
       if (step.cutIn) {
         const actorObj = pb.next.actors.find((a) => a.key === step.cutIn?.actorKey);
         setCutInBanner({
@@ -961,14 +1056,12 @@ export default function LllClient() {
         setCutInBanner(null);
       }
 
-      // 3D VFX 発火
       if (step.vfx || step.shakeIntensity > 0) {
         setSceneVfx(step.vfx);
         setSceneShake(step.shakeIntensity);
         setSceneVfxNonce((n) => n + 1);
       }
 
-      // 2D 前進・シェイク・シールドフラッシュ・フロート
       const attackerKey = step.event.actorKey;
       if (attackerKey && (step.event.type === "damage" || step.event.type === "info")) {
         setLungeKey(attackerKey);
@@ -1060,7 +1153,7 @@ export default function LllClient() {
     }
   }, []);
 
-  const sendAction = async (action: { skill: 0 | 1 | "basic" | "defend"; targetKey?: string }) => {
+  const sendAction = async (action: { skill: 0 | 1 | "basic" | "defend" | "burst"; targetKey?: string }) => {
     const current = battleRef.current;
     if (!token || !current || busy || playbackRef.current || current.phase !== "battle") return;
     setBusy(true);
@@ -1072,7 +1165,14 @@ export default function LllClient() {
     }
     try {
       const actionPayload = {
-        type: action.skill === "basic" ? "basic" : action.skill === "defend" ? "defend" : "skill",
+        type:
+          action.skill === "basic"
+            ? "basic"
+            : action.skill === "defend"
+              ? "defend"
+              : action.skill === "burst"
+                ? "burst"
+                : "skill",
         ...action,
       };
       const { res, data } = await postJson("/api/lll/battle/action", { token, battleId: current.id, action: actionPayload });
@@ -1168,11 +1268,23 @@ export default function LllClient() {
     return () => clearTimeout(timer);
   }, [autoMode, token, battle, isPlayerTurn, displayBattle, busy, postJson, startPlayback, applyBattleFx]);
 
-  const chooseSkill = (skill: 0 | 1 | "basic" | "defend") => {
+  const chooseSkill = (skill: 0 | 1 | "basic" | "defend" | "burst") => {
     if (!currentActor || !isPlayerTurn || busy || playbackRef.current) return;
     playSe("tap");
     if (skill === "defend") {
       void sendAction({ skill: "defend" });
+      return;
+    }
+    if (skill === "burst") {
+      if ((battle?.burst?.player ?? 0) < 100 || currentStunned) {
+        playSe("error");
+        return;
+      }
+      if (currentActor.element === "light") {
+        setPending({ skill: "burst", targetSide: "cpu", label: RESONANCE_BURST_INFO.light.name });
+        return;
+      }
+      void sendAction({ skill: "burst" });
       return;
     }
     if (skill === "basic") {
@@ -1319,7 +1431,12 @@ export default function LllClient() {
   const forecastForActor = (actor: BattleActor): string | null => {
     if (!pending || !currentActor || !isPlayerTurn || displayBattle || !actor.alive || actor.side !== pending.targetSide) return null;
     if (pending.targetSide === "cpu") {
-      const power = pending.skill === "basic" ? 40 : currentActor.skills[pending.skill as 0 | 1]?.power ?? 40;
+      const power =
+        pending.skill === "basic"
+          ? 40
+          : pending.skill === "burst"
+            ? 115
+            : currentActor.skills[pending.skill as 0 | 1]?.power ?? 40;
       const dmg = predictDamageRange(
         {
           atk: currentActor.atk,
@@ -1343,14 +1460,22 @@ export default function LllClient() {
     return "味方対象";
   };
 
+  const reactionForActor = (actor: BattleActor): string | null => {
+    if (!pending || !currentActor || !isPlayerTurn || displayBattle || !actor.alive) return null;
+    if (pending.targetSide !== "cpu" || actor.side !== "cpu") return null;
+    const hit = detectElementalReaction(currentActor.element, actor.statuses);
+    return hit ? hit.name : null;
+  };
+
   const renderActor = (actor: BattleActor) => {
     const targetable = !!pending && pending.targetSide === actor.side && actor.alive && isPlayerTurn && !displayBattle;
     const guideTarget = !!pending && guideRecommendation?.skill === pending.skill && guideRecommendation?.targetKey === actor.key;
     const forecastLabel = forecastForActor(actor);
+    const reactionLabel = reactionForActor(actor);
     return (
       <div key={actor.key} className="lll-actor-wrap">
         <LllCard
-          view={actorToView(actor, forecastLabel)}
+          view={actorToView(actor, forecastLabel, reactionLabel)}
           size="sm"
           dataKey={actor.key}
           current={currentActor?.key === actor.key && battle?.phase === "battle"}
@@ -1377,8 +1502,8 @@ export default function LllClient() {
 
   if (!profile) {
     return (
-      <div className="lll-shell">
-        <div className="lll-table">
+      <div className="lll-shell lll-table">
+        <div className="lll-workspace">
           <p className="lll-loading">読み込み中…</p>
           {error && (
             <p className="lll-error" role="alert">
@@ -1395,6 +1520,13 @@ export default function LllClient() {
     .map((id) => profile.cards.find((c) => c.id === id))
     .filter((c): c is CardT => !!c);
   const teamPower = teamCards.reduce((sum, c) => sum + cardPowerScore(c), 0);
+  const teamResonance = evaluatePartyResonance(teamCards);
+  const ownedRelics = profile.unlockedRelics ?? [];
+  const equippedRelicIds = profile.equippedRelics ?? [];
+  const equippedRelicDefs = equippedRelicIds
+    .map((id) => RELIC_BY_ID[id])
+    .filter((r): r is NonNullable<typeof r> => !!r);
+
   const homeBadgeCount =
     DAILY_MISSIONS.filter((m) => {
       const cur = profile.dailyProgress?.[m.metric] ?? 0;
@@ -1406,10 +1538,24 @@ export default function LllClient() {
   const scoutCue = profile.cards.length <= 3;
   const shownBattle = displayBattle ?? battle;
 
+  // 選択中ステージの地脈プレビュー
+  const previewFieldId: BattleFieldId =
+    arenaMode === "abyss"
+      ? fieldForAbyssFloor(abyssFloor)
+      : arenaMode === "pvp"
+        ? fieldForPvpRival(selectedRivalId ?? "")
+        : fieldForLadderTier(selectedTier);
+  const previewField = BATTLE_FIELD_BY_ID[previewFieldId];
+  const activeField = BATTLE_FIELD_BY_ID[shownBattle?.fieldId ?? "neutral"];
+
   const targetableKeys =
     pending && isPlayerTurn && !displayBattle && shownBattle
       ? shownBattle.actors.filter((a) => a.alive && a.side === pending.targetSide).map((a) => a.key)
       : [];
+
+  const playerBurst = Math.min(100, Math.max(0, shownBattle?.burst?.player ?? 0));
+  const cpuBurst = Math.min(100, Math.max(0, shownBattle?.burst?.cpu ?? 0));
+  const burstReady = playerBurst >= 100 && !currentStunned;
 
   const battleRecap = (() => {
     if (!battle || battle.phase !== "finished") return null;
@@ -1444,7 +1590,7 @@ export default function LllClient() {
       key={`${card.id}-${mode}-${card.tier}-${card.level}-${card.limitBreak ?? 0}`}
       card={cardToThreeInput(card)}
       mode={mode}
-      height={mode === "summon" ? 310 : 280}
+      height={mode === "summon" ? 310 : 270}
       onFail={handle3DFail}
       fallback={<LllCard view={cardToView(card, profile)} size="lg" />}
     />
@@ -1457,778 +1603,1055 @@ export default function LllClient() {
     </>
   );
 
+  const navItems: { key: Tab; label: string; badge: string | null; icon: React.ReactNode }[] = [
+    { key: "hub", label: "ハブ", badge: homeBadgeCount > 0 ? String(homeBadgeCount) : null, icon: <IconHub size={15} /> },
+    { key: "arena", label: "出撃", badge: battle?.phase === "battle" ? "進行" : null, icon: <IconSwords size={15} /> },
+    { key: "binder", label: "編成・遺物", badge: pendingTeam ? `${pendingTeam.length}/3` : null, icon: <IconDeck size={15} /> },
+    { key: "scout", label: "スカウト", badge: (profile.tickets ?? 0) > 0 ? String(profile.tickets) : null, icon: <IconScout size={15} /> },
+    { key: "codex", label: "図鑑・規則", badge: null, icon: <IconCodex size={15} /> },
+  ];
+
   return (
-    <div className="lll-shell">
-      <div className="lll-table">
-        {/* ヘッダーストリップ */}
-        <div className="lll-head">
-          <div className="lll-title-group">
-            <span className="lll-logo">LLL</span>
-            <span className="lll-hero">想像を、切り札に。</span>
+    <div className="lll-shell lll-table">
+      {/* フルビューポート独立トップバー（AGOBOT クローム非表示に伴う専用操作帯） */}
+      <header className="lll-appbar">
+        <div className="lll-appbar-inner">
+          <div className="lll-appbar-left">
+            <Link href={`${prefix}/games`} className="lll-back-link">
+              <IconBack size={15} />
+              <span>ゲーム一覧</span>
+            </Link>
+            <button type="button" className="lll-brand-btn" onClick={() => switchTab("hub")}>
+              LLL
+            </button>
+            {editingName ? (
+              <form
+                className="lll-name-form"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  void savePlayerName(nameInput);
+                }}
+              >
+                <input
+                  type="text"
+                  className="lll-name-input"
+                  value={nameInput}
+                  maxLength={16}
+                  autoFocus
+                  aria-label="プレイヤー名"
+                  onChange={(e) => setNameInput(e.target.value)}
+                />
+                <button type="submit" className="lll-snd-btn lll-snd-on" disabled={busy || !nameInput.trim()}>
+                  保存
+                </button>
+                <button type="button" className="lll-snd-btn" onClick={() => setEditingName(false)}>
+                  ×
+                </button>
+              </form>
+            ) : (
+              <button
+                type="button"
+                className="lll-player-pill"
+                title="クリックして調律者名を変更"
+                onClick={() => {
+                  setNameInput(profile.playerName ?? "調律者");
+                  setEditingName(true);
+                }}
+              >
+                {profile.playerName ?? "調律者"}
+              </button>
+            )}
           </div>
-          <div className="lll-currencies">
-            <span className="lll-chip lll-chip-shards">◆ 欠片 {profile.shards}</span>
-            <span className="lll-chip lll-chip-lumen">● ルーメン {profile.lumen}</span>
-            <span className="lll-chip lll-chip-ticket">🎫 券 {profile.tickets ?? 0}</span>
-            <span className="lll-chip lll-chip-rating">Rate {profile.pvpRating ?? 1000}</span>
-          </div>
-          <div className="lll-soundbar" role="group" aria-label="表示とサウンド設定">
-            <button
-              type="button"
-              className={`lll-snd-btn${canUse3D ? " lll-snd-on" : ""}`}
-              aria-pressed={canUse3D}
-              disabled={webglFailed}
-              onClick={toggle3D}
-              title={webglFailed ? "WebGL非対応のため2D表示中" : "3D / 2D 表示切替"}
-            >
-              3D {canUse3D ? "ON" : "OFF"}
-            </button>
-            <button
-              type="button"
-              className={`lll-snd-btn${sound.bgm ? " lll-snd-on" : ""}`}
-              aria-pressed={sound.bgm}
-              onClick={() => toggleSound("bgm")}
-            >
-              ♪ BGM {sound.bgm ? "ON" : "OFF"}
-            </button>
-            <button
-              type="button"
-              className={`lll-snd-btn${sound.se ? " lll-snd-on" : ""}`}
-              aria-pressed={sound.se}
-              onClick={() => toggleSound("se")}
-            >
-              SE {sound.se ? "ON" : "OFF"}
-            </button>
+
+          <nav className="lll-appbar-nav" aria-label="LLL メインナビゲーション">
+            {navItems.map((item) => (
+              <button
+                key={item.key}
+                type="button"
+                className={`lll-nav-btn${tab === item.key ? " lll-nav-active" : ""}`}
+                aria-current={tab === item.key ? "page" : undefined}
+                onClick={() => switchTab(item.key)}
+              >
+                {item.icon}
+                <span>{item.label}</span>
+                {item.badge && <span className="lll-count-pill">{item.badge}</span>}
+              </button>
+            ))}
+          </nav>
+
+          <div className="lll-appbar-right">
+            <div className="lll-res-group" aria-label="所持リソース">
+              <span className="lll-chip lll-chip-shards" title="強化の欠片">
+                <IconShard size={13} /> {profile.shards}
+              </span>
+              <span className="lll-chip lll-chip-lumen" title="ルーメン">
+                <IconLumen size={13} /> {profile.lumen}
+              </span>
+              <span className="lll-chip lll-chip-ticket" title="スカウト券">
+                <IconTicket size={13} /> {profile.tickets ?? 0}
+              </span>
+            </div>
+            <div className="lll-soundbar" role="group" aria-label="表示とサウンド設定">
+              <button
+                type="button"
+                className={`lll-snd-btn${canUse3D ? " lll-snd-on" : ""}`}
+                aria-pressed={canUse3D}
+                disabled={webglFailed}
+                onClick={toggle3D}
+                title={webglFailed ? "WebGL非対応のため2D表示中" : "3D / 2D 表示切替"}
+              >
+                <IconCube size={13} /> 3D
+              </button>
+              <button
+                type="button"
+                className={`lll-snd-btn${sound.bgm ? " lll-snd-on" : ""}`}
+                aria-pressed={sound.bgm}
+                onClick={() => toggleSound("bgm")}
+                title="BGM 切替"
+              >
+                <IconMusic size={13} />
+              </button>
+              <button
+                type="button"
+                className={`lll-snd-btn${sound.se ? " lll-snd-on" : ""}`}
+                aria-pressed={sound.se}
+                onClick={() => toggleSound("se")}
+                title="効果音 切替"
+              >
+                <IconVolume size={13} />
+              </button>
+            </div>
           </div>
         </div>
+      </header>
 
+      <main className="lll-workspace">
         {error && (
           <p className="lll-error" role="alert">
             {error}
           </p>
         )}
 
-        <div className="lll-main-stage">
-          {/* ===== ホーム ===== */}
-          {tab === "home" && (
-            <LllHomeView
-              profile={profile}
-              busy={busy}
-              canUse3D={canUse3D}
-              viewer3D={(card) => viewer3DForCard(card, "inspect")}
-              onSavePlayerName={(name) => void savePlayerName(name)}
-              onClaimMission={(kind, id) => void claimMission(kind, id)}
-              onSwitchTab={switchTab}
-              onInspectCard={(cardId) => setDetailCardId(cardId)}
-            />
-          )}
+        {/* ===== ホームハブ ===== */}
+        {tab === "hub" && (
+          <LllHomeView
+            profile={profile}
+            busy={busy}
+            canUse3D={canUse3D}
+            viewer3D={(card) => viewer3DForCard(card, "inspect")}
+            onClaimMission={(kind, id) => void claimMission(kind, id)}
+            onSwitchTab={switchTab}
+            onLaunchArena={launchArena}
+            onOpenDeckModal={() => setShowDeckModal(true)}
+            onInspectCard={(cardId) => openDetailCard(cardId)}
+          />
+        )}
 
-      {/* ===== スカウト ===== */}
-      {tab === "scout" && (
-        <section className="lll-scout">
-          <div className="lll-panel-head" style={{ width: "100%" }}>
-            <span className="lll-chip">所持カード {profile.cards.length}/60</span>
-            <button type="button" className="lll-btn" onClick={() => setShowRates(true)}>
-              提供割合・仕様
-            </button>
-          </div>
-          {scoutCue && !appraising && !result && (
-            <ol className="lll-cue" aria-label="はじめの3ステップ">
-              <li className="lll-cue-active">1 画像またはスカウト券</li>
-              <li>2 3D鑑定召喚</li>
-              <li>3 切り札完成</li>
-            </ol>
-          )}
-          {appraising ? (
-            <div className="lll-flip-wrap" aria-live="polite">
-              <div className="lll-cardback-flip">
-                <span>✦</span>
-                <span className="lll-cardback-logo">LLL</span>
-              </div>
-              <p className="lll-appraising">召喚鑑定中…</p>
+        {/* ===== スカウト ===== */}
+        {tab === "scout" && (
+          <section className="lll-scout">
+            <div className="lll-panel-head" style={{ width: "100%" }}>
+              <span className="lll-chip">所持カード {profile.cards.length}/60</span>
+              <button type="button" className="lll-btn" onClick={() => setShowRates(true)}>
+                提供割合・仕様
+              </button>
             </div>
-          ) : result ? (
-            <div className="lll-reveal">
-              {result.duplicated || !result.card ? (
-                <div className="lll-dup-box">
-                  <span className="lll-stamp lll-stamp-dup">重複</span>
-                  <p className="lll-dup-text">
-                    {result.limitBroken ? "見覚えのある1枚！同名カードが自動で限界突破しました！" : "見覚えのある1枚だった。"}
-                  </p>
-                  <div className="lll-currencies">
-                    <span className="lll-chip lll-chip-shards">◆ 欠片 +{result.shardsGained}</span>
-                    {result.limitBroken && <span className="lll-chip lll-chip-picked">★ 限界突破 +1</span>}
+            {scoutCue && !appraising && !result && (
+              <ol className="lll-cue" aria-label="はじめの3ステップ">
+                <li className="lll-cue-active">1 画像またはスカウト券</li>
+                <li>2 鑑定召喚</li>
+                <li>3 パーティ編成</li>
+              </ol>
+            )}
+            {appraising ? (
+              <div className="lll-flip-wrap" aria-live="polite">
+                <div className="lll-cardback-flip">
+                  <IconScout size={30} />
+                  <span className="lll-cardback-logo">LLL</span>
+                </div>
+                <p className="lll-appraising">召喚鑑定中…</p>
+              </div>
+            ) : result ? (
+              <div className="lll-reveal">
+                {result.duplicated || !result.card ? (
+                  <div className="lll-dup-box">
+                    <span className="lll-stamp lll-stamp-dup">重複</span>
+                    <p className="lll-dup-text">
+                      {result.limitBroken ? "見覚えのある1枚。同名カードが自動で限界突破しました。" : "見覚えのある1枚だった。"}
+                    </p>
+                    <div className="lll-currencies">
+                      <span className="lll-chip lll-chip-shards">
+                        <IconShard size={13} /> 欠片 +{result.shardsGained}
+                      </span>
+                      {result.limitBroken && (
+                        <span className="lll-chip lll-chip-picked">
+                          <IconStar size={13} /> 限界突破 +1
+                        </span>
+                      )}
+                    </div>
                   </div>
-                </div>
-              ) : (
-                <div className="lll-reveal-card" style={{ width: "100%", maxWidth: 320 }}>
-                  {canUse3D ? (
-                    viewer3DForCard(result.card, "summon")
-                  ) : (
-                    <LllCard view={cardToView(result.card, profile)} size="lg" />
-                  )}
-                  <span className={`lll-stamp lll-stamp-${result.card.tier}`}>{TIER_LABEL[result.card.tier]}</span>
-                  {result.card.tier === "legend" && <span className="lll-legend-flash" aria-hidden="true" />}
-                </div>
-              )}
-              {!result.duplicated && result.card && (
-                <div className="lll-currencies">
-                  <span className="lll-chip">{result.aiUsed ? "AI鑑定" : "召喚鑑定"}</span>
-                  <span className="lll-chip">
-                    {result.card.name} ({ELEMENT_LABEL[result.card.element]})
-                  </span>
-                </div>
-              )}
-              <div className="lll-actions">
-                <button
-                  type="button"
-                  className="lll-btn lll-btn-primary"
-                  onClick={() => {
-                    setResult(null);
-                    fileInputRef.current?.click();
-                  }}
-                >
-                  画像でもう一度
-                </button>
-                {(profile.tickets ?? 0) >= 1 && (
+                ) : (
+                  <div className="lll-reveal-card" style={{ width: "100%", maxWidth: 320 }}>
+                    {canUse3D ? (
+                      viewer3DForCard(result.card, "summon")
+                    ) : (
+                      <LllCard view={cardToView(result.card, profile)} size="lg" />
+                    )}
+                    <span className={`lll-stamp lll-stamp-${result.card.tier}`}>{TIER_LABEL[result.card.tier]}</span>
+                    {result.card.tier === "legend" && <span className="lll-legend-flash" aria-hidden="true" />}
+                  </div>
+                )}
+                {!result.duplicated && result.card && (
+                  <div className="lll-currencies">
+                    <span className="lll-chip">{result.aiUsed ? "AI鑑定" : "召喚鑑定"}</span>
+                    <span className="lll-chip">
+                      {result.card.name} ({ELEMENT_LABEL[result.card.element]})
+                    </span>
+                  </div>
+                )}
+                <div className="lll-actions">
                   <button
                     type="button"
                     className="lll-btn lll-btn-primary"
-                    onClick={() => void summonWithTicket()}
+                    onClick={() => {
+                      setResult(null);
+                      fileInputRef.current?.click();
+                    }}
                   >
-                    🎫 券で召喚（残{profile.tickets}）
+                    画像でもう一度
                   </button>
-                )}
-                {result.card && (
-                  <button type="button" className="lll-btn" onClick={() => switchTab("binder")}>
-                    バインダーで編成
-                  </button>
-                )}
-              </div>
-            </div>
-          ) : (
-            <div className="lll-scout-grid">
-              <div
-                className={`lll-dropzone${dragOver ? " lll-dropzone-hot" : ""}${scoutCue ? " lll-dropzone-cue" : ""}`}
-                role="button"
-                tabIndex={0}
-                aria-label="画像をドロップ、またはクリックして選択"
-                onClick={() => fileInputRef.current?.click()}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") {
-                    e.preventDefault();
-                    fileInputRef.current?.click();
-                  }
-                }}
-                onDragOver={(e) => {
-                  e.preventDefault();
-                  setDragOver(true);
-                }}
-                onDragLeave={() => setDragOver(false)}
-                onDrop={(e) => {
-                  e.preventDefault();
-                  setDragOver(false);
-                  const file = e.dataTransfer.files?.[0];
-                  if (file) void appraiseFile(file);
-                }}
-              >
-                <span className="lll-dropzone-glyph" aria-hidden="true">
-                  ✦
-                </span>
-                <span className="lll-dropzone-label">画像スカウト（ドロップ/選択）</span>
-                <span className="lll-dropzone-sub">どんな画像も固有の切り札に鑑定</span>
-              </div>
-
-              <div className="lll-ticket-card">
-                <span className="lll-dropzone-glyph" aria-hidden="true">
-                  🎫
-                </span>
-                <strong>SR以上確定 スカウト券召喚</strong>
-                <span className="lll-mission-meta">エリート80% / レジェンド20%（重複時は限界突破）</span>
-                <span className="lll-chip lll-chip-ticket">所持スカウト券：{profile.tickets ?? 0}枚</span>
-                <button
-                  type="button"
-                  className="lll-btn lll-btn-primary"
-                  disabled={appraising || (profile.tickets ?? 0) < 1}
-                  onClick={() => void summonWithTicket()}
-                >
-                  🎫 1枚使って召喚
-                </button>
-              </div>
-            </div>
-          )}
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/*"
-            hidden
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              e.target.value = "";
-              if (file) void appraiseFile(file);
-            }}
-          />
-        </section>
-      )}
-
-      {/* ===== バインダー ===== */}
-      {tab === "binder" && (
-        <section className="lll-binder">
-          <div className="lll-binder-head">
-            <span className="lll-chip">チーム {teamCards.length}/3</span>
-            {pendingTeam && <span className="lll-chip lll-chip-picked">編成中：あと{3 - pendingTeam.length}枚で確定</span>}
-            <span className="lll-chip">所持 {profile.cards.length}/60</span>
-            {pickedCardId && <span className="lll-chip lll-chip-picked">置くスロットを選んでください（もう一度タップで詳細）</span>}
-            <button type="button" className="lll-btn lll-btn-exchange" onClick={exchangeLumen} disabled={busy || profile.lumen < 50}>
-              ルーメン両替 50 → 欠片5
-            </button>
-          </div>
-
-          <div className="lll-team-slots">
-            {[0, 1, 2].map((i) => {
-              const card = teamCards[i];
-              return (
-                <div
-                  key={i}
-                  ref={(el) => {
-                    teamSlotRefs.current[i] = el;
-                  }}
-                  className={`lll-slot${hotSlot === i ? " lll-slot-hot" : ""}${pickedCardId ? " lll-slot-armed" : ""}`}
-                  onClick={() => {
-                    if (pickedCardId) assignToSlot(pickedCardId, i);
-                  }}
-                >
-                  {card ? (
-                    <LllCard view={cardToView(card, profile)} size="md" onClick={() => setDetailCardId(card.id)}>
-                      <button
-                        type="button"
-                        className="lll-remove-chip"
-                        aria-label={`${card.name}をチームから外す`}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          removeFromTeam(card.id);
-                        }}
-                      >
-                        ×
-                      </button>
-                    </LllCard>
-                  ) : (
-                    <div className="lll-slot-empty">
-                      <span className="lll-slot-num">{i + 1}</span>
-                      <span>空き</span>
-                    </div>
+                  {(profile.tickets ?? 0) >= 1 && (
+                    <button
+                      type="button"
+                      className="lll-btn lll-btn-primary"
+                      onClick={() => void summonWithTicket()}
+                    >
+                      <IconTicket size={14} /> 券で召喚（残{profile.tickets}）
+                    </button>
+                  )}
+                  {result.card && (
+                    <button type="button" className="lll-btn" onClick={() => switchTab("binder")}>
+                      編成・遺物へ
+                    </button>
                   )}
                 </div>
-              );
-            })}
-          </div>
-
-          {/* 絞り込み・並び替え・一括分解ツールバー */}
-          <div className="lll-filterbar">
-            <select
-              className="lll-select"
-              aria-label="属性で絞り込み"
-              value={filterElement}
-              onChange={(e) => setFilterElement(e.target.value as "all" | LllElement)}
-            >
-              <option value="all">全属性</option>
-              {(["fire", "water", "wind", "earth", "light", "dark"] as LllElement[]).map((el) => (
-                <option key={el} value={el}>
-                  {ELEMENT_LABEL[el]}属性
-                </option>
-              ))}
-            </select>
-            <select
-              className="lll-select"
-              aria-label="ティアで絞り込み"
-              value={filterTier}
-              onChange={(e) => setFilterTier(e.target.value as "all" | LllTier)}
-            >
-              <option value="all">全ティア</option>
-              <option value="legend">レジェンド</option>
-              <option value="elite">エリート</option>
-              <option value="normal">ノーマル</option>
-            </select>
-            <select
-              className="lll-select"
-              aria-label="並び替え"
-              value={sortBy}
-              onChange={(e) => setSortBy(e.target.value as BinderSort)}
-            >
-              <option value="power">戦力順</option>
-              <option value="level">Lv順</option>
-              <option value="tier">ティア順</option>
-              <option value="recent">入手順</option>
-            </select>
-            <button
-              type="button"
-              className={`lll-btn${dismantleMode ? " lll-btn-danger" : ""}`}
-              onClick={() => {
-                setDismantleMode((v) => !v);
-                setDismantleIds([]);
-                setPickedCardId(null);
-                playSe("tap");
-              }}
-            >
-              {dismantleMode ? "分解モード終了" : "一括分解"}
-            </button>
-          </div>
-
-          {dismantleMode && (
-            <div className="lll-dismantle-bar">
-              <span>分解するカードを選択（チーム内・🔒保護カードは除外）: {dismantleIds.length}枚選択中</span>
-              <span className="lll-chip lll-chip-shards">獲得予定 ◆+{dismantleGain}</span>
-              <button
-                type="button"
-                className="lll-btn lll-btn-danger"
-                disabled={busy || dismantleIds.length === 0}
-                onClick={() => void executeDismantle()}
-              >
-                選択を分解する
-              </button>
-            </div>
-          )}
-
-          <div className="lll-collection">
-            {filteredCards.map((card) => {
-              const inTeam = effectiveTeamIds.includes(card.id);
-              const dismantleSelected = dismantleMode && dismantleIds.includes(card.id);
-              return (
-                <LllCard
-                  key={card.id}
-                  view={cardToView(card, profile)}
-                  size="sm"
-                  selected={dismantleSelected || (!dismantleMode && pickedCardId === card.id)}
-                  dimmed={inTeam}
-                  draggableClass={!dismantleMode}
-                  onClick={() => tapCollectionCard(card)}
-                  {...binderDragHandlers(card)}
-                >
-                  {inTeam && <span className="lll-team-badge">チーム内</span>}
-                  {dismantleSelected && <span className="lll-team-badge">分解選択</span>}
-                </LllCard>
-              );
-            })}
-          </div>
-        </section>
-      )}
-
-      {/* ===== アリーナ ===== */}
-      {tab === "arena" && (
-        <section className="lll-arena">
-          {!battle ? (
-            <>
-              <div className="lll-binder-head">
-                <span className="lll-chip">⚔ {profile.wins}勝</span>
-                <span className="lll-chip">敗北 {profile.losses}</span>
-                <span className="lll-chip">引分 {profile.draws}</span>
-                <span className="lll-chip lll-chip-rating">PvPレート {profile.pvpRating ?? 1000}</span>
-                <span className="lll-chip">深淵最高 {profile.abyssBestFloor ?? 0}F</span>
-                <span className="lll-chip">チーム {teamCards.length}/3</span>
               </div>
-
-              <div className="lll-mode-tabs" role="tablist" aria-label="対戦モード">
-                {(
-                  [
-                    ["ladder", "ラダー戦"],
-                    ["abyss", "深淵の試練"],
-                    ["pvp", "模擬PvP"],
-                  ] as [ArenaMode, string][]
-                ).map(([m, label]) => (
-                  <button
-                    key={m}
-                    type="button"
-                    role="tab"
-                    aria-selected={arenaMode === m}
-                    className={`lll-btn${arenaMode === m ? " lll-btn-primary" : ""}`}
-                    onClick={() => {
-                      setArenaMode(m);
-                      playSe("tap");
-                    }}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-
-              {arenaMode === "ladder" && (
-                <div className="lll-ladder">
-                  {TIERS.map((tier, i) => {
-                    const unlocked = i <= maxCleared + 1;
-                    const cleared = profile.clearedTiers.includes(i);
-                    return (
-                      <button
-                        key={tier.name}
-                        type="button"
-                        className={`lll-tier-row${selectedTier === i ? " lll-tier-selected" : ""}${unlocked ? "" : " lll-tier-locked"}`}
-                        disabled={!unlocked}
-                        aria-pressed={selectedTier === i}
-                        onClick={() => {
-                          setSelectedTier(i);
-                          playSe("tap");
-                        }}
-                      >
-                        <span className="lll-tier-name">
-                          {tier.name}
-                          {cleared && <span className="lll-tier-clear">✓ クリア</span>}
-                          {!unlocked && <span aria-hidden="true"> （未開放）</span>}
-                        </span>
-                        <span className="lll-tier-meta">敵 Lv{tier.enemyLv}</span>
-                        <span className="lll-tier-reward">
-                          勝利 ◆{tier.winShards} / ●{tier.winLumen}
-                          {cleared ? "" : "（初回2倍）"} ・ 敗北 ◆{tier.loseShards}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-
-              {arenaMode === "abyss" && (
-                <div className="lll-abyss-card">
-                  <div className="lll-mission-info">
-                    <strong>深淵の試練 — 第 {abyssFloor} 階層</strong>
-                    <span className="lll-mission-meta">
-                      5階層ごとに強敵ボス登場（スカウト券確定ドロップ！）。到達済み最大 {(profile.abyssBestFloor ?? 0) + 1}F まで挑戦可能。
-                    </span>
-                  </div>
-                  <div className="lll-soundbar">
-                    <button
-                      type="button"
-                      className="lll-snd-btn"
-                      disabled={abyssFloor <= 1}
-                      onClick={() => setAbyssFloor((f) => Math.max(1, f - 1))}
-                    >
-                      －1F
-                    </button>
-                    <button
-                      type="button"
-                      className="lll-snd-btn lll-snd-on"
-                      disabled={abyssFloor >= (profile.abyssBestFloor ?? 0) + 1}
-                      onClick={() => setAbyssFloor((f) => Math.min((profile.abyssBestFloor ?? 0) + 1, f + 1))}
-                    >
-                      ＋1F
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {arenaMode === "pvp" && (
-                <div className="lll-ladder">
-                  {pvpRivals.map((rival) => (
-                    <button
-                      key={rival.id}
-                      type="button"
-                      className={`lll-pvp-card${selectedRivalId === rival.id ? " lll-pvp-selected" : ""}`}
-                      onClick={() => {
-                        setSelectedRivalId(rival.id);
-                        playSe("tap");
-                      }}
-                    >
-                      <div className="lll-mission-info" style={{ textAlign: "left" }}>
-                        <strong>
-                          {rival.playerName}（{rival.title}）
-                        </strong>
-                        <span className="lll-mission-meta">
-                          {rival.cards.map((c) => `${c.name}(Lv${c.level})`).join(" / ")}
-                        </span>
-                      </div>
-                      <div className="lll-currencies">
-                        <span className="lll-chip lll-chip-rating">Rate {rival.rating}</span>
-                        <span className="lll-chip">戦力 {rival.powerScore}</span>
-                      </div>
-                    </button>
-                  ))}
-                  {pvpRivals.length === 0 && <p className="lll-mission-meta">対戦相手を読み込み中…</p>}
-                </div>
-              )}
-
-              <div className="lll-deckpick" role="group" aria-label="戦術デッキ">
-                <div className="lll-panel-head" style={{ gridColumn: "1 / -1" }}>
-                  <span className="lll-actionbar-label">戦術デッキ（30枚）</span>
-                  <button type="button" className="lll-btn" onClick={() => setShowDeckModal(true)}>
-                    カスタムデッキ編成
-                  </button>
-                </div>
-                {Object.entries(TACTIC_DECKS).map(([deckId, deck]) => (
-                  <button
-                    key={deckId}
-                    type="button"
-                    className={`lll-deck-btn${selectedDeck === deckId ? " lll-deck-selected" : ""}`}
-                    aria-pressed={selectedDeck === deckId}
-                    onClick={() => {
-                      setSelectedDeck(deckId);
-                      playSe("tap");
-                    }}
-                  >
-                    <span className="lll-deck-name">{deck.name}</span>
-                    <span className="lll-deck-desc">{deck.description}</span>
-                  </button>
-                ))}
-                {profile.customTacticDeck && (
-                  <button
-                    type="button"
-                    className={`lll-deck-btn${selectedDeck === "custom" ? " lll-deck-selected" : ""}`}
-                    aria-pressed={selectedDeck === "custom"}
-                    onClick={() => {
-                      setSelectedDeck("custom");
-                      playSe("tap");
-                    }}
-                  >
-                    <span className="lll-deck-name">✦ マイカスタム30枚</span>
-                    <span className="lll-deck-desc">自作の30枚戦術デッキで出撃する。</span>
-                  </button>
-                )}
-              </div>
-
-              <div className="lll-actions">
-                <button
-                  type="button"
-                  className="lll-btn lll-btn-primary lll-btn-big"
-                  disabled={busy || teamCards.length < 3 || (arenaMode === "pvp" && !selectedRivalId)}
-                  onClick={() => {
-                    if (arenaMode === "abyss") {
-                      void beginBattleRequest({ mode: "abyss", floor: abyssFloor });
-                    } else if (arenaMode === "pvp" && selectedRivalId) {
-                      void beginBattleRequest({ mode: "pvp", rivalId: selectedRivalId });
-                    } else {
-                      void beginBattleRequest({
-                        mode: "ladder",
-                        tierIndex: selectedTier,
-                        clearedBefore: profile.clearedTiers.includes(selectedTier),
-                      });
+            ) : (
+              <div className="lll-scout-grid">
+                <div
+                  className={`lll-dropzone${dragOver ? " lll-dropzone-hot" : ""}${scoutCue ? " lll-dropzone-cue" : ""}`}
+                  role="button"
+                  tabIndex={0}
+                  aria-label="画像をドロップ、またはクリックして選択"
+                  onClick={() => fileInputRef.current?.click()}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      fileInputRef.current?.click();
                     }
                   }}
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    setDragOver(true);
+                  }}
+                  onDragLeave={() => setDragOver(false)}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    setDragOver(false);
+                    const file = e.dataTransfer.files?.[0];
+                    if (file) void appraiseFile(file);
+                  }}
                 >
-                  {arenaMode === "abyss"
-                    ? `深淵 第${abyssFloor}階層へ`
-                    : arenaMode === "pvp"
-                      ? "ゴーストライバルと対戦"
-                      : "対戦開始"}
-                </button>
-                {teamCards.length < 3 && <span className="lll-chip">バインダーで3枚編成してください</span>}
-              </div>
-            </>
-          ) : (
-            <div
-              className="lll-battle"
-              onClick={() => {
-                if (displayBattle) advancePlayback();
-              }}
-            >
-              <div className="lll-battle-side-label">
-                <span className="lll-chip lll-chip-enemy">
-                  {battle.title ?? `CPU ・ ${TIERS[battle.tierIndex]?.name ?? ""}`}
-                </span>
-                {battle.tactics && battle.tactics.cpu.deckCount + (battle.tactics.cpu.handCount ?? 0) > 0 && (
-                  <span className="lll-chip">
-                    CPU 手札 {battle.tactics.cpu.handCount ?? 0} ・ 山札 {battle.tactics.cpu.deckCount}
-                    {(battle.tactics.cpu.reserveCount ?? 0) > 0 ? ` ・ 設置 ${battle.tactics.cpu.reserveCount}` : ""}
+                  <span className="lll-dropzone-glyph" aria-hidden="true">
+                    <IconScout size={22} />
                   </span>
-                )}
-                <div className="lll-speedbar" role="group" aria-label="再生・オート操作">
+                  <span className="lll-dropzone-label">画像スカウト（ドロップ / 選択）</span>
+                  <span className="lll-dropzone-sub">手元の写真やイラストから固有ステータス・技を鑑定</span>
+                </div>
+
+                <div className="lll-ticket-card">
+                  <span className="lll-dropzone-glyph" aria-hidden="true">
+                    <IconTicket size={22} />
+                  </span>
+                  <strong>SR以上確定 スカウト券召喚</strong>
+                  <span className="lll-mission-meta">エリート80% / レジェンド20%（重複時は限界突破）</span>
+                  <span className="lll-chip lll-chip-ticket">
+                    <IconTicket size={13} /> 所持スカウト券：{profile.tickets ?? 0}枚
+                  </span>
                   <button
                     type="button"
-                    className={`lll-snd-btn${autoMode ? " lll-snd-on" : ""}`}
-                    aria-pressed={autoMode}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setAutoMode((v) => !v);
-                      playSe("tap");
-                    }}
+                    className="lll-btn lll-btn-primary"
+                    disabled={appraising || (profile.tickets ?? 0) < 1}
+                    onClick={() => void summonWithTicket()}
                   >
-                    AUTO {autoMode ? "ON" : "OFF"}
+                    <IconTicket size={14} /> 1枚使って召喚
                   </button>
-                  <button
-                    type="button"
-                    className={`lll-snd-btn${canUse3D ? " lll-snd-on" : ""}`}
-                    aria-pressed={canUse3D}
-                    disabled={webglFailed}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      toggle3D();
-                    }}
-                  >
-                    {canUse3D ? "3D" : "2D"}
-                  </button>
-                  {(["1x", "2x", "instant"] as SpeedMode[]).map((mode) => (
-                    <button
-                      key={mode}
-                      type="button"
-                      className={`lll-snd-btn${speed === mode ? " lll-snd-on" : ""}`}
-                      aria-pressed={speed === mode}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        changeSpeed(mode);
-                      }}
-                    >
-                      {mode === "instant" ? "一斉" : mode}
-                    </button>
-                  ))}
                 </div>
               </div>
+            )}
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              hidden
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                e.target.value = "";
+                if (file) void appraiseFile(file);
+              }}
+            />
+          </section>
+        )}
 
-              <div className="lll-battle-stage">
-                {cutInBanner && (
-                  <div className="lll-cutin-banner" aria-live="polite">
-                    <span className="lll-cutin-actor">{cutInBanner.actorName}</span>
-                    <span className="lll-cutin-skill">{cutInBanner.skillName}</span>
-                  </div>
-                )}
+        {/* ===== バインダー・編成・遺物工房 ===== */}
+        {tab === "binder" && (
+          <section className="lll-binder">
+            <div className="lll-binder-head">
+              <span className="lll-chip">チーム {teamCards.length}/3 ・ 総戦力 {teamPower}</span>
+              {pendingTeam && <span className="lll-chip lll-chip-picked">編成中：あと{3 - pendingTeam.length}枚で確定</span>}
+              <span className="lll-chip">所持 {profile.cards.length}/60</span>
+              {pickedCardId && <span className="lll-chip lll-chip-picked">置くスロットを選択（再タップで詳細・調律）</span>}
+              <button type="button" className="lll-btn lll-btn-exchange" onClick={exchangeLumen} disabled={busy || profile.lumen < 50}>
+                ルーメン両替 50 → 欠片5
+              </button>
+            </div>
 
-                {canUse3D ? (
-                  <>
-                    <LllBattleScene3D
-                      actors={(shownBattle ?? battle).actors.map(actorToThreeInput)}
-                      currentActorKey={
-                        displayBattle
-                          ? playbackInfo?.actorKey ?? null
-                          : currentActor?.key ?? null
-                      }
-                      targetableKeys={targetableKeys}
-                      guideTargetKey={
-                        pending && guideRecommendation?.skill === pending.skill
-                          ? guideRecommendation.targetKey
-                          : null
-                      }
-                      vfx={sceneVfx}
-                      vfxNonce={sceneVfxNonce}
-                      shakeIntensity={sceneShake}
-                      isBossOrAbyss={battle.mode === "abyss" || battle.tierIndex >= 6}
-                      onActorTap={tapActorByKey}
-                      onFail={handle3DFail}
-                      fallback={render2DArenaBoard()}
-                    />
-                    {pending && targetableKeys.length > 0 && (
-                      <div className="lll-actions" aria-label="対象クイック選択">
-                        {(shownBattle ?? battle).actors
-                          .filter((a) => targetableKeys.includes(a.key))
-                          .map((a) => {
-                            const fc = forecastForActor(a);
-                            return (
-                              <button
-                                key={a.key}
-                                type="button"
-                                className="lll-btn lll-btn-primary"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  tapActor(a);
-                                }}
-                              >
-                                {a.name} (HP {a.hp}/{a.maxHp}){fc ? ` [${fc}]` : ""}
-                              </button>
-                            );
-                          })}
-                      </div>
-                    )}
-                  </>
-                ) : (
-                  render2DArenaBoard()
-                )}
-              </div>
-
-              <div className="lll-queue" aria-label="行動順">
-                {(shownBattle ?? battle).queue.map((key, i) => {
-                  const actor = (shownBattle ?? battle).actors.find((a) => a.key === key);
-                  if (!actor) return null;
-                  const nowKey = displayBattle
-                    ? playbackInfo?.actorKey ?? key
-                    : (shownBattle ?? battle).queue[(shownBattle ?? battle).queuePos];
-                  const done = !displayBattle && i < (shownBattle ?? battle).queuePos;
+            <div className="lll-team-panel">
+              <div className="lll-team-slots">
+                {[0, 1, 2].map((i) => {
+                  const card = teamCards[i];
                   return (
-                    <span
-                      key={`${key}-${i}`}
-                      className={`lll-queue-chip${key === nowKey ? " lll-queue-chip-now" : ""}${done ? " lll-queue-chip-done" : ""}${actor.alive ? "" : " lll-queue-chip-dead"}`}
+                    <div
+                      key={i}
+                      ref={(el) => {
+                        teamSlotRefs.current[i] = el;
+                      }}
+                      className={`lll-slot${hotSlot === i ? " lll-slot-hot" : ""}${pickedCardId ? " lll-slot-armed" : ""}`}
+                      onClick={() => {
+                        if (pickedCardId) assignToSlot(pickedCardId, i);
+                      }}
                     >
-                      {actor.name}
-                    </span>
+                      {card ? (
+                        <LllCard view={cardToView(card, profile)} size="md" onClick={() => openDetailCard(card.id)}>
+                          <button
+                            type="button"
+                            className="lll-remove-chip"
+                            aria-label={`${card.name}をチームから外す`}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              removeFromTeam(card.id);
+                            }}
+                          >
+                            ×
+                          </button>
+                        </LllCard>
+                      ) : (
+                        <div className="lll-slot-empty">
+                          <span className="lll-slot-num">{i + 1}</span>
+                          <span>空き</span>
+                        </div>
+                      )}
+                    </div>
                   );
                 })}
               </div>
 
-              <div className="lll-logstrip" aria-live="polite">
-                <span className="lll-chip">R{(shownBattle ?? battle).round}</span>
-                {[...(shownBattle ?? battle).log]
-                  .slice(-3)
-                  .reverse()
-                  .map((entry, i) => (
-                    <p key={`${(shownBattle ?? battle).log.length}-${i}`} className={`lll-logline${i === 0 ? " lll-logline-latest" : ""}`}>
-                      {entry.text}
-                    </p>
+              <div className="lll-resonance-bar">
+                <div className="lll-resonance-title">
+                  <span className="lll-chip lll-chip-lumen">属性共鳴：{teamResonance.name}</span>
+                  <span className="lll-chip">{teamResonance.shortLabel}</span>
+                </div>
+                <span className="lll-mission-meta">{teamResonance.description}</span>
+              </div>
+            </div>
+
+            {/* 遺物工房（鍛造＆最大2枠装備） */}
+            <div className="lll-panel">
+              <div className="lll-panel-head">
+                <h2 className="lll-panel-title">
+                  <IconRelic size={15} /> 遺物工房（装備 {equippedRelicIds.length}/{MAX_EQUIPPED_RELICS}）
+                </h2>
+                <div className="lll-currencies">
+                  {equippedRelicDefs.map((r) => (
+                    <span key={r.id} className="lll-chip lll-chip-lumen">
+                      {r.name}
+                    </span>
                   ))}
-                {(shownBattle ?? battle).log.length === 0 && <p className="lll-logline">対戦開始</p>}
+                  <button type="button" className="lll-snd-btn" onClick={() => setShowRelics((v) => !v)}>
+                    {showRelics ? "折りたたむ" : "遺物一覧を開く"}
+                  </button>
+                </div>
               </div>
 
-              {battle.phase === "finished" ? (
-                <div className="lll-result">
-                  <span className={`lll-result-stamp lll-result-${battle.winner === "player" ? "win" : battle.winner === "draw" ? "draw" : "lose"}`}>
-                    {battle.winner === "player" ? "勝利" : battle.winner === "draw" ? "引分" : "敗北"}
-                  </span>
-                  {battleStartRef.current && (
-                    <div className="lll-currencies">
-                      {profile.shards - battleStartRef.current.shards !== 0 && (
-                        <span className="lll-chip lll-chip-shards">◆ 欠片 +{profile.shards - battleStartRef.current.shards}</span>
-                      )}
-                      {profile.lumen - battleStartRef.current.lumen !== 0 && (
-                        <span className="lll-chip lll-chip-lumen">● ルーメン +{profile.lumen - battleStartRef.current.lumen}</span>
-                      )}
-                      {(profile.tickets ?? 0) - battleStartRef.current.tickets > 0 && (
-                        <span className="lll-chip lll-chip-ticket">
-                          🎫 券 +{(profile.tickets ?? 0) - battleStartRef.current.tickets}
-                        </span>
-                      )}
-                      {battle.mode === "pvp" && (profile.pvpRating ?? 1000) !== battleStartRef.current.rating && (
-                        <span className="lll-chip lll-chip-rating">
-                          Rate {(profile.pvpRating ?? 1000) - battleStartRef.current.rating >= 0 ? "+" : ""}
-                          {(profile.pvpRating ?? 1000) - battleStartRef.current.rating}
-                        </span>
-                      )}
-                    </div>
-                  )}
-                  {battleRecap && battleRecap.totalDamage > 0 && (
-                    <div className="lll-currencies" aria-label="戦績">
-                      <span className="lll-chip">与ダメージ {battleRecap.totalDamage}</span>
-                      {battleRecap.maxHit > 0 && <span className="lll-chip">最大の一撃 {battleRecap.maxHitLabel} {battleRecap.maxHit}</span>}
-                      {battleRecap.mvp && <span className="lll-chip">MVP {battleRecap.mvp.name}（{battleRecap.mvp.total}）</span>}
-                    </div>
-                  )}
-                  <div className="lll-actions">
-                    {battle.mode === "abyss" ? (
+              {showRelics && (
+                <div className="lll-relic-grid">
+                  {RELICS.map((relic) => {
+                    const owned = ownedRelics.includes(relic.id);
+                    const equipped = equippedRelicIds.includes(relic.id);
+                    const canAfford = profile.shards >= relic.craftShards && profile.lumen >= relic.craftLumen;
+                    const slotsFull = !equipped && equippedRelicIds.length >= MAX_EQUIPPED_RELICS;
+                    return (
+                      <div key={relic.id} className={`lll-relic-card${equipped ? " lll-relic-equipped" : ""}`}>
+                        <div className="lll-relic-head">
+                          <strong>{relic.name}</strong>
+                          <span className="lll-chip">{RELIC_CAT_LABEL[relic.category] ?? relic.category}</span>
+                        </div>
+                        <p className="lll-mission-meta">{relic.summary}</p>
+                        <div className="lll-relic-foot">
+                          {owned ? (
+                            <button
+                              type="button"
+                              className={`lll-btn${equipped ? " lll-btn-primary" : ""}`}
+                              disabled={busy || slotsFull}
+                              onClick={() => toggleEquipRelic(relic.id)}
+                            >
+                              {equipped ? "装備中（外す）" : slotsFull ? "枠満杯 (2/2)" : "装備する"}
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              className="lll-btn"
+                              disabled={busy || !canAfford}
+                              onClick={() => craftRelicAction(relic.id)}
+                            >
+                              鍛造（欠片{relic.craftShards} / L{relic.craftLumen}）
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* 絞り込み・並び替え・一括分解ツールバー */}
+            <div className="lll-filterbar">
+              <select
+                className="lll-select"
+                aria-label="属性で絞り込み"
+                value={filterElement}
+                onChange={(e) => setFilterElement(e.target.value as "all" | LllElement)}
+              >
+                <option value="all">全属性</option>
+                {(["fire", "water", "wind", "earth", "light", "dark"] as LllElement[]).map((el) => (
+                  <option key={el} value={el}>
+                    {ELEMENT_LABEL[el]}属性
+                  </option>
+                ))}
+              </select>
+              <select
+                className="lll-select"
+                aria-label="ティアで絞り込み"
+                value={filterTier}
+                onChange={(e) => setFilterTier(e.target.value as "all" | LllTier)}
+              >
+                <option value="all">全ティア</option>
+                <option value="legend">レジェンド</option>
+                <option value="elite">エリート</option>
+                <option value="normal">ノーマル</option>
+              </select>
+              <select
+                className="lll-select"
+                aria-label="並び替え"
+                value={sortBy}
+                onChange={(e) => setSortBy(e.target.value as BinderSort)}
+              >
+                <option value="power">戦力順</option>
+                <option value="level">Lv順</option>
+                <option value="tier">ティア順</option>
+                <option value="recent">入手順</option>
+              </select>
+              <button
+                type="button"
+                className={`lll-btn${dismantleMode ? " lll-btn-danger" : ""}`}
+                onClick={() => {
+                  setDismantleMode((v) => !v);
+                  setDismantleIds([]);
+                  setPickedCardId(null);
+                  playSe("tap");
+                }}
+              >
+                {dismantleMode ? "分解モード終了" : "一括分解"}
+              </button>
+            </div>
+
+            {dismantleMode && (
+              <div className="lll-dismantle-bar">
+                <span>分解するカードを選択（チーム内・保護ロック中は除外）: {dismantleIds.length}枚選択中</span>
+                <span className="lll-chip lll-chip-shards">
+                  <IconShard size={13} /> 獲得予定 +{dismantleGain}
+                </span>
+                <button
+                  type="button"
+                  className="lll-btn lll-btn-danger"
+                  disabled={busy || dismantleIds.length === 0}
+                  onClick={() => void executeDismantle()}
+                >
+                  選択を分解する
+                </button>
+              </div>
+            )}
+
+            <div className="lll-collection">
+              {filteredCards.map((card) => {
+                const inTeam = effectiveTeamIds.includes(card.id);
+                const dismantleSelected = dismantleMode && dismantleIds.includes(card.id);
+                return (
+                  <LllCard
+                    key={card.id}
+                    view={cardToView(card, profile)}
+                    size="sm"
+                    selected={dismantleSelected || (!dismantleMode && pickedCardId === card.id)}
+                    dimmed={inTeam}
+                    draggableClass={!dismantleMode}
+                    onClick={() => tapCollectionCard(card)}
+                    {...binderDragHandlers(card)}
+                  >
+                    {inTeam && <span className="lll-team-badge">チーム内</span>}
+                    {dismantleSelected && <span className="lll-team-badge">分解選択</span>}
+                  </LllCard>
+                );
+              })}
+            </div>
+          </section>
+        )}
+
+        {/* ===== アリーナ（出撃＆バトル） ===== */}
+        {tab === "arena" && (
+          <section className="lll-arena">
+            {!battle ? (
+              <>
+                <div className="lll-arena-top">
+                  <div className="lll-seg" role="tablist" aria-label="対戦モード">
+                    {(
+                      [
+                        ["ladder", "ラダー戦"],
+                        ["abyss", "深淵の試練"],
+                        ["pvp", "模擬PvP"],
+                      ] as [ArenaMode, string][]
+                    ).map(([m, label]) => (
+                      <button
+                        key={m}
+                        type="button"
+                        role="tab"
+                        aria-selected={arenaMode === m}
+                        className={`lll-seg-btn${arenaMode === m ? " lll-seg-active" : ""}`}
+                        onClick={() => {
+                          setArenaMode(m);
+                          playSe("tap");
+                        }}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="lll-currencies">
+                    <span className="lll-chip">
+                      {profile.wins}勝 {profile.losses}敗 {profile.draws}分
+                    </span>
+                    <span className="lll-chip lll-chip-rating">Rate {profile.pvpRating ?? 1000}</span>
+                    <span className="lll-chip">深淵 {profile.abyssBestFloor ?? 0}F</span>
+                  </div>
+                </div>
+
+                {/* 出撃ブリーフィング（地脈・共鳴・装備遺物の一覧確認） */}
+                <div className="lll-briefing">
+                  <div className="lll-briefing-cell">
+                    <span className="lll-briefing-label">
+                      <IconField size={13} /> 戦場地脈
+                    </span>
+                    <strong className="lll-briefing-val">
+                      <span className="lll-field-dot" style={{ background: previewField.accentHex }} />
+                      {previewField.name}（{previewField.shortTag}）
+                    </strong>
+                    <span className="lll-mission-meta">{previewField.description}</span>
+                  </div>
+                  <div className="lll-briefing-cell">
+                    <span className="lll-briefing-label">属性共鳴（編成 {teamCards.length}/3）</span>
+                    <strong className="lll-briefing-val">{teamResonance.name}</strong>
+                    <span className="lll-mission-meta">{teamResonance.description}</span>
+                  </div>
+                  <div className="lll-briefing-cell">
+                    <span className="lll-briefing-label">
+                      <IconRelic size={13} /> 装備遺物 ({equippedRelicDefs.length}/{MAX_EQUIPPED_RELICS})
+                    </span>
+                    {equippedRelicDefs.length > 0 ? (
                       <>
-                        {battle.winner === "player" && (
+                        <strong className="lll-briefing-val">{equippedRelicDefs.map((r) => r.name).join(" / ")}</strong>
+                        <span className="lll-mission-meta">{equippedRelicDefs.map((r) => r.summary).join(" ・ ")}</span>
+                      </>
+                    ) : (
+                      <button type="button" className="lll-inline-link" onClick={() => switchTab("binder")}>
+                        未装備（編成・遺物タブで装備）
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {arenaMode === "ladder" && (
+                  <div className="lll-ladder">
+                    {TIERS.map((tier, i) => {
+                      const unlocked = i <= maxCleared + 1;
+                      const cleared = profile.clearedTiers.includes(i);
+                      const field = BATTLE_FIELD_BY_ID[fieldForLadderTier(i)];
+                      return (
+                        <button
+                          key={tier.name}
+                          type="button"
+                          className={`lll-tier-row${selectedTier === i ? " lll-tier-selected" : ""}${unlocked ? "" : " lll-tier-locked"}`}
+                          disabled={!unlocked}
+                          aria-pressed={selectedTier === i}
+                          onClick={() => {
+                            setSelectedTier(i);
+                            playSe("tap");
+                          }}
+                        >
+                          <span className="lll-tier-name">
+                            {tier.name}
+                            {cleared && <span className="lll-tier-clear">クリア済</span>}
+                            {!unlocked && <span aria-hidden="true">（未開放）</span>}
+                          </span>
+                          <span className="lll-tier-meta">敵 Lv{tier.enemyLv}</span>
+                          <span className="lll-chip">
+                            <span className="lll-field-dot" style={{ background: field.accentHex }} />
+                            {field.name}
+                          </span>
+                          <span className="lll-tier-reward">
+                            勝利 欠片{tier.winShards} / L{tier.winLumen}
+                            {cleared ? "" : "（初回2倍）"} ・ 敗北 欠片{tier.loseShards}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {arenaMode === "abyss" && (
+                  <div className="lll-abyss-card">
+                    <div className="lll-mission-info">
+                      <strong>
+                        深淵の試練 — 第 {abyssFloor} 階層{abyssFloor % 5 === 0 ? "（BOSS）" : ""}
+                      </strong>
+                      <span className="lll-mission-meta">
+                        5階層ごとに強敵ボス登場（スカウト券確定ドロップ）。到達済み最大 {(profile.abyssBestFloor ?? 0) + 1}F まで挑戦可能。
+                      </span>
+                    </div>
+                    <div className="lll-soundbar">
+                      <button
+                        type="button"
+                        className="lll-snd-btn"
+                        disabled={abyssFloor <= 1}
+                        onClick={() => setAbyssFloor((f) => Math.max(1, f - 1))}
+                      >
+                        －1F
+                      </button>
+                      <button
+                        type="button"
+                        className="lll-snd-btn lll-snd-on"
+                        disabled={abyssFloor >= (profile.abyssBestFloor ?? 0) + 1}
+                        onClick={() => setAbyssFloor((f) => Math.min((profile.abyssBestFloor ?? 0) + 1, f + 1))}
+                      >
+                        ＋1F
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {arenaMode === "pvp" && (
+                  <div className="lll-ladder">
+                    {pvpRivals.map((rival) => {
+                      const field = BATTLE_FIELD_BY_ID[fieldForPvpRival(rival.id)];
+                      return (
+                        <button
+                          key={rival.id}
+                          type="button"
+                          className={`lll-pvp-card${selectedRivalId === rival.id ? " lll-pvp-selected" : ""}`}
+                          onClick={() => {
+                            setSelectedRivalId(rival.id);
+                            playSe("tap");
+                          }}
+                        >
+                          <div className="lll-mission-info" style={{ textAlign: "left" }}>
+                            <strong>
+                              {rival.playerName}（{rival.title}）
+                            </strong>
+                            <span className="lll-mission-meta">
+                              {rival.cards.map((c) => `${c.name}(Lv${c.level})`).join(" / ")}
+                            </span>
+                          </div>
+                          <div className="lll-currencies">
+                            <span className="lll-chip">
+                              <span className="lll-field-dot" style={{ background: field.accentHex }} />
+                              {field.name}
+                            </span>
+                            <span className="lll-chip lll-chip-rating">Rate {rival.rating}</span>
+                            <span className="lll-chip">戦力 {rival.powerScore}</span>
+                          </div>
+                        </button>
+                      );
+                    })}
+                    {pvpRivals.length === 0 && <p className="lll-mission-meta">対戦相手を読み込み中…</p>}
+                  </div>
+                )}
+
+                <div className="lll-deckpick" role="group" aria-label="戦術デッキ">
+                  <div className="lll-panel-head" style={{ gridColumn: "1 / -1" }}>
+                    <span className="lll-actionbar-label" style={{ width: "auto", textAlign: "left" }}>
+                      戦術デッキ（30枚）
+                    </span>
+                    <button type="button" className="lll-btn" onClick={() => setShowDeckModal(true)}>
+                      <IconDeck size={14} /> カスタムデッキ編成
+                    </button>
+                  </div>
+                  {Object.entries(TACTIC_DECKS).map(([deckId, deck]) => (
+                    <button
+                      key={deckId}
+                      type="button"
+                      className={`lll-deck-btn${selectedDeck === deckId ? " lll-deck-selected" : ""}`}
+                      aria-pressed={selectedDeck === deckId}
+                      onClick={() => {
+                        setSelectedDeck(deckId);
+                        playSe("tap");
+                      }}
+                    >
+                      <span className="lll-deck-name">{deck.name}</span>
+                      <span className="lll-deck-desc">{deck.description}</span>
+                    </button>
+                  ))}
+                  {profile.customTacticDeck && (
+                    <button
+                      type="button"
+                      className={`lll-deck-btn${selectedDeck === "custom" ? " lll-deck-selected" : ""}`}
+                      aria-pressed={selectedDeck === "custom"}
+                      onClick={() => {
+                        setSelectedDeck("custom");
+                        playSe("tap");
+                      }}
+                    >
+                      <span className="lll-deck-name">マイカスタム 30枚</span>
+                      <span className="lll-deck-desc">自作の30枚戦術デッキで出撃する。</span>
+                    </button>
+                  )}
+                </div>
+
+                <div className="lll-actions">
+                  <button
+                    type="button"
+                    className="lll-btn lll-btn-primary lll-btn-big"
+                    disabled={busy || teamCards.length < 3 || (arenaMode === "pvp" && !selectedRivalId)}
+                    onClick={() => {
+                      if (arenaMode === "abyss") {
+                        void beginBattleRequest({ mode: "abyss", floor: abyssFloor });
+                      } else if (arenaMode === "pvp" && selectedRivalId) {
+                        void beginBattleRequest({ mode: "pvp", rivalId: selectedRivalId });
+                      } else {
+                        void beginBattleRequest({
+                          mode: "ladder",
+                          tierIndex: selectedTier,
+                          clearedBefore: profile.clearedTiers.includes(selectedTier),
+                        });
+                      }
+                    }}
+                  >
+                    <IconSwords size={16} />
+                    {arenaMode === "abyss"
+                      ? `深淵 第${abyssFloor}階層へ出撃`
+                      : arenaMode === "pvp"
+                        ? "ゴーストライバルと対戦"
+                        : "対戦開始"}
+                  </button>
+                  {teamCards.length < 3 && <span className="lll-chip">編成タブで3枚編成してください</span>}
+                </div>
+              </>
+            ) : (
+              <div
+                className="lll-battle"
+                onClick={() => {
+                  if (displayBattle) advancePlayback();
+                }}
+              >
+                <div className="lll-battle-side-label">
+                  <span className="lll-chip lll-chip-enemy">
+                    {battle.title ?? `CPU ・ ${TIERS[battle.tierIndex]?.name ?? ""}`}
+                  </span>
+                  <span className="lll-chip" title={activeField.description}>
+                    <span className="lll-field-dot" style={{ background: activeField.accentHex }} />
+                    地脈：{activeField.name}
+                  </span>
+                  {shownBattle?.resonance?.player && (
+                    <span className="lll-chip lll-chip-lumen" title={shownBattle.resonance.player.description}>
+                      共鳴：{shownBattle.resonance.player.name}
+                    </span>
+                  )}
+                  {battle.tactics && battle.tactics.cpu.deckCount + (battle.tactics.cpu.handCount ?? 0) > 0 && (
+                    <span className="lll-chip">
+                      敵手札 {battle.tactics.cpu.handCount ?? 0} ・ 山札 {battle.tactics.cpu.deckCount}
+                      {(battle.tactics.cpu.reserveCount ?? 0) > 0 ? ` ・ 設置 ${battle.tactics.cpu.reserveCount}` : ""}
+                    </span>
+                  )}
+                  <div className="lll-speedbar" role="group" aria-label="再生・オート操作">
+                    <button
+                      type="button"
+                      className={`lll-snd-btn${autoMode ? " lll-snd-on" : ""}`}
+                      aria-pressed={autoMode}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setAutoMode((v) => !v);
+                        playSe("tap");
+                      }}
+                    >
+                      AUTO {autoMode ? "ON" : "OFF"}
+                    </button>
+                    <button
+                      type="button"
+                      className={`lll-snd-btn${canUse3D ? " lll-snd-on" : ""}`}
+                      aria-pressed={canUse3D}
+                      disabled={webglFailed}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        toggle3D();
+                      }}
+                    >
+                      {canUse3D ? "3D" : "2D"}
+                    </button>
+                    {(["1x", "2x", "instant"] as SpeedMode[]).map((mode) => (
+                      <button
+                        key={mode}
+                        type="button"
+                        className={`lll-snd-btn${speed === mode ? " lll-snd-on" : ""}`}
+                        aria-pressed={speed === mode}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          changeSpeed(mode);
+                        }}
+                      >
+                        {mode === "instant" ? "一斉" : mode}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* 地脈効果 + 共鳴バーストゲージ */}
+                <div className="lll-battle-hud">
+                  <div className="lll-field-banner">
+                    <span className="lll-field-dot" style={{ background: activeField.accentHex }} />
+                    <span className="lll-mission-meta">{activeField.description}</span>
+                  </div>
+                  <div className={`lll-burst-meter${playerBurst >= 100 ? " lll-burst-ready" : ""}`} aria-label="共鳴バーストゲージ">
+                    <div className="lll-burst-head">
+                      <span>
+                        <IconBolt size={13} /> 共鳴バースト {playerBurst}%
+                      </span>
+                      <span className="lll-mission-meta">敵 {cpuBurst}%</span>
+                    </div>
+                    <div className="lll-burst-track">
+                      <span className="lll-burst-fill" style={{ width: `${playerBurst}%` }} />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="lll-battle-stage">
+                  {cutInBanner && (
+                    <div className="lll-cutin-banner" aria-live="polite">
+                      <span className="lll-cutin-actor">{cutInBanner.actorName}</span>
+                      <span className="lll-cutin-skill">{cutInBanner.skillName}</span>
+                    </div>
+                  )}
+
+                  {canUse3D ? (
+                    <>
+                      <LllBattleScene3D
+                        actors={(shownBattle ?? battle).actors.map(actorToThreeInput)}
+                        currentActorKey={
+                          displayBattle
+                            ? playbackInfo?.actorKey ?? null
+                            : currentActor?.key ?? null
+                        }
+                        targetableKeys={targetableKeys}
+                        guideTargetKey={
+                          pending && guideRecommendation?.skill === pending.skill
+                            ? guideRecommendation.targetKey
+                            : null
+                        }
+                        vfx={sceneVfx}
+                        vfxNonce={sceneVfxNonce}
+                        shakeIntensity={sceneShake}
+                        isBossOrAbyss={battle.mode === "abyss" || battle.tierIndex >= 6}
+                        fieldId={(shownBattle ?? battle).fieldId ?? "neutral"}
+                        onActorTap={tapActorByKey}
+                        onFail={handle3DFail}
+                        fallback={render2DArenaBoard()}
+                      />
+                      {pending && targetableKeys.length > 0 && (
+                        <div className="lll-actions" aria-label="対象クイック選択">
+                          {(shownBattle ?? battle).actors
+                            .filter((a) => targetableKeys.includes(a.key))
+                            .map((a) => {
+                              const fc = forecastForActor(a);
+                              const rx = reactionForActor(a);
+                              return (
+                                <button
+                                  key={a.key}
+                                  type="button"
+                                  className="lll-btn lll-btn-primary"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    tapActor(a);
+                                  }}
+                                >
+                                  {a.name} (HP {a.hp}/{a.maxHp})
+                                  {fc ? ` [${fc}]` : ""}
+                                  {rx ? ` [反応:${rx}]` : ""}
+                                </button>
+                              );
+                            })}
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    render2DArenaBoard()
+                  )}
+                </div>
+
+                <div className="lll-queue" aria-label="行動順">
+                  {(shownBattle ?? battle).queue.map((key, i) => {
+                    const actor = (shownBattle ?? battle).actors.find((a) => a.key === key);
+                    if (!actor) return null;
+                    const nowKey = displayBattle
+                      ? playbackInfo?.actorKey ?? key
+                      : (shownBattle ?? battle).queue[(shownBattle ?? battle).queuePos];
+                    const done = !displayBattle && i < (shownBattle ?? battle).queuePos;
+                    return (
+                      <span
+                        key={`${key}-${i}`}
+                        className={`lll-queue-chip${key === nowKey ? " lll-queue-chip-now" : ""}${done ? " lll-queue-chip-done" : ""}${actor.alive ? "" : " lll-queue-chip-dead"}`}
+                      >
+                        {actor.name}
+                      </span>
+                    );
+                  })}
+                </div>
+
+                <div className="lll-logstrip" aria-live="polite">
+                  <span className="lll-chip">R{(shownBattle ?? battle).round}</span>
+                  {[...(shownBattle ?? battle).log]
+                    .slice(-3)
+                    .reverse()
+                    .map((entry, i) => (
+                      <p key={`${(shownBattle ?? battle).log.length}-${i}`} className={`lll-logline${i === 0 ? " lll-logline-latest" : ""}`}>
+                        {entry.text}
+                      </p>
+                    ))}
+                  {(shownBattle ?? battle).log.length === 0 && <p className="lll-logline">対戦開始</p>}
+                </div>
+
+                {battle.phase === "finished" ? (
+                  <div className="lll-result">
+                    <span className={`lll-result-stamp lll-result-${battle.winner === "player" ? "win" : battle.winner === "draw" ? "draw" : "lose"}`}>
+                      {battle.winner === "player" ? "勝利" : battle.winner === "draw" ? "引分" : "敗北"}
+                    </span>
+                    {battleStartRef.current && (
+                      <div className="lll-currencies">
+                        {profile.shards - battleStartRef.current.shards !== 0 && (
+                          <span className="lll-chip lll-chip-shards">
+                            <IconShard size={13} /> 欠片 +{profile.shards - battleStartRef.current.shards}
+                          </span>
+                        )}
+                        {profile.lumen - battleStartRef.current.lumen !== 0 && (
+                          <span className="lll-chip lll-chip-lumen">
+                            <IconLumen size={13} /> ルーメン +{profile.lumen - battleStartRef.current.lumen}
+                          </span>
+                        )}
+                        {(profile.tickets ?? 0) - battleStartRef.current.tickets > 0 && (
+                          <span className="lll-chip lll-chip-ticket">
+                            <IconTicket size={13} /> 券 +{(profile.tickets ?? 0) - battleStartRef.current.tickets}
+                          </span>
+                        )}
+                        {battle.mode === "pvp" && (profile.pvpRating ?? 1000) !== battleStartRef.current.rating && (
+                          <span className="lll-chip lll-chip-rating">
+                            Rate {(profile.pvpRating ?? 1000) - battleStartRef.current.rating >= 0 ? "+" : ""}
+                            {(profile.pvpRating ?? 1000) - battleStartRef.current.rating}
+                          </span>
+                        )}
+                      </div>
+                    )}
+                    {battleRecap && battleRecap.totalDamage > 0 && (
+                      <div className="lll-currencies" aria-label="戦績">
+                        <span className="lll-chip">与ダメージ {battleRecap.totalDamage}</span>
+                        {battleRecap.maxHit > 0 && (
+                          <span className="lll-chip">
+                            最大の一撃 {battleRecap.maxHitLabel} {battleRecap.maxHit}
+                          </span>
+                        )}
+                        {battleRecap.mvp && (
+                          <span className="lll-chip">
+                            MVP {battleRecap.mvp.name}（{battleRecap.mvp.total}）
+                          </span>
+                        )}
+                      </div>
+                    )}
+                    <div className="lll-actions">
+                      {battle.mode === "abyss" ? (
+                        <>
+                          {battle.winner === "player" && (
+                            <button
+                              type="button"
+                              className="lll-btn lll-btn-primary"
+                              disabled={busy}
+                              onClick={() => {
+                                const nextFloor = (battle.floor ?? abyssFloor) + 1;
+                                setAbyssFloor(nextFloor);
+                                void beginBattleRequest({ mode: "abyss", floor: nextFloor });
+                              }}
+                            >
+                              次の階層（{(battle.floor ?? abyssFloor) + 1}F）へ
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            className="lll-btn"
+                            disabled={busy}
+                            onClick={() => void beginBattleRequest({ mode: "abyss", floor: battle.floor ?? abyssFloor })}
+                          >
+                            同じ階層へ
+                          </button>
+                        </>
+                      ) : battle.mode === "pvp" ? (
+                        <button
+                          type="button"
+                          className="lll-btn lll-btn-primary"
+                          disabled={busy || !selectedRivalId}
+                          onClick={() => selectedRivalId && void beginBattleRequest({ mode: "pvp", rivalId: selectedRivalId })}
+                        >
+                          もう一度対戦
+                        </button>
+                      ) : battle.winner === "player" && battleStartRef.current && !battleStartRef.current.clearedBefore && battle.tierIndex < TIERS.length - 1 ? (
+                        <>
                           <button
                             type="button"
                             className="lll-btn lll-btn-primary"
                             disabled={busy}
-                            onClick={() => {
-                              const nextFloor = (battle.floor ?? abyssFloor) + 1;
-                              setAbyssFloor(nextFloor);
-                              void beginBattleRequest({ mode: "abyss", floor: nextFloor });
-                            }}
+                            onClick={() =>
+                              void beginBattleRequest({
+                                mode: "ladder",
+                                tierIndex: battle.tierIndex + 1,
+                                clearedBefore: profile.clearedTiers.includes(battle.tierIndex + 1),
+                              })
+                            }
                           >
-                            次の階層（{(battle.floor ?? abyssFloor) + 1}F）へ
+                            次のティア（{TIERS[battle.tierIndex + 1].name}）へ
                           </button>
-                        )}
-                        <button
-                          type="button"
-                          className="lll-btn"
-                          disabled={busy}
-                          onClick={() => void beginBattleRequest({ mode: "abyss", floor: battle.floor ?? abyssFloor })}
-                        >
-                          同じ階層へ
-                        </button>
-                      </>
-                    ) : battle.mode === "pvp" ? (
-                      <button
-                        type="button"
-                        className="lll-btn lll-btn-primary"
-                        disabled={busy || !selectedRivalId}
-                        onClick={() => selectedRivalId && void beginBattleRequest({ mode: "pvp", rivalId: selectedRivalId })}
-                      >
-                        もう一度対戦
-                      </button>
-                    ) : battle.winner === "player" && battleStartRef.current && !battleStartRef.current.clearedBefore && battle.tierIndex < TIERS.length - 1 ? (
-                      <>
+                          <button
+                            type="button"
+                            className="lll-btn"
+                            disabled={busy}
+                            onClick={() => void beginBattleRequest({ mode: "ladder", tierIndex: battle.tierIndex, clearedBefore: true })}
+                          >
+                            もう一度
+                          </button>
+                        </>
+                      ) : (
                         <button
                           type="button"
                           className="lll-btn lll-btn-primary"
@@ -2236,368 +2659,433 @@ export default function LllClient() {
                           onClick={() =>
                             void beginBattleRequest({
                               mode: "ladder",
-                              tierIndex: battle.tierIndex + 1,
-                              clearedBefore: profile.clearedTiers.includes(battle.tierIndex + 1),
+                              tierIndex: battle.tierIndex,
+                              clearedBefore: profile.clearedTiers.includes(battle.tierIndex),
                             })
                           }
                         >
-                          次のティア（{TIERS[battle.tierIndex + 1].name}）へ
+                          {guideBattle && battle.winner === "cpu" ? "もう一度（同じ相手）" : "もう一度"}
                         </button>
-                        <button
-                          type="button"
-                          className="lll-btn"
-                          disabled={busy}
-                          onClick={() => void beginBattleRequest({ mode: "ladder", tierIndex: battle.tierIndex, clearedBefore: true })}
-                        >
-                          もう一度
-                        </button>
-                      </>
-                    ) : (
+                      )}
                       <button
                         type="button"
-                        className="lll-btn lll-btn-primary"
-                        disabled={busy}
-                        onClick={() =>
-                          void beginBattleRequest({
-                            mode: "ladder",
-                            tierIndex: battle.tierIndex,
-                            clearedBefore: profile.clearedTiers.includes(battle.tierIndex),
-                          })
-                        }
+                        className="lll-btn"
+                        onClick={() => {
+                          setBattle(null);
+                          setPending(null);
+                          setAutoMode(false);
+                          playSe("tap");
+                        }}
                       >
-                        {guideBattle && battle.winner === "cpu" ? "もう一度（同じ相手）" : "もう一度"}
+                        出撃画面へ
                       </button>
-                    )}
+                    </div>
+                  </div>
+                ) : displayBattle ? (
+                  <div className="lll-actionbar lll-playbackbar">
+                    <span className="lll-chip">
+                      再生中 {playbackInfo ? playbackInfo.index + 1 : 1}/{playbackInfo?.total ?? ""}
+                    </span>
+                    <span className="lll-chip">タップで次の拍へ</span>
                     <button
                       type="button"
                       className="lll-btn"
-                      onClick={() => {
-                        setBattle(null);
-                        setPending(null);
-                        setAutoMode(false);
-                        playSe("tap");
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        finishPlayback();
                       }}
                     >
-                      アリーナへ
+                      全表示
                     </button>
                   </div>
-                </div>
-              ) : displayBattle ? (
-                <div className="lll-actionbar lll-playbackbar">
-                  <span className="lll-chip">
-                    再生中 {playbackInfo ? playbackInfo.index + 1 : 1}/{playbackInfo?.total ?? ""}
-                  </span>
-                  <span className="lll-chip">タップで次の拍へ</span>
-                  <button
-                    type="button"
-                    className="lll-btn"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      finishPlayback();
-                    }}
-                  >
-                    全表示
-                  </button>
-                </div>
-              ) : isPlayerTurn && currentActor ? (
-                <>
-                  {battle.tactics && (
-                    <div className="lll-tactics" aria-label="戦術カード">
-                      <span className="lll-chip lll-chip-tp">TP {battle.tactics.player.tp} / 5</span>
-                      <span className="lll-chip">
-                        山札 {battle.tactics.player.deckCount} ・ 捨札 {battle.tactics.player.discard.length}
-                      </span>
-                      {battle.tactics.player.reserves.map((cardId, i) => (
-                        <span key={`res-${cardId}-${i}`} className="lll-chip lll-chip-reserve">
-                          設置中：{TACTIC_CARD_BY_ID.get(cardId)?.name ?? cardId}
+                ) : isPlayerTurn && currentActor ? (
+                  <>
+                    {battle.tactics && (
+                      <div className="lll-tactics" aria-label="戦術カード">
+                        <span className="lll-chip lll-chip-tp">TP {battle.tactics.player.tp} / 5</span>
+                        <span className="lll-chip">
+                          山札 {battle.tactics.player.deckCount} ・ 捨札 {battle.tactics.player.discard.length}
                         </span>
-                      ))}
-                      <div className="lll-hand">
-                        {battle.tactics.player.hand.length === 0 && <span className="lll-chip">手札なし（行動のみ）</span>}
-                        {battle.tactics.player.hand.map((cardId, i) => {
-                          const def = TACTIC_CARD_BY_ID.get(cardId);
-                          if (!def) return null;
-                          const unaffordable = def.cost > (battle.tactics?.player.tp ?? 0);
-                          return (
-                            <button
-                              key={`${cardId}-${i}`}
-                              type="button"
-                              className="lll-tactic-btn"
-                              disabled={busy || unaffordable}
-                              title={def.text}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                void sendTactic(cardId);
-                              }}
-                            >
-                              <span className="lll-tactic-name">{def.name}</span>
-                              <span className="lll-tactic-meta">
-                                {def.reserve ? "設置" : def.tags.join("・")} ・ TP{def.cost}
-                              </span>
-                            </button>
-                          );
-                        })}
+                        {battle.tactics.player.reserves.map((cardId, i) => (
+                          <span key={`res-${cardId}-${i}`} className="lll-chip lll-chip-reserve">
+                            設置中：{TACTIC_CARD_BY_ID.get(cardId)?.name ?? cardId}
+                          </span>
+                        ))}
+                        <div className="lll-hand">
+                          {battle.tactics.player.hand.length === 0 && <span className="lll-chip">手札なし（行動のみ）</span>}
+                          {battle.tactics.player.hand.map((cardId, i) => {
+                            const def = TACTIC_CARD_BY_ID.get(cardId);
+                            if (!def) return null;
+                            const unaffordable = def.cost > (battle.tactics?.player.tp ?? 0);
+                            return (
+                              <button
+                                key={`${cardId}-${i}`}
+                                type="button"
+                                className="lll-tactic-btn"
+                                disabled={busy || unaffordable}
+                                title={def.text}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  void sendTactic(cardId);
+                                }}
+                              >
+                                <span className="lll-tactic-name">{def.name}</span>
+                                <span className="lll-tactic-meta">
+                                  {def.reserve ? "設置" : def.tags.join("・")} ・ TP{def.cost}
+                                </span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                        <span className="lll-tactics-hint">戦術カードは行動の前に TP の範囲で何枚でも使用可能。カード名にカーソルを合わせると効果を表示。</span>
                       </div>
-                      <span className="lll-tactics-hint">戦術カードは行動の前に何枚でも切れる（TP の範囲で）。カード名に触れると効果文が出る。</span>
-                    </div>
-                  )}
-                  <div className="lll-actionbar">
-                    <span className="lll-actionbar-label">
-                      {currentStunned ? `${currentActor.name} はスタン中：戦術のみ使える（下のボタンは手番を渡す）` : `${currentActor.name} の行動`}
-                    </span>
-                    {guideActive && <span className="lll-chip lll-chip-picked">ガイド中 あと{3 - guideTurnsUsed}手</span>}
-                    <button
-                      type="button"
-                      className={`lll-btn${pending?.skill === "basic" ? " lll-btn-primary" : ""}${guideRecommendation?.skill === "basic" ? " lll-btn-guide" : ""}`}
-                      disabled={busy}
-                      onClick={() => chooseSkill("basic")}
-                    >
-                      通常攻撃
-                    </button>
-                    {([0, 1] as const).map((idx) => {
-                      const skill = currentActor.skills[idx];
-                      if (!skill) return null;
-                      const cd = currentActor.cooldowns[idx] ?? 0;
-                      return (
-                        <button
-                          key={idx}
-                          type="button"
-                          className={`lll-btn${pending?.skill === idx ? " lll-btn-primary" : ""}${guideRecommendation?.skill === idx ? " lll-btn-guide" : ""}`}
-                          disabled={busy || cd > 0}
-                          onClick={() => chooseSkill(idx)}
-                          title={skill.description}
-                        >
-                          {skill.name}
-                          <span className="lll-btn-meta">{cd > 0 ? `CD ${cd}` : `威力${skill.power}`}</span>
-                        </button>
-                      );
-                    })}
-                    <button type="button" className="lll-btn lll-btn-danger" disabled={busy} onClick={() => chooseSkill("defend")}>
-                      防御
-                    </button>
-                    {pending && (
-                      <>
-                        <span className="lll-chip lll-chip-picked">{pending.label}: 対象を選んでください</span>
-                        <button type="button" className="lll-btn" onClick={() => setPending(null)}>
-                          やめる
-                        </button>
-                      </>
                     )}
-                  </div>
-                </>
-              ) : (
-                <p className="lll-loading">相手の行動中…</p>
-              )}
-            </div>
-          )}
-        </section>
-      )}
-        </div>
-
-        {/* ソシャゲ式ボトムドックナビゲーション */}
-        <nav className="lll-dock" aria-label="メインメニュー">
-          {(
-            [
-              ["home", "🏛", "ホーム", homeBadgeCount > 0 ? String(homeBadgeCount) : null],
-              ["scout", "✦", "スカウト", (profile.tickets ?? 0) > 0 ? String(profile.tickets) : null],
-              ["binder", "🃏", "バインダー", pendingTeam ? `${pendingTeam.length}/3` : null],
-              ["arena", "⚔", "アリーナ", battle?.phase === "battle" ? "進行中" : null],
-            ] as [Tab, string, string, string | null][]
-          ).map(([key, icon, label, badge]) => (
-            <button
-              key={key}
-              type="button"
-              className={`lll-dock-btn${tab === key ? " lll-dock-btn-active" : ""}`}
-              aria-pressed={tab === key}
-              onClick={() => switchTab(key)}
-            >
-              <span className="lll-dock-icon" aria-hidden="true">
-                {icon}
-              </span>
-              <span className="lll-dock-label">{label}</span>
-              {badge && <span className="lll-dock-badge">{badge}</span>}
-            </button>
-          ))}
-        </nav>
-
-        {/* ===== 詳細オーバーレイ（3Dホロ表示 + 強化・限界突破・覚醒・ロック・推し） ===== */}
-        {detailCard && (
-          <div
-            className="lll-overlay"
-            role="dialog"
-            aria-label={`${detailCard.name}の詳細`}
-            onClick={(e) => {
-              if (e.target === e.currentTarget) setDetailCardId(null);
-            }}
-          >
-            <div className="lll-detail">
-              <div style={{ width: "100%", maxWidth: 260 }}>
-                {canUse3D ? (
-                  viewer3DForCard(detailCard, "inspect")
+                    <div className="lll-actionbar">
+                      <span className="lll-actionbar-label">
+                        {currentStunned ? `${currentActor.name} はスタン中：戦術のみ使用可（下のボタンで手番終了）` : `${currentActor.name} の行動`}
+                      </span>
+                      {guideActive && <span className="lll-chip lll-chip-picked">ガイド中 あと{3 - guideTurnsUsed}手</span>}
+                      <button
+                        type="button"
+                        className={`lll-btn${pending?.skill === "basic" ? " lll-btn-primary" : ""}${guideRecommendation?.skill === "basic" ? " lll-btn-guide" : ""}`}
+                        disabled={busy}
+                        onClick={() => chooseSkill("basic")}
+                      >
+                        通常攻撃
+                      </button>
+                      {([0, 1] as const).map((idx) => {
+                        const skill = currentActor.skills[idx];
+                        if (!skill) return null;
+                        const cd = currentActor.cooldowns[idx] ?? 0;
+                        return (
+                          <button
+                            key={idx}
+                            type="button"
+                            className={`lll-btn${pending?.skill === idx ? " lll-btn-primary" : ""}${guideRecommendation?.skill === idx ? " lll-btn-guide" : ""}`}
+                            disabled={busy || cd > 0}
+                            onClick={() => chooseSkill(idx)}
+                            title={skill.description}
+                          >
+                            {skill.name}
+                            <span className="lll-btn-meta">{cd > 0 ? `CD ${cd}` : `威力${skill.power}`}</span>
+                          </button>
+                        );
+                      })}
+                      {burstReady && (
+                        <button
+                          type="button"
+                          className={`lll-btn lll-btn-burst${pending?.skill === "burst" ? " lll-btn-primary" : ""}`}
+                          disabled={busy}
+                          title={RESONANCE_BURST_INFO[currentActor.element].summary}
+                          onClick={() => chooseSkill("burst")}
+                        >
+                          <IconBolt size={14} />
+                          共鳴バースト：{RESONANCE_BURST_INFO[currentActor.element].name}
+                        </button>
+                      )}
+                      <button type="button" className="lll-btn lll-btn-danger" disabled={busy} onClick={() => chooseSkill("defend")}>
+                        <IconShield size={14} /> 防御
+                      </button>
+                      {pending && (
+                        <>
+                          <span className="lll-chip lll-chip-picked">{pending.label}: 対象を選択</span>
+                          <button type="button" className="lll-btn" onClick={() => setPending(null)}>
+                            やめる
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </>
                 ) : (
-                  <LllCard view={cardToView(detailCard, profile)} size="lg" />
+                  <p className="lll-loading">相手の行動中…</p>
                 )}
               </div>
-              <div className="lll-detail-info">
+            )}
+          </section>
+        )}
+
+        {/* ===== 図鑑・戦闘規則・ミッション ===== */}
+        {tab === "codex" && (
+          <LllCodexView
+            profile={profile}
+            teamCards={teamCards}
+            busy={busy}
+            onClaimMission={(kind, id) => void claimMission(kind, id)}
+          />
+        )}
+      </main>
+
+      {/* ===== カード詳細オーバーレイ（強化・管理 / 特性・技2調律） ===== */}
+      {detailCard && (
+        <div
+          className="lll-overlay"
+          role="dialog"
+          aria-label={`${detailCard.name}の詳細`}
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setDetailCardId(null);
+          }}
+        >
+          <div className="lll-detail">
+            <div style={{ width: "100%", maxWidth: 260 }}>
+              {canUse3D ? (
+                viewer3DForCard(detailCard, "inspect")
+              ) : (
+                <LllCard view={cardToView(detailCard, profile)} size="lg" />
+              )}
+            </div>
+            <div className="lll-detail-info">
+              <div className="lll-panel-head">
                 <div className="lll-currencies">
                   <span className="lll-chip">{TIER_LABEL[detailCard.tier]}</span>
                   <span className="lll-chip">{ELEMENT_LABEL[detailCard.element]}</span>
                   <span className="lll-chip">戦力 {cardPowerScore(detailCard)}</span>
-                  <span className="lll-chip">限界突破 ★{detailCard.limitBreak ?? 0}/{MAX_LIMIT_BREAK}</span>
+                  <span className="lll-chip">限界突破 +{detailCard.limitBreak ?? 0}/{MAX_LIMIT_BREAK}</span>
                 </div>
-                <p className="lll-flavor-lg">{detailCard.flavor}</p>
-                <ul className="lll-detail-skills">
-                  {detailCard.skills.map((skill, i) => (
-                    <li key={`${skill.name}-${i}`}>
-                      <strong>{skill.name}</strong>
-                      <span>
-                        威力{skill.power} ・ CD{skill.cooldown} ・ AP{skill.ap}
-                      </span>
-                      <p>{skill.description}</p>
-                    </li>
-                  ))}
-                  <li>
-                    <strong>✦ {detailCard.trait.name}</strong>
-                    <p>{detailCard.trait.description}</p>
-                  </li>
-                </ul>
-                <div className="lll-actions lll-detail-actions">
+                <div className="lll-seg" role="tablist" aria-label="カード詳細タブ">
                   <button
                     type="button"
-                    className="lll-btn lll-btn-primary"
-                    disabled={busy || detailCard.level >= MAX_LEVEL || profile.shards < levelUpCost(detailCard.level)}
-                    onClick={() => growCard(detailCard)}
+                    role="tab"
+                    aria-selected={detailTab === "grow"}
+                    className={`lll-seg-btn${detailTab === "grow" ? " lll-seg-active" : ""}`}
+                    onClick={() => setDetailTab("grow")}
                   >
-                    {detailCard.level >= MAX_LEVEL ? "Lv MAX" : `強化（欠片 ${levelUpCost(detailCard.level)}）`}
+                    成長・管理
                   </button>
                   <button
                     type="button"
-                    className="lll-btn lll-btn-primary"
-                    disabled={
-                      busy ||
-                      (detailCard.limitBreak ?? 0) >= MAX_LIMIT_BREAK ||
-                      profile.shards < limitBreakCost(detailCard.limitBreak ?? 0)
-                    }
-                    onClick={() => limitBreakCard(detailCard)}
+                    role="tab"
+                    aria-selected={detailTab === "tune"}
+                    className={`lll-seg-btn${detailTab === "tune" ? " lll-seg-active" : ""}`}
+                    onClick={() => setDetailTab("tune")}
                   >
-                    {(detailCard.limitBreak ?? 0) >= MAX_LIMIT_BREAK
-                      ? "限界突破 MAX"
-                      : `限界突破 +1（欠片 ${limitBreakCost(detailCard.limitBreak ?? 0)}）`}
-                  </button>
-                  {(() => {
-                    const nTier = nextTier(detailCard.tier);
-                    const cost = awakenCost(detailCard.tier);
-                    if (!nTier || !cost) return null;
-                    return (
-                      <button
-                        type="button"
-                        className="lll-btn lll-btn-primary"
-                        disabled={busy || profile.shards < cost.shards || profile.lumen < cost.lumen}
-                        onClick={() => awakenCard(detailCard)}
-                      >
-                        {TIER_LABEL[nTier]}へ覚醒（◆{cost.shards} ●{cost.lumen}）
-                      </button>
-                    );
-                  })()}
-                  <button
-                    type="button"
-                    className="lll-btn"
-                    disabled={busy}
-                    onClick={() => toggleLockCard(detailCard.id)}
-                  >
-                    {profile.lockedCardIds?.includes(detailCard.id) ? "🔒 ロック解除" : "🔒 保護ロック"}
-                  </button>
-                  <button
-                    type="button"
-                    className="lll-btn"
-                    disabled={busy || profile.favoriteCardId === detailCard.id}
-                    onClick={() => setFavoriteCard(detailCard.id)}
-                  >
-                    {profile.favoriteCardId === detailCard.id ? "♥ 推し設定中" : "♥ 推しに設定"}
-                  </button>
-                  {effectiveTeamIds.includes(detailCard.id) ? (
-                    <button type="button" className="lll-btn lll-btn-danger" onClick={() => removeFromTeam(detailCard.id)}>
-                      チームから外す
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      className="lll-btn"
-                      disabled={effectiveTeamIds.length >= 3}
-                      onClick={() => assignToSlot(detailCard.id, effectiveTeamIds.length)}
-                    >
-                      チームに入れる
-                    </button>
-                  )}
-                  <button type="button" className="lll-btn" onClick={() => setDetailCardId(null)}>
-                    閉じる
+                    <IconTune size={13} /> 特性・技2調律
                   </button>
                 </div>
               </div>
+
+              {detailTab === "grow" ? (
+                <>
+                  <p className="lll-flavor-lg">{detailCard.flavor}</p>
+                  <ul className="lll-detail-skills">
+                    {detailCard.skills.map((skill, i) => (
+                      <li key={`${skill.name}-${i}`}>
+                        <strong>
+                          技{i + 1}：{skill.name}
+                        </strong>
+                        <span>
+                          威力{skill.power} ・ CD{skill.cooldown} ・ AP{skill.ap}
+                        </span>
+                        <p>{skill.description}</p>
+                      </li>
+                    ))}
+                    <li>
+                      <strong>特性：{detailCard.trait.name}</strong>
+                      <p>{detailCard.trait.description}</p>
+                    </li>
+                  </ul>
+                  <div className="lll-actions lll-detail-actions">
+                    <button
+                      type="button"
+                      className="lll-btn lll-btn-primary"
+                      disabled={busy || detailCard.level >= MAX_LEVEL || profile.shards < levelUpCost(detailCard.level)}
+                      onClick={() => growCard(detailCard)}
+                    >
+                      {detailCard.level >= MAX_LEVEL ? "Lv MAX" : `強化（欠片 ${levelUpCost(detailCard.level)}）`}
+                    </button>
+                    <button
+                      type="button"
+                      className="lll-btn lll-btn-primary"
+                      disabled={
+                        busy ||
+                        (detailCard.limitBreak ?? 0) >= MAX_LIMIT_BREAK ||
+                        profile.shards < limitBreakCost(detailCard.limitBreak ?? 0)
+                      }
+                      onClick={() => limitBreakCard(detailCard)}
+                    >
+                      {(detailCard.limitBreak ?? 0) >= MAX_LIMIT_BREAK
+                        ? "限界突破 MAX"
+                        : `限界突破 +1（欠片 ${limitBreakCost(detailCard.limitBreak ?? 0)}）`}
+                    </button>
+                    {(() => {
+                      const nTier = nextTier(detailCard.tier);
+                      const cost = awakenCost(detailCard.tier);
+                      if (!nTier || !cost) return null;
+                      return (
+                        <button
+                          type="button"
+                          className="lll-btn lll-btn-primary"
+                          disabled={busy || profile.shards < cost.shards || profile.lumen < cost.lumen}
+                          onClick={() => awakenCard(detailCard)}
+                        >
+                          {TIER_LABEL[nTier]}へ覚醒（欠片{cost.shards} / L{cost.lumen}）
+                        </button>
+                      );
+                    })()}
+                    <button
+                      type="button"
+                      className="lll-btn"
+                      disabled={busy}
+                      onClick={() => toggleLockCard(detailCard.id)}
+                    >
+                      <IconLock size={13} />
+                      {profile.lockedCardIds?.includes(detailCard.id) ? "ロック解除" : "保護ロック"}
+                    </button>
+                    <button
+                      type="button"
+                      className="lll-btn"
+                      disabled={busy || profile.favoriteCardId === detailCard.id}
+                      onClick={() => setFavoriteCard(detailCard.id)}
+                    >
+                      <IconStar size={13} />
+                      {profile.favoriteCardId === detailCard.id ? "主力表示中" : "主力に設定"}
+                    </button>
+                    {effectiveTeamIds.includes(detailCard.id) ? (
+                      <button type="button" className="lll-btn lll-btn-danger" onClick={() => removeFromTeam(detailCard.id)}>
+                        チームから外す
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        className="lll-btn"
+                        disabled={effectiveTeamIds.length >= 3}
+                        onClick={() => assignToSlot(detailCard.id, effectiveTeamIds.length)}
+                      >
+                        チームに入れる
+                      </button>
+                    )}
+                    <button type="button" className="lll-btn" onClick={() => setDetailCardId(null)}>
+                      閉じる
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <div className="lll-tune-panel">
+                  <div className="lll-tune-block">
+                    <div className="lll-panel-head">
+                      <strong>特性の調律</strong>
+                      <span className="lll-chip">
+                        費用：欠片 {TUNE_TRAIT_COST.shards} / L {TUNE_TRAIT_COST.lumen}
+                      </span>
+                    </div>
+                    <div className="lll-tune-grid">
+                      {ALL_TRAIT_KINDS.map((kind) => {
+                        const isCur = detailCard.trait.kind === kind;
+                        const canAfford = profile.shards >= TUNE_TRAIT_COST.shards && profile.lumen >= TUNE_TRAIT_COST.lumen;
+                        return (
+                          <button
+                            key={kind}
+                            type="button"
+                            className={`lll-tune-opt${isCur ? " lll-tune-opt-cur" : ""}`}
+                            disabled={busy || isCur || !canAfford}
+                            onClick={() => tuneTraitAction(detailCard.id, kind)}
+                          >
+                            <strong>
+                              {TRAIT_DEFAULT_NAME[kind]}
+                              {isCur ? "（現在）" : ""}
+                            </strong>
+                            <span>{TRAIT_DESCRIPTION[kind]}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <div className="lll-tune-block">
+                    <div className="lll-panel-head">
+                      <strong>技2の種別調律</strong>
+                      <span className="lll-chip">
+                        費用：欠片 {TUNE_SKILL2_COST.shards} / L {TUNE_SKILL2_COST.lumen}
+                      </span>
+                    </div>
+                    <div className="lll-tune-grid">
+                      {TUNABLE_SKILL2_KINDS.map((kind) => {
+                        const isCur = detailCard.skills[1]?.kind === kind;
+                        const canAfford = profile.shards >= TUNE_SKILL2_COST.shards && profile.lumen >= TUNE_SKILL2_COST.lumen;
+                        return (
+                          <button
+                            key={kind}
+                            type="button"
+                            className={`lll-tune-opt${isCur ? " lll-tune-opt-cur" : ""}`}
+                            disabled={busy || isCur || !canAfford}
+                            onClick={() => tuneSkill2Action(detailCard.id, kind)}
+                          >
+                            <strong>
+                              {SKILL2_KIND_LABEL[kind]}
+                              {isCur ? "（現在）" : ""}
+                            </strong>
+                            <span>{SKILL_DESCRIPTION[kind]}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <div className="lll-actions lll-detail-actions">
+                    <button type="button" className="lll-btn" onClick={() => setDetailCardId(null)}>
+                      閉じる
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
-        )}
+        </div>
+      )}
 
-        {/* モーダル群 */}
-        {loginBonus && <LoginBonusModal bonus={loginBonus} onClose={() => setLoginBonus(null)} />}
-        {showRates && <DropRatesModal onClose={() => setShowRates(false)} />}
-        {showDeckModal && (
-          <CustomDeckModal
-            initialCounts={profile.customTacticDeck ?? {}}
-            busy={busy}
-            onSave={(counts) => void saveCustomDeck(counts)}
-            onClose={() => setShowDeckModal(false)}
-          />
-        )}
-      </div>
+      {/* モーダル群 */}
+      {loginBonus && <LoginBonusModal bonus={loginBonus} onClose={() => setLoginBonus(null)} />}
+      {showRates && <DropRatesModal onClose={() => setShowRates(false)} />}
+      {showDeckModal && (
+        <CustomDeckModal
+          initialCounts={profile.customTacticDeck ?? {}}
+          busy={busy}
+          onSave={(counts) => void saveCustomDeck(counts)}
+          onClose={() => setShowDeckModal(false)}
+        />
+      )}
 
-      {/* 独立ゲームフッター（AGOBOT 風のゆとりあるグループ配置） */}
+      {/* 独立フッター（AGOBOT と同様に余白を確保し、設定・規則・離脱のみを整理配置） */}
       <footer className="lll-footer" aria-label="LLL フッター">
         <div className="lll-footer-inner">
           <div className="lll-footer-brand">
-            <span className="lll-footer-logo">✦ LLL</span>
-            <p className="lll-footer-tagline">想像を、切り札に。写真とAIと3Dで紡ぐカードバトル。</p>
+            <span className="lll-footer-logo">LLL</span>
+            <p className="lll-footer-meta">
+              調律者 {profile.playerName ?? "調律者"} ・ 総戦力 {teamPower} ・ 遺物 {ownedRelics.length}/{RELICS.length}
+            </p>
             <div className="lll-footer-stats">
-              <span>調律者: {profile.playerName ?? "調律者"}</span>
-              <span>総戦力 {teamPower}</span>
+              <span>
+                戦績 {profile.wins}勝 {profile.losses}敗
+              </span>
               <span>Rate {profile.pvpRating ?? 1000}</span>
               <span>深淵 {profile.abyssBestFloor ?? 0}F</span>
+              <span>所持 {profile.cards.length}/60</span>
             </div>
           </div>
 
           <div className="lll-footer-groups">
-            <nav className="lll-footer-group" aria-label="ゲームメニュー">
-              <p className="lll-footer-group-title">ゲームメニュー</p>
-              <button type="button" className="lll-footer-link" onClick={() => switchTab("home")}>
-                ホームロビー
+            <nav className="lll-footer-group" aria-label="規則・編成">
+              <p className="lll-footer-group-title">規則・編成</p>
+              <button type="button" className="lll-footer-link" onClick={() => switchTab("codex")}>
+                戦闘規則・属性反応図鑑
               </button>
-              <button type="button" className="lll-footer-link" onClick={() => switchTab("scout")}>
-                スカウト召喚
+              <button type="button" className="lll-footer-link" onClick={() => setShowDeckModal(true)}>
+                カスタム戦術デッキ（30枚）
               </button>
-              <button type="button" className="lll-footer-link" onClick={() => switchTab("binder")}>
-                バインダー編成
-              </button>
-              <button type="button" className="lll-footer-link" onClick={() => switchTab("arena")}>
-                アリーナ・深淵・PvP
+              <button type="button" className="lll-footer-link" onClick={() => setShowRates(true)}>
+                提供割合・鑑定仕様
               </button>
             </nav>
 
-            <nav className="lll-footer-group" aria-label="サポート・設定">
-              <p className="lll-footer-group-title">サポート・設定</p>
-              <button type="button" className="lll-footer-link" onClick={() => setShowRates(true)}>
-                提供割合・仕様
-              </button>
-              <button type="button" className="lll-footer-link" onClick={() => setShowDeckModal(true)}>
-                カスタム戦術デッキ
-              </button>
+            <nav className="lll-footer-group" aria-label="表示・サウンド">
+              <p className="lll-footer-group-title">表示・サウンド</p>
               <button type="button" className="lll-footer-link" disabled={webglFailed} onClick={toggle3D}>
-                3D表示: {canUse3D ? "ON" : "OFF"}
+                3D表示：{canUse3D ? "ON" : "OFF"}
               </button>
               <button type="button" className="lll-footer-link" onClick={() => toggleSound("bgm")}>
-                BGM: {sound.bgm ? "ON" : "OFF"}
+                BGM：{sound.bgm ? "ON" : "OFF"}
               </button>
               <button type="button" className="lll-footer-link" onClick={() => toggleSound("se")}>
-                SE: {sound.se ? "ON" : "OFF"}
+                効果音：{sound.se ? "ON" : "OFF"}
               </button>
             </nav>
 
@@ -2612,9 +3100,26 @@ export default function LllClient() {
 
         <div className="lll-footer-bottom">
           <span>LLL — Loci / Lumen / Legacy</span>
-          <span>所持カード {profile.cards.length}/60 ・ 連続ログイン {profile.loginStreak ?? 1}日目</span>
+          <span>連続ログイン {profile.loginStreak ?? 1}日目</span>
         </div>
       </footer>
+
+      {/* モバイル専用コンパクトボトムナビ（760px 以下のみ表示） */}
+      <nav className="lll-mobile-nav" aria-label="モバイルメニュー">
+        {navItems.map((item) => (
+          <button
+            key={item.key}
+            type="button"
+            className={`lll-mobile-btn${tab === item.key ? " lll-mobile-active" : ""}`}
+            aria-current={tab === item.key ? "page" : undefined}
+            onClick={() => switchTab(item.key)}
+          >
+            {item.icon}
+            <span>{item.label}</span>
+            {item.badge && <span className="lll-mobile-badge">{item.badge}</span>}
+          </button>
+        ))}
+      </nav>
 
       {/* ドラッグ中の飛行体 */}
       {binderDrag && (
@@ -2624,7 +3129,7 @@ export default function LllClient() {
       )}
       {battleDrag && (
         <div className="lll-drag-clone" style={{ transform: `translate(${battleDrag.x + 10}px, ${battleDrag.y + 10}px)` }}>
-          ⚔ 通常攻撃
+          通常攻撃
         </div>
       )}
     </div>

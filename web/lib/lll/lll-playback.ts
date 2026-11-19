@@ -21,6 +21,9 @@ export type PlaybackEventLike = {
   shieldAfter?: number;
   affinity?: number;
   statusKind?: string;
+  removeStatusKind?: string;
+  reactionName?: string;
+  burst?: boolean;
   element?: string;
   skillName?: string;
   skillPower?: number;
@@ -41,6 +44,7 @@ export type PlaybackFloatKind =
   | "damage"
   | "weak"
   | "resist"
+  | "reaction"
   | "heal"
   | "shield"
   | "shieldbreak"
@@ -73,7 +77,7 @@ export type PlaybackStep = {
   float: { targetKey: string; text: string; kind: PlaybackFloatKind } | null;
   /** この拍で点滅させるシールド/防御バッジの持ち主。無ければ null。 */
   shieldFlashKey: string | null;
-  /** カットイン演出（技2やレジェンド技の開始時）。 */
+  /** カットイン演出（技2やレジェンド技・共鳴バーストの開始時）。 */
   cutIn: { actorKey: string; skillName: string; element: string } | null;
   /** 2D/3D共通のビジュアルエフェクト指示。 */
   vfx: PlaybackVfx | null;
@@ -156,34 +160,57 @@ export function buildPlaybackSteps<T extends PlaybackActorLike>(
         skillName: event.skillName,
         element: event.element ?? "light",
       };
-      durationMs = Math.max(durationMs, 680);
+      durationMs = Math.max(durationMs, event.burst ? 820 : 680);
+    }
+
+    if (event.removeStatusKind && target) {
+      target.statuses = target.statuses.filter((s) => s.kind !== event.removeStatusKind);
     }
 
     switch (event.type) {
       case "damage": {
         if (target) {
           applyHp(target, event, -1);
-          const kind: PlaybackFloatKind =
-            typeof event.affinity === "number" && event.affinity >= 1.25
-              ? "weak"
-              : typeof event.affinity === "number" && event.affinity <= 0.8
-                ? "resist"
-                : "damage";
-          float = {
-            targetKey: target.key,
-            text: kind === "weak" ? `弱点 -${event.amount ?? 0}` : `-${event.amount ?? 0}`,
-            kind,
-          };
-          if (target.side === "player") vibrate = kind === "weak" ? [20, 20, 20] : 18;
-          vfx = {
-            kind: "attack",
-            element: event.element ?? "fire",
-            fromKey: event.actorKey,
-            toKey: target.key,
-            strong: kind === "weak" || (event.skillPower ?? 0) >= 80,
-          };
-          shakeIntensity = kind === "weak" || (event.skillPower ?? 0) >= 80 ? 3 : 1;
-          se = kind === "weak" ? "weak" : "hit";
+          if (event.reactionName) {
+            float = {
+              targetKey: target.key,
+              text: `${event.reactionName} -${event.amount ?? 0}`,
+              kind: "reaction",
+            };
+            if (target.side === "player") vibrate = [20, 20, 25];
+            vfx = {
+              kind: "attack",
+              element: event.element ?? "fire",
+              fromKey: event.actorKey,
+              toKey: target.key,
+              strong: true,
+            };
+            shakeIntensity = 3;
+            se = "weak";
+            durationMs = Math.max(durationMs, 640);
+          } else {
+            const kind: PlaybackFloatKind =
+              typeof event.affinity === "number" && event.affinity >= 1.25
+                ? "weak"
+                : typeof event.affinity === "number" && event.affinity <= 0.8
+                  ? "resist"
+                  : "damage";
+            float = {
+              targetKey: target.key,
+              text: kind === "weak" ? `弱点 -${event.amount ?? 0}` : `-${event.amount ?? 0}`,
+              kind,
+            };
+            if (target.side === "player") vibrate = kind === "weak" ? [20, 20, 20] : 18;
+            vfx = {
+              kind: "attack",
+              element: event.element ?? "fire",
+              fromKey: event.actorKey,
+              toKey: target.key,
+              strong: kind === "weak" || (event.skillPower ?? 0) >= 80,
+            };
+            shakeIntensity = kind === "weak" || (event.skillPower ?? 0) >= 80 ? 3 : 1;
+            se = kind === "weak" ? "weak" : "hit";
+          }
         } else {
           se = "hit";
         }
@@ -234,11 +261,16 @@ export function buildPlaybackSteps<T extends PlaybackActorLike>(
       }
       case "status": {
         if (typeof event.amount === "number" && target) {
-          // やけどの経過ダメージ
+          // やけど・深淵瘴気の経過ダメージ
           applyHp(target, event, -1);
-          float = { targetKey: target.key, text: `やけど -${event.amount}`, kind: "burn" };
+          const isBurn = event.statusKind === "burn";
+          float = {
+            targetKey: target.key,
+            text: isBurn ? `やけど -${event.amount}` : `瘴気 -${event.amount}`,
+            kind: "burn",
+          };
           if (target.side === "player") vibrate = 12;
-          vfx = { kind: "status", element: "fire", toKey: target.key };
+          vfx = { kind: "status", element: isBurn ? "fire" : "dark", toKey: target.key };
           se = "status";
         } else if (event.statusKind && target) {
           const kind = event.statusKind;
@@ -275,6 +307,10 @@ export function buildPlaybackSteps<T extends PlaybackActorLike>(
         if (actor && event.text.includes("防御した")) {
           shieldFlashKey = actor.key;
           vfx = { kind: "shield", element: "earth", toKey: actor.key };
+        } else if (event.burst) {
+          se = "awaken";
+          vfx = { kind: "attack", element: event.element ?? "light", fromKey: event.actorKey, strong: true };
+          shakeIntensity = 2;
         } else if (cutIn) {
           se = "cutin";
         }

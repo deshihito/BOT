@@ -35,6 +35,13 @@ test("WORLD BOX（/games/worldbox）では共通クロームを出さない", ()
   assert.equal(m.showsCtaBand("/games/chess"), true);
 });
 
+test("LLL（/games/lll）では共通クロームを出さない（WorldBox 同様の独立フル画面シェル）", () => {
+  assert.equal(m.isChromelessPath("/games/lll"), true);
+  assert.equal(m.isChromelessPath("/games/lll/"), true);
+  assert.equal(m.isChromelessPath("/games/lllx"), false);
+  assert.equal(m.showsCtaBand("/games/lll"), false);
+});
+
 test("それ以外のページでは共通クロームを出す", () => {
   assert.equal(m.isChromelessPath("/"), false);
   assert.equal(m.isChromelessPath("/games"), false);

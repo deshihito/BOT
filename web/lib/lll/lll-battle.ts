@@ -14,12 +14,19 @@
 
 import {
   affinityMultiplier,
+  BATTLE_FIELD_BY_ID,
+  detectElementalReaction,
   effectiveStats,
+  evaluatePartyResonance,
+  RESONANCE_BURST_INFO,
+  type BattleFieldDef,
+  type BattleFieldId,
   type LllCard,
   type LllElement,
   type LllSkill,
   type LllTier,
   type LllTrait,
+  type PartyResonance,
 } from "./lll-game";
 import {
   TACTIC_CARD_BY_ID,
@@ -117,6 +124,12 @@ export type BattleEvent = {
   affinity?: number;
   /** 表示用メタ（status の付与イベントのみ）: 付与した状態の種類。 */
   statusKind?: BattleStatusKind;
+  /** 表示用メタ（属性反応で消費された状態異常を逐次再生側でも解除するため）。 */
+  removeStatusKind?: BattleStatusKind;
+  /** 表示用メタ（属性反応名）。 */
+  reactionName?: string;
+  /** 表示用メタ（共鳴バースト発動イベント）。 */
+  burst?: boolean;
   /** 表示用メタ（演出用）: 発動属性・技名・威力・カットイン有無。 */
   element?: LllElement;
   skillName?: string;
@@ -144,8 +157,16 @@ export type BattleState = {
   title?: string;
   floor?: number;
   rivalName?: string;
+  /** フィールド地脈ID。 */
+  fieldId?: BattleFieldId;
+  /** 両陣営の属性共鳴。 */
+  resonance?: { player: PartyResonance; cpu: PartyResonance };
+  /** 両陣営の装備遺物ID一覧。 */
+  relics?: { player: string[]; cpu: string[] };
+  /** チーム共鳴バーストゲージ（0〜100）。 */
+  burst?: { player: number; cpu: number };
 };
-export type PlayerAction = { skill: 0 | 1 | "basic" | "defend"; targetKey?: string };
+export type PlayerAction = { skill: 0 | 1 | "basic" | "defend" | "burst"; targetKey?: string };
 
 /** 通常攻撃の威力（仕様 §4）。 */
 const BASIC_POWER = 40;
@@ -160,6 +181,29 @@ function nextRandom(state: BattleState): number {
   t = Math.imul(t ^ (t >>> 15), t | 1);
   t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
   return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+}
+
+/* --- 地脈・共鳴・遺物・バースト参照ヘルパー --- */
+
+function battleField(state: BattleState): BattleFieldDef {
+  return BATTLE_FIELD_BY_ID[state.fieldId ?? "neutral"] ?? BATTLE_FIELD_BY_ID.neutral;
+}
+
+function sideResonance(state: BattleState, side: "player" | "cpu"): PartyResonance | undefined {
+  return state.resonance?.[side];
+}
+
+function hasRelic(state: BattleState, side: "player" | "cpu", relicId: string): boolean {
+  return state.relics?.[side]?.includes(relicId) ?? false;
+}
+
+function addBurst(state: BattleState, side: "player" | "cpu", baseDelta: number): void {
+  if (!state.burst) state.burst = { player: 0, cpu: 0 };
+  if (baseDelta <= 0) return;
+  let mult = 1;
+  if (battleField(state).id === "gale_corridor") mult *= 1.25;
+  if (hasRelic(state, side, "relic_resonance_bell")) mult *= 1.2;
+  state.burst[side] = Math.min(100, state.burst[side] + Math.round(baseDelta * mult));
 }
 
 /* --- アクター参照・派生ステータス --- */
@@ -185,23 +229,34 @@ function addStatus(actor: BattleActor, kind: BattleStatusKind, turns: number): v
   else actor.statuses.push({ kind, turns });
 }
 
-/** 特性 haste を含めた行動順用の実効 SPD。 */
-function queueSpeed(actor: BattleActor): number {
-  return actor.spd * (actor.trait.kind === "haste" ? 1.1 : 1);
+function removeStatus(actor: BattleActor, kind: BattleStatusKind): void {
+  actor.statuses = actor.statuses.filter((status) => status.kind !== kind);
 }
 
-/** 特性 focus と overdrive、戦術カードの強化を含めた実効 ATK。 */
-function effectiveAtk(actor: BattleActor): number {
+/** 特性 haste・共鳴・遺物を含めた行動順用の実効 SPD。 */
+function queueSpeed(state: BattleState, actor: BattleActor): number {
+  let spd = actor.spd;
+  if (actor.trait.kind === "haste") spd *= 1.1;
+  spd *= sideResonance(state, actor.side)?.spdMult ?? 1;
+  if (hasRelic(state, actor.side, "relic_gale_feather")) spd *= 1.12;
+  return spd;
+}
+
+/** 特性 focus と overdrive、戦術カードの強化、共鳴を含めた実効 ATK。 */
+function effectiveAtk(state: BattleState, actor: BattleActor): number {
   let atk = actor.atk;
   if (actor.trait.kind === "focus") atk *= 1.1;
   if (hasStatus(actor, "overdrive")) atk *= 1.3;
   if ((actor.buffTurns ?? 0) > 0) atk *= actor.buffMult ?? 1;
+  atk *= sideResonance(state, actor.side)?.atkMult ?? 1;
   return atk;
 }
 
-/** guard_break 中の実効 DEF。 */
-function effectiveDef(actor: BattleActor): number {
-  return actor.def * (hasStatus(actor, "guard_break") ? 0.6 : 1);
+/** guard_break・共鳴を含めた実効 DEF。 */
+function effectiveDef(state: BattleState, actor: BattleActor): number {
+  let def = actor.def * (hasStatus(actor, "guard_break") ? 0.6 : 1);
+  def *= sideResonance(state, actor.side)?.defMult ?? 1;
+  return def;
 }
 
 function pushLog(state: BattleState, event: BattleEvent): void {
@@ -374,9 +429,9 @@ function markDead(state: BattleState, target: BattleActor): void {
 }
 
 /**
- * ダメージ計算（仕様 §4）:
- * floor(威力 × ATK/(ATK+DEF) × 乱数0.8〜1.2 × 属性倍率 × 防御倍率)、最低1。
- * シールドが先に吸収する。特性 thorns は与ダメの一部を反射する。
+ * ダメージ計算（仕様 §4 + 拡張地脈・共鳴・遺物・属性反応）:
+ * floor(威力 × ATK/(ATK+DEF) × 乱数0.8〜1.2 × 属性倍率 × 各種補正 × 防御倍率)、最低1。
+ * シールドが先に吸収する。属性反応・吸血・反射（thorns）を順に処理する。
  */
 function dealDamage(
   state: BattleState,
@@ -384,20 +439,35 @@ function dealDamage(
   target: BattleActor,
   power: number,
   sourcePower?: number,
+  options?: { allowReaction?: boolean; allowVampire?: boolean; noBurstCharge?: boolean },
 ): number {
-  const atk = effectiveAtk(attacker);
-  const def = effectiveDef(target);
+  const atk = effectiveAtk(state, attacker);
+  const def = effectiveDef(state, target);
   const randomFactor = 0.8 + nextRandom(state) * 0.4;
+  const affinity = affinityMultiplier(attacker.element, target.element);
+  const field = battleField(state);
+  const fieldElMult = field.elementBoost?.[attacker.element] ?? 1;
+  const guardMult = target.defending ? (field.guardMult ?? 0.5) : 1;
+  let weakExtra = 1;
+  if (affinity > 1) {
+    weakExtra *= sideResonance(state, attacker.side)?.weakBonusMult ?? 1;
+    weakExtra *= field.weakBonusMult ?? 1;
+    if (hasRelic(state, attacker.side, "relic_prism_lens")) weakExtra *= 1.15;
+  }
+  const relicAtkMult = hasRelic(state, attacker.side, "relic_ember_core") ? 1.08 : 1;
+
   let damage = Math.floor(
     power *
       (atk / (atk + def)) *
       randomFactor *
-      affinityMultiplier(attacker.element, target.element) *
-      (target.defending ? 0.5 : 1) *
+      affinity *
+      weakExtra *
+      fieldElMult *
+      relicAtkMult *
+      guardMult *
       (target.trait.kind === "guard" ? 0.9 : 1),
   );
   damage = Math.max(1, damage);
-  const affinity = affinityMultiplier(attacker.element, target.element);
   // 設置 C4（庇う盾）はダメージ確定前に割り込む唯一の例外（仕様 §3.7）。
   // スタック解決中の反射など間接ダメージには割り込まない。
   const tactics = state.tactics;
@@ -438,11 +508,103 @@ function dealDamage(
     element: attacker.element,
     ...(typeof sourcePower === "number" ? { skillPower: sourcePower } : {}),
   });
+  // 共鳴バースト蓄積
+  if (!options?.noBurstCharge) {
+    addBurst(state, attacker.side, affinity > 1 ? 18 : 10);
+  }
+  if (dealt > 0) {
+    addBurst(state, target.side, 7);
+  }
   // 「このターンの出来事」への記録（直接効果による与ダメージのみ数える）
   if (tactics && tactics.effectDepth === 0 && attacker.side === tactics.turn.side && dealt > 0) {
     tactics.turn.dmgCount += 1;
   }
   markDead(state, target);
+
+  // 遺物「紅玉の吸血牙」: 直接攻撃の与ダメ12%吸収
+  if (
+    options?.allowVampire !== false &&
+    dealt > 0 &&
+    attacker.alive &&
+    attacker.hp < attacker.maxHp &&
+    hasRelic(state, attacker.side, "relic_vampire_fang") &&
+    (!tactics || tactics.effectDepth === 0)
+  ) {
+    healActor(state, attacker, attacker, Math.max(1, Math.floor(dealt * 0.12)), "紅玉の吸血牙");
+  }
+
+  // 属性反応（状態異常×攻撃属性コンボ）: 対象が存命で対象状態を持つ場合のみ誘発
+  if (options?.allowReaction !== false && dealt > 0 && target.alive && attacker.alive) {
+    const reaction = detectElementalReaction(attacker.element, target.statuses);
+    if (reaction) {
+      let rMult = 1;
+      if (field.id === "abyss_miasma") rMult *= 1.2;
+      if (hasRelic(state, attacker.side, "relic_prism_lens")) rMult *= 1.25;
+      const rawBonus = Math.max(reaction.minBonus, Math.floor(dealt * reaction.bonusRatio * rMult));
+      if (reaction.consumesStatus) {
+        removeStatus(target, reaction.requiredStatus);
+      }
+      const rAbsorbed = Math.min(target.shield, rawBonus);
+      if (rAbsorbed > 0) {
+        target.shield -= rAbsorbed;
+        pushLog(state, {
+          type: "shield",
+          text: `${target.name}のシールドが反応ダメージ ${rAbsorbed} を吸収。`,
+          actorKey: attacker.key,
+          targetKey: target.key,
+          amount: rAbsorbed,
+          shieldAfter: target.shield,
+        });
+      }
+      const rDealt = rawBonus - rAbsorbed;
+      target.hp -= rDealt;
+      pushLog(state, {
+        type: "damage",
+        text: `属性反応【${reaction.name}】！${target.name}に ${rDealt} 追加ダメージ。`,
+        actorKey: attacker.key,
+        targetKey: target.key,
+        amount: rDealt,
+        hpAfter: Math.max(0, target.hp),
+        affinity: 1,
+        element: attacker.element,
+        reactionName: reaction.name,
+        ...(reaction.consumesStatus ? { removeStatusKind: reaction.requiredStatus } : {}),
+      });
+      if (!options?.noBurstCharge) addBurst(state, attacker.side, 14);
+      markDead(state, target);
+
+      if (reaction.id === "spread") {
+        for (const other of state.actors) {
+          if (other.side === target.side && other.key !== target.key && other.alive) {
+            addStatus(other, "burn", 2);
+            pushLog(state, {
+              type: "status",
+              text: `熱風が拡散し、${other.name}はやけどを負った。`,
+              actorKey: attacker.key,
+              targetKey: other.key,
+              statusKind: "burn",
+            });
+          }
+        }
+      } else if (reaction.id === "shatter" && attacker.alive) {
+        grantShield(state, attacker, attacker, 24, {
+          text: `岩盤粉砕の余波で ${attacker.name}にシールドを付与。`,
+        });
+      } else if (reaction.id === "judgment" && target.alive) {
+        addStatus(target, "guard_break", 2);
+        pushLog(state, {
+          type: "status",
+          text: `断罪の余波で ${target.name}の防御が崩れた。`,
+          actorKey: attacker.key,
+          targetKey: target.key,
+          statusKind: "guard_break",
+        });
+      } else if (reaction.id === "overload") {
+        addBurst(state, attacker.side, 18);
+      }
+    }
+  }
+
   if (tactics) {
     // 高密度化では誘発をスタックに積む（仕様 §3.6）
     if (dealt > 0 && target.alive && attacker.alive) {
@@ -483,11 +645,39 @@ function dealDamage(
   return dealt;
 }
 
-function healActor(state: BattleState, source: BattleActor, target: BattleActor, amount: number): number {
+function healActor(state: BattleState, source: BattleActor, target: BattleActor, rawAmount: number, label?: string): number {
+  const mult = (sideResonance(state, source.side)?.healShieldMult ?? 1) * (battleField(state).healShieldMult ?? 1);
+  const amount = Math.max(1, Math.floor(rawAmount * mult));
   const healed = Math.max(0, Math.min(amount, target.maxHp - target.hp));
   target.hp += healed;
-  pushLog(state, { type: "heal", text: `${target.name}のHPが ${healed} 回復。`, actorKey: source.key, targetKey: target.key, amount: healed, hpAfter: target.hp });
+  const text = label ? `${label}により ${target.name}のHPが ${healed} 回復。` : `${target.name}のHPが ${healed} 回復。`;
+  pushLog(state, { type: "heal", text, actorKey: source.key, targetKey: target.key, amount: healed, hpAfter: target.hp });
   return healed;
+}
+
+function grantShield(
+  state: BattleState,
+  source: BattleActor,
+  target: BattleActor,
+  rawAmount: number,
+  extra?: Partial<BattleEvent>,
+): number {
+  const mult = (sideResonance(state, source.side)?.healShieldMult ?? 1) * (battleField(state).healShieldMult ?? 1);
+  const amount = Math.max(1, Math.floor(rawAmount * mult));
+  target.shield += amount;
+  pushLog(state, {
+    type: "shield",
+    text: extra?.text ?? `${target.name}にシールド ${amount}。`,
+    actorKey: source.key,
+    targetKey: target.key,
+    amount,
+    shieldAfter: target.shield,
+    ...(extra?.element ? { element: extra.element } : {}),
+    ...(extra?.skillName ? { skillName: extra.skillName } : {}),
+    ...(typeof extra?.skillPower === "number" ? { skillPower: extra.skillPower } : {}),
+    ...(extra?.cutIn ? { cutIn: extra.cutIn } : {}),
+  });
+  return amount;
 }
 
 /* --- 行動の実行 --- */
@@ -521,11 +711,97 @@ function resolveTarget(state: BattleState, actor: BattleActor, targetKey: string
   return fallback;
 }
 
-/** 1回の行動（技・通常攻撃・防御）を実行する。手番の進行はしない。 */
+/** 1回の行動（技・通常攻撃・防御・共鳴バースト）を実行する。手番の進行はしない。 */
 function executeAction(state: BattleState, actor: BattleActor, action: PlayerAction): void {
   if (action.skill === "defend") {
     actor.defending = true;
-    pushLog(state, { type: "info", text: `${actor.name}は防御した。次の自分のターンまで被ダメージ半減。`, actorKey: actor.key });
+    addBurst(state, actor.side, 18);
+    const guardPct = battleField(state).guardMult === 0.4 ? "60%軽減" : "半減";
+    pushLog(state, { type: "info", text: `${actor.name}は防御した。次の自分のターンまで被ダメージ${guardPct}。`, actorKey: actor.key });
+    if (hasRelic(state, actor.side, "relic_iron_vow")) {
+      grantShield(state, actor, actor, 24, { text: `黒鉄の誓約印により ${actor.name}にシールド付与。` });
+      addBurst(state, actor.side, 10);
+    }
+    return;
+  }
+  if (action.skill === "burst") {
+    const gauge = state.burst?.[actor.side] ?? 0;
+    if (gauge < 100) throw new Error("共鳴バーストがまだ溜まっていません。");
+    if (!state.burst) state.burst = { player: 0, cpu: 0 };
+    state.burst[actor.side] = 0;
+    const info = RESONANCE_BURST_INFO[actor.element];
+    pushLog(state, {
+      type: "info",
+      text: `${actor.name}の共鳴バースト【${info.name}】！`,
+      actorKey: actor.key,
+      element: actor.element,
+      skillName: info.name,
+      skillPower: 100,
+      cutIn: true,
+      burst: true,
+    });
+    const enemies = state.actors.filter((a) => a.side !== actor.side && a.alive);
+    const allies = state.actors.filter((a) => a.side === actor.side && a.alive);
+    if (actor.element === "fire") {
+      for (const enemy of enemies) {
+        if (!enemy.alive) continue;
+        dealDamage(state, actor, enemy, 68, 68, { noBurstCharge: true });
+        if (enemy.alive) {
+          addStatus(enemy, "burn", 2);
+          pushLog(state, { type: "status", text: `${enemy.name}はやけどを負った。`, actorKey: actor.key, targetKey: enemy.key, statusKind: "burn" });
+        }
+      }
+    } else if (actor.element === "water") {
+      for (const enemy of enemies) {
+        if (!enemy.alive) continue;
+        dealDamage(state, actor, enemy, 52, 52, { noBurstCharge: true });
+      }
+      for (const ally of allies) {
+        if (!ally.alive) continue;
+        healActor(state, actor, ally, Math.max(16, Math.floor(ally.maxHp * 0.22)));
+        grantShield(state, actor, ally, 20);
+      }
+    } else if (actor.element === "wind") {
+      for (const enemy of enemies) {
+        if (!enemy.alive) continue;
+        dealDamage(state, actor, enemy, 58, 58, { noBurstCharge: true });
+      }
+      if (state.tactics) {
+        drawTacticCards(state, actor.side, 2);
+        pushLog(state, { type: "info", text: `烈風の追い風で戦術カードを2枚引いた。`, actorKey: actor.key });
+      }
+    } else if (actor.element === "earth") {
+      for (const ally of allies) {
+        if (!ally.alive) continue;
+        grantShield(state, actor, ally, 45);
+      }
+      for (const enemy of enemies) {
+        if (!enemy.alive) continue;
+        dealDamage(state, actor, enemy, 42, 42, { noBurstCharge: true });
+      }
+    } else if (actor.element === "light") {
+      const target = resolveTarget(state, actor, action.targetKey, "enemy");
+      dealDamage(state, actor, target, 115, 115, { noBurstCharge: true });
+      for (const ally of allies) {
+        if (!ally.alive) continue;
+        grantShield(state, actor, ally, 20);
+      }
+    } else {
+      // dark
+      let totalDealt = 0;
+      for (const enemy of enemies) {
+        if (!enemy.alive) continue;
+        totalDealt += dealDamage(state, actor, enemy, 64, 64, { noBurstCharge: true });
+        if (enemy.alive) {
+          addStatus(enemy, "guard_break", 2);
+          pushLog(state, { type: "status", text: `${enemy.name}の防御が崩れた。`, actorKey: actor.key, targetKey: enemy.key, statusKind: "guard_break" });
+        }
+      }
+      if (totalDealt > 0 && actor.alive) {
+        healActor(state, actor, actor, Math.max(10, Math.floor(totalDealt * 0.25)));
+      }
+    }
+    if (state.tactics) drainStack(state);
     return;
   }
   if (action.skill === "basic") {
@@ -543,8 +819,8 @@ function executeAction(state: BattleState, actor: BattleActor, action: PlayerAct
 
   if (skill.kind === "heal") {
     const target = resolveTarget(state, actor, action.targetKey, "ally");
-    const atk = effectiveAtk(actor);
-    const amount = Math.max(1, Math.floor(skill.power * (atk / (atk + effectiveDef(target))) * (0.8 + nextRandom(state) * 0.4)));
+    const atk = effectiveAtk(state, actor);
+    const amount = Math.max(1, Math.floor(skill.power * (atk / (atk + effectiveDef(state, target))) * (0.8 + nextRandom(state) * 0.4)));
     pushLog(state, {
       type: "info",
       text: `${actor.name}の「${skill.name}」。`,
@@ -556,23 +832,27 @@ function executeAction(state: BattleState, actor: BattleActor, action: PlayerAct
       cutIn: isCutIn,
     });
     healActor(state, actor, target, amount);
+    addBurst(state, actor.side, 12);
     return;
   }
   if (skill.kind === "shield") {
     const target = resolveTarget(state, actor, action.targetKey, "ally");
-    target.shield += skill.power;
+    const mult = (sideResonance(state, actor.side)?.healShieldMult ?? 1) * (battleField(state).healShieldMult ?? 1);
+    const amount = Math.max(1, Math.floor(skill.power * mult));
+    target.shield += amount;
     pushLog(state, {
       type: "shield",
-      text: `${actor.name}の「${skill.name}」。${target.name}にシールド ${skill.power}。`,
+      text: `${actor.name}の「${skill.name}」。${target.name}にシールド ${amount}。`,
       actorKey: actor.key,
       targetKey: target.key,
-      amount: skill.power,
+      amount,
       shieldAfter: target.shield,
       element: actor.element,
       skillName: skill.name,
       skillPower: skill.power,
       cutIn: isCutIn,
     });
+    addBurst(state, actor.side, 12);
     return;
   }
   if (skill.kind === "overdrive") {
@@ -589,6 +869,7 @@ function executeAction(state: BattleState, actor: BattleActor, action: PlayerAct
       skillPower: skill.power,
       cutIn: isCutIn,
     });
+    addBurst(state, actor.side, 12);
     return;
   }
   // 攻撃系（damage / burn / stun / guard_break / drain）
@@ -872,8 +1153,7 @@ function resolveTacticEffect(state: BattleState, effect: TacticEffect, ctx: Tact
     case "shield": {
       const target = effect.target === "allyLowest" ? lowestAllyOf(state, ctx.side) : effect.target === "linked" ? linked : lowestAllyOf(state, ctx.side);
       if (target && target.alive) {
-        target.shield += effect.n;
-        pushLog(state, { type: "shield", text: `${target.name}にシールド ${effect.n}。`, actorKey: linked.key, targetKey: target.key, amount: effect.n, shieldAfter: target.shield });
+        grantShield(state, linked, target, effect.n);
       }
       break;
     }
@@ -881,16 +1161,15 @@ function resolveTacticEffect(state: BattleState, effect: TacticEffect, ctx: Tact
       const target = lowestAllyOf(state, ctx.side);
       if (target && target.alive) {
         const amount = Math.min(effect.cap, effect.base + effect.per * sideState.discard.length);
-        target.shield += amount;
-        pushLog(state, { type: "shield", text: `${target.name}にシールド ${amount}。`, actorKey: linked.key, targetKey: target.key, amount, shieldAfter: target.shield });
+        grantShield(state, linked, target, amount);
       }
       break;
     }
     case "heal": {
       const target = lowestAllyOf(state, ctx.side);
       if (target && target.alive) {
-        const atk = effectiveAtk(linked);
-        const amount = Math.max(1, Math.floor(effect.power * (atk / (atk + effectiveDef(target))) * (0.8 + nextRandom(state) * 0.4)));
+        const atk = effectiveAtk(state, linked);
+        const amount = Math.max(1, Math.floor(effect.power * (atk / (atk + effectiveDef(state, target))) * (0.8 + nextRandom(state) * 0.4)));
         healActor(state, linked, target, amount);
       }
       break;
@@ -1056,7 +1335,10 @@ function processTurnStart(state: BattleState, actor: BattleActor): boolean {
   actor.cooldowns = [Math.max(0, actor.cooldowns[0] - 1), Math.max(0, actor.cooldowns[1] - 1)] as [number, number];
   actor.defending = false;
   if (hasStatus(actor, "burn")) {
-    const burnDamage = Math.max(1, Math.floor(actor.maxHp * 0.06));
+    let burnMult = battleField(state).burnDamageMult ?? 1;
+    const enemySide = actor.side === "player" ? "cpu" : "player";
+    if (hasRelic(state, enemySide, "relic_ember_core")) burnMult *= 1.35;
+    const burnDamage = Math.max(1, Math.floor(actor.maxHp * 0.06 * burnMult));
     actor.hp -= burnDamage;
     pushLog(state, { type: "status", text: `${actor.name}はやけどで ${burnDamage} ダメージ。`, targetKey: actor.key, amount: burnDamage, hpAfter: Math.max(0, actor.hp), statusKind: "burn" });
     markDead(state, actor);
@@ -1088,7 +1370,7 @@ function buildQueue(state: BattleState): void {
   }
   state.queue = state.actors
     .filter((actor) => actor.alive)
-    .sort((a, b) => queueSpeed(b) - queueSpeed(a) || (tieBreakers.get(a.key) ?? 0) - (tieBreakers.get(b.key) ?? 0))
+    .sort((a, b) => queueSpeed(state, b) - queueSpeed(state, a) || (tieBreakers.get(a.key) ?? 0) - (tieBreakers.get(b.key) ?? 0))
     .map((actor) => actor.key);
   state.queuePos = 0;
 }
@@ -1108,6 +1390,23 @@ function advanceToPlayerTurn(state: BattleState): void {
         return;
       }
       state.round += 1;
+      const erosion = battleField(state).roundErosionPct ?? 0;
+      if (erosion > 0) {
+        for (const a of state.actors) {
+          if (!a.alive || a.hp <= 1) continue;
+          const dmg = Math.min(a.hp - 1, Math.max(1, Math.floor(a.maxHp * erosion)));
+          if (dmg > 0) {
+            a.hp -= dmg;
+            pushLog(state, {
+              type: "status",
+              text: `深淵の瘴気が ${a.name}を ${dmg} 侵蝕。`,
+              targetKey: a.key,
+              amount: dmg,
+              hpAfter: a.hp,
+            });
+          }
+        }
+      }
       startRoundTactics(state);
       buildQueue(state);
       continue;
@@ -1198,8 +1497,19 @@ export function createBattle(
     title?: string;
     floor?: number;
     rivalName?: string;
+    fieldId?: BattleFieldId;
+    playerRelics?: string[];
+    cpuRelics?: string[];
   },
 ): BattleState {
+  const fieldId: BattleFieldId = options?.fieldId ?? "neutral";
+  const playerRes = evaluatePartyResonance(playerTeam);
+  const cpuRes = evaluatePartyResonance(enemyTeam);
+  const playerRelics = [...(options?.playerRelics ?? [])];
+  const cpuRelics = [...(options?.cpuRelics ?? [])];
+  const startBurstFor = (res: PartyResonance, relics: string[]) =>
+    Math.min(100, res.startBurst + (relics.includes("relic_resonance_bell") ? 35 : 0));
+
   const state: BattleState = {
     id,
     tierIndex,
@@ -1215,31 +1525,60 @@ export function createBattle(
     seed,
     rngState: seed >>> 0,
     turnCount: 0,
+    fieldId,
+    resonance: { player: playerRes, cpu: cpuRes },
+    relics: { player: playerRelics, cpu: cpuRelics },
+    burst: {
+      player: startBurstFor(playerRes, playerRelics),
+      cpu: startBurstFor(cpuRes, cpuRelics),
+    },
     ...(options?.mode ? { mode: options.mode } : {}),
     ...(options?.title ? { title: options.title } : {}),
     ...(typeof options?.floor === "number" ? { floor: options.floor } : {}),
     ...(options?.rivalName ? { rivalName: options.rivalName } : {}),
   };
   pushLog(state, { type: "info", text: "対戦開始。" });
+  const fieldDef = battleField(state);
+  if (fieldId !== "neutral") {
+    pushLog(state, { type: "info", text: `地脈【${fieldDef.name}】が戦場を覆う（${fieldDef.shortTag}）。` });
+  }
+  pushLog(state, { type: "info", text: `自軍共鳴【${playerRes.name}】発動（${playerRes.description}）。` });
+
+  // 開幕遺物効果: 真鍮の防壁章（全員にシールド +28）
+  for (const side of ["player", "cpu"] as const) {
+    if (hasRelic(state, side, "relic_aegis")) {
+      const members = state.actors.filter((a) => a.side === side && a.alive);
+      if (members.length > 0) {
+        for (const m of members) {
+          grantShield(state, members[0], m, 28, { text: `遺物「真鍮の防壁章」により ${m.name}に初期シールド付与。` });
+        }
+      }
+    }
+  }
+
   if (options?.tacticDecks) {
     // 高密度化: 戦術デッキを seeded 乱数でシャッフルし、初期手札を配る
-    const freshSide = (deckList: string[] | null): TacticSideState => {
+    const freshSide = (deckList: string[] | null, side: "player" | "cpu"): TacticSideState => {
       const deck = [...(deckList ?? [])];
       for (let i = deck.length - 1; i > 0; i--) {
         const j = Math.floor(nextRandom(state) * (i + 1));
         [deck[i], deck[j]] = [deck[j], deck[i]];
       }
-      return { deck, hand: [], discard: [], tp: TACTIC_TP_PER_ROUND, reserves: [], lastPlayedEffects: null };
+      const bonusTp = hasRelic(state, side, "relic_chronometer") ? 1 : 0;
+      return { deck, hand: [], discard: [], tp: TACTIC_TP_PER_ROUND + bonusTp, reserves: [], lastPlayedEffects: null };
     };
     state.tactics = {
-      player: freshSide(options.tacticDecks.player),
-      cpu: freshSide(options.tacticDecks.cpu),
+      player: freshSide(options.tacticDecks.player, "player"),
+      cpu: freshSide(options.tacticDecks.cpu, "cpu"),
       turn: { actorKey: "", side: "player", dmgCount: 0, statusesApplied: [], tagsPlayed: [], cardsPlayed: 0, tpUsed: [] },
       stack: [],
       effectDepth: 0,
     };
     for (const side of ["player", "cpu"] as const) {
-      if (state.tactics[side].deck.length > 0) drawTacticCards(state, side, TACTIC_INITIAL_HAND);
+      if (state.tactics[side].deck.length > 0) {
+        const bonusDraw = hasRelic(state, side, "relic_chronometer") ? 1 : 0;
+        drawTacticCards(state, side, TACTIC_INITIAL_HAND + bonusDraw);
+      }
     }
   }
   buildQueue(state);
@@ -1247,10 +1586,13 @@ export function createBattle(
   return state;
 }
 
-/** その技で合法な対象の key 一覧。防御は対象なし（空配列）。 */
-export function legalTargets(state: BattleState, actor: BattleActor, skillIndex: 0 | 1 | "basic" | "defend"): string[] {
+/** その技で合法な対象の key 一覧。防御・全体バーストは対象なし（空配列）。 */
+export function legalTargets(state: BattleState, actor: BattleActor, skillIndex: 0 | 1 | "basic" | "defend" | "burst"): string[] {
   if (skillIndex === "defend") return [];
   const enemies = state.actors.filter((candidate) => candidate.side !== actor.side && candidate.alive).map((candidate) => candidate.key);
+  if (skillIndex === "burst") {
+    return actor.element === "light" ? enemies : [];
+  }
   if (skillIndex === "basic") return enemies;
   const skill = actor.skills[skillIndex];
   if (!skill) return [];
@@ -1294,15 +1636,23 @@ export function applyAction(state: BattleState, action: PlayerAction): BattleSta
 }
 
 /**
- * CPU の決定的ポリシー（仕様 §4）:
- * 回復は味方HP<50%で、状態異常は未付与の対象へ、強技はCD明け即使用、
- * 攻撃対象は最もHPの低い敵。防御はしない。
+ * CPU の決定的ポリシー（仕様 §4 + 共鳴バースト対応）:
+ * 共鳴バースト満タンなら発動、回復は味方HP<50%で、状態異常は未付与の対象へ、
+ * 強技はCD明け即使用、攻撃対象は最もHPの低い敵。防御はしない。
  */
 export function cpuChooseAction(state: BattleState, actor: BattleActor): PlayerAction {
   const allies = state.actors.filter((candidate) => candidate.side === actor.side && candidate.alive);
   const enemies = state.actors.filter((candidate) => candidate.side !== actor.side && candidate.alive);
   const lowestEnemy = enemies.slice().sort((a, b) => a.hp - b.hp || a.key.localeCompare(b.key))[0];
   const ready = (index: 0 | 1) => actor.cooldowns[index] === 0;
+
+  // 共鳴バースト: 満タンなら優先発動（CPUはティア2以上または深淵/PvPのみ使用）
+  const canBurst =
+    (state.burst?.[actor.side] ?? 0) >= 100 &&
+    (actor.side === "player" || state.tierIndex >= 2 || state.mode === "abyss" || state.mode === "pvp");
+  if (canBurst && lowestEnemy) {
+    return actor.element === "light" ? { skill: "burst", targetKey: lowestEnemy.key } : { skill: "burst" };
+  }
 
   // 回復: HP割合が50%未満の味方がいれば最も割合の低い味方へ
   for (const index of [0, 1] as const) {

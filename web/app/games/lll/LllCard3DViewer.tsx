@@ -54,7 +54,7 @@ export default function LllCard3DViewer({
     summonStartRef.current = performance.now();
 
     const stage = createStage(el, {
-      background: card.tier === "legend" ? 0x1a1308 : card.tier === "elite" ? 0x160f2b : 0x100d1f,
+      background: card.tier === "legend" ? 0x17130c : card.tier === "elite" ? 0x0f1620 : 0x101318,
       camera: { position: [0, 0.3, 4.35], lookAt: [0, 0, 0], fov: 40 },
       pixelRatioCap: 2,
       onFrame: (dt, t) => {
@@ -71,7 +71,7 @@ export default function LllCard3DViewer({
             if (pillarMesh) {
               pillarMesh.visible = true;
               pillarMesh.scale.set(1.2 - p * 0.4, 1, 1.2 - p * 0.4);
-              (pillarMesh.material as THREE.MeshBasicMaterial).opacity = 0.55 * (1 - p * 0.5);
+              (pillarMesh.material as THREE.MeshBasicMaterial).opacity = 0.5 * (1 - p * 0.5);
             }
           } else {
             const settle = Math.min(1, (elapsed - 0.95) / 0.35);
@@ -90,14 +90,14 @@ export default function LllCard3DViewer({
         }
 
         if (ringMesh) {
-          ringMesh.rotation.z = t * 0.28;
+          ringMesh.rotation.z = t * 0.22;
         }
         if (holoLight) {
           holoLight.position.x = Math.sin(t * 2.1) * 2.4;
           holoLight.position.y = Math.cos(t * 1.5) * 1.8;
         }
         if (motes) {
-          motes.rotation.y = t * 0.15;
+          motes.rotation.y = t * 0.14;
         }
       },
     });
@@ -111,18 +111,19 @@ export default function LllCard3DViewer({
     stageRef.current = stage;
 
     // ホログラム用ライト
-    holoLight = new THREE.PointLight(card.tier === "legend" ? 0xffe484 : elColor, 3.2, 10);
+    holoLight = new THREE.PointLight(card.tier === "legend" ? 0xe8c77f : elColor, 2.8, 10);
     holoLight.position.set(1.5, 1.5, 2.8);
     stage.scene.add(holoLight);
 
-    // 背面魔法陣リング
-    const circleTex = createArenaCircleTexture(card.tier === "legend" ? "#f5c518" : "#a78bfa");
+    // 背面幾何学リング
+    const ringHex = card.tier === "legend" ? "#d4a24c" : card.tier === "elite" ? "#5b9bd5" : "#6c7588";
+    const circleTex = createArenaCircleTexture(ringHex);
     ringMesh = new THREE.Mesh(
       new THREE.PlaneGeometry(3.4, 3.4),
       new THREE.MeshBasicMaterial({
         map: circleTex,
         transparent: true,
-        opacity: card.tier === "legend" ? 0.65 : 0.4,
+        opacity: card.tier === "legend" ? 0.55 : 0.35,
         depthWrite: false,
       }),
     );
@@ -135,7 +136,7 @@ export default function LllCard3DViewer({
       new THREE.MeshBasicMaterial({
         color: tierColor,
         transparent: true,
-        opacity: 0.45,
+        opacity: 0.4,
         side: THREE.DoubleSide,
         blending: THREE.AdditiveBlending,
         depthWrite: false,
@@ -144,9 +145,9 @@ export default function LllCard3DViewer({
     pillarMesh.visible = mode === "summon";
     stage.scene.add(pillarMesh);
 
-    // 浮遊マナ粒子
+    // 浮遊粒子
     const glowTex = createGlowSpriteTexture();
-    const count = card.tier === "legend" ? 42 : 24;
+    const count = card.tier === "legend" ? 36 : 20;
     const pos = new Float32Array(count * 3);
     for (let i = 0; i < count; i++) {
       pos[i * 3] = (Math.random() - 0.5) * 3.8;
@@ -158,11 +159,11 @@ export default function LllCard3DViewer({
     motes = new THREE.Points(
       geo,
       new THREE.PointsMaterial({
-        color: card.tier === "legend" ? 0xffe066 : elColor,
-        size: 0.13,
+        color: card.tier === "legend" ? 0xe6c07b : elColor,
+        size: 0.12,
         map: glowTex,
         transparent: true,
-        opacity: 0.75,
+        opacity: 0.6,
         blending: THREE.AdditiveBlending,
         depthWrite: false,
       }),
@@ -178,13 +179,13 @@ export default function LllCard3DViewer({
     const backTex = createCardBackTexture();
     const frameMat = new THREE.MeshStandardMaterial({
       color: tierColor,
-      roughness: card.tier === "normal" ? 0.5 : 0.22,
-      metalness: card.tier === "legend" ? 0.8 : card.tier === "elite" ? 0.55 : 0.2,
+      roughness: card.tier === "normal" ? 0.5 : 0.24,
+      metalness: card.tier === "legend" ? 0.78 : card.tier === "elite" ? 0.52 : 0.22,
     });
     const faceMat = new THREE.MeshStandardMaterial({
       map: faceTex,
-      roughness: card.tier === "normal" ? 0.65 : 0.25,
-      metalness: card.tier === "legend" ? 0.35 : 0.15,
+      roughness: card.tier === "normal" ? 0.65 : 0.26,
+      metalness: card.tier === "legend" ? 0.3 : 0.14,
     });
     const backMat = new THREE.MeshStandardMaterial({
       map: backTex,
@@ -245,13 +246,13 @@ export default function LllCard3DViewer({
   return (
     <SceneBox
       height={height}
-      label={`${card.name} 3Dホログラムビューア`}
+      label={`${card.name} 3Dビューア`}
       ready={ready}
       failed={failed}
       fallback={fallback}
       containerRef={containerRef}
-      background={card.tier === "legend" ? "#1a1308" : "#100d1f"}
-      radius={12}
+      background={card.tier === "legend" ? "#17130c" : card.tier === "elite" ? "#0f1620" : "#101318"}
+      radius={10}
     />
   );
 }
