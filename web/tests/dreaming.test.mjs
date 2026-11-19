@@ -79,6 +79,7 @@ const game = await loadBundle(
     "pulseDream",
     "toggleAnchor",
     "setDreamTemperature",
+    "ambientTemperatureFor",
     "driftDreamTick",
     "descendDream",
     "redriftDream",
@@ -481,34 +482,26 @@ test("品質制約: 外部 AI API・Transformer・ネオン紫AIスロップ・�
   }
 });
 
-test("文脈UI補助 & フルブリード初期状態: getAdjacentContext が隣接要素を検出し、LSTMパネルは初期閉じになっている", () => {
+test("ゼロUI＆ジョイスティック構成 + 温度の自律呼吸: ボタンや設定UIを置かずジョイスティック移動と自律温度呼吸で動く", () => {
   let s = game.createDreamGame(2026);
   const initialCtx = game.getAdjacentContext(s);
   assert.equal(initialCtx.hasAnchor, false);
 
-  // しおりを留めると hasAnchor が true になる
   s = game.toggleAnchor(s);
   assert.equal(game.getAdjacentContext(s).hasAnchor, true);
 
-  // 隣にモチーフと裂け目を置くとそれぞれ文脈検出される
-  const east = s.tiles.get(game.tileKey(1, 0));
-  east.motif = {
-    id: "clock",
-    generation: 2,
-    name: "とけいのはり",
-    originDomain: "station",
-    domain: s.dominantDomain,
-  };
-  const west = s.tiles.get(game.tileKey(-1, 0));
-  west.kind = "rift";
+  // 深度と RNN ステップで温度が安全範囲内で自然に呼吸し、深層ほど高温寄りになる
+  const shallowAvg =
+    Array.from({ length: 40 }, (_, i) => game.ambientTemperatureFor(1, i)).reduce((a, b) => a + b, 0) / 40;
+  const deepAvg =
+    Array.from({ length: 40 }, (_, i) => game.ambientTemperatureFor(6, i)).reduce((a, b) => a + b, 0) / 40;
+  assert.ok(shallowAvg >= 0.45 && shallowAvg <= 1.85);
+  assert.ok(deepAvg > shallowAvg, `深層ほど自律温度が高まるはず: shallow=${shallowAvg}, deep=${deepAvg}`);
 
-  const ctx = game.getAdjacentContext(s);
-  assert.equal(ctx.motif?.id, "clock");
-  assert.equal(ctx.motif?.generation, 2);
-  assert.equal(ctx.hasRift, true);
-
+  // クライアントにボタン・スライダー・設定パネル・ヘッダー・フッターなどのUIを一切置かない
   const clientSrc = fs.readFileSync(path.join(webDir, "app/games/dreaming/DreamingClient.tsx"), "utf8");
-  assert.match(clientSrc, /const \[showRnn, setShowRnn\] = useState\(false\);/, "LSTMパネルが初期表示で開いたままになっている");
+  assert.match(clientSrc, /className="dreaming-joystick"/, "最低限のジョイスティック移動UIがない");
+  assert.doesNotMatch(clientSrc, /<button\b|<input\b|<header\b|<footer\b|<aside\b|<Link\b/, "不要なボタン・設定・HUD要素が残っている");
 });
 
 test("リアルタイム自律夢遊（driftDreamTick）: 立ち止まったまま LSTM が漂流し、しおり保護域を保ちつつ周辺地形が変容する", () => {
