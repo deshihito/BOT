@@ -11,12 +11,18 @@ after カーソルでその直後の発言をピンポイント取得する。�
 履歴が多いチャンネルほど重いため通常経路では使わない。
 代わりに均一性は「発言数」ではなく「時間」基準になる（発言が密集した
 時期の発言は当たりにくい）。
+
+「コメントガチャ#チャンネル名」（末尾の #名前、またはチャンネル
+メンション）で掘り返し先のチャンネルを指定できる。再投稿は発動した
+チャンネルへ行う。再投稿の本文は、メンションが飛ばないよう
+allowed_mentions=none に加えてトークン自体も無力化する。
 """
 from __future__ import annotations
 
 import asyncio
 import logging
 import random
+import re
 import time
 from typing import Any
 
@@ -118,6 +124,72 @@ async def draw_random_message(channel: Any, *, exclude_id: Any) -> Any | None:
     return None
 
 
+_USER_MENTION_RE = re.compile(r"<@!?(\d+)>")
+_ROLE_MENTION_RE = re.compile(r"<@&(\d+)>")
+_TRAILING_CHANNEL_RE = re.compile(r"#([^\s#]+)\s*$")
+_ZERO_WIDTH = "​"
+
+
+def _neutralize_mentions(content: str, source: Any) -> str:
+    """再投稿でメンションが飛ばないよう、通知が飛ぶトークンを無力化する。
+
+    allowed_mentions=none と二重に対策する。本文の見た目はできるだけ保ち、
+    ユーザー/ロールは名前が引ければ @名前 のプレーンテキストに、
+    引けなければゼロ幅スペースを挟んで生テキスト化する。
+    チャンネルメンション（<#id>）は通知が飛ばないのでそのまま残す。
+    """
+    if not content:
+        return content
+    users = {m.id: m for m in getattr(source, "mentions", None) or []}
+    roles = {r.id: r for r in getattr(source, "role_mentions", None) or []}
+
+    def user_sub(match: re.Match) -> str:
+        member = users.get(int(match.group(1)))
+        if member is not None:
+            return f"@{member.display_name}"
+        return f"<@{_ZERO_WIDTH}{match.group(1)}>"
+
+    def role_sub(match: re.Match) -> str:
+        role = roles.get(int(match.group(1)))
+        if role is not None:
+            return f"@{role.name}"
+        return f"<@&{_ZERO_WIDTH}{match.group(1)}>"
+
+    content = _USER_MENTION_RE.sub(user_sub, content)
+    content = _ROLE_MENTION_RE.sub(role_sub, content)
+    return content.replace("@everyone", f"@{_ZERO_WIDTH}everyone").replace(
+        "@here", f"@{_ZERO_WIDTH}here"
+    )
+
+
+def _resolve_source_channel(message: Any) -> Any | None:
+    """「コメントガチャ#チャンネル名」の掘り返し先チャンネルを解決する。
+
+    指定が無ければ発言チャンネル。指定があるのに解決できなければ None
+    （掘り返し先が分からないので何もしない）。チャンネルメンション
+    （<#id>）がトリガー語より後ろにあればそれを、無ければ末尾の
+    #名前 をギルド内のチャンネル名と照合する。
+    """
+    content = getattr(message, "content", "") or ""
+    trigger_at = content.find(TRIGGER_PHRASE)
+    tail = content[trigger_at + len(TRIGGER_PHRASE):] if trigger_at >= 0 else ""
+    for mentioned in getattr(message, "channel_mentions", None) or []:
+        if f"<#{mentioned.id}>" in tail:
+            return mentioned
+    match = _TRAILING_CHANNEL_RE.search(tail)
+    if match is None:
+        return message.channel
+    guild = getattr(message, "guild", None)
+    name = match.group(1)
+    candidates = list(getattr(guild, "text_channels", None) or []) + list(
+        getattr(guild, "threads", None) or []
+    )
+    for candidate in candidates:
+        if getattr(candidate, "name", None) == name:
+            return candidate
+    return None
+
+
 class CommentGachaCog(commands.Cog):
     def __init__(self, bot: commands.Bot, clock=time.monotonic):
         self.bot = bot
@@ -134,6 +206,10 @@ class CommentGachaCog(commands.Cog):
             return
         if getattr(message, "guild", None) is None:
             return
+        source_channel = _resolve_source_channel(message)
+        if source_channel is None:
+            # #指定があったのに掘り返し先が解決できない場合は何もしない。
+            return
         channel_id = message.channel.id
         lock = self._locks.setdefault(channel_id, asyncio.Lock())
         if lock.locked():
@@ -143,30 +219,36 @@ class CommentGachaCog(commands.Cog):
             if now - self._last_drawn.get(channel_id, float("-inf")) < COOLDOWN_SECONDS:
                 return
             self._last_drawn[channel_id] = now
-            await self._draw(message)
+            await self._draw(message, source_channel)
 
-    async def _draw(self, trigger_message: discord.Message):
+    async def _draw(self, trigger_message: discord.Message, source_channel: Any):
         channel = trigger_message.channel
         guild = trigger_message.guild
         me = getattr(guild, "me", None)
         if me is not None:
             try:
-                permissions = channel.permissions_for(me)
+                post_permissions = channel.permissions_for(me)
+                source_permissions = (
+                    source_channel.permissions_for(me)
+                    if source_channel is not channel
+                    else post_permissions
+                )
             except Exception:
-                permissions = None
-            if permissions is not None and not (
-                getattr(permissions, "manage_webhooks", False)
-                and getattr(permissions, "read_message_history", False)
+                post_permissions = source_permissions = None
+            if post_permissions is not None and source_permissions is not None and not (
+                getattr(post_permissions, "manage_webhooks", False)
+                and getattr(source_permissions, "read_message_history", False)
             ):
                 logger.warning(
-                    "コメントガチャにはWebhook管理とメッセージ履歴の閲覧権限が必要です (guild=%s channel=%s)",
+                    "コメントガチャにはWebhook管理とメッセージ履歴の閲覧権限が必要です (guild=%s channel=%s source=%s)",
                     guild.id,
                     channel.id,
+                    getattr(source_channel, "id", None),
                 )
                 return
         started = time.monotonic()
         try:
-            source = await draw_random_message(channel, exclude_id=trigger_message.id)
+            source = await draw_random_message(source_channel, exclude_id=trigger_message.id)
             if source is None:
                 return
             await self._repost(channel, source)
@@ -208,7 +290,9 @@ class CommentGachaCog(commands.Cog):
                 logger.debug("コメントガチャの添付取得に失敗しました", exc_info=True)
         author = source.author
         kwargs: dict[str, Any] = {
-            "content": (getattr(source, "content", "") or "")[:2000] or None,
+            "content": _neutralize_mentions(
+                getattr(source, "content", "") or "", source
+            )[:2000] or None,
             "username": str(getattr(author, "display_name", "メンバー"))[:80],
             "avatar_url": str(author.display_avatar.url),
             "files": files,
