@@ -75,16 +75,23 @@ async def draw_random_message(channel: Any, *, exclude_id: Any) -> Any | None:
     落ちても、after 取得は次の実在発言を返すためそのまま候補になる。
     """
     first = await _edge_message(channel, oldest=True)
-    latest = await _edge_message(channel, oldest=False)
-    if first is None or latest is None:
+    if first is None:
         return None
-    if latest.id <= first.id:
-        return latest if _eligible(latest, exclude_id=exclude_id) else None
+    # 最新IDはゲートウェイが保持するキャッシュから取る（APIを叩かない）。
+    latest_id = getattr(channel, "last_message_id", None)
+    if latest_id is None:
+        latest = await _edge_message(channel, oldest=False)
+        if latest is None:
+            return None
+        latest_id = latest.id
+    if latest_id <= first.id:
+        # チャンネルの発言が実質1件だけの場合はそれが候補。
+        return first if _eligible(first, exclude_id=exclude_id) else None
     history = getattr(channel, "history", None)
     if not callable(history):
         return None
     for _ in range(DRAW_ATTEMPTS):
-        pivot = random.randint(first.id, latest.id)
+        pivot = random.randint(first.id, latest_id)
         window = []
         async for candidate in history(
             limit=DRAW_WINDOW,
@@ -144,11 +151,17 @@ class CommentGachaCog(commands.Cog):
                     channel.id,
                 )
                 return
+        started = time.monotonic()
         try:
             source = await draw_random_message(channel, exclude_id=trigger_message.id)
             if source is None:
                 return
             await self._repost(channel, source)
+            logger.debug(
+                "コメントガチャ再投稿まで %.2f秒 (channel=%s)",
+                time.monotonic() - started,
+                channel.id,
+            )
         except discord.Forbidden:
             logger.warning(
                 "コメントガチャの履歴取得または再投稿が拒否されました (guild=%s channel=%s)",

@@ -37,6 +37,7 @@ class FakeChannel:
     def __init__(self, messages=(), *, manage_webhooks=True, read_history=True):
         self.id = 100
         self._messages = list(messages)
+        self.last_message_id = self._messages[0].id if self._messages else None
         self.webhook = FakeWebhook()
         self.create_webhook = AsyncMock(return_value=self.webhook)
         self._permissions = types.SimpleNamespace(
@@ -181,6 +182,19 @@ class CommentGachaCogTest(unittest.IsolatedAsyncioTestCase):
                 patch.object(commentgacha.random, "choice", side_effect=lambda seq: seq[0]):
             chosen = await commentgacha.draw_random_message(channel, exclude_id=999)
         self.assertEqual(chosen.id, 300)
+
+    async def test_draw_falls_back_to_fetching_latest_without_cache(self):
+        channel = FakeChannel([
+            hist_message(300, "最新の発言"),
+            hist_message(200, "真ん中の発言"),
+            hist_message(100, "最古の発言"),
+        ])
+        channel.last_message_id = None
+        with patch.object(commentgacha.random, "randint", return_value=150) as roll, \
+                patch.object(commentgacha.random, "choice", side_effect=lambda seq: seq[0]):
+            chosen = await commentgacha.draw_random_message(channel, exclude_id=999)
+        roll.assert_called_once_with(100, 300)
+        self.assertEqual(chosen.id, 200)
 
     async def test_draw_returns_none_without_candidates(self):
         channel = FakeChannel([
