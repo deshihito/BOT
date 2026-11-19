@@ -167,13 +167,14 @@ const DOMAIN_AMBIENCE: Record<
 };
 
 /**
- * 現在の RNN 領域混合分布と温度に応じて、微かな夢の環境ドローンを連続調律する。
- * ミュート中は即座に無音化し、ユーザー操作後に穏やかに立ち上がる。
+ * 現在の RNN 領域混合分布・温度・恐怖度 dread に応じて、夢の環境ドローンを連続調律する。
+ * dread が高まるほど完全五度が増四度（トライトーン）へ不穏に歪み、テープ揺らぎと暗騒音が増す。
  */
 export function updateDreamAmbience(
   domainWeights: Record<DomainId, number>,
   temperature: number,
   depth: number,
+  dread = 0,
 ): void {
   if (isSfxMuted()) {
     stopDreamAmbience();
@@ -266,21 +267,28 @@ export function updateDreamAmbience(
       airVol += cfg.airVol * w;
     }
 
-    // 深層ほどわずかに低く沈み、温度が高いほどテープ揺らぎが増す
-    const depthShift = Math.max(0.84, 1 - (depth - 1) * 0.025);
+    // 深層ほど低く沈み、恐怖度 dread が上がるほど完全五度が不協和（増四度）へ軋む
+    const clampedDread = Math.max(0, Math.min(1, dread));
+    const depthShift = Math.max(0.82, 1 - (depth - 1) * 0.026);
+    const tritoneBend = 1 - clampedDread * 0.062; // 1.5 -> ~1.407 (不穏なトライトーン)
+    const upperBend = 1 + clampedDread * 0.036;
     const t = c.currentTime;
-    ambience.osc1.frequency.setTargetAtTime(root * depthShift, t, 1.1);
-    ambience.osc2.frequency.setTargetAtTime(fifth * depthShift, t, 1.1);
-    ambience.osc3.frequency.setTargetAtTime(upper * depthShift, t, 1.3);
+    ambience.osc1.frequency.setTargetAtTime(root * depthShift, t, 1.0);
+    ambience.osc2.frequency.setTargetAtTime(fifth * depthShift * tritoneBend, t, 0.85);
+    ambience.osc3.frequency.setTargetAtTime(upper * depthShift * upperBend, t, 0.9);
 
-    const cutoff = Math.max(200, Math.min(620, 480 - (temperature - 0.6) * 140));
-    ambience.filter.frequency.setTargetAtTime(cutoff, t, 0.9);
-    ambience.lfoGain.gain.setTargetAtTime(1.2 + Math.max(0, temperature - 0.5) * 8.5, t, 0.8);
-    ambience.lfo.frequency.setTargetAtTime(0.11 + temperature * 0.09, t, 0.8);
+    const cutoff = Math.max(180, Math.min(680, 460 - (temperature - 0.6) * 120 + clampedDread * 190));
+    ambience.filter.frequency.setTargetAtTime(cutoff, t, 0.7);
+    ambience.lfoGain.gain.setTargetAtTime(
+      1.4 + Math.max(0, temperature - 0.5) * 9.5 + clampedDread * 28,
+      t,
+      0.6,
+    );
+    ambience.lfo.frequency.setTargetAtTime(0.11 + temperature * 0.1 + clampedDread * 0.35, t, 0.6);
 
-    ambience.master.gain.setTargetAtTime(0.024, t, 1.2);
-    ambience.noiseFilter.frequency.setTargetAtTime(airFreq, t, 1.0);
-    ambience.noiseGain.gain.setTargetAtTime(airVol, t, 1.1);
+    ambience.master.gain.setTargetAtTime(0.025 + clampedDread * 0.018, t, 0.9);
+    ambience.noiseFilter.frequency.setTargetAtTime(airFreq * (1 + clampedDread * 0.65), t, 0.8);
+    ambience.noiseGain.gain.setTargetAtTime(airVol + clampedDread * 0.012, t, 0.8);
   } catch {
     // no-op
   }
@@ -380,4 +388,28 @@ export function sfxDreamDescend(): void {
   softTone(293.66, 0.72, 0.048, "triangle", 0.1, 220.0);
   softTone(440.0, 0.62, 0.038, "sine", 0.22, 293.66);
   softNoise(0.55, 0.024, 480, 0.9, 0.05);
+}
+
+/** 影が接近しているときの低い心音（ドクン…ドクン…）。 */
+export function sfxDreamHeartbeat(intensity: number): void {
+  const v = Math.max(0.015, Math.min(0.11, 0.02 + intensity * 0.085));
+  softTone(64, 0.16, v, "sine", 0, 34);
+  softTone(56, 0.2, v * 0.78, "sine", 0.165, 30);
+}
+
+/** 懐中電灯の光錐に残響の影を捉えた瞬間の、冷たい不協和スティンガー。 */
+export function sfxDreamStalkerSpot(): void {
+  softTone(466.16, 0.62, 0.045, "triangle", 0, 448.0);
+  softTone(493.88, 0.68, 0.04, "sine", 0.02, 476.0);
+  softTone(92.5, 0.55, 0.055, "sine", 0, 68.0);
+  softNoise(0.32, 0.028, 1950, 3.2, 0);
+}
+
+/** 影に呑み込まれて一段深い悪夢層へ引きずり込まれるときのノイズと沈下音。 */
+export function sfxDreamConsumed(): void {
+  softNoise(0.85, 0.085, 760, 0.7, 0);
+  softNoise(0.65, 0.055, 2200, 1.4, 0.04);
+  softTone(185.0, 1.25, 0.085, "sawtooth", 0, 44.0);
+  softTone(196.0, 1.15, 0.065, "triangle", 0.04, 46.5);
+  softTone(62.0, 1.4, 0.095, "sine", 0.08, 32.0);
 }
