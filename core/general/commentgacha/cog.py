@@ -4,9 +4,11 @@
 トリガー語を含む発言に反応し、そのチャンネルの過去の発言から1件を
 抜き出して、元の投稿者の名前とアバターを付けた webhook で再投稿する。
 
-抜き出しは TakasumiBOT の /top と同じカーソル取得の応用: 最古と最新の
-発言IDの範囲でランダムなIDを引き、after カーソルでその直後の発言を
-ピンポイント取得する。全履歴の走査はしない（API数回で完結）。
+抜き出しは TakasumiBOT の /top と同じカーソル取得の応用: チャンネル
+作成（＝チャンネルID）から最新の発言IDの範囲でランダムなIDを引き、
+after カーソルでその直後の発言をピンポイント取得する。全履歴の走査は
+しない（通常は窓取得1回＋再投稿1回で完結）。最古発言の取得（after=0）は
+履歴が多いチャンネルほど重いため通常経路では使わない。
 代わりに均一性は「発言数」ではなく「時間」基準になる（発言が密集した
 時期の発言は当たりにくい）。
 """
@@ -68,15 +70,20 @@ async def _edge_message(channel: Any, *, oldest: bool) -> Any | None:
 
 
 async def draw_random_message(channel: Any, *, exclude_id: Any) -> Any | None:
-    """最古〜最新の発言IDの範囲でランダムなIDを引き、その直後の候補から1件選ぶ。
+    """チャンネル作成〜最新の発言IDの範囲でランダムなIDを引き、その直後の候補から1件選ぶ。
 
     /top の after カーソル取得と同じ仕組みで、全履歴を走査せずに
     ピンポイントで抜き出す。ランダムIDが削除済み発言や空白期間に
     落ちても、after 取得は次の実在発言を返すためそのまま候補になる。
+
+    範囲の下限はチャンネル自身のID（snowflake＝作成時刻）を使う。
+    発言はチャンネル作成より前に存在しないため、最古発言の取得
+    （after=0）は通常経路では行わない。after=0 の取得は履歴件数が
+    多いチャンネルほど Discord 側の応答が重くなることが実機で
+    確認できたためで、窓が空振りし続けた場合のフォールバックでのみ
+    使う（発言が実質1件のチャンネルでも引けるようにするため。
+    その場合はチャンネル自体が小さいので after=0 でも軽い）。
     """
-    first = await _edge_message(channel, oldest=True)
-    if first is None:
-        return None
     # 最新IDはゲートウェイが保持するキャッシュから取る（APIを叩かない）。
     latest_id = getattr(channel, "last_message_id", None)
     if latest_id is None:
@@ -84,14 +91,14 @@ async def draw_random_message(channel: Any, *, exclude_id: Any) -> Any | None:
         if latest is None:
             return None
         latest_id = latest.id
-    if latest_id <= first.id:
-        # チャンネルの発言が実質1件だけの場合はそれが候補。
-        return first if _eligible(first, exclude_id=exclude_id) else None
     history = getattr(channel, "history", None)
     if not callable(history):
         return None
+    floor = getattr(channel, "id", 0) or 0
+    if floor > latest_id:
+        floor = latest_id
     for _ in range(DRAW_ATTEMPTS):
-        pivot = random.randint(first.id, latest_id)
+        pivot = random.randint(floor, latest_id)
         window = []
         async for candidate in history(
             limit=DRAW_WINDOW,
@@ -102,6 +109,10 @@ async def draw_random_message(channel: Any, *, exclude_id: Any) -> Any | None:
                 window.append(candidate)
         if window:
             return random.choice(window)
+    # フォールバック: 窓が全部空だった場合のみ最古発言を引く。
+    first = await _edge_message(channel, oldest=True)
+    if first is not None and _eligible(first, exclude_id=exclude_id):
+        return first
     return None
 
 

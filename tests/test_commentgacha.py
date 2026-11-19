@@ -183,6 +183,29 @@ class CommentGachaCogTest(unittest.IsolatedAsyncioTestCase):
             chosen = await commentgacha.draw_random_message(channel, exclude_id=999)
         self.assertEqual(chosen.id, 300)
 
+    async def test_draw_uses_no_oldest_fetch_on_fast_path(self):
+        channel = FakeChannel([
+            hist_message(300, "最新の発言"),
+            hist_message(200, "真ん中の発言"),
+            hist_message(100, "最古の発言"),
+        ])
+        calls = []
+        original = channel.history
+
+        def recording(**kwargs):
+            calls.append(kwargs)
+            return original(**kwargs)
+
+        channel.history = recording
+        with patch.object(commentgacha.random, "randint", return_value=150), \
+                patch.object(commentgacha.random, "choice", side_effect=lambda seq: seq[0]):
+            chosen = await commentgacha.draw_random_message(channel, exclude_id=999)
+        self.assertEqual(chosen.id, 200)
+        # 通常経路では窓取得（limit=DRAW_WINDOW）だけを使い、
+        # 最古取得（after=0 / limit=1）を叩かない。
+        self.assertTrue(calls)
+        self.assertTrue(all(c.get("limit") == commentgacha.DRAW_WINDOW for c in calls))
+
     async def test_draw_falls_back_to_fetching_latest_without_cache(self):
         channel = FakeChannel([
             hist_message(300, "最新の発言"),
