@@ -10,6 +10,7 @@
     ai            core/general/ai/cog.py                   AICog
     ai_tools      core/general/ai_tools/cog.py             AIToolsCog
     circulation   core/general/circulation/cog.py          CirculationCog
+    commentgacha  core/general/commentgacha/cog.py         CommentGachaCog
     d1_test       core/general/d1_test/cog.py              D1TestCog
     gauge         core/general/gauge/cog.py                Gauge
     garden        core/general/garden/cog.py               GardenCog
@@ -95,6 +96,7 @@ _FEATURE_MODULES = (
     ("ai", "core.general.ai.cog"),
     ("ai_tools", "core.general.ai_tools.cog"),
     ("circulation", "core.general.circulation.cog"),
+    ("commentgacha", "core.general.commentgacha.cog"),
     ("d1_test", "core.general.d1_test.cog"),
     ("gauge", "core.general.gauge.cog"),
     ("garden", "core.general.garden.cog"),
@@ -153,6 +155,7 @@ _LAZY_FEATURE_MODULES = {
     "COOLDOWN_SECONDS": "core.general.imakita.cog",
     "COUNTER_SECONDS": "core.general.gauge.cog",
     "CirculationCog": "core.general.circulation.cog",
+    "CommentGachaCog": "core.general.commentgacha.cog",
     "CraftView": "core.general.workshop.cog",
     "D1TestCog": "core.general.d1_test.cog",
     "DEFAULT_D1_ENDPOINT": "core.general.d1_test.cog",
