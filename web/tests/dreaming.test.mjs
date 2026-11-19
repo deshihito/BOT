@@ -82,6 +82,7 @@ const game = await loadBundle(
     "descendDream",
     "redriftDream",
     "findNearestSignal",
+    "getAdjacentContext",
     "parseDreamRecord",
     "mergeRecordWithSession",
     "isWalkableTile",
@@ -477,4 +478,34 @@ test("品質制約: 外部 AI API・Transformer・ネオン紫AIスロップ・�
     assert.doesNotMatch(src, /#7c5cff|#a78bfa|#f472b6/i, `${rel}: ネオン紫AIスロップ色を含んではならない`);
     assert.doesNotMatch(codeOnly, /EndScreen|ゲームオーバー|クリア！/, `${rel}: 勝敗・クリアで閉じる仕組みを含んではならない`);
   }
+});
+
+test("文脈UI補助 & フルブリード初期状態: getAdjacentContext が隣接要素を検出し、LSTMパネルは初期閉じになっている", () => {
+  let s = game.createDreamGame(2026);
+  const initialCtx = game.getAdjacentContext(s);
+  assert.equal(initialCtx.hasAnchor, false);
+
+  // しおりを留めると hasAnchor が true になる
+  s = game.toggleAnchor(s);
+  assert.equal(game.getAdjacentContext(s).hasAnchor, true);
+
+  // 隣にモチーフと裂け目を置くとそれぞれ文脈検出される
+  const east = s.tiles.get(game.tileKey(1, 0));
+  east.motif = {
+    id: "clock",
+    generation: 2,
+    name: "とけいのはり",
+    originDomain: "station",
+    domain: s.dominantDomain,
+  };
+  const west = s.tiles.get(game.tileKey(-1, 0));
+  west.kind = "rift";
+
+  const ctx = game.getAdjacentContext(s);
+  assert.equal(ctx.motif?.id, "clock");
+  assert.equal(ctx.motif?.generation, 2);
+  assert.equal(ctx.hasRift, true);
+
+  const clientSrc = fs.readFileSync(path.join(webDir, "app/games/dreaming/DreamingClient.tsx"), "utf8");
+  assert.match(clientSrc, /const \[showRnn, setShowRnn\] = useState\(false\);/, "LSTMパネルが初期表示で開いたままになっている");
 });
