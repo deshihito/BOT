@@ -12,8 +12,11 @@
   そのギルドでそのユーザーは期間内に N 回まで（ユーザー単位）。
 
 執行は各ルートの dispatch 入口（general / vc / support / game / help）が
-共通ヘルパー ``guard`` を呼ぶ形に寄せ、二重実装を避ける。対象外は
-右クリックメニューや返信トリガ等のメッセージ経由の入口と常駐処理。
+共通ヘルパー ``guard`` を呼ぶ形に寄せ、二重実装を避ける。右クリック
+メニュー等のメッセージ経由の入口と常駐処理は原則対象外だが、メッセージ
+発動の3機能（今北産業／コメントガチャ／おみくじ）は ``guard_message``
+で対象に含める。おみくじはパネル入口と共通の ``general:omikuji`` で
+判定し、今北産業とコメントガチャはメッセージ専用IDで判定する。
 
 ロックアウト防止:
 - 設定アクション自身（support:bot_fixer）は常に対象外。
@@ -41,6 +44,18 @@ SELF_ACTION_IDS = frozenset({
     "support:bot_fixer_bots",
     "support:bot_fixer_rates",
 })
+
+# メッセージ発動機能のアクションID。おみくじは /general パネルと共通。
+# 今北産業とコメントガチャはパネル入口を持たないためメッセージ専用IDを
+# 割り当てる。レジストリには載せない（ショートカットや AI tools の候補に
+# 混ぜないため）ので、BOT fixer の一覧へは bot_fixer 側でこの定義を足す。
+OMIKUJI_ACTION_ID = "general:omikuji"
+IMAKITA_ACTION_ID = "general:imakita"
+COMMENTGACHA_ACTION_ID = "general:commentgacha"
+MESSAGE_ONLY_ACTION_LABELS = {
+    IMAKITA_ACTION_ID: "今北産業",
+    COMMENTGACHA_ACTION_ID: "コメントガチャ",
+}
 
 MODE_OFF = "off"
 MODE_DENY = "deny"
@@ -218,3 +233,33 @@ async def guard(interaction, action_id: str) -> bool:
     except Exception:
         logger.exception("コマンド制限の通知に失敗しました")
     return False
+
+
+async def guard_message(message, action_id: str) -> bool:
+    """メッセージ発動機能用ガード。実行可なら True、制限中は無言で False。
+
+    パネル入口の ``guard`` と違い、制限中でもチャンネルへ通知しない
+    （トリガー発言のたびに注意文を出すと荒れるため、黙って発動しない）。
+    DM は対象外。設定の読み込みに失敗しても通常処理は止めない
+    （制限なしとして通す）。
+    """
+    guild = getattr(message, "guild", None)
+    if guild is None:
+        return True
+    author = getattr(message, "author", None)
+    if is_manager(author):
+        return True
+    try:
+        from core.support import guild_settings
+
+        store = guild_settings.get_store()
+        await store.ensure_loaded()
+        settings = get_settings(store, guild.id)
+        if settings["mode"] == MODE_OFF and not settings["rates"]:
+            return True
+        verdict = check(settings, action_id, guild_id=guild.id,
+                        user_id=getattr(author, "id", 0), manager=False)
+    except Exception:
+        logger.exception("コマンド制限の判定に失敗しました（制限なしとして続行）")
+        return True
+    return verdict.allowed

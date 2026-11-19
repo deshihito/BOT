@@ -1,6 +1,8 @@
 """「コメントガチャ」の投稿に反応して、そのチャンネルの過去の発言を1件再投稿する機能。
 
-イースターエッグ枠（今北産業と同じ置き方）: 設定はなく常時オン。
+イースターエッグ枠（今北産業と同じ置き方）: 専用の設定はなく常時オン。
+ただし BOT fixer のコマンド制限の対象（アクションIDは
+general:commentgacha）で、制限されているサーバーでは無言で発動しない。
 トリガー語を含む発言に反応し、そのチャンネルの過去の発言から1件を
 抜き出して、元の投稿者の名前とアバターを付けた webhook で再投稿する。
 
@@ -28,6 +30,8 @@ from typing import Any
 
 import discord
 from discord.ext import commands
+
+from core.support import command_control
 
 logger = logging.getLogger("cogs.commentgacha")
 TRIGGER_PHRASE = "コメントガチャ"
@@ -205,6 +209,9 @@ class CommentGachaCog(commands.Cog):
         if TRIGGER_PHRASE not in (getattr(message, "content", "") or ""):
             return
         if getattr(message, "guild", None) is None:
+            return
+        # BOT fixer のコマンド制限（制限中は無言で発動しない）。
+        if not await command_control.guard_message(message, command_control.COMMENTGACHA_ACTION_ID):
             return
         source_channel = _resolve_source_channel(message)
         if source_channel is None:

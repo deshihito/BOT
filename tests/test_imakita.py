@@ -128,6 +128,22 @@ class ImakitaSummaryTest(unittest.IsolatedAsyncioTestCase):
         create.assert_not_awaited()
         trigger.reply.assert_not_awaited()
 
+    async def test_bot_fixer_blocked_guild_does_not_summarize(self):
+        trigger = FakeMessage(3, "今北産業")
+        trigger.channel = FakeChannel([trigger, FakeMessage(1, "最近の会話")])
+        trigger.guild = types.SimpleNamespace(id=99)
+        client, create = self.make_client(self.completion("要約"))
+        cog = ImakitaSummaryCog(types.SimpleNamespace(command_prefix="!"), client=client, clock=lambda: 100)
+
+        with patch("core.general.imakita.cog.command_control.guard_message",
+                   new=AsyncMock(return_value=False)) as guard:
+            await cog.on_message(trigger)
+
+        guard.assert_awaited_once()
+        self.assertEqual(guard.await_args.args[1], "general:imakita")
+        create.assert_not_awaited()
+        trigger.reply.assert_not_awaited()
+
 
 if __name__ == "__main__":
     unittest.main()

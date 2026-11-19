@@ -5,6 +5,10 @@
   「おみくじ」が含まれていればその人の今日のおみくじを引く。
   Bot・Webhook・DM は対象外（常駐しりとり/今北産業と同じ作法）。
 - パネル：/general の dispatch から呼ばれ、言語設定に関係なく引ける。
+- BOT fixer のコマンド制限はパネル・メッセージ発動の両方が対象で、
+  どちらも同じアクションID（general:omikuji）で判定する。パネル側は
+  dispatch の guard が、メッセージ側は guard_message が判定し、
+  制限中は無言で発動しない。
 - 結果は1日1回（ユーザー×ギルド、JST日次）で固定。再表示には短い
   クールダウンを付け、連投による再投稿を抑える。ただし回数制限の
   対象外ユーザー（store.UNLIMITED_USER_IDS）は毎回新規抽選で、
@@ -21,6 +25,7 @@ import time
 import discord
 from discord.ext import commands
 
+from core.support import command_control
 from core.support.localization.localization import guild_locale
 
 from .render import render_omikuji_image
@@ -74,6 +79,10 @@ class OmikujiCog(commands.Cog):
         # おみくじの文面と画像は日本語固定のため、日本語設定のサーバー
         # でのみ発動する（今北産業と同じ判定）。
         if guild_locale(message.guild.id) != "ja":
+            return
+        # BOT fixer のコマンド制限（パネル入口と同じ general:omikuji で判定。
+        # 制限中は無言で発動しない）。
+        if not await command_control.guard_message(message, command_control.OMIKUJI_ACTION_ID):
             return
 
         key = (message.guild.id, author.id)
