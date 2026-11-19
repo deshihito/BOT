@@ -79,6 +79,7 @@ const game = await loadBundle(
     "pulseDream",
     "toggleAnchor",
     "setDreamTemperature",
+    "driftDreamTick",
     "descendDream",
     "redriftDream",
     "findNearestSignal",
@@ -508,4 +509,53 @@ test("文脈UI補助 & フルブリード初期状態: getAdjacentContext が隣
 
   const clientSrc = fs.readFileSync(path.join(webDir, "app/games/dreaming/DreamingClient.tsx"), "utf8");
   assert.match(clientSrc, /const \[showRnn, setShowRnn\] = useState\(false\);/, "LSTMパネルが初期表示で開いたままになっている");
+});
+
+test("リアルタイム自律夢遊（driftDreamTick）: 立ち止まったまま LSTM が漂流し、しおり保護域を保ちつつ周辺地形が変容する", () => {
+  let s = game.createDreamGame(202607);
+  s = game.setDreamTemperature(s, 1.48);
+  s = game.toggleAnchor(s); // (0,0) を中心に 5×5 を保護
+
+  // 保護域タイルと未保護周辺タイルの初期スナップショットを取る
+  const protectedSnapshot = new Map();
+  const outerSnapshot = new Map();
+  for (const [k, t] of s.tiles) {
+    const dist = game.chebyshev(0, 0, t.x, t.y);
+    if (dist <= game.ANCHOR_RADIUS) {
+      protectedSnapshot.set(k, { kind: t.kind, glyph: t.glyph, memory: t.memory });
+    } else if (dist <= game.VIEW_RADIUS && !t.motif && t.kind !== "rift") {
+      outerSnapshot.set(k, { kind: t.kind, glyph: t.glyph });
+    }
+  }
+  const initialRnnSteps = s.rnn.steps;
+  const initialStep = s.step;
+
+  // 12 ティック分、立ち止まったまま自律夢遊させる
+  for (let i = 0; i < 12; i++) {
+    s = game.driftDreamTick(s);
+    assert.equal(s.status, "drifting");
+    assert.equal(s.lastEvent.kind, "drift");
+    assert.equal(s.step, initialStep, "自律夢遊ティックでプレイヤー歩数 step が増えてはならない");
+  }
+
+  assert.equal(s.rnn.steps, initialRnnSteps + 12, "自律夢遊で LSTM 隠れ状態が進んでいない");
+
+  // しおり保護域（5×5）は 1 マスも書き換わらない
+  for (const [k, snap] of protectedSnapshot) {
+    const after = s.tiles.get(k);
+    assert.ok(after, `保護域タイル ${k} が消えている`);
+    assert.equal(after.kind, snap.kind, `保護域タイル ${k} の種別が書き換わった`);
+    assert.equal(after.glyph, snap.glyph, `保護域タイル ${k} の文字が書き換わった`);
+    assert.equal(after.memory, 1, `保護域タイル ${k} の記憶が維持されていない`);
+  }
+
+  // 未保護の周辺タイルはリアルタイムで変容している
+  let changedOuter = 0;
+  for (const [k, snap] of outerSnapshot) {
+    const after = s.tiles.get(k);
+    if (after && (after.kind !== snap.kind || after.glyph !== snap.glyph)) {
+      changedOuter++;
+    }
+  }
+  assert.ok(changedOuter > 0, "未保護の周辺タイルが 12 ティック後も一切変容していない");
 });
