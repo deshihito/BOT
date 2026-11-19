@@ -767,7 +767,7 @@ class TicketCog(commands.Cog):
             if settings["delete_after"]:
                 task = asyncio.create_task(self._delete_later(room.id, settings["delete_after"]))
                 self._delete_tasks[room.id] = task
-        except (discord.Forbidden, discord.HTTPException):
+        except (discord.Forbidden, discord.HTTPException, discord.RateLimited):
             logger.exception("チケットを閉じられません (room=%s)", room_id)
             await interaction.followup.send("チケットを閉じられませんでした。", ephemeral=True)
 

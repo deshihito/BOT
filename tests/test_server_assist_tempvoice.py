@@ -105,6 +105,22 @@ class TempVoiceSettingsTest(unittest.IsolatedAsyncioTestCase):
         keys = [feature.key for feature in discover_features(refresh=True)]
         self.assertIn("tempvoice", keys)
 
+    def test_channel_edit_claims_are_capped_per_window(self):
+        import time
+        tempvoice._channel_edit_claims.clear()
+        self.addCleanup(tempvoice._channel_edit_claims.clear)
+        # Discord の上限は同一チャンネル10分に2回まで。
+        self.assertTrue(tempvoice._claim_channel_edit(4242))
+        self.assertTrue(tempvoice._claim_channel_edit(4242))
+        self.assertFalse(tempvoice._claim_channel_edit(4242))
+        # 別チャンネルは別枠。
+        self.assertTrue(tempvoice._claim_channel_edit(777))
+        # 窓を過ぎた古い枠は数えない。
+        tempvoice._channel_edit_claims[4242] = [
+            time.monotonic() - tempvoice._CHANNEL_EDIT_WINDOW_SECONDS - 1,
+        ]
+        self.assertTrue(tempvoice._claim_channel_edit(4242))
+
     def test_defaults(self):
         self.assertEqual(
             tempvoice.settings(1),

@@ -25,6 +25,8 @@ INTERVAL_SECONDS = 600
 # その周期は諦める。
 MIN_RENAME_INTERVAL_SECONDS = 600
 EDIT_TIMEOUT_SECONDS = 20
+# それでも 429 を踏んだチャンネルは、改名を1時間止める（サーキットブレーカ）。
+RATE_LIMIT_BLOCK_SECONDS = 3600
 
 FEATURE = Feature(
     key=KEY,
@@ -67,12 +69,38 @@ def _as_epoch(value: Any) -> float:
     return float(value)
 
 
-def _last_renames(guild_id: int) -> dict[str, float]:
+def _last_renames_by_channel(guild_id: int) -> dict[int, float]:
+    """チャンネルID → 前回改名試行の epoch 秒。
+
+    項目別（メンバー/オンライン等）ではなくチャンネル単位で持つ。
+    同じVCを複数項目に設定しても、上限はチャンネル側の予算を共有するため。
+    """
     raw = get_settings(guild_id, KEY)
-    return {
-        name: _as_epoch(raw.get(f"last_rename_{name}"))
-        for name in ("member", "online", "boost")
+    stored = raw.get("last_rename_channels")
+    result: dict[int, float] = {}
+    if isinstance(stored, dict):
+        for raw_id, raw_ts in stored.items():
+            try:
+                channel_id = int(raw_id)
+            except (TypeError, ValueError):
+                continue
+            epoch = _as_epoch(raw_ts)
+            if epoch > 0:
+                result[channel_id] = epoch
+    return result
+
+
+async def _record_renames(guild_id: int, renames: dict[int, float], now: float) -> None:
+    """改名試行の記録を保存する（古い記録は落とす）。失敗しても改名は続行する。"""
+    pruned = {
+        str(channel_id): ts
+        for channel_id, ts in renames.items()
+        if ts > now - 86400
     }
+    try:
+        await update_settings(guild_id, KEY, last_rename_channels=pruned)
+    except Exception:
+        logger.debug("サーバースタッツの改名時刻を記録できませんでした: guild=%s", guild_id)
 
 
 async def update_stats(guild: Any, current: dict[str, Any], *, force: bool = False) -> None:
@@ -81,7 +109,7 @@ async def update_stats(guild: Any, current: dict[str, Any], *, force: bool = Fal
     guild_id = getattr(guild, "id", None)
     counts = _counts(guild)
     labels = {"member": "メンバー", "online": "オンライン", "boost": "ブースト"}
-    last_renames = _last_renames(guild_id) if isinstance(guild_id, int) else {}
+    renames = _last_renames_by_channel(guild_id) if isinstance(guild_id, int) else {}
     now = time.time()
     for key, label in labels.items():
         channel_id = current.get(f"{key}_channel_id")
@@ -91,23 +119,32 @@ async def update_stats(guild: Any, current: dict[str, Any], *, force: bool = Fal
         name = f"{label}: {counts[key]}"
         if getattr(channel, "name", None) == name:
             continue
-        if not force and now - last_renames.get(key, 0.0) < MIN_RENAME_INTERVAL_SECONDS:
-            # 前回の改名から10分経っていない。Discord の上限（10分に2回）を
-            # 踏まないよう、この周期は見送る。
+        if not force and now - renames.get(channel_id, 0.0) < MIN_RENAME_INTERVAL_SECONDS:
+            # 前回の改名（試行）から10分経っていない。Discord の上限
+            # （同一チャンネル10分に2回）を踏まないよう、この周期は見送る。
             continue
         if isinstance(guild_id, int):
             # 試行自体を先に記録する（失敗・429でも間隔は空ける）。
-            try:
-                await update_settings(guild_id, KEY, **{f"last_rename_{key}": now})
-            except Exception:
-                logger.debug("サーバースタッツの改名時刻を記録できませんでした: guild=%s", guild_id)
+            renames[channel_id] = now
+            await _record_renames(guild_id, renames, now)
         try:
             await asyncio.wait_for(
                 channel.edit(name=name, reason="Server stats"),
                 timeout=EDIT_TIMEOUT_SECONDS,
             )
+        except discord.RateLimited:
+            # 上限に当たったチャンネルは1時間止める（サーキットブレーカ）。
+            logger.warning(
+                "サーバースタッツの改名がレートリミットに当たったため、このチャンネルの改名を1時間止めます: guild=%s channel=%s",
+                guild_id, channel_id,
+            )
+            if isinstance(guild_id, int):
+                renames[channel_id] = (
+                    time.time() + RATE_LIMIT_BLOCK_SECONDS - MIN_RENAME_INTERVAL_SECONDS
+                )
+                await _record_renames(guild_id, renames, time.time())
         except TimeoutError:
-            # 429 の retry_after 待ちなどで edit がぶら下がった場合は諦める。
+            # edit がぶら下がった場合はこの周期は諦める。
             logger.debug("サーバースタッツの更新がタイムアウトしました: guild=%s channel=%s", guild_id, channel_id)
         except (discord.Forbidden, discord.HTTPException):
             logger.debug("サーバースタッツを更新できませんでした: guild=%s channel=%s", guild_id, channel_id)

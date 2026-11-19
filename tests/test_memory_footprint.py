@@ -35,11 +35,14 @@ class BotClientKwargsTest(unittest.IsolatedAsyncioTestCase):
         kwargs = bot_client_kwargs()
         self.assertIs(kwargs["chunk_guilds_at_startup"], False)
         self.assertEqual(kwargs["max_messages"], 500)
+        # 429 の長い retry_after は寝て待たず RateLimited で返す（呼び出し側が諦める）。
+        self.assertEqual(kwargs["max_ratelimit_timeout"], 30.0)
         bot = commands.Bot(command_prefix="!", **kwargs)
         try:
             state = bot._connection
             self.assertFalse(state._chunk_guilds)
             self.assertEqual(state.max_messages, 500)
+            self.assertEqual(bot.http.max_ratelimit_timeout, 30.0)
             # member_cache_flags は既定（joined / voice）のまま。
             self.assertTrue(state.member_cache_flags.joined)
             self.assertTrue(state.member_cache_flags.voice)

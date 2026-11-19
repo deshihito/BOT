@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any
 
 import discord
@@ -27,6 +28,27 @@ FEATURE = Feature(
 
 _entries: KVStore | None = None
 _cache: dict[str, dict[str, Any]] | None = None
+
+# チャンネル編集は同一チャンネル10分に2回まで（Discord の上限）。
+# 名前変更と人数制限は同じ予算を共有するため、合わせて数える。
+_CHANNEL_EDIT_WINDOW_SECONDS = 600
+_CHANNEL_EDIT_MAX_PER_WINDOW = 2
+_channel_edit_claims: dict[int, list[float]] = {}
+
+
+def _claim_channel_edit(channel_id: int) -> bool:
+    """このチャンネルの編集枠を1つ消費する。上限に達していたら False。"""
+    now = time.monotonic()
+    claims = [
+        ts for ts in _channel_edit_claims.get(channel_id, [])
+        if now - ts < _CHANNEL_EDIT_WINDOW_SECONDS
+    ]
+    if len(claims) >= _CHANNEL_EDIT_MAX_PER_WINDOW:
+        _channel_edit_claims[channel_id] = claims
+        return False
+    claims.append(now)
+    _channel_edit_claims[channel_id] = claims
+    return True
 
 
 def reset_cache() -> None:
@@ -326,8 +348,12 @@ class TempVoiceRenameModal(discord.ui.Modal, title="一時VCの名前変更"):
         channel = interaction.guild.get_channel(self.channel_id) if interaction.guild else None
         if channel is None:
             return await interaction.response.send_message("VCが見つかりません。", ephemeral=True)
+        if not _claim_channel_edit(self.channel_id):
+            return await interaction.response.send_message("チャンネル編集が続いています。10分ほど待ってから再度お試しください。", ephemeral=True)
         try:
             await channel.edit(name=str(self.text.value)[:100], reason="TempVoice rename")
+        except discord.RateLimited:
+            return await interaction.response.send_message("Discord側の制限にかかりました。しばらく待ってから再度お試しください。", ephemeral=True)
         except (discord.Forbidden, discord.HTTPException):
             return await interaction.response.send_message("名前を変更できませんでした。", ephemeral=True)
         await _update_panel(interaction.guild, channel, entry, self.cog)
@@ -359,8 +385,12 @@ class TempVoiceLimitModal(discord.ui.Modal, title="一時VCの人数制限"):
         channel = interaction.guild.get_channel(self.channel_id) if interaction.guild else None
         if channel is None:
             return await interaction.response.send_message("VCが見つかりません。", ephemeral=True)
+        if not _claim_channel_edit(self.channel_id):
+            return await interaction.response.send_message("チャンネル編集が続いています。10分ほど待ってから再度お試しください。", ephemeral=True)
         try:
             await channel.edit(user_limit=limit, reason="TempVoice limit")
+        except discord.RateLimited:
+            return await interaction.response.send_message("Discord側の制限にかかりました。しばらく待ってから再度お試しください。", ephemeral=True)
         except (discord.Forbidden, discord.HTTPException):
             return await interaction.response.send_message("人数制限を変更できませんでした。", ephemeral=True)
         await _update_panel(interaction.guild, channel, entry, self.cog)
