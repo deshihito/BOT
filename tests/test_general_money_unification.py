@@ -114,12 +114,12 @@ class MoneyGenreDisplayTest(unittest.TestCase):
                 [value for _label, value in MONEY_PANEL_ENTRIES])
 
     def test_registry_keeps_all_36_economy_actions(self):
-        # レジストリは不変: 75件のまま、経済3ジャンルも件数どおり残る。
+        # 経済3ジャンルは件数どおり残る（全体はオプトアウト設定追加で76件）。
         self.assertEqual(len(GENERAL_ACTIONS["money"]), 10)
         self.assertEqual(len(GENERAL_ACTIONS["trade_craft"]), 15)
         self.assertEqual(len(GENERAL_ACTIONS["play"]), 11)
         self.assertEqual(
-            sum(len(v) for v in GENERAL_ACTIONS.values()), 75)
+            sum(len(v) for v in GENERAL_ACTIONS.values()), 76)
 
 
 class ShortcutModeCatalogTest(unittest.TestCase):

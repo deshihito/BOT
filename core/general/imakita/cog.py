@@ -13,6 +13,7 @@ import time
 import discord
 from discord.ext import commands
 from groq import APIStatusError, AsyncGroq, RateLimitError
+from core.general import optout
 from core.support import command_control
 from core.support.localization.localization import guild_locale
 
@@ -75,6 +76,9 @@ class ImakitaSummaryCog(commands.Cog):
         try:
             async for item in trigger_message.channel.history(limit=HISTORY_LIMIT):
                 if item.id == trigger_message.id or item.author.bot:
+                    continue
+                # オプトアウトしたユーザーの発言は要約材料に入れない。
+                if optout.is_opted_out(getattr(item.author, "id", None), optout.FEATURE_IMAKITA):
                     continue
                 text = (item.content or "").strip()
                 if not text or TRIGGER_PHRASE in text:

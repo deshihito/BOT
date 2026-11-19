@@ -36,6 +36,7 @@ class ShortcutTest(unittest.IsolatedAsyncioTestCase):
                 ("AI思考強度を設定", "reasoning_default"),
                 # 導線最適化 S7: 1件ジャンル「翻訳」から吸収
                 ("自動翻訳を設定", "translation_settings"),
+                ("オプトアウト設定", "optout_settings"),
                 # MIQ設定は「画像作成」(make_image) ジャンルへ移行した
                 # 機能数再編: !ai / !generate 本体への独立入口
                 ("AIチャット（!ai）", "ai_chat"),

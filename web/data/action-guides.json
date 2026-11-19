@@ -1,8 +1,8 @@
 {
   "version": 1,
-  "total": 256,
+  "total": 257,
   "counts": {
-    "general": 75,
+    "general": 76,
     "vc": 47,
     "game": 48,
     "support": 85,
@@ -453,6 +453,12 @@
               "id": "general:translation_settings",
               "value": "translation_settings",
               "title": "自動翻訳を設定",
+              "description": ""
+            },
+            {
+              "id": "general:optout_settings",
+              "value": "optout_settings",
+              "title": "オプトアウト設定",
               "description": ""
             },
             {

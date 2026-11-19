@@ -31,6 +31,7 @@ from typing import Any
 import discord
 from discord.ext import commands
 
+from core.general import optout
 from core.support import command_control
 
 logger = logging.getLogger("cogs.commentgacha")
@@ -47,11 +48,14 @@ DRAW_ATTEMPTS = 3
 
 def _eligible(message: Any, *, exclude_id: Any) -> bool:
     """ガチャの候補になる発言か。Bot/webhook・空発言・システム発言・
-    トリガー語を含む発言（過去の呼び出し等）は除く。"""
+    トリガー語を含む発言（過去の呼び出し等）は除く。オプトアウトした
+    ユーザーの発言も候補にしない（される側の拒否）。"""
     if getattr(message, "id", None) == exclude_id:
         return False
     author = getattr(message, "author", None)
     if author is None or getattr(author, "bot", False):
+        return False
+    if optout.is_opted_out(getattr(author, "id", None), optout.FEATURE_COMMENTGACHA):
         return False
     if getattr(message, "webhook_id", None) is not None:
         return False

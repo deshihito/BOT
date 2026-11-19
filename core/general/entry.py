@@ -38,6 +38,8 @@ from core.game.rta.views import RtaBoardView
 from core.game.sokunuke_rta.cog import SokunukeBoardView
 from core.game.nurupo_rta.cog import NurupoBoardView
 from core.general import translation_settings as translation
+from core.general import optout
+from core.general.optout_ui import OptOutSettingsView
 from core.support.localization import localization
 from core.game.hub import prison as prison_core
 from core.support.messages import CIRCULATION_NOT_LOADED, GAMBLING_NOT_LOADED, ITEMS_NOT_LOADED, MARKET_NOT_LOADED, MONEY_PANEL_NOT_LOADED, WORKSHOP_NOT_LOADED, feature_not_loaded
@@ -183,6 +185,7 @@ class GeneralCog(
 
     async def cog_load(self):
         await translation.ensure_loaded()
+        await optout.ensure_loaded()
         self.exp_vc_tick.start()
         self._bgcut_result_poll.start()
         self.bot.tree.add_command(self.miq_menu, override=True)
@@ -269,6 +272,10 @@ class GeneralCog(
             if cog is None:
                 return await self._safe_respond(interaction, feature_not_loaded("天気"))
             return await cog.open_panel(interaction)
+
+        if value == "optout_settings":
+            view = OptOutSettingsView(self, interaction.user.id)
+            return await interaction.response.send_message(view=as_panel_v2(view), ephemeral=True)
 
         if value == "miq_settings":
             view = MiqSettingsView(self, interaction.user.id)
