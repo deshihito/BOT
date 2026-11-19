@@ -79,9 +79,12 @@ const game = await loadBundle(
     "pulseDream",
     "toggleAnchor",
     "setDreamTemperature",
+    "ambientTemperatureFor",
+    "driftDreamTick",
     "descendDream",
     "redriftDream",
     "findNearestSignal",
+    "getAdjacentContext",
     "parseDreamRecord",
     "mergeRecordWithSession",
     "isWalkableTile",
@@ -477,4 +480,75 @@ test("品質制約: 外部 AI API・Transformer・ネオン紫AIスロップ・�
     assert.doesNotMatch(src, /#7c5cff|#a78bfa|#f472b6/i, `${rel}: ネオン紫AIスロップ色を含んではならない`);
     assert.doesNotMatch(codeOnly, /EndScreen|ゲームオーバー|クリア！/, `${rel}: 勝敗・クリアで閉じる仕組みを含んではならない`);
   }
+});
+
+test("ゼロUI＆ジョイスティック構成 + 温度の自律呼吸: ボタンや設定UIを置かずジョイスティック移動と自律温度呼吸で動く", () => {
+  let s = game.createDreamGame(2026);
+  const initialCtx = game.getAdjacentContext(s);
+  assert.equal(initialCtx.hasAnchor, false);
+
+  s = game.toggleAnchor(s);
+  assert.equal(game.getAdjacentContext(s).hasAnchor, true);
+
+  // 深度と RNN ステップで温度が安全範囲内で自然に呼吸し、深層ほど高温寄りになる
+  const shallowAvg =
+    Array.from({ length: 40 }, (_, i) => game.ambientTemperatureFor(1, i)).reduce((a, b) => a + b, 0) / 40;
+  const deepAvg =
+    Array.from({ length: 40 }, (_, i) => game.ambientTemperatureFor(6, i)).reduce((a, b) => a + b, 0) / 40;
+  assert.ok(shallowAvg >= 0.45 && shallowAvg <= 1.85);
+  assert.ok(deepAvg > shallowAvg, `深層ほど自律温度が高まるはず: shallow=${shallowAvg}, deep=${deepAvg}`);
+
+  // クライアントにボタン・スライダー・設定パネル・ヘッダー・フッターなどのUIを一切置かない
+  const clientSrc = fs.readFileSync(path.join(webDir, "app/games/dreaming/DreamingClient.tsx"), "utf8");
+  assert.match(clientSrc, /className="dreaming-joystick"/, "最低限のジョイスティック移動UIがない");
+  assert.doesNotMatch(clientSrc, /<button\b|<input\b|<header\b|<footer\b|<aside\b|<Link\b/, "不要なボタン・設定・HUD要素が残っている");
+});
+
+test("リアルタイム自律夢遊（driftDreamTick）: 立ち止まったまま LSTM が漂流し、しおり保護域を保ちつつ周辺地形が変容する", () => {
+  let s = game.createDreamGame(202607);
+  s = game.setDreamTemperature(s, 1.48);
+  s = game.toggleAnchor(s); // (0,0) を中心に 5×5 を保護
+
+  // 保護域タイルと未保護周辺タイルの初期スナップショットを取る
+  const protectedSnapshot = new Map();
+  const outerSnapshot = new Map();
+  for (const [k, t] of s.tiles) {
+    const dist = game.chebyshev(0, 0, t.x, t.y);
+    if (dist <= game.ANCHOR_RADIUS) {
+      protectedSnapshot.set(k, { kind: t.kind, glyph: t.glyph, memory: t.memory });
+    } else if (dist <= game.VIEW_RADIUS && !t.motif && t.kind !== "rift") {
+      outerSnapshot.set(k, { kind: t.kind, glyph: t.glyph });
+    }
+  }
+  const initialRnnSteps = s.rnn.steps;
+  const initialStep = s.step;
+
+  // 12 ティック分、立ち止まったまま自律夢遊させる
+  for (let i = 0; i < 12; i++) {
+    s = game.driftDreamTick(s);
+    assert.equal(s.status, "drifting");
+    assert.equal(s.lastEvent.kind, "drift");
+    assert.equal(s.step, initialStep, "自律夢遊ティックでプレイヤー歩数 step が増えてはならない");
+  }
+
+  assert.equal(s.rnn.steps, initialRnnSteps + 12, "自律夢遊で LSTM 隠れ状態が進んでいない");
+
+  // しおり保護域（5×5）は 1 マスも書き換わらない
+  for (const [k, snap] of protectedSnapshot) {
+    const after = s.tiles.get(k);
+    assert.ok(after, `保護域タイル ${k} が消えている`);
+    assert.equal(after.kind, snap.kind, `保護域タイル ${k} の種別が書き換わった`);
+    assert.equal(after.glyph, snap.glyph, `保護域タイル ${k} の文字が書き換わった`);
+    assert.equal(after.memory, 1, `保護域タイル ${k} の記憶が維持されていない`);
+  }
+
+  // 未保護の周辺タイルはリアルタイムで変容している
+  let changedOuter = 0;
+  for (const [k, snap] of outerSnapshot) {
+    const after = s.tiles.get(k);
+    if (after && (after.kind !== snap.kind || after.glyph !== snap.glyph)) {
+      changedOuter++;
+    }
+  }
+  assert.ok(changedOuter > 0, "未保護の周辺タイルが 12 ティック後も一切変容していない");
 });

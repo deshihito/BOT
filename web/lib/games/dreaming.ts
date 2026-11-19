@@ -230,7 +230,8 @@ export type DreamEventKind =
   | "anchor_remove"
   | "pulse"
   | "descend"
-  | "temp";
+  | "temp"
+  | "drift";
 
 export type DreamEvent = {
   kind: DreamEventKind;
@@ -500,17 +501,37 @@ function populateVisionTiles(
   }
 }
 
-/** 忘却処理：記憶窓から外れた非アンカー保護タイルを減衰させ、0 以下になったものを忘却（evict）する。 */
+const DIR_DELTA: Record<DreamDir, [number, number]> = {
+  up: [0, -1],
+  down: [0, 1],
+  left: [-1, 0],
+  right: [1, 0],
+};
+
+/**
+ * 忘却処理：記憶窓から外れた非アンカー保護タイルを減衰させ、0 以下になったものを忘却（evict）する。
+ * また、進行方向の「背後」にあるタイルほど早く薄れ、薄れたまま再び視界の縁へ戻った非保護タイルは
+ * 現在の LSTM 状態から密かに再サンプルされて別の景色へ書き換わる（夢の記憶違い）。
+ */
 function applyForgetting(
   tiles: Map<string, DreamTile>,
   px: number,
   py: number,
+  facing: DreamDir,
   step: number,
   depth: number,
   anchors: readonly DreamAnchor[],
+  domainWeights: Record<DomainId, number>,
+  dominant: DomainId,
+  bleedEntropy: number,
+  stepsSinceDescend: number,
+  temperature: number,
+  rng: Rng,
 ): number {
   const windowSteps = memoryWindowForDepth(depth);
+  const [fx, fy] = DIR_DELTA[facing];
   let forgotten = 0;
+  let misremembered = 0;
 
   for (const [key, tile] of tiles) {
     const dist = chebyshev(px, py, tile.x, tile.y);
@@ -521,7 +542,48 @@ function applyForgetting(
       continue;
     }
 
+    const dx = tile.x - px;
+    const dy = tile.y - py;
+    const behindDot = dx * fx + dy * fy;
+
     if (dist <= 3) {
+      // 薄れかけていた非保護タイルを振り返って見直すと、現在の夢状態に引っ張られて密かに記憶違いを起こす
+      if (
+        dist >= 2 &&
+        tile.memory < 0.56 &&
+        !tile.motif &&
+        tile.kind !== "rift" &&
+        misremembered < 2
+      ) {
+        const shiftProb = Math.max(
+          0.08,
+          Math.min(0.65, 0.16 + (temperature - 0.65) * 0.28 + bleedEntropy * 0.22),
+        );
+        if (rng() < shiftProb) {
+          const resampled = sampleNextTile(
+            domainWeights,
+            {
+              north: tiles.get(tileKey(tile.x, tile.y - 1))?.kind,
+              south: tiles.get(tileKey(tile.x, tile.y + 1))?.kind,
+              east: tiles.get(tileKey(tile.x + 1, tile.y))?.kind,
+              west: tiles.get(tileKey(tile.x - 1, tile.y))?.kind,
+              bleedEntropy,
+              stepsSinceDescend,
+              hasNearbyRift: true,
+            },
+            temperature,
+            rng,
+          );
+          tile.kind = resampled;
+          tile.domain = dominant;
+          tile.domainBlend = { ...domainWeights };
+          tile.glyph = sampleGlyph(domainWeights, temperature, rng);
+          tile.bornStep = step;
+          tile.memory = 0.84;
+          misremembered++;
+          continue;
+        }
+      }
       // 足元の直接視界は鮮明さを取り戻す
       tile.memory = Math.min(1, tile.memory + 0.16);
       continue;
@@ -531,12 +593,15 @@ function applyForgetting(
     let decay = 0;
     if (dist > VIEW_RADIUS) {
       // 視界外に押し出された記憶は急速に薄れる（有限コンテキスト窓の忘却）
-      decay = 0.28 + Math.min(0.24, (depth - 1) * 0.035) + (dist - VIEW_RADIUS) * 0.08;
+      decay = 0.3 + Math.min(0.24, (depth - 1) * 0.035) + (dist - VIEW_RADIUS) * 0.08;
     } else if (dist >= 5) {
-      // 視界の縁でも古い記憶はじわじわ滲み始める
-      decay = age > windowSteps ? 0.14 : 0.04;
-    } else if (age > windowSteps * 1.35) {
-      decay = 0.03;
+      // 視界の縁・背後はじわじわ滲み始める
+      decay = (age > windowSteps ? 0.16 : 0.06) + (behindDot < 0 ? 0.07 : 0);
+    } else if (behindDot < 0 && dist >= 4) {
+      // 背中側（視線の裏）は前よりも早く曖昧になる
+      decay = age > windowSteps * 0.7 ? 0.13 : 0.07;
+    } else if (age > windowSteps * 1.2) {
+      decay = 0.04;
     }
 
     if (decay > 0) {
@@ -551,13 +616,6 @@ function applyForgetting(
   }
   return forgotten;
 }
-
-const DIR_DELTA: Record<DreamDir, [number, number]> = {
-  up: [0, -1],
-  down: [0, 1],
-  left: [-1, 0],
-  right: [1, 0],
-};
 
 /** 反響キューに待機中の変質モチーフを、進行方向の視界内へ再出現させる。 */
 function manifestDueEchoes(
@@ -984,8 +1042,22 @@ export function moveDream(state: DreamState, dir: DreamDir): DreamState {
     rng,
   );
 
-  // 3. 記憶窓から外れた背後タイルを忘却（evict）
-  const forgottenNow = applyForgetting(nextTiles, nx, ny, nextStep, state.depth, state.anchors);
+  // 3. 記憶窓から外れた背後タイルを忘却（evict）＋薄れた記憶の密かな書き換わり
+  const forgottenNow = applyForgetting(
+    nextTiles,
+    nx,
+    ny,
+    dir,
+    nextStep,
+    state.depth,
+    state.anchors,
+    nextWeights,
+    nextDom,
+    nextEntropy,
+    nextSinceDescend,
+    state.temperature,
+    rng,
+  );
 
   // 4. 反響キューの満期モチーフを変質させて進行方向に出現させる
   const { remaining: nextEchoQueue, manifestedName } = manifestDueEchoes(
@@ -1302,6 +1374,140 @@ export function setDreamTemperature(state: DreamState, temperature: number): Dre
   };
 }
 
+/** 深度と LSTM 経過ステップから、夢が自然に呼吸するサンプリング温度 T を算出する。 */
+export function ambientTemperatureFor(depth: number, rnnSteps: number): number {
+  const base = 0.86 + Math.min(0.46, Math.max(0, depth - 1) * 0.085);
+  const wave = Math.sin(rnnSteps * 0.16) * 0.24 + Math.cos(rnnSteps * 0.07) * 0.08;
+  return Math.round(clampTemperature(base + wave) * 100) / 100;
+}
+
+/**
+ * リアルタイム自律夢遊ティック（立ち止まっていても夢がうねり・滲み・書き換わり続ける）。
+ * - 小型 LSTM を微細な自律波動入力で 1 ステップ揺らし、領域確率分布を連続漂流させる
+ * - 非アンカー保護・非プレイヤー足元の周辺タイルを 1〜3 マス局所再サンプルし、空間をリアルタイム変容させる
+ * - 高温時や領域移り変わり時に地名・未採集モチーフ名も文字 n-gram で微かに揺らぐ
+ * プレイヤーの歩数（step）やアンカー保護域は一切変えない。
+ */
+export function driftDreamTick(state: DreamState): DreamState {
+  const { rng, nextTick } = nextStepRng(state.seed, state.rngTick);
+  const { x: px, y: py } = state.player;
+  const temp = state.temperature;
+
+  // 1. 隠れ状態へ微かな自律ゆらぎ入力を与え、立ち止まっていても潜在空間が漂い続ける
+  const waveScale = 0.14 + Math.max(0, temp - 0.5) * 0.22;
+  const phase = state.rnn.steps * 0.37;
+  const driftInput = new Array<number>(8);
+  for (let i = 0; i < 6; i++) {
+    const gentleWave = Math.sin(phase + i * 1.15) * 0.45 + (rng() - 0.48) * 0.9;
+    driftInput[i] = gentleWave * waveScale;
+  }
+  driftInput[6] = (rng() - 0.5) * waveScale * 0.8;
+  driftInput[7] = (state.bleedEntropy - 0.5) * 0.25 + (rng() - 0.5) * waveScale;
+
+  const nextRnn = stepRnn(state.rnn, driftInput, state.depth, temp);
+  const nextWeights = domainProbsFromRnn(nextRnn, temp);
+  const nextDom = dominantDomainOf(nextWeights);
+  const nextEntropy = normalizedEntropy(DOMAIN_IDS.map((d) => nextWeights[d]));
+
+  // 2. タイルを浅く複製し、視界内の非アンカー周辺タイルを 1〜3 マス確率再サンプルして空間をうねらせる
+  const nextTiles = new Map<string, DreamTile>();
+  for (const [k, v] of state.tiles) {
+    nextTiles.set(k, { ...v, motif: v.motif ? { ...v.motif } : null });
+  }
+
+  const candidates: DreamTile[] = [];
+  const motifCandidates: DreamTile[] = [];
+  for (const tile of nextTiles.values()) {
+    const dist = chebyshev(px, py, tile.x, tile.y);
+    if (dist < 2 || dist > VIEW_RADIUS) continue;
+    if (isProtectedByAnchor(tile.x, tile.y, state.anchors)) continue;
+    if (tile.motif) {
+      motifCandidates.push(tile);
+      continue;
+    }
+    if (tile.kind === "rift") continue;
+    candidates.push(tile);
+  }
+
+  const morphBudget = temp >= 1.3 ? 3 : temp >= 0.78 ? 2 : 1;
+  const hasRift = hasNearbyRift(px, py, nextTiles, VIEW_RADIUS);
+
+  for (let m = 0; m < morphBudget && candidates.length > 0; m++) {
+    const idx = Math.floor(rng() * candidates.length);
+    const target = candidates.splice(idx, 1)[0];
+    const shock = computeBoundaryShock(target.x, target.y, nextDom, nextTiles, state.anchors);
+    const resampled = sampleNextTile(
+      nextWeights,
+      {
+        north: nextTiles.get(tileKey(target.x, target.y - 1))?.kind,
+        south: nextTiles.get(tileKey(target.x, target.y + 1))?.kind,
+        east: nextTiles.get(tileKey(target.x + 1, target.y))?.kind,
+        west: nextTiles.get(tileKey(target.x - 1, target.y))?.kind,
+        boundaryShock: shock,
+        bleedEntropy: nextEntropy,
+        stepsSinceDescend: state.stepsSinceDescend,
+        hasNearbyRift: hasRift || chebyshev(px, py, target.x, target.y) <= 2,
+      },
+      temp,
+      rng,
+    );
+    target.kind = resampled;
+    target.domain = nextDom;
+    target.domainBlend = { ...nextWeights };
+    target.glyph = sampleGlyph(nextWeights, temp, rng);
+    target.bleedShock = shock;
+    target.memory = Math.max(0.55, Math.min(1, target.memory));
+  }
+
+  // 3. 高温時または領域変遷時、未採集モチーフ名や地名が文字 n-gram でじわっと揺らぐ
+  const models = getDreamLanguageModels();
+  if (motifCandidates.length > 0 && rng() < Math.max(0.05, (temp - 0.72) * 0.28)) {
+    const mt = motifCandidates[Math.floor(rng() * motifCandidates.length)];
+    if (mt.motif) {
+      mt.motif = {
+        ...mt.motif,
+        name: mutateDreamName(models, nextWeights, mt.motif.name, mt.motif.generation, temp, rng),
+        domain: nextDom,
+      };
+    }
+  }
+
+  const domainShifted = nextDom !== state.dominantDomain;
+  let nextPlaceName = state.placeName;
+  let nextWhisper = state.whisper;
+
+  if (domainShifted || (temp >= 1.18 && rng() < 0.24)) {
+    nextPlaceName = mutateDreamName(
+      models,
+      nextWeights,
+      state.placeName,
+      domainShifted ? 2 : 1,
+      temp,
+      rng,
+    );
+  }
+  if (domainShifted) {
+    nextWhisper = {
+      text: generateDreamFragment(models, nextWeights, temp, rng),
+      sub: `佇むうちに「${DOMAIN_PALETTES[nextDom].label}」へ滲んでいく — ${nextPlaceName}`,
+      step: state.step,
+    };
+  }
+
+  return {
+    ...state,
+    rngTick: nextTick,
+    rnn: nextRnn,
+    domainWeights: nextWeights,
+    dominantDomain: nextDom,
+    bleedEntropy: nextEntropy,
+    placeName: nextPlaceName,
+    tiles: nextTiles,
+    whisper: nextWhisper,
+    lastEvent: { kind: "drift", step: state.step, x: px, y: py },
+  };
+}
+
 /** 現在の標本帳・記録を保ったまま、別シードの浅い夢へ漂い直す（終了ではなく連続した転寝）。 */
 export function redriftDream(state: DreamState, newSeed: number): DreamState {
   const fresh = createDreamGame(newSeed);
@@ -1335,6 +1541,29 @@ export function findNearestSignal(
     }
   }
   return best ? { kind: best.kind, dx: best.dx, dy: best.dy, label: best.label } : null;
+}
+
+export type AdjacentContext = {
+  motif: TileMotif | null;
+  hasRift: boolean;
+  hasAnchor: boolean;
+};
+
+/** プレイヤー周囲 1 マスの共鳴対象・裂け目・しおり有無を返す（文脈連動 UI 用）。 */
+export function getAdjacentContext(state: DreamState): AdjacentContext {
+  const { x: px, y: py } = state.player;
+  let motif: TileMotif | null = null;
+  let hasRift = false;
+  for (let dy = -1; dy <= 1; dy++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      const t = state.tiles.get(tileKey(px + dx, py + dy));
+      if (!t) continue;
+      if (!motif && t.motif) motif = t.motif;
+      if (t.kind === "rift") hasRift = true;
+    }
+  }
+  const hasAnchor = state.anchors.some((a) => chebyshev(a.x, a.y, px, py) <= 1);
+  return { motif, hasRift, hasAnchor };
 }
 
 // ============================================================

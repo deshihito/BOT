@@ -1,652 +1,149 @@
 /* dreaming 独立フルビューポートシェル専用スタイルシート */
-/* カラー設計: 深夜の墨藍（#0d1117 / #131820）× 古紙インク（#e8e3d5）× 鈍い真鍮（#cfa960）× 霧青（#7aa3b5） */
+/* UI・ボタン・設定を一切置かず、100svh の夢空間キャンバスと極薄アナログジョイスティックのみで構成 */
 
 .dreaming-shell {
-  --dr-bg: #0d1117;
-  --dr-surface: rgba(16, 21, 28, 0.84);
-  --dr-surface-strong: rgba(15, 19, 26, 0.95);
-  --dr-line: rgba(232, 227, 213, 0.14);
-  --dr-line-strong: rgba(232, 227, 213, 0.28);
-  --dr-ink: #e8e3d5;
-  --dr-muted: #9a968b;
-  --dr-brass: #cfa960;
-  --dr-mist: #8eb2c2;
-  --dr-rust: #c77b63;
   position: relative;
   width: 100%;
   height: 100svh;
-  min-height: 520px;
+  min-height: 480px;
   overflow: hidden;
-  display: flex;
-  flex-direction: column;
-  background: var(--dr-bg);
-  color: var(--dr-ink);
+  background: #0b1018;
   user-select: none;
   -webkit-user-select: none;
 }
 
-/* 全面キャンバス舞台 */
 .dreaming-stage {
-  position: relative;
-  flex: 1 1 auto;
-  min-height: 0;
+  position: absolute;
+  inset: 0;
   width: 100%;
+  height: 100%;
   overflow: hidden;
   touch-action: none;
+  cursor: grab;
+}
+
+.dreaming-stage[data-dragging="true"] {
+  cursor: grabbing;
 }
 
 .dreaming-canvas {
   display: block;
   width: 100%;
   height: 100%;
-  cursor: pointer;
 }
 
-/* 上部ミニマルバー */
-.dreaming-topbar {
-  position: relative;
-  z-index: 20;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px 14px;
-  padding: 8px 14px;
-  background: var(--dr-surface-strong);
-  border-bottom: 1px solid var(--dr-line);
-  backdrop-filter: blur(8px);
-}
-
-.dreaming-topbar-left {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
-}
-
-.dreaming-back {
-  display: inline-flex;
-  align-items: center;
-  padding: 5px 10px;
-  border: 1px solid var(--dr-line);
-  border-radius: 6px;
-  color: var(--dr-muted);
-  font-size: 12px;
-  font-weight: 700;
-  text-decoration: none;
-  white-space: nowrap;
-  transition: color 140ms ease, border-color 140ms ease, background 140ms ease;
-}
-
-.dreaming-back:hover {
-  color: var(--dr-ink);
-  border-color: var(--dr-line-strong);
-  background: rgba(232, 227, 213, 0.06);
-  text-decoration: none;
-}
-
-.dreaming-place {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  line-height: 1.25;
-}
-
-.dreaming-place-name {
-  font-size: 15px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  color: var(--dr-ink);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.dreaming-place-blend {
-  font-size: 11px;
-  color: var(--dr-muted);
-  letter-spacing: 0.04em;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.dreaming-metrics {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 6px 12px;
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
-}
-
-.dreaming-metric {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 4px;
-  color: var(--dr-muted);
-}
-
-.dreaming-metric strong {
-  color: var(--dr-ink);
-  font-size: 13px;
-  font-weight: 700;
-}
-
-.dreaming-metric-accent strong {
-  color: var(--dr-brass);
-}
-
-.dreaming-topbar-tools {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.dreaming-tool-btn {
-  padding: 5px 10px;
-  border: 1px solid var(--dr-line);
-  border-radius: 6px;
-  background: rgba(232, 227, 213, 0.04);
-  color: var(--dr-ink);
-  font-size: 12px;
-  font-weight: 700;
-  cursor: pointer;
-  white-space: nowrap;
-  transition: background 120ms ease, border-color 120ms ease, transform 80ms ease;
-}
-
-.dreaming-tool-btn:hover {
-  background: rgba(232, 227, 213, 0.1);
-  border-color: var(--dr-line-strong);
-}
-
-.dreaming-tool-btn:active {
-  transform: scale(0.96);
-}
-
-.dreaming-tool-btn[aria-pressed="true"] {
-  border-color: rgba(207, 169, 96, 0.6);
-  background: rgba(207, 169, 96, 0.14);
-  color: var(--dr-brass);
-}
-
-/* 舞台上の RNN 隠れ状態モニタ（右上フロート・折りたたみ可能） */
-.dreaming-rnn-panel {
+/* 下部中央に静かに佇む最小限のアナログジョイスティック */
+.dreaming-joystick,
+.dreaming-joy-float {
   position: absolute;
-  top: 12px;
-  right: 12px;
-  z-index: 14;
-  width: 224px;
-  padding: 10px 12px;
-  border: 1px solid var(--dr-line);
-  border-radius: 8px;
-  background: var(--dr-surface);
-  backdrop-filter: blur(8px);
-  font-size: 11px;
-  line-height: 1.45;
-  pointer-events: auto;
-}
-
-.dreaming-rnn-head {
+  width: 108px;
+  height: 108px;
+  border-radius: 999px;
+  border: 1px solid rgba(239, 233, 218, 0.22);
+  background: radial-gradient(
+    circle,
+    rgba(239, 233, 218, 0.06) 0%,
+    rgba(11, 16, 24, 0.22) 66%,
+    rgba(11, 16, 24, 0.04) 100%
+  );
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  box-shadow:
+    0 0 28px rgba(6, 10, 16, 0.36),
+    inset 0 0 18px rgba(239, 233, 218, 0.05);
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  margin-bottom: 6px;
-  color: var(--dr-muted);
-  font-size: 10px;
-  font-weight: 800;
-  letter-spacing: 0.1em;
+  justify-content: center;
 }
 
-.dreaming-rnn-bars {
-  display: grid;
-  grid-template-columns: repeat(8, minmax(0, 1fr));
-  gap: 3px;
-  height: 30px;
-  align-items: end;
-  padding: 3px 0 6px;
-  border-bottom: 1px solid var(--dr-line);
-  margin-bottom: 6px;
-}
-
-.dreaming-rnn-bar-col {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: flex-end;
-  height: 100%;
-  gap: 2px;
-}
-
-.dreaming-rnn-bar {
-  width: 100%;
-  border-radius: 2px;
-  min-height: 2px;
-  transition: height 180ms ease, background-color 220ms ease;
-}
-
-.dreaming-prob-list {
-  display: grid;
-  gap: 3px;
-}
-
-.dreaming-prob-row {
-  display: grid;
-  grid-template-columns: 64px 1fr 30px;
-  align-items: center;
-  gap: 6px;
-  font-variant-numeric: tabular-nums;
-}
-
-.dreaming-prob-label {
-  color: var(--dr-muted);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.dreaming-prob-track {
-  height: 5px;
-  border-radius: 3px;
-  background: rgba(232, 227, 213, 0.08);
-  overflow: hidden;
-}
-
-.dreaming-prob-fill {
-  height: 100%;
-  border-radius: 3px;
-  transition: width 200ms ease;
-}
-
-.dreaming-prob-pct {
-  text-align: right;
-  color: var(--dr-ink);
-  font-size: 10px;
-}
-
-.dreaming-rnn-foot {
-  display: flex;
-  justify-content: space-between;
-  margin-top: 6px;
-  padding-top: 5px;
-  border-top: 1px solid var(--dr-line);
-  color: var(--dr-muted);
-  font-size: 10px;
-  font-variant-numeric: tabular-nums;
-}
-
-/* 夢の一行字幕（舞台下部中央） */
-.dreaming-whisper {
-  position: absolute;
+.dreaming-joystick {
   left: 50%;
-  bottom: 14px;
+  bottom: max(26px, calc(env(safe-area-inset-bottom, 0px) + 18px));
   transform: translateX(-50%);
   z-index: 12;
-  max-width: min(620px, calc(100% - 28px));
-  padding: 8px 16px;
-  border: 1px solid var(--dr-line);
-  border-radius: 8px;
-  background: rgba(13, 17, 23, 0.78);
-  backdrop-filter: blur(6px);
-  text-align: center;
-  pointer-events: none;
-  animation: dreaming-fade-up 240ms ease-out;
+  opacity: 0.42;
+  transition: opacity 260ms ease, border-color 220ms ease, box-shadow 260ms ease;
 }
 
-.dreaming-whisper-text {
-  font-size: 14px;
-  letter-spacing: 0.08em;
-  color: var(--dr-ink);
-  line-height: 1.5;
+.dreaming-joystick:hover {
+  opacity: 0.66;
 }
 
-.dreaming-whisper-sub {
-  margin-top: 2px;
-  font-size: 11px;
-  color: var(--dr-muted);
-  letter-spacing: 0.04em;
+.dreaming-joystick[data-active="true"] {
+  opacity: 0.92;
+  border-color: rgba(239, 233, 218, 0.42);
+  box-shadow:
+    0 0 32px rgba(216, 178, 106, 0.16),
+    inset 0 0 20px rgba(239, 233, 218, 0.09);
 }
 
-@keyframes dreaming-fade-up {
-  from {
-    opacity: 0;
-    transform: translate(-50%, 6px);
-  }
-  to {
-    opacity: 1;
-    transform: translate(-50%, 0);
-  }
-}
-
-/* 初期の数歩だけ出す静かなガイド */
-.dreaming-hint-pill {
-  position: absolute;
-  top: 12px;
-  left: 12px;
-  z-index: 12;
-  max-width: min(360px, calc(100% - 24px));
-  padding: 7px 12px;
-  border: 1px solid var(--dr-line);
-  border-radius: 8px;
-  background: rgba(13, 17, 23, 0.76);
-  color: var(--dr-muted);
-  font-size: 11.5px;
-  line-height: 1.5;
+.dreaming-joystick[data-hidden="true"] {
+  opacity: 0;
   pointer-events: none;
 }
 
-.dreaming-hint-pill strong {
-  color: var(--dr-ink);
+/* 画面の好きな場所をドラッグしたときだけ指元に現れるフローティングリング */
+.dreaming-joy-float {
+  left: 0;
+  top: 0;
+  transform: translate(-50%, -50%);
+  z-index: 14;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 160ms ease;
 }
 
-/* 下部コントロールバー */
-.dreaming-controls {
-  position: relative;
-  z-index: 20;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px 16px;
-  padding: 10px 14px;
-  background: var(--dr-surface-strong);
-  border-top: 1px solid var(--dr-line);
+.dreaming-joy-float[data-visible="true"] {
+  opacity: 0.88;
+  border-color: rgba(239, 233, 218, 0.38);
 }
 
-.dreaming-temp-wrap {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex: 1 1 230px;
-  max-width: 360px;
-}
-
-.dreaming-temp-label {
-  display: flex;
-  flex-direction: column;
-  line-height: 1.2;
-  min-width: 78px;
-}
-
-.dreaming-temp-label span {
-  font-size: 10px;
-  color: var(--dr-muted);
-  letter-spacing: 0.06em;
-}
-
-.dreaming-temp-label strong {
-  font-size: 12.5px;
-  color: var(--dr-ink);
-  font-variant-numeric: tabular-nums;
-}
-
-.dreaming-temp-slider {
-  flex: 1 1 auto;
-  min-width: 110px;
-  accent-color: var(--dr-brass);
-  cursor: pointer;
-}
-
-.dreaming-actions {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.dreaming-action-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  min-height: 36px;
-  padding: 6px 13px;
-  border: 1px solid var(--dr-line-strong);
-  border-radius: 7px;
-  background: rgba(232, 227, 213, 0.06);
-  color: var(--dr-ink);
-  font-size: 12.5px;
-  font-weight: 700;
-  cursor: pointer;
-  transition: background 120ms ease, border-color 120ms ease, transform 80ms ease;
-}
-
-.dreaming-action-btn:hover {
-  background: rgba(232, 227, 213, 0.12);
-}
-
-.dreaming-action-btn:active {
-  transform: scale(0.96);
-}
-
-.dreaming-action-primary {
-  border-color: rgba(207, 169, 96, 0.58);
-  background: rgba(207, 169, 96, 0.14);
-  color: #f2dfb5;
-}
-
-.dreaming-action-primary:hover {
-  background: rgba(207, 169, 96, 0.22);
-}
-
-.dreaming-kbd {
-  padding: 1px 5px;
-  border: 1px solid var(--dr-line);
-  border-radius: 4px;
-  font-size: 10px;
-  color: var(--dr-muted);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-}
-
-.dreaming-anchor-dots {
-  display: inline-flex;
-  gap: 4px;
-  align-items: center;
-}
-
-.dreaming-anchor-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  border: 1px solid var(--dr-brass);
-  background: transparent;
-}
-
-.dreaming-anchor-dot-on {
-  background: var(--dr-brass);
-}
-
-/* 標本帳スライドドロワー */
-.dreaming-drawer-backdrop {
+.dreaming-joy-core {
   position: absolute;
-  inset: 0;
-  z-index: 30;
-  background: rgba(7, 10, 14, 0.55);
-  display: flex;
-  justify-content: flex-end;
+  width: 4px;
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(239, 233, 218, 0.3);
+  pointer-events: none;
 }
 
-.dreaming-drawer {
-  width: min(410px, 92vw);
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  background: #12171f;
-  border-left: 1px solid var(--dr-line-strong);
-  box-shadow: -12px 0 32px rgba(0, 0, 0, 0.45);
+.dreaming-joy-knob {
+  width: 38px;
+  height: 38px;
+  border-radius: 999px;
+  border: 1px solid rgba(246, 238, 218, 0.54);
+  background: radial-gradient(
+    circle at 38% 34%,
+    rgba(250, 244, 228, 0.86),
+    rgba(216, 178, 106, 0.34) 68%,
+    rgba(216, 178, 106, 0.08) 100%
+  );
+  box-shadow: 0 0 18px rgba(236, 222, 188, 0.24);
+  pointer-events: none;
+  will-change: transform;
 }
 
-.dreaming-drawer-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 14px 16px;
-  border-bottom: 1px solid var(--dr-line);
+.dreaming-joy-knob[data-spring="true"] {
+  transition: transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-.dreaming-drawer-head h2 {
-  font-size: 16px;
-  letter-spacing: 0.06em;
-}
-
-.dreaming-drawer-body {
-  flex: 1 1 auto;
-  overflow-y: auto;
-  padding: 14px 16px 24px;
-  display: grid;
-  gap: 16px;
-  align-content: start;
-}
-
-.dreaming-summary-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-}
-
-.dreaming-summary-card {
-  padding: 10px 12px;
-  border: 1px solid var(--dr-line);
-  border-radius: 7px;
-  background: rgba(232, 227, 213, 0.03);
-}
-
-.dreaming-summary-card span {
-  display: block;
-  font-size: 11px;
-  color: var(--dr-muted);
-}
-
-.dreaming-summary-card strong {
-  font-size: 16px;
-  font-variant-numeric: tabular-nums;
-  color: var(--dr-ink);
-}
-
-.dreaming-archetypes {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 6px;
-}
-
-.dreaming-archetype-chip {
-  padding: 6px 8px;
-  border: 1px solid var(--dr-line);
-  border-radius: 6px;
-  font-size: 11.5px;
-  color: var(--dr-muted);
-  background: rgba(232, 227, 213, 0.02);
-  text-align: center;
-}
-
-.dreaming-archetype-chip-found {
-  border-color: rgba(207, 169, 96, 0.45);
-  background: rgba(207, 169, 96, 0.1);
-  color: var(--dr-ink);
-}
-
-.dreaming-log-list {
-  display: grid;
-  gap: 8px;
-}
-
-.dreaming-log-item {
-  padding: 10px 12px;
-  border: 1px solid var(--dr-line);
-  border-radius: 7px;
-  background: rgba(232, 227, 213, 0.03);
-  display: grid;
-  gap: 3px;
-}
-
-.dreaming-log-top {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.dreaming-log-name {
-  font-size: 14px;
-  font-weight: 700;
-  color: var(--dr-ink);
-  letter-spacing: 0.05em;
-}
-
-.dreaming-log-meta {
-  font-size: 11px;
-  color: var(--dr-brass);
-  white-space: nowrap;
-}
-
-.dreaming-log-sub {
-  font-size: 11px;
-  color: var(--dr-muted);
-}
-
-.dreaming-log-frag {
-  font-size: 12px;
-  color: #cdc7b8;
-  line-height: 1.5;
-}
-
-.dreaming-section-title {
-  margin: 0 0 8px;
-  font-size: 11px;
-  font-weight: 800;
-  letter-spacing: 0.12em;
-  color: var(--dr-muted);
-}
-
-.dreaming-drawer-foot {
-  padding: 12px 16px;
-  border-top: 1px solid var(--dr-line);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-}
-
-@media (max-width: 720px) {
-  .dreaming-topbar {
-    padding: 7px 10px;
-    gap: 6px 10px;
+@media (max-width: 640px) {
+  .dreaming-joystick,
+  .dreaming-joy-float {
+    width: 100px;
+    height: 100px;
   }
-  .dreaming-metrics {
-    font-size: 11px;
-    gap: 4px 9px;
-  }
-  .dreaming-rnn-panel {
-    width: 184px;
-    padding: 8px 10px;
-    top: 8px;
-    right: 8px;
-  }
-  .dreaming-controls {
-    padding: 8px 10px;
-    gap: 8px;
-  }
-  .dreaming-kbd {
-    display: none;
-  }
-  .dreaming-whisper {
-    bottom: 10px;
-    padding: 6px 12px;
-  }
-  .dreaming-whisper-text {
-    font-size: 12.5px;
+
+  .dreaming-joy-knob {
+    width: 34px;
+    height: 34px;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .dreaming-whisper {
-    animation: none;
-  }
-  .dreaming-rnn-bar,
-  .dreaming-prob-fill,
-  .dreaming-action-btn,
-  .dreaming-tool-btn {
+  .dreaming-joystick,
+  .dreaming-joy-float,
+  .dreaming-joy-knob {
     transition: none;
   }
 }
