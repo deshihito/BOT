@@ -100,6 +100,59 @@ class StatsSettingsTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(guild.online.edit.await_args.kwargs["name"], "オンライン: 2")
         self.assertEqual(guild.boost.edit.await_args.kwargs["name"], "ブースト: 2")
 
+    async def test_second_rename_within_interval_is_skipped(self):
+        import time
+        await stats.update_settings(
+            1, stats.KEY, enabled=True, member_channel_id=30,
+        )
+        guild = FakeGuild()
+        await stats.update_stats(guild, stats.settings(1))
+        self.assertEqual(guild.member.edit.await_count, 1)
+        # 数が変わっても、前回改名から10分経つまでは改名しない（429回避）。
+        guild.member_count = 5
+        await stats.update_stats(guild, stats.settings(1))
+        self.assertEqual(guild.member.edit.await_count, 1)
+        # 改名時刻が設定ストアに残っている（再起動をまたいで効く）。
+        self.assertGreater(stats._last_renames(1)["member"], time.time() - 60)
+
+    async def test_rename_allowed_after_interval(self):
+        import time
+        await stats.update_settings(
+            1, stats.KEY, enabled=True, member_channel_id=30,
+            last_rename_member=time.time() - stats.MIN_RENAME_INTERVAL_SECONDS - 1,
+        )
+        guild = FakeGuild()
+        await stats.update_stats(guild, stats.settings(1))
+        self.assertEqual(guild.member.edit.await_count, 1)
+
+    async def test_force_bypasses_interval(self):
+        await stats.update_settings(
+            1, stats.KEY, enabled=True, member_channel_id=30,
+        )
+        guild = FakeGuild()
+        await stats.update_stats(guild, stats.settings(1))
+        guild.member_count = 5
+        await stats.update_stats(guild, stats.settings(1), force=True)
+        self.assertEqual(guild.member.edit.await_count, 2)
+        self.assertEqual(guild.member.edit.await_args.kwargs["name"], "メンバー: 5")
+
+    async def test_slow_edit_times_out_and_is_recorded(self):
+        import time
+        from unittest.mock import patch
+        await stats.update_settings(
+            1, stats.KEY, enabled=True, member_channel_id=30,
+        )
+        guild = FakeGuild()
+
+        async def hang(**kwargs):
+            await asyncio.sleep(60)
+
+        guild.member.edit = AsyncMock(side_effect=hang)
+        with patch.object(stats, "EDIT_TIMEOUT_SECONDS", 0.05):
+            await stats.update_stats(guild, stats.settings(1))
+        # タイムアウトしても例外なく終わり、試行は記録される。
+        self.assertGreater(stats._last_renames(1)["member"], time.time() - 60)
+
     async def test_disabled_does_nothing(self):
         await stats.update_settings(1, stats.KEY, enabled=False, member_channel_id=30)
         guild = FakeGuild()
