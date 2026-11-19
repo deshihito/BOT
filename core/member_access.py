@@ -26,6 +26,15 @@ logger = logging.getLogger(__name__)
 
 MAX_MESSAGES = 500
 
+# レートリミット方針（2026-11-19）:
+# 429 の retry_after がこの秒数を超える場合、discord.py に呼び出しの内側で
+# 寝てリトライさせず、RateLimited 例外として呼び出し側へ返す。
+# チャンネル名変更の上限（10分に2回）では retry_after が約600秒になり、
+# 既定動作だと1回の edit が最大5回・数十分ぶら下がり、再起動後にも
+# 食い込んで次の 429 を誘発していた。呼び出し側は HTTPException として
+# 処理し、その周期を諦めるのが前提。
+MAX_RATELIMIT_TIMEOUT_SECONDS = 30.0
+
 
 def build_intents() -> discord.Intents:
     """Bot が使う intent 一式。typing だけは利用箇所が無いため外す。"""
@@ -41,6 +50,7 @@ def bot_client_kwargs() -> dict[str, Any]:
         "intents": build_intents(),
         "chunk_guilds_at_startup": False,
         "max_messages": MAX_MESSAGES,
+        "max_ratelimit_timeout": MAX_RATELIMIT_TIMEOUT_SECONDS,
     }
 
 

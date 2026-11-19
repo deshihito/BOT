@@ -206,7 +206,7 @@ async def sync_category_perms(category, role) -> int:
     for channel in category.channels:
         try:
             await channel.edit(sync_permissions=True)
-        except (discord.Forbidden, discord.HTTPException):
+        except (discord.Forbidden, discord.HTTPException, discord.RateLimited):
             # 閲覧・管理できないチャンネル（隠しチャンネル等）は同期できない。
             # 1件の失敗で残り全部を止めないよう、飛ばして続行する。
             logger.warning(

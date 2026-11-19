@@ -113,13 +113,13 @@ class StatsSettingsTest(unittest.IsolatedAsyncioTestCase):
         await stats.update_stats(guild, stats.settings(1))
         self.assertEqual(guild.member.edit.await_count, 1)
         # 改名時刻が設定ストアに残っている（再起動をまたいで効く）。
-        self.assertGreater(stats._last_renames(1)["member"], time.time() - 60)
+        self.assertGreater(stats._last_renames_by_channel(1)[30], time.time() - 60)
 
     async def test_rename_allowed_after_interval(self):
         import time
         await stats.update_settings(
             1, stats.KEY, enabled=True, member_channel_id=30,
-            last_rename_member=time.time() - stats.MIN_RENAME_INTERVAL_SECONDS - 1,
+            last_rename_channels={"30": time.time() - stats.MIN_RENAME_INTERVAL_SECONDS - 1},
         )
         guild = FakeGuild()
         await stats.update_stats(guild, stats.settings(1))
@@ -151,7 +151,28 @@ class StatsSettingsTest(unittest.IsolatedAsyncioTestCase):
         with patch.object(stats, "EDIT_TIMEOUT_SECONDS", 0.05):
             await stats.update_stats(guild, stats.settings(1))
         # タイムアウトしても例外なく終わり、試行は記録される。
-        self.assertGreater(stats._last_renames(1)["member"], time.time() - 60)
+        self.assertGreater(stats._last_renames_by_channel(1)[30], time.time() - 60)
+
+    async def test_same_channel_for_two_keys_renamed_once(self):
+        await stats.update_settings(
+            1, stats.KEY, enabled=True, member_channel_id=30, online_channel_id=30,
+        )
+        guild = FakeGuild()
+        await stats.update_stats(guild, stats.settings(1))
+        # 同じVCが2項目に設定されても、改名はチャンネル単位で1回だけ。
+        self.assertEqual(guild.member.edit.await_count, 1)
+
+    async def test_rate_limited_channel_is_blocked_for_an_hour(self):
+        import time
+        await stats.update_settings(
+            1, stats.KEY, enabled=True, member_channel_id=30,
+        )
+        guild = FakeGuild()
+        guild.member.edit = AsyncMock(side_effect=discord.RateLimited(600.0))
+        await stats.update_stats(guild, stats.settings(1))
+        # 429 を踏んだチャンネルはサーキットブレーカで約1時間止まる。
+        blocked_value = stats._last_renames_by_channel(1)[30]
+        self.assertGreater(blocked_value, time.time() + 2900)
 
     async def test_disabled_does_nothing(self):
         await stats.update_settings(1, stats.KEY, enabled=False, member_channel_id=30)
