@@ -80,6 +80,9 @@ const game = await loadBundle(
     "toggleAnchor",
     "setDreamTemperature",
     "ambientTemperatureFor",
+    "isInVisionCone",
+    "computeDread",
+    "syncStalkerVisibility",
     "driftDreamTick",
     "descendDream",
     "redriftDream",
@@ -551,4 +554,74 @@ test("リアルタイム自律夢遊（driftDreamTick）: 立ち止まったま�
     }
   }
   assert.ok(changedOuter > 0, "未保護の周辺タイルが 12 ティック後も一切変容していない");
+});
+
+test("ホラー機構（残響の影・視線凍結・しおり結界・終わりなき呑み込み）: 光錐で止まり背後から迫り、呑まれても終わらず深層へ落ちる", () => {
+  let s = game.createDreamGame(6661);
+  // 東西の直線を歩行可能な床へ整える
+  for (let x = -4; x <= 4; x++) {
+    const t = s.tiles.get(game.tileKey(x, 0));
+    if (t) t.kind = "floor";
+  }
+
+  // 東側 (3,0) に影を 1 体配置。プレイヤーは東向き（0 rad）なので光錐に捉えられて静止する
+  const stalkerEast = {
+    id: 1,
+    x: 3,
+    y: 0,
+    name: "うしろのかげ",
+    originMotifId: "payphone",
+    generation: 2,
+    domain: s.dominantDomain,
+    seen: false,
+    stareTicks: 0,
+  };
+  s = { ...s, stalkers: [stalkerEast], nextStalkerId: 2 };
+
+  // 光錐を東（0 rad）に向けると即座に spotted となり、複数回 drift しても静止し続ける
+  const vis = game.syncStalkerVisibility(s, 0);
+  assert.equal(vis.newlySpotted, true);
+  assert.equal(vis.state.stalkers[0].seen, true);
+  s = vis.state;
+  for (let i = 0; i < 4; i++) {
+    s = game.driftDreamTick(s, 0);
+    assert.equal(s.stalkers[0].x, 3, "光を当てているのに影が動いてしまった");
+    assert.equal(s.stalkers[0].y, 0);
+  }
+  assert.ok(s.stalkers[0].stareTicks >= 4);
+
+  // 高 dread で自律温度が上昇する
+  const calmT = game.ambientTemperatureFor(1, 5, 0);
+  const panicT = game.ambientTemperatureFor(1, 5, 0.9);
+  assert.ok(panicT > calmT + 0.3, `恐怖度 dread で温度が上がっていない: calm=${calmT}, panic=${panicT}`);
+
+  // しおり保護域（5×5）を (0,0) に結ぶと dread が和らぎ、西を向いて背を向けても影は x=2 以内へ侵入できない
+  s = game.toggleAnchor(s);
+  const dreadInSanctuary = s.dread;
+  const dreadExposed = game.computeDread(0, 0, s.depth, s.stalkers, []);
+  assert.ok(dreadInSanctuary < dreadExposed, "しおり結界内で恐怖度が和らいでいない");
+
+  for (let i = 0; i < 8; i++) {
+    s = game.driftDreamTick(s, Math.PI); // 西向き（影に背を向ける）
+  }
+  assert.ok(
+    game.chebyshev(0, 0, s.stalkers[0].x, s.stalkers[0].y) > game.ANCHOR_RADIUS,
+    `しおり結界（半径 ${game.ANCHOR_RADIUS}）内に影が侵入してしまった`,
+  );
+
+  // しおりを外して背を向け続けると影が忍び寄り、接触すると終わらず一段深い層へ引きずり込まれる
+  s = game.toggleAnchor(s);
+  assert.equal(s.anchors.length, 0);
+  let consumed = false;
+  for (let i = 0; i < 20; i++) {
+    s = game.driftDreamTick(s, Math.PI);
+    if (s.lastEvent.kind === "consumed") {
+      consumed = true;
+      break;
+    }
+  }
+  assert.equal(consumed, true, "背を向け続けたのに影に呑み込まれなかった");
+  assert.equal(s.status, "drifting", "呑み込まれてもゲームオーバーで終了してはならない");
+  assert.equal(s.depth, 2, "呑み込みで一段深い悪夢層へ落ちていない");
+  assert.equal(s.consumedCount, 1);
 });

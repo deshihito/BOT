@@ -219,6 +219,21 @@ export type ArchiveEntry = {
   fragment: string;
 };
 
+export type DreamStalker = {
+  id: number;
+  x: number;
+  y: number;
+  /** char-RNN が変質生成した不気味な呼び名。 */
+  name: string;
+  originMotifId: MotifId | null;
+  generation: number;
+  domain: DomainId;
+  /** 懐中電灯の光錐内に捉えられているか（目が合うと静止する）。 */
+  seen: boolean;
+  /** 見つめ合い続けている累積ティック。 */
+  stareTicks: number;
+};
+
 export type DreamEventKind =
   | "init"
   | "move"
@@ -230,6 +245,7 @@ export type DreamEventKind =
   | "anchor_remove"
   | "pulse"
   | "descend"
+  | "consumed"
   | "temp"
   | "drift";
 
@@ -249,7 +265,7 @@ export type DreamWhisper = {
 };
 
 export type DreamState = {
-  /** ゲームに終わりはないため常に "drifting"。 */
+  /** ゲームに終わりはないため常に "drifting"。影に呑まれても終わらずさらに深い悪夢層へ落ちる。 */
   status: "drifting";
   seed: number;
   rngTick: number;
@@ -266,6 +282,13 @@ export type DreamState = {
   tiles: Map<string, DreamTile>;
   anchors: DreamAnchor[];
   nextAnchorId: number;
+  /** 視線の裏から忍び寄り、光を当てると静止する変質残響の影。 */
+  stalkers: DreamStalker[];
+  nextStalkerId: number;
+  /** 現在の恐怖・狂気度（0..1）。温度 T・空間歪み・心音・言語崩壊へ直結する。 */
+  dread: number;
+  /** 影に呑み込まれて深層へ引きずり込まれた累計回数。 */
+  consumedCount: number;
   echoQueue: EchoSeed[];
   echoChain: number;
   maxGeneration: number;
@@ -299,6 +322,228 @@ function isProtectedByAnchor(x: number, y: number, anchors: readonly DreamAnchor
     if (chebyshev(x, y, a.x, a.y) <= ANCHOR_RADIUS) return a;
   }
   return null;
+}
+
+const DIR_ANGLE: Record<DreamDir, number> = {
+  right: 0,
+  down: Math.PI * 0.5,
+  left: Math.PI,
+  up: -Math.PI * 0.5,
+};
+
+/** プレイヤーの懐中電灯光錐（距離 5.8 以内・角度 ±0.64 rad）に対象が入っているか。 */
+export function isInVisionCone(
+  px: number,
+  py: number,
+  facingOrAngle: DreamDir | number,
+  tx: number,
+  ty: number,
+): boolean {
+  const dx = tx - px;
+  const dy = ty - py;
+  const dist = Math.hypot(dx, dy);
+  if (dist < 0.01) return true;
+  if (dist > 5.8) return false;
+  const look = typeof facingOrAngle === "number" ? facingOrAngle : DIR_ANGLE[facingOrAngle];
+  let diff = Math.atan2(dy, dx) - look;
+  while (diff > Math.PI) diff -= Math.PI * 2;
+  while (diff < -Math.PI) diff += Math.PI * 2;
+  return Math.abs(diff) <= 0.64;
+}
+
+/** 影との距離・見つめ合い・深度・しおり保護から現在の恐怖度 dread（0..1）を算出する。 */
+export function computeDread(
+  px: number,
+  py: number,
+  depth: number,
+  stalkers: readonly DreamStalker[],
+  anchors: readonly DreamAnchor[],
+): number {
+  const base = Math.min(0.28, Math.max(0, depth - 1) * 0.065);
+  let peak = 0;
+  for (const st of stalkers) {
+    const dist = Math.hypot(st.x - px, st.y - py);
+    if (dist > 7.5) continue;
+    const prox = Math.max(0, 1 - dist / 7.0);
+    const stareBonus = st.seen ? Math.min(0.28, 0.08 + st.stareTicks * 0.04) : 0;
+    const local = Math.pow(prox, 1.35) * 0.86 + stareBonus;
+    if (local > peak) peak = local;
+  }
+  const inSanctuary = isProtectedByAnchor(px, py, anchors) !== null;
+  const raw = Math.min(1, base + peak);
+  return Math.round((inSanctuary ? raw * 0.48 : raw) * 1000) / 1000;
+}
+
+const STALKER_SEED_NAMES = ["うしろのかげ", "だれかのあしおと", "みているひと", "かえれないかげ"] as const;
+
+/**
+ * 残響の影（DreamStalker）の出現・視線凍結・背後接近・しおり境界ブロックを 1 ステップ進める。
+ * - 視線光錐内（seen = true）の影はピタッと静止し、見つめ合いが続くほど名前が崩れて dread が高まる
+ * - 視線光錐外（背中側・闇）の影は静かに 1 マスずつ忍び寄る（ただしアンカー保護域 5×5 へは侵入できない）
+ * - プレイヤーと重なった場合は consumedBy にその影を返す
+ */
+function advanceStalkers(
+  prevStalkers: readonly DreamStalker[],
+  nextStalkerIdStart: number,
+  tiles: Map<string, DreamTile>,
+  anchors: readonly DreamAnchor[],
+  px: number,
+  py: number,
+  facingOrAngle: DreamDir | number,
+  depth: number,
+  step: number,
+  domainWeights: Record<DomainId, number>,
+  dominant: DomainId,
+  temperature: number,
+  archive: readonly ArchiveEntry[],
+  mode: "move" | "drift",
+  rng: Rng,
+): { stalkers: DreamStalker[]; nextStalkerId: number; consumedBy: DreamStalker | null } {
+  const models = getDreamLanguageModels();
+  let nextId = nextStalkerIdStart;
+  const result: DreamStalker[] = [];
+  let consumedBy: DreamStalker | null = null;
+
+  const occupied = new Set<string>();
+  const playerProtected = isProtectedByAnchor(px, py, anchors) !== null;
+
+  // 1. 既存の影を更新（遠すぎるものは霧へ忘却）
+  for (const raw of prevStalkers) {
+    if (chebyshev(px, py, raw.x, raw.y) > VIEW_RADIUS + 2) continue;
+
+    const st: DreamStalker = { ...raw };
+    const seenNow = isInVisionCone(px, py, facingOrAngle, st.x, st.y);
+    st.seen = seenNow;
+
+    if (st.x === px && st.y === py) {
+      if (!playerProtected) {
+        consumedBy = st;
+      }
+      result.push(st);
+      continue;
+    }
+
+    if (seenNow) {
+      // 光を向けられている間はピタッと静止し、見つめ合い続けると言葉が崩れる
+      st.stareTicks += 1;
+      if (st.stareTicks % 3 === 0) {
+        st.name = mutateDreamName(models, domainWeights, st.name, st.generation + 1, Math.min(1.8, temperature + 0.25), rng);
+      }
+    } else {
+      st.stareTicks = 0;
+      const moveChance =
+        mode === "drift"
+          ? Math.min(0.88, 0.64 + (depth - 1) * 0.06)
+          : Math.min(0.84, 0.56 + (depth - 1) * 0.06);
+
+      if (rng() < moveChance) {
+        const dirs: readonly [number, number][] = [
+          [0, -1],
+          [1, 0],
+          [0, 1],
+          [-1, 0],
+        ];
+        let bestX = st.x;
+        let bestY = st.y;
+        let bestDist = Math.hypot(px - st.x, py - st.y);
+
+        for (const [dx, dy] of dirs) {
+          const nx = st.x + dx;
+          const ny = st.y + dy;
+          const nKey = tileKey(nx, ny);
+          if (occupied.has(nKey)) continue;
+          // しおり（Anchor）の 5×5 記憶結界には絶対に踏み込めない
+          if (isProtectedByAnchor(nx, ny, anchors) !== null) continue;
+          const tile = tiles.get(nKey);
+          const walkable = tile ? isWalkableTile(tile.kind) && tile.kind !== "rift" : false;
+          // 第 3 層以降では非アンカー壁を低確率ですり抜けて不気味さを増す
+          const canPhase = depth >= 3 && tile && !walkable && rng() < 0.28;
+          if (!walkable && !canPhase) continue;
+
+          const d = Math.hypot(px - nx, py - ny) + (rng() - 0.5) * 0.14;
+          if (d < bestDist) {
+            bestDist = d;
+            bestX = nx;
+            bestY = ny;
+          }
+        }
+        st.x = bestX;
+        st.y = bestY;
+        st.seen = isInVisionCone(px, py, facingOrAngle, st.x, st.y);
+      }
+    }
+
+    occupied.add(tileKey(st.x, st.y));
+    result.push(st);
+
+    if (st.x === px && st.y === py && !playerProtected && !consumedBy) {
+      consumedBy = st;
+    }
+  }
+
+  // 2. 視線の裏（光錐の外・距離 5..7・非アンカー）から新たな残響の影が滲み出る
+  const maxStalkers = depth === 1 ? 1 : depth <= 3 ? 2 : 3;
+  const eligible = step >= 4 || depth >= 2 || archive.length >= 1;
+  const spawnChance = mode === "drift" ? 0.26 : 0.22;
+
+  if (!consumedBy && eligible && result.length < maxStalkers && rng() < spawnChance) {
+    const candidates: DreamTile[] = [];
+    for (const tile of tiles.values()) {
+      const dist = chebyshev(px, py, tile.x, tile.y);
+      if (dist < 5 || dist > VIEW_RADIUS) continue;
+      if (!isWalkableTile(tile.kind) || tile.kind === "rift") continue;
+      if (isProtectedByAnchor(tile.x, tile.y, anchors) !== null) continue;
+      if (isInVisionCone(px, py, facingOrAngle, tile.x, tile.y)) continue;
+      if (occupied.has(tileKey(tile.x, tile.y))) continue;
+      candidates.push(tile);
+    }
+    if (candidates.length > 0) {
+      const spot = candidates[Math.floor(rng() * candidates.length)];
+      const recent = archive[0];
+      const baseWord =
+        recent?.name ?? STALKER_SEED_NAMES[Math.floor(rng() * STALKER_SEED_NAMES.length)];
+      const gen = (recent?.generation ?? 1) + Math.max(0, depth - 1);
+      const mutated = mutateDreamName(models, domainWeights, baseWord, gen, Math.min(1.8, temperature + 0.2), rng);
+      result.push({
+        id: nextId++,
+        x: spot.x,
+        y: spot.y,
+        name: mutated,
+        originMotifId: recent?.motifId ?? null,
+        generation: gen,
+        domain: dominant,
+        seen: false,
+        stareTicks: 0,
+      });
+    }
+  }
+
+  return { stalkers: result, nextStalkerId: nextId, consumedBy };
+}
+
+/** リアルタイムで懐中電灯の向きが変わった瞬間、影の可視状態と恐怖度 dread を即時同期する。 */
+export function syncStalkerVisibility(
+  state: DreamState,
+  lookAngle: number,
+): { state: DreamState; newlySpotted: boolean } {
+  if (state.stalkers.length === 0) return { state, newlySpotted: false };
+  let changed = false;
+  let newlySpotted = false;
+  const nextStalkers = state.stalkers.map((st) => {
+    const seen = isInVisionCone(state.player.x, state.player.y, lookAngle, st.x, st.y);
+    if (seen !== st.seen) {
+      changed = true;
+      if (seen) newlySpotted = true;
+      return { ...st, seen };
+    }
+    return st;
+  });
+  if (!changed) return { state, newlySpotted: false };
+  const nextDread = computeDread(state.player.x, state.player.y, state.depth, nextStalkers, state.anchors);
+  return {
+    state: { ...state, stalkers: nextStalkers, dread: nextDread },
+    newlySpotted,
+  };
 }
 
 /** 指定座標の近傍に別領域（特にアンカー保護された過去領域）が接している強度（0..1）。 */
@@ -887,6 +1132,10 @@ export function createDreamGame(seed = 20261119): DreamState {
     tiles,
     anchors: [],
     nextAnchorId: 1,
+    stalkers: [],
+    nextStalkerId: 1,
+    dread: 0,
+    consumedCount: 0,
     echoQueue: [],
     echoChain: 0,
     maxGeneration: 0,
@@ -961,6 +1210,7 @@ export function descendDream(state: DreamState): DreamState {
     rng,
   );
   const line = generateDreamFragment(models, nextWeights, state.temperature, rng);
+  const baseDread = computeDread(0, 0, nextDepth, [], []);
 
   return {
     ...state,
@@ -975,6 +1225,8 @@ export function descendDream(state: DreamState): DreamState {
     placeName: nextPlaceName,
     tiles,
     anchors: [],
+    stalkers: [],
+    dread: baseDread,
     echoQueue: adjustedEchoes,
     forgottenCount: state.forgottenCount + forgottenHere,
     whisper: {
@@ -988,6 +1240,45 @@ export function descendDream(state: DreamState): DreamState {
       x: 0,
       y: 0,
       detail: nextPlaceName,
+    },
+  };
+}
+
+/**
+ * 残響の影に呑み込まれたときの処理。
+ * 終わらない悪夢なので終了画面にはならず、しおりを砕いて一段深い層へ引きずり込まれる。
+ */
+function consumeByStalker(state: DreamState, stalker: DreamStalker): DreamState {
+  const dropped = descendDream(state);
+  const { rng, nextTick } = nextStepRng(dropped.seed, dropped.rngTick);
+  const models = getDreamLanguageModels();
+  const eerieLine = mutateDreamName(
+    models,
+    dropped.domainWeights,
+    stalker.name,
+    stalker.generation + 1,
+    1.65,
+    rng,
+  );
+  const frag = generateDreamFragment(models, dropped.domainWeights, 1.58, rng);
+  return {
+    ...dropped,
+    rngTick: nextTick,
+    temperature: clampTemperature(Math.max(dropped.temperature, 1.38)),
+    dread: Math.max(dropped.dread, 0.72),
+    consumedCount: state.consumedCount + 1,
+    whisper: {
+      text: `${eerieLine} …… ${frag}`,
+      sub: `影に呑まれ第${dropped.depth}層へ落ちた`,
+      step: dropped.step,
+    },
+    lastEvent: {
+      kind: "consumed",
+      step: dropped.step,
+      x: 0,
+      y: 0,
+      detail: stalker.name,
+      generation: stalker.generation,
     },
   };
 }
@@ -1102,6 +1393,26 @@ export function moveDream(state: DreamState, dir: DreamDir): DreamState {
     };
   }
 
+  // 6. 残響の影（Stalker）の背後接近・視線凍結・接触判定
+  const stalkRes = advanceStalkers(
+    state.stalkers,
+    state.nextStalkerId,
+    nextTiles,
+    state.anchors,
+    nx,
+    ny,
+    dir,
+    state.depth,
+    nextStep,
+    nextWeights,
+    nextDom,
+    state.temperature,
+    state.archive,
+    "move",
+    rng,
+  );
+  const nextDread = computeDread(nx, ny, state.depth, stalkRes.stalkers, state.anchors);
+
   const moved: DreamState = {
     ...state,
     rngTick: nextTick,
@@ -1114,18 +1425,26 @@ export function moveDream(state: DreamState, dir: DreamDir): DreamState {
     bleedEntropy: nextEntropy,
     placeName: nextPlaceName,
     tiles: nextTiles,
+    stalkers: stalkRes.stalkers,
+    nextStalkerId: stalkRes.nextStalkerId,
+    dread: nextDread,
     echoQueue: nextEchoQueue,
     forgottenCount: state.forgottenCount + forgottenNow,
     whisper: nextWhisper,
     lastEvent: { kind: "move", step: nextStep, x: nx, y: ny },
   };
 
-  // 6. 踏んだマスが境界の裂け目（rift）ならそのまま深層へ潜行
+  // 7. 残響の影に呑まれた場合：ゲームオーバーではなく一段深い悪夢層へ引きずり込まれる
+  if (stalkRes.consumedBy) {
+    return consumeByStalker(moved, stalkRes.consumedBy);
+  }
+
+  // 8. 踏んだマスが境界の裂け目（rift）ならそのまま深層へ潜行
   if (steppedTile.kind === "rift") {
     return descendDream(moved);
   }
 
-  // 7. 踏んだマスにモチーフがあれば共鳴採集
+  // 9. 踏んだマスにモチーフがあれば共鳴採集
   if (steppedTile.motif) {
     return collectMotifOnTile(moved, nextTiles, steppedTile, rng, nextTick);
   }
@@ -1246,6 +1565,21 @@ export function pulseDream(state: DreamState): DreamState {
     }
   }
 
+  // 周囲 4 マス以内の残響の影を波紋で 2 マス押し返す（追い詰められた際の微かな抵抗）
+  const nextStalkers = state.stalkers.map((st) => {
+    const dist = chebyshev(px, py, st.x, st.y);
+    if (dist > 4) return st;
+    const dx = Math.sign(st.x - px) || (rng() < 0.5 ? 1 : -1);
+    const dy = Math.sign(st.y - py);
+    return {
+      ...st,
+      x: st.x + dx * 2,
+      y: st.y + dy * 2,
+      stareTicks: 0,
+    };
+  });
+  const nextDread = computeDread(px, py, state.depth, nextStalkers, state.anchors);
+
   const models = getDreamLanguageModels();
   const fragment = calledMotifName
     ? `遠くで「${calledMotifName}」の輪郭が結ばれた`
@@ -1257,6 +1591,8 @@ export function pulseDream(state: DreamState): DreamState {
     ...state,
     rngTick: nextTick,
     tiles: nextTiles,
+    stalkers: nextStalkers,
+    dread: nextDread,
     whisper: {
       text: fragment,
       sub: reshaped > 0 ? `周囲の地形 ${reshaped} マスを再想起` : "波紋が静かに広がった",
@@ -1284,6 +1620,7 @@ export function toggleAnchor(state: DreamState): DreamState {
       ...state,
       tiles: nextTiles,
       anchors: nextAnchors,
+      dread: computeDread(px, py, state.depth, state.stalkers, nextAnchors),
       whisper: {
         text: `「${removed.label}」のしおりを外した`,
         sub: "この場所はふたたび忘却へ溶けていく",
@@ -1309,12 +1646,22 @@ export function toggleAnchor(state: DreamState): DreamState {
     nextAnchors = nextAnchors.slice(1);
   }
 
-  // 新しいアンカー保護域の記憶を 1.0 に固定
+  // 新しいアンカー保護域の記憶を 1.0 に固定し、結界内に入りかけていた影を外縁へ押し出す
   for (const tile of nextTiles.values()) {
     if (chebyshev(tile.x, tile.y, px, py) <= ANCHOR_RADIUS) {
       tile.memory = 1;
     }
   }
+  const pushedStalkers = state.stalkers.map((st) => {
+    if (chebyshev(st.x, st.y, px, py) > ANCHOR_RADIUS) return st;
+    const dx = Math.sign(st.x - px) || 1;
+    const dy = Math.sign(st.y - py);
+    return {
+      ...st,
+      x: px + dx * (ANCHOR_RADIUS + 1),
+      y: py + dy * (ANCHOR_RADIUS + 1),
+    };
+  });
 
   // FIFO で押し出された最古のしおりが遠くにあれば即座に忘却を開始
   let forgottenNow = 0;
@@ -1335,6 +1682,8 @@ export function toggleAnchor(state: DreamState): DreamState {
     ...state,
     tiles: nextTiles,
     anchors: nextAnchors,
+    stalkers: pushedStalkers,
+    dread: computeDread(px, py, state.depth, pushedStalkers, nextAnchors),
     nextAnchorId: state.nextAnchorId + 1,
     forgottenCount: state.forgottenCount + forgottenNow,
     whisper: evicted
@@ -1374,21 +1723,23 @@ export function setDreamTemperature(state: DreamState, temperature: number): Dre
   };
 }
 
-/** 深度と LSTM 経過ステップから、夢が自然に呼吸するサンプリング温度 T を算出する。 */
-export function ambientTemperatureFor(depth: number, rnnSteps: number): number {
-  const base = 0.86 + Math.min(0.46, Math.max(0, depth - 1) * 0.085);
-  const wave = Math.sin(rnnSteps * 0.16) * 0.24 + Math.cos(rnnSteps * 0.07) * 0.08;
-  return Math.round(clampTemperature(base + wave) * 100) / 100;
+/** 深度・LSTM 経過ステップ・恐怖度 dread から、夢が自然に呼吸し歪むサンプリング温度 T を算出する。 */
+export function ambientTemperatureFor(depth: number, rnnSteps: number, dread = 0): number {
+  const base = 0.82 + Math.min(0.42, Math.max(0, depth - 1) * 0.08);
+  const wave = Math.sin(rnnSteps * 0.16) * 0.22 + Math.cos(rnnSteps * 0.07) * 0.07;
+  const fearBoost = Math.max(0, Math.min(1, dread)) * 0.62;
+  return Math.round(clampTemperature(base + wave + fearBoost) * 100) / 100;
 }
 
 /**
- * リアルタイム自律夢遊ティック（立ち止まっていても夢がうねり・滲み・書き換わり続ける）。
+ * リアルタイム自律夢遊ティック（立ち止まっていても夢がうねり・滲み・書き換わり、背後の影も忍び寄る）。
  * - 小型 LSTM を微細な自律波動入力で 1 ステップ揺らし、領域確率分布を連続漂流させる
  * - 非アンカー保護・非プレイヤー足元の周辺タイルを 1〜3 マス局所再サンプルし、空間をリアルタイム変容させる
+ * - 視線光錐の外（背中側）にいる残響の影が静かに歩み寄り、光を当てていれば静止する
  * - 高温時や領域移り変わり時に地名・未採集モチーフ名も文字 n-gram で微かに揺らぐ
  * プレイヤーの歩数（step）やアンカー保護域は一切変えない。
  */
-export function driftDreamTick(state: DreamState): DreamState {
+export function driftDreamTick(state: DreamState, lookAngle?: number): DreamState {
   const { rng, nextTick } = nextStepRng(state.seed, state.rngTick);
   const { x: px, y: py } = state.player;
   const temp = state.temperature;
@@ -1494,7 +1845,27 @@ export function driftDreamTick(state: DreamState): DreamState {
     };
   }
 
-  return {
+  // 4. 立ち止まっている間も、視線光錐の外にいる残響の影が背後から忍び寄る
+  const stalkRes = advanceStalkers(
+    state.stalkers,
+    state.nextStalkerId,
+    nextTiles,
+    state.anchors,
+    px,
+    py,
+    lookAngle ?? state.player.facing,
+    state.depth,
+    state.step,
+    nextWeights,
+    nextDom,
+    temp,
+    state.archive,
+    "drift",
+    rng,
+  );
+  const nextDread = computeDread(px, py, state.depth, stalkRes.stalkers, state.anchors);
+
+  const drifted: DreamState = {
     ...state,
     rngTick: nextTick,
     rnn: nextRnn,
@@ -1503,9 +1874,18 @@ export function driftDreamTick(state: DreamState): DreamState {
     bleedEntropy: nextEntropy,
     placeName: nextPlaceName,
     tiles: nextTiles,
+    stalkers: stalkRes.stalkers,
+    nextStalkerId: stalkRes.nextStalkerId,
+    dread: nextDread,
     whisper: nextWhisper,
     lastEvent: { kind: "drift", step: state.step, x: px, y: py },
   };
+
+  if (stalkRes.consumedBy) {
+    return consumeByStalker(drifted, stalkRes.consumedBy);
+  }
+
+  return drifted;
 }
 
 /** 現在の標本帳・記録を保ったまま、別シードの浅い夢へ漂い直す（終了ではなく連続した転寝）。 */

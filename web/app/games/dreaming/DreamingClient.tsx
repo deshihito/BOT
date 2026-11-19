@@ -6,10 +6,12 @@
 //
 // Transformer 以前の生成モデル（小型 LSTM + 文字レベル n-gram + 2D 条件付きマルコフ場）の
 // 隠れ状態 h_t をそのまま 60fps の連続頂点ワープ場・流体リボン・液状クロスモーフ・
-// 残像フィードバックバッファ・自律夢遊ティック（driftDreamTick）へ直結する。
-// - 壁へ押し当て続けると夢の波紋で道が溶けて開く（自動パルス救済）
-// - 歩いた後に静かに佇むと足元の 5×5 が揺れない「記憶の島（しおり）」として定着する
-// - 温度 T は深度と時間波動に応じて自然に呼吸する
+// 残像フィードバックバッファ・自律夢遊ティック（driftDreamTick）へ直結し、
+// 視線光錐の外から忍び寄る「残響の影（DreamStalker）」と忘却による認知崩壊ホラーを描く。
+// - 懐中電灯の光錐を向けた影はピタッと静止し、背を向けると闇の中から忍び寄る
+// - 歩いた後に静かに佇むと足元の 5×5 が影の入れない「記憶の島（しおり）」として定着する
+// - 壁へ押し当て続けると波紋で道が開き、近くの影も押し返される
+// - 呑み込まれても終わらず、しおりが砕けてさらに深い悪夢層へ引きずり込まれる
 
 import { useCallback, useEffect, useRef } from "react";
 import { isSfxMuted, setSfxMuted } from "@/lib/sfx";
@@ -39,6 +41,7 @@ import {
   parseDreamRecord,
   pulseDream,
   setDreamTemperature,
+  syncStalkerVisibility,
   toggleAnchor,
   tileKey,
   type DreamDir,
@@ -51,8 +54,11 @@ import {
   sfxDreamAnchor,
   sfxDreamBump,
   sfxDreamCollect,
+  sfxDreamConsumed,
   sfxDreamDescend,
+  sfxDreamHeartbeat,
   sfxDreamPulse,
+  sfxDreamStalkerSpot,
   sfxDreamStep,
   stopDreamAmbience,
   updateDreamAmbience,
@@ -570,10 +576,17 @@ export default function DreamingClient() {
     bumpX: 0,
     bumpY: 0,
     descendFlash: 0,
+    consumedFlash: 0,
+    spotFlash: 0,
+    shake: 0,
+    smoothDread: 0,
     pulseWave: 0,
   });
   const smoothHRef = useRef<number[]>(new Array<number>(RNN_DIM).fill(0));
   const smoothWeightsRef = useRef<Record<DomainId, number>>({ ...stateRef.current.domainWeights });
+  const stalkerSmoothPosRef = useRef<Map<number, Pt>>(new Map());
+  const lastHeartbeatMsRef = useRef(0);
+  const lastSpotSfxMsRef = useRef(0);
   const ripplesRef = useRef<RippleFx[]>([]);
   const tapRingsRef = useRef<ScreenTapFx[]>([]);
   const particlesRef = useRef<CharParticle[]>([]);
@@ -728,7 +741,7 @@ export default function DreamingClient() {
     }
 
     const evKind = next.lastEvent.kind;
-    if (evKind === "collect" || evKind === "reunion" || evKind === "descend") {
+    if (evKind === "collect" || evKind === "reunion" || evKind === "descend" || evKind === "consumed") {
       mt.metaHighlightUntilMs = now + 4500;
     }
 
@@ -739,7 +752,8 @@ export default function DreamingClient() {
       forgotDelta > 0 ||
       evKind === "collect" ||
       evKind === "reunion" ||
-      evKind === "descend"
+      evKind === "descend" ||
+      evKind === "consumed"
     ) {
       savedStepsRef.current = next.step;
       savedForgottenRef.current = next.forgottenCount;
@@ -749,7 +763,7 @@ export default function DreamingClient() {
     }
 
     if (audioUnlockedRef.current && !isSfxMuted()) {
-      updateDreamAmbience(next.domainWeights, next.temperature, next.depth);
+      updateDreamAmbience(next.domainWeights, next.temperature, next.depth, next.dread);
     }
   }, []);
 
@@ -761,8 +775,9 @@ export default function DreamingClient() {
       const accent = rgbCss(blendDomainColors(next.domainWeights, "accent"), 0.88);
       const ink = rgbCss(blendDomainColors(next.domainWeights, "ink"), 0.92);
 
-      if (ev.kind === "descend" || ev.kind === "init") {
+      if (ev.kind === "descend" || ev.kind === "consumed" || ev.kind === "init") {
         syncTileVisualDiff(next, true);
+        stalkerSmoothPosRef.current.clear();
       } else {
         syncTileVisualDiff(next, false);
       }
@@ -847,6 +862,30 @@ export default function DreamingClient() {
           maxRadius: 5.2,
           color: "rgba(204, 224, 236, 0.82)",
         });
+      } else if (ev.kind === "consumed") {
+        // 残響の影に呑まれ、終わらない悪夢のさらに深い層へ落ちる衝撃演出
+        sfxDreamConsumed();
+        camRef.current.x = 0;
+        camRef.current.y = 0;
+        camRef.current.px = 0;
+        camRef.current.py = 0;
+        camRef.current.consumedFlash = 1;
+        camRef.current.shake = 14;
+        const chars = Array.from(ev.detail ?? "みつけた");
+        chars.forEach((ch, idx) => {
+          const angle = (idx / Math.max(1, chars.length)) * Math.PI * 2;
+          particlesRef.current.push({
+            wx: 0,
+            wy: 0,
+            vx: Math.cos(angle) * 1.15,
+            vy: Math.sin(angle) * 1.15,
+            char: ch,
+            startMs: now,
+            durMs: 2100,
+            color: "rgba(214, 96, 82, 0.88)",
+            scale: 1.35,
+          });
+        });
       }
     },
     [syncMetaAndPersistence, syncTileVisualDiff],
@@ -857,7 +896,7 @@ export default function DreamingClient() {
       audioUnlockedRef.current = true;
       if (!isSfxMuted()) {
         const cur = stateRef.current;
-        updateDreamAmbience(cur.domainWeights, cur.temperature, cur.depth);
+        updateDreamAmbience(cur.domainWeights, cur.temperature, cur.depth, cur.dread);
       }
     }
   }, []);
@@ -904,6 +943,10 @@ export default function DreamingClient() {
       bumpX: 0,
       bumpY: 0,
       descendFlash: 0.72,
+      consumedFlash: 0,
+      spotFlash: 0,
+      shake: 0,
+      smoothDread: 0,
       pulseWave: 0,
     };
     syncTileVisualDiff(hydrated, true);
@@ -916,30 +959,34 @@ export default function DreamingClient() {
     };
   }, [syncTileVisualDiff]);
 
-  // リアルタイム自律夢遊ループ：立ち止まっていても LSTM・温度呼吸・周辺地形・語彙が連続変容し続ける
+  // リアルタイム自律夢遊ループ：立ち止まっていても LSTM・温度呼吸・周辺地形・背後の影が動き続ける
   useEffect(() => {
     let timerId: ReturnType<typeof setTimeout> | null = null;
     let cancelled = false;
 
     const scheduleNext = () => {
       if (cancelled) return;
-      const curTemp = stateRef.current.temperature;
+      const cur = stateRef.current;
       const intervalMs = Math.round(
-        Math.max(920, Math.min(2250, 2150 - (curTemp - MIN_TEMPERATURE) * 880)),
+        Math.max(760, Math.min(2150, 2050 - (cur.temperature - MIN_TEMPERATURE) * 760 - cur.dread * 420)),
       );
       timerId = setTimeout(() => {
         if (cancelled) return;
         if (!reducedMotionRef.current && (typeof document === "undefined" || !document.hidden)) {
-          const cur = stateRef.current;
-          const breathedTemp = ambientTemperatureFor(cur.depth, cur.rnn.steps);
+          const latest = stateRef.current;
+          const breathedTemp = ambientTemperatureFor(latest.depth, latest.rnn.steps, latest.dread);
           const tempered =
-            Math.abs(breathedTemp - cur.temperature) >= 0.02
-              ? setDreamTemperature(cur, breathedTemp)
-              : cur;
-          const next = driftDreamTick(tempered);
+            Math.abs(breathedTemp - latest.temperature) >= 0.02
+              ? setDreamTemperature(latest, breathedTemp)
+              : latest;
+          const next = driftDreamTick(tempered, camRef.current.facingAngle);
           stateRef.current = next;
-          syncTileVisualDiff(next, false);
-          syncMetaAndPersistence(next);
+          if (next.lastEvent.kind === "consumed") {
+            handleEventEffects(next);
+          } else {
+            syncTileVisualDiff(next, false);
+            syncMetaAndPersistence(next);
+          }
         }
         scheduleNext();
       }, intervalMs);
@@ -950,7 +997,7 @@ export default function DreamingClient() {
       cancelled = true;
       if (timerId !== null) clearTimeout(timerId);
     };
-  }, [syncMetaAndPersistence, syncTileVisualDiff]);
+  }, [handleEventEffects, syncMetaAndPersistence, syncTileVisualDiff]);
 
   // キーボード操作（UI ゼロでも矢印・WASD 押しっぱなしでジョイスティックと連動して連続歩行できる）
   useEffect(() => {
@@ -981,7 +1028,7 @@ export default function DreamingClient() {
         } else {
           unlockAudio();
           const cur = stateRef.current;
-          updateDreamAmbience(cur.domainWeights, cur.temperature, cur.depth);
+          updateDreamAmbience(cur.domainWeights, cur.temperature, cur.depth, cur.dread);
         }
       }
     };
@@ -1114,11 +1161,13 @@ export default function DreamingClient() {
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    // 液状残像フィードバック用の軽量 0.5x オフスクリーンキャンバス（2枚スワップ）
+    // 液状残像フィードバック＆懐中電灯暗闇マスク用の軽量 0.5x オフスクリーンキャンバス
     const trailCanvas = document.createElement("canvas");
     const trailSwap = document.createElement("canvas");
+    const lightCanvas = document.createElement("canvas");
     const tCtx = trailCanvas.getContext("2d");
     const sCtx = trailSwap.getContext("2d");
+    const lCtx = lightCanvas.getContext("2d");
 
     const grainPattern = createFilmGrainPattern(ctx);
     let rafId = 0;
@@ -1177,6 +1226,8 @@ export default function DreamingClient() {
       trailCanvas.height = th;
       trailSwap.width = tw;
       trailSwap.height = th;
+      lightCanvas.width = tw;
+      lightCanvas.height = th;
 
       if (ambientMotesRef.current.length === 0) {
         initAmbientField(width, height);
@@ -1340,12 +1391,49 @@ export default function DreamingClient() {
         }
       }
 
-      const s = stateRef.current;
       const timeSec = now / 1000;
       const cam = camRef.current;
       const reduced = reducedMotionRef.current;
 
-      // 滑らかなカメラ・視線角・LSTM 隠れ状態・領域重み補間
+      // ジョイスティックを傾けている間は光錐も滑らかにアナログ角へ追従
+      const targetAngle = isMoving ? Math.atan2(iy, ix) : FACING_ANGLE[stateRef.current.player.facing];
+      let angleDiff = targetAngle - cam.facingAngle;
+      while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+      while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+      cam.facingAngle += angleDiff * (reduced ? 1 : 0.18);
+
+      // 光錐の向きが変わった瞬間に影の視認・凍結を即時同期（目を合わせた瞬間に冷たいスティンガー）
+      const visSync = syncStalkerVisibility(stateRef.current, cam.facingAngle);
+      if (visSync.state !== stateRef.current) {
+        stateRef.current = visSync.state;
+        if (visSync.newlySpotted && now - lastSpotSfxMsRef.current > 1300) {
+          lastSpotSfxMsRef.current = now;
+          sfxDreamStalkerSpot();
+          cam.spotFlash = 0.55;
+          cam.shake = Math.max(cam.shake, 5.2);
+          if (audioUnlockedRef.current && !isSfxMuted()) {
+            updateDreamAmbience(
+              visSync.state.domainWeights,
+              visSync.state.temperature,
+              visSync.state.depth,
+              visSync.state.dread,
+            );
+          }
+        }
+      }
+
+      const s = stateRef.current;
+
+      // 影との距離・見つめ合いに応じた心音ループ（UI ゲージ無しで切迫感を伝える）
+      if (audioUnlockedRef.current && !isSfxMuted() && s.dread >= 0.24) {
+        const hbInterval = Math.max(420, 1180 - (s.dread - 0.24) * 980);
+        if (now - lastHeartbeatMsRef.current >= hbInterval) {
+          lastHeartbeatMsRef.current = now;
+          sfxDreamHeartbeat(s.dread);
+        }
+      }
+
+      // 滑らかなカメラ・LSTM 隠れ状態・領域重み・恐怖度補間
       const lerp = reduced ? 1 : 0.14;
       cam.px += (s.player.x - cam.px) * lerp;
       cam.py += (s.player.y - cam.py) * lerp;
@@ -1354,7 +1442,12 @@ export default function DreamingClient() {
       cam.bumpX *= 0.76;
       cam.bumpY *= 0.76;
       cam.descendFlash = Math.max(0, cam.descendFlash - 0.02);
+      cam.consumedFlash = Math.max(0, cam.consumedFlash - 0.015);
+      cam.spotFlash = Math.max(0, cam.spotFlash - 0.04);
+      cam.shake *= 0.86;
       cam.pulseWave = Math.max(0, cam.pulseWave - 0.025);
+      cam.smoothDread += (s.dread - cam.smoothDread) * (reduced ? 1 : 0.07);
+      const dread = cam.smoothDread;
 
       const hLerp = reduced ? 1 : 0.055;
       const sh = smoothHRef.current;
@@ -1366,15 +1459,17 @@ export default function DreamingClient() {
         sw[d] += ((s.domainWeights[d] ?? 0) - sw[d]) * hLerp;
       }
 
-      // ジョイスティックを傾けている間は光錐も滑らかにアナログ角へ追従
-      const targetAngle = isMoving ? Math.atan2(iy, ix) : FACING_ANGLE[s.player.facing];
-      let angleDiff = targetAngle - cam.facingAngle;
-      while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
-      while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
-      cam.facingAngle += angleDiff * (reduced ? 1 : 0.18);
-
       ctx.save();
       ctx.scale(dpr, dpr);
+
+      // 恐怖高潮・遭遇・呑み込み時の微細なカメラ震え
+      if (!reduced && (cam.shake > 0.2 || dread > 0.65)) {
+        const trem = cam.shake + Math.max(0, dread - 0.65) * 4.5;
+        ctx.translate(
+          (Math.sin(timeSec * 53) * 0.6 + Math.cos(timeSec * 31) * 0.4) * trem,
+          (Math.cos(timeSec * 47) * 0.6 + Math.sin(timeSec * 29) * 0.4) * trem,
+        );
+      }
 
       const fogRgb = blendDomainColors(sw, "fog");
       const accentRgb = blendDomainColors(sw, "accent");
@@ -1385,11 +1480,11 @@ export default function DreamingClient() {
         Math.min(1, (s.temperature - MIN_TEMPERATURE) / (MAX_TEMPERATURE - MIN_TEMPERATURE)),
       );
 
-      // 背景：中心に微かな余韻を帯びた深い夢霧グラデーション
+      // 背景：中心に微かな余韻を帯びた深い闇霧グラデーション
       const bgGrad = ctx.createRadialGradient(
         width * 0.5 + Math.sin(timeSec * 0.35) * 24,
         height * 0.48 + Math.cos(timeSec * 0.28) * 18,
-        Math.min(width, height) * 0.08,
+        Math.min(width, height) * 0.06,
         width * 0.5,
         height * 0.5,
         Math.max(width, height) * 0.78,
@@ -1398,9 +1493,9 @@ export default function DreamingClient() {
         0,
         rgbCss(
           [
-            Math.min(255, fogRgb[0] + 12),
-            Math.min(255, fogRgb[1] + 14),
-            Math.min(255, fogRgb[2] + 16),
+            Math.min(255, fogRgb[0] + 8),
+            Math.min(255, fogRgb[1] + 9),
+            Math.min(255, fogRgb[2] + 11),
           ],
           1,
         ),
@@ -1419,12 +1514,12 @@ export default function DreamingClient() {
         if (tile.kind === "rift") rifts.push({ x: tile.x, y: tile.y });
       }
 
-      // 8 次元 LSTM 隠れ状態 h_t × 温度 T に駆動される連続 2D 流体ワープ場
-      const tSlow = timeSec * (0.9 + tempNorm * 0.85);
-      const tFast = timeSec * (1.75 + tempNorm * 1.35);
+      // 8 次元 LSTM 隠れ状態 h_t × 温度 T × 恐怖度 dread に駆動される連続 2D 流体ワープ場
+      const tSlow = timeSec * (0.9 + tempNorm * 0.85 + dread * 0.55);
+      const tFast = timeSec * (1.75 + tempNorm * 1.35 + dread * 0.95);
       const baseWarpAmp = reduced
         ? 0
-        : tileSz * (0.14 + tempNorm * 0.27 + s.bleedEntropy * 0.14 + cam.pulseWave * 0.08);
+        : tileSz * (0.14 + tempNorm * 0.25 + s.bleedEntropy * 0.12 + dread * 0.18 + cam.pulseWave * 0.08);
 
       const warpCache = new Map<string, Pt>();
       const warpWorldToScreen = (wx: number, wy: number): Pt => {
@@ -2134,6 +2229,139 @@ export default function DreamingClient() {
         }
       }
 
+      // 6.5. 残響の影（DreamStalker）本体＆長い投射影（懐中電灯が当たると輪郭が浮かび上がり痙攣静止する）
+      const pPos = warpWorldToScreen(cam.px + cam.bumpX, cam.py + cam.bumpY);
+      const activeStalkerIds = new Set<number>();
+      const stalkerScreenList: Array<{ st: (typeof s.stalkers)[number]; pos: Pt; dist: number }> = [];
+
+      for (const st of s.stalkers) {
+        activeStalkerIds.add(st.id);
+        let sp = stalkerSmoothPosRef.current.get(st.id);
+        if (!sp) {
+          sp = { x: st.x, y: st.y };
+          stalkerSmoothPosRef.current.set(st.id, sp);
+        } else {
+          const stLerp = reduced ? 1 : st.seen ? 0.28 : 0.12;
+          sp.x += (st.x - sp.x) * stLerp;
+          sp.y += (st.y - sp.y) * stLerp;
+        }
+        const pos = warpWorldToScreen(sp.x, sp.y);
+        const dist = Math.hypot(sp.x - cam.px, sp.y - cam.py);
+        stalkerScreenList.push({ st, pos, dist });
+
+        // 光錐に捉えられている間、背後へ長く伸びる不気味な影を床に落とす
+        if (st.seen) {
+          const awayAng = Math.atan2(pos.y - pPos.y, pos.x - pPos.x);
+          const shLen = tileSz * (2.2 + Math.min(2.0, st.stareTicks * 0.25));
+          const sxEnd = pos.x + Math.cos(awayAng) * shLen;
+          const syEnd = pos.y + Math.sin(awayAng) * shLen;
+          const perpX = -Math.sin(awayAng) * tileSz * 0.34;
+          const perpY = Math.cos(awayAng) * tileSz * 0.34;
+          const shGrad = ctx.createLinearGradient(pos.x, pos.y, sxEnd, syEnd);
+          shGrad.addColorStop(0, "rgba(2, 3, 6, 0.85)");
+          shGrad.addColorStop(1, "rgba(2, 3, 6, 0)");
+          ctx.fillStyle = shGrad;
+          ctx.beginPath();
+          ctx.moveTo(pos.x + perpX * 0.55, pos.y + perpY * 0.55);
+          ctx.lineTo(pos.x - perpX * 0.55, pos.y - perpY * 0.55);
+          ctx.lineTo(sxEnd - perpX * 1.45, syEnd - perpY * 1.45);
+          ctx.lineTo(sxEnd + perpX * 1.45, syEnd + perpY * 1.45);
+          ctx.closePath();
+          ctx.fill();
+        }
+
+        // うろ覚えの人型シルエット（AI が輪郭を保てずウニョウニョ痙攣する墨の影）
+        const jitX = reduced || !st.seen ? 0 : Math.sin(timeSec * 44 + st.id * 3) * (1.2 + dread * 2.2);
+        const jitY = reduced || !st.seen ? 0 : Math.cos(timeSec * 39 + st.id * 5) * (0.9 + dread * 1.8);
+        const bx = pos.x + jitX;
+        const by = pos.y + jitY;
+
+        ctx.save();
+        // 周囲の滲む黒霧オーラ
+        const aura = ctx.createRadialGradient(bx, by, 2, bx, by, tileSz * 1.05);
+        aura.addColorStop(0, "rgba(3, 4, 8, 0.94)");
+        aura.addColorStop(0.55, "rgba(6, 7, 12, 0.58)");
+        aura.addColorStop(1, "rgba(6, 7, 12, 0)");
+        ctx.fillStyle = aura;
+        ctx.beginPath();
+        ctx.arc(bx, by, tileSz * 1.05, 0, Math.PI * 2);
+        ctx.fill();
+
+        // 細長く歪んだ胴体＋わずかに傾いた頭部（二重露光で不気味の谷を強調）
+        const tilt = Math.sin(timeSec * 1.6 + st.id) * 0.14 + (st.seen ? 0.18 : 0);
+        if (!reduced) {
+          ctx.fillStyle = "rgba(182, 74, 66, 0.16)";
+          traceOrganicBlob(ctx, bx + ghostShift * 0.9, by + tileSz * 0.08, tileSz * 0.26, tileSz * 0.52, timeSec * 2.6, st.id * 1.3, 0.24, 10);
+          ctx.fill();
+        }
+        ctx.fillStyle = "rgba(5, 6, 10, 0.96)";
+        traceOrganicBlob(ctx, bx, by + tileSz * 0.1, tileSz * 0.26, tileSz * 0.48, timeSec * 2.4, st.id * 1.7, 0.2, 10);
+        ctx.fill();
+        traceOrganicBlob(
+          ctx,
+          bx + Math.sin(tilt) * tileSz * 0.1,
+          by - tileSz * 0.34,
+          tileSz * 0.17,
+          tileSz * 0.21,
+          timeSec * 2.8,
+          st.id * 2.9,
+          0.18,
+          9,
+        );
+        ctx.fill();
+
+        // 胴体から這い出す細い墨の触手・輪郭ノイズ
+        ctx.strokeStyle = "rgba(18, 20, 28, 0.72)";
+        ctx.lineWidth = 1.25;
+        for (let k = 0; k < 4; k++) {
+          const ang = (k / 4) * Math.PI * 2 + timeSec * 0.7 + st.id;
+          const r1 = tileSz * 0.22;
+          const r2 = tileSz * (0.48 + Math.sin(timeSec * 3.1 + k * 2) * 0.12);
+          ctx.beginPath();
+          ctx.moveTo(bx + Math.cos(ang) * r1, by + Math.sin(ang) * r1);
+          ctx.quadraticCurveTo(
+            bx + Math.cos(ang + 0.35) * r2 * 0.75,
+            by + Math.sin(ang + 0.35) * r2 * 0.75,
+            bx + Math.cos(ang) * r2,
+            by + Math.sin(ang) * r2,
+          );
+          ctx.stroke();
+        }
+
+        // 光錐に捉えられた影の周囲にだけ、壊れた char-RNN の呼び名が震えながら浮かぶ
+        if (st.seen) {
+          const chars = Array.from(st.name);
+          const fs = Math.max(11, Math.round(tileSz * 0.22));
+          ctx.font = `400 ${fs}px "Shippori Mincho", "Hiragino Mincho ProN", serif`;
+          ctx.textAlign = "center";
+          ctx.textBaseline = "bottom";
+          ctx.shadowColor = "rgba(0, 0, 0, 0.96)";
+          ctx.shadowBlur = 10;
+          const stepW = fs * 0.94;
+          const sx = bx - ((chars.length - 1) * stepW) * 0.5;
+          const sy = by - tileSz * 0.62;
+          for (let ci = 0; ci < chars.length; ci++) {
+            const jx = reduced ? 0 : Math.sin(timeSec * 28 + ci * 2.1 + st.id) * 1.4;
+            const jy = reduced ? 0 : Math.cos(timeSec * 23 + ci * 1.7) * 1.6;
+            ctx.fillStyle = "rgba(196, 86, 74, 0.45)";
+            ctx.fillText(chars[ci], sx + ci * stepW + jx + 2, sy + jy - 1);
+            ctx.fillStyle = "rgba(232, 224, 214, 0.9)";
+            ctx.fillText(chars[ci], sx + ci * stepW + jx, sy + jy);
+          }
+        }
+        ctx.restore();
+
+        if (tCtx && !reduced) {
+          tCtx.fillStyle = "rgba(176, 62, 54, 0.14)";
+          tCtx.beginPath();
+          tCtx.arc(bx * 0.5, by * 0.5, tileSz * 0.26, 0, Math.PI * 2);
+          tCtx.fill();
+        }
+      }
+      for (const oldId of stalkerSmoothPosRef.current.keys()) {
+        if (!activeStalkerIds.has(oldId)) stalkerSmoothPosRef.current.delete(oldId);
+      }
+
       // 7. 足跡の記憶軌跡（歩いてきた数歩が背後に淡く光って消えていく）
       trailRef.current = trailRef.current.filter((node) => now - node.atMs < 6500);
       if (trailRef.current.length >= 2) {
@@ -2141,7 +2369,7 @@ export default function DreamingClient() {
         for (let i = 0; i < trailRef.current.length; i++) {
           const node = trailRef.current[i];
           const age = (now - node.atMs) / 6500;
-          const a = Math.max(0, (1 - age) * 0.24);
+          const a = Math.max(0, (1 - age) * 0.22);
           const pos = warpWorldToScreen(node.x, node.y);
           ctx.fillStyle = rgbCss(inkRgb, a);
           ctx.beginPath();
@@ -2167,29 +2395,34 @@ export default function DreamingClient() {
         return true;
       });
 
-      // 9. プレイヤー（夢の中を漂う灯火・視線光錐・佇みしおり定着弧・集めた記憶の蛍・残響コンパス弧）
-      const pPos = warpWorldToScreen(cam.px + cam.bumpX, cam.py + cam.bumpY);
+      // 9. プレイヤー（懐中電灯の光錐・蛍光灯チラつき・佇みしおり定着弧・集めた記憶の蛍・残響コンパス弧）
+      const flickerWave =
+        !reduced && dread > 0.25
+          ? Math.sin(timeSec * 37.3) * Math.sin(timeSec * 13.1) * Math.sin(timeSec * 5.7)
+          : 0;
+      const beamPower = flickerWave > 0.48 ? Math.max(0.42, 1 - dread * 0.58) : 1;
 
       ctx.save();
       ctx.globalCompositeOperation = "lighter";
-      const coneLen = tileSz * 3.15;
+      const coneLen = tileSz * 5.4;
       const coneGrad = ctx.createRadialGradient(pPos.x, pPos.y, 4, pPos.x, pPos.y, coneLen);
-      coneGrad.addColorStop(0, "rgba(244, 234, 212, 0.15)");
-      coneGrad.addColorStop(1, "rgba(244, 234, 212, 0)");
+      coneGrad.addColorStop(0, `rgba(244, 236, 214, ${(0.22 * beamPower).toFixed(3)})`);
+      coneGrad.addColorStop(0.5, `rgba(222, 218, 200, ${(0.09 * beamPower).toFixed(3)})`);
+      coneGrad.addColorStop(1, "rgba(222, 218, 200, 0)");
       ctx.fillStyle = coneGrad;
       ctx.beginPath();
       ctx.moveTo(pPos.x, pPos.y);
-      ctx.arc(pPos.x, pPos.y, coneLen, cam.facingAngle - 0.46, cam.facingAngle + 0.46);
+      ctx.arc(pPos.x, pPos.y, coneLen, cam.facingAngle - 0.56, cam.facingAngle + 0.56);
       ctx.closePath();
       ctx.fill();
 
-      const pHalo = ctx.createRadialGradient(pPos.x, pPos.y, 2, pPos.x, pPos.y, tileSz * 2.25);
-      pHalo.addColorStop(0, "rgba(246, 236, 212, 0.3)");
-      pHalo.addColorStop(0.45, rgbCss(accentRgb, 0.11));
+      const pHalo = ctx.createRadialGradient(pPos.x, pPos.y, 2, pPos.x, pPos.y, tileSz * 1.9);
+      pHalo.addColorStop(0, `rgba(246, 236, 212, ${(0.28 * beamPower).toFixed(3)})`);
+      pHalo.addColorStop(0.45, rgbCss(accentRgb, 0.1 * beamPower));
       pHalo.addColorStop(1, "rgba(246, 236, 212, 0)");
       ctx.fillStyle = pHalo;
       ctx.beginPath();
-      ctx.arc(pPos.x, pPos.y, tileSz * 2.25, 0, Math.PI * 2);
+      ctx.arc(pPos.x, pPos.y, tileSz * 1.9, 0, Math.PI * 2);
       ctx.fill();
       ctx.restore();
 
@@ -2211,7 +2444,7 @@ export default function DreamingClient() {
         ctx.restore();
       }
 
-      // 佇み定着チャージ弧（ボタン無しで静かに記憶の島を結ぶ気配）
+      // 佇み定着チャージ弧（ボタン無しで静かに記憶の結界を結ぶ気配）
       if (mc.stillSec > STILL_ANCHOR_DELAY_SEC) {
         const charge = Math.min(
           1,
@@ -2278,7 +2511,7 @@ export default function DreamingClient() {
       if (tCtx && !reduced) {
         ctx.save();
         ctx.globalCompositeOperation = "screen";
-        ctx.globalAlpha = 0.3 + tempNorm * 0.26;
+        ctx.globalAlpha = 0.3 + tempNorm * 0.24 + dread * 0.14;
         ctx.imageSmoothingEnabled = true;
         ctx.drawImage(trailCanvas, 0, 0, width, height);
         ctx.restore();
@@ -2343,35 +2576,153 @@ export default function DreamingClient() {
           mg.x = (mg.x + (mg.vx * 0.014 + fv.x * 0.25) + width) % width;
           mg.y = (mg.y + (mg.vy * 0.014 + fv.y * 0.25) + height) % height;
           const edgeDist = Math.hypot((mg.x - centerX) / (width * 0.5), (mg.y - centerY) / (height * 0.5));
-          if (edgeDist < 0.6) continue;
+          if (edgeDist < 0.54) continue;
           const ch = whisperChars.length > 0 ? whisperChars[i % whisperChars.length] : mg.char;
-          const gA = Math.min(0.18, (edgeDist - 0.6) * 0.3) * (0.55 + 0.45 * Math.sin(timeSec * 0.8 + mg.phase));
-          ctx.fillStyle = rgbCss(inkRgb, gA);
+          const gA =
+            Math.min(0.28, (edgeDist - 0.54) * (0.3 + dread * 0.35)) *
+            (0.55 + 0.45 * Math.sin(timeSec * (0.8 + dread * 2.2) + mg.phase));
+          ctx.fillStyle = dread > 0.55 && i % 3 === 0 ? `rgba(198, 92, 80, ${gA.toFixed(3)})` : rgbCss(inkRgb, gA);
           ctx.fillText(ch, mg.x, mg.y);
         }
         ctx.restore();
       }
 
-      // 13. 深度に応じてわずかに狭まる周辺霧ビネット（有限コンテキスト窓の体感）
-      const depthTighten = Math.min(0.1, (s.depth - 1) * 0.014);
+      // 12.5. 深闇＆懐中電灯マスク（光錐の外を深い闇に沈め、しおり結界・街灯・モチーフだけ淡く灯す）
+      if (lCtx) {
+        const sScale = 0.5;
+        lCtx.globalCompositeOperation = "source-over";
+        lCtx.clearRect(0, 0, tw, th);
+        const darkAlpha = Math.min(0.94, 0.82 + dread * 0.1 + Math.min(0.06, (s.depth - 1) * 0.014));
+        lCtx.fillStyle = `rgba(3, 5, 9, ${darkAlpha.toFixed(3)})`;
+        lCtx.fillRect(0, 0, tw, th);
+
+        lCtx.globalCompositeOperation = "destination-out";
+
+        const punchCircle = (cx: number, cy: number, r: number, strength: number) => {
+          const sx = cx * sScale;
+          const sy = cy * sScale;
+          const sr = Math.max(4, r * sScale);
+          const g = lCtx.createRadialGradient(sx, sy, sr * 0.06, sx, sy, sr);
+          g.addColorStop(0, `rgba(0,0,0,${strength.toFixed(3)})`);
+          g.addColorStop(0.62, `rgba(0,0,0,${(strength * 0.55).toFixed(3)})`);
+          g.addColorStop(1, "rgba(0,0,0,0)");
+          lCtx.fillStyle = g;
+          lCtx.beginPath();
+          lCtx.arc(sx, sy, sr, 0, Math.PI * 2);
+          lCtx.fill();
+        };
+
+        // プレイヤー周囲の足元オーラ
+        punchCircle(pPos.x, pPos.y, tileSz * 2.15, 0.92 * beamPower);
+
+        // 懐中電灯の狭い視線光錐（背後は闇に沈み、振り返る行為自体が恐怖になる）
+        const pxS = pPos.x * sScale;
+        const pyS = pPos.y * sScale;
+        const coneR = tileSz * 5.9 * sScale;
+        const beamGrad = lCtx.createRadialGradient(pxS, pyS, 2, pxS, pyS, coneR);
+        beamGrad.addColorStop(0, `rgba(0,0,0,${(0.98 * beamPower).toFixed(3)})`);
+        beamGrad.addColorStop(0.55, `rgba(0,0,0,${(0.84 * beamPower).toFixed(3)})`);
+        beamGrad.addColorStop(0.85, `rgba(0,0,0,${(0.38 * beamPower).toFixed(3)})`);
+        beamGrad.addColorStop(1, "rgba(0,0,0,0)");
+        lCtx.fillStyle = beamGrad;
+        lCtx.beginPath();
+        lCtx.moveTo(pxS, pyS);
+        lCtx.arc(pxS, pyS, coneR, cam.facingAngle - 0.62, cam.facingAngle + 0.62);
+        lCtx.closePath();
+        lCtx.fill();
+
+        // 記憶のしおり（Anchor）の安全結界は穏やかな光の島として闇を押し返す
+        for (const anchor of s.anchors) {
+          const ap = warpWorldToScreen(anchor.x, anchor.y);
+          punchCircle(ap.x, ap.y, (ANCHOR_RADIUS + 1.15) * tileSz, 0.84);
+        }
+
+        // 街灯・窓・モチーフ・裂け目が闇の奥でかすかに灯る
+        for (const src of lightSources) {
+          punchCircle(src.c.x, src.c.y, tileSz * (src.tile.kind === "lamp" ? 2.1 : 1.35), 0.72 * src.alpha);
+        }
+        for (const tile of s.tiles.values()) {
+          if (tile.motif) {
+            const mp = warpWorldToScreen(tile.x, tile.y);
+            punchCircle(mp.x, mp.y, tileSz * 1.35, 0.68);
+          } else if (tile.kind === "rift") {
+            const rp = warpWorldToScreen(tile.x, tile.y);
+            punchCircle(rp.x, rp.y, tileSz * 1.45, 0.62);
+          }
+        }
+
+        ctx.save();
+        ctx.imageSmoothingEnabled = true;
+        ctx.drawImage(lightCanvas, 0, 0, width, height);
+        ctx.restore();
+      }
+
+      // 12.6. 闇を突き抜けてこちらを見つめる影の虚ろな瞳（光錐の外でも気配だけが刺さる）
+      for (const { st, pos, dist } of stalkerScreenList) {
+        if (dist > VIEW_RADIUS + 1) continue;
+        const headX = pos.x;
+        const headY = pos.y - tileSz * 0.34;
+        const lookAng = Math.atan2(pPos.y - headY, pPos.x - headX);
+        const eyeShiftX = Math.cos(lookAng) * 2.2;
+        const eyeShiftY = Math.sin(lookAng) * 1.6;
+        const blink = Math.sin(timeSec * 1.9 + st.id * 4.3) > 0.96 ? 0.15 : 1;
+        const eyeAlpha = (st.seen ? 0.94 : Math.max(0.18, 0.56 - dist * 0.06)) * blink;
+        const eyeSep = tileSz * 0.065;
+        const eyeR = Math.max(1.5, tileSz * 0.032);
+
+        ctx.save();
+        ctx.fillStyle = st.seen
+          ? `rgba(244, 236, 224, ${eyeAlpha.toFixed(3)})`
+          : `rgba(218, 212, 202, ${eyeAlpha.toFixed(3)})`;
+        ctx.shadowColor = st.seen ? "rgba(220, 96, 82, 0.85)" : "rgba(220, 214, 200, 0.55)";
+        ctx.shadowBlur = st.seen ? 10 : 6;
+        ctx.beginPath();
+        ctx.arc(headX - eyeSep + eyeShiftX, headY + eyeShiftY, eyeR, 0, Math.PI * 2);
+        ctx.arc(headX + eyeSep + eyeShiftX, headY + eyeShiftY, eyeR, 0, Math.PI * 2);
+        ctx.fill();
+
+        // 高恐怖時、AI の解剖学的幻覚としてわずかにズレた 3 つ目の瞳が明滅する
+        if (dread > 0.62 && Math.sin(timeSec * 7.2 + st.id) > 0.25) {
+          ctx.fillStyle = `rgba(224, 108, 92, ${(eyeAlpha * 0.72).toFixed(3)})`;
+          ctx.beginPath();
+          ctx.arc(headX + eyeShiftX * 0.5, headY - eyeSep * 1.15 + eyeShiftY, eyeR * 0.82, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.restore();
+      }
+
+      // 13. 深度＆恐怖度 dread に応じて締め付ける周辺霧ビネット（高恐怖時は暗赤の脈動）
+      const depthTighten = Math.min(0.12, (s.depth - 1) * 0.015 + dread * 0.11);
       const vig = ctx.createRadialGradient(
         centerX,
         centerY,
-        Math.min(width, height) * (0.28 - depthTighten),
+        Math.min(width, height) * Math.max(0.12, 0.28 - depthTighten),
         centerX,
         centerY,
         Math.max(width, height) * 0.66,
       );
       vig.addColorStop(0, "rgba(0, 0, 0, 0)");
-      vig.addColorStop(0.72, rgbCss(fogRgb, 0.4));
-      vig.addColorStop(1, rgbCss(fogRgb, 0.92));
+      vig.addColorStop(0.7, rgbCss(fogRgb, 0.42 + dread * 0.18));
+      if (dread > 0.35) {
+        const pulseBeat = 0.5 + 0.5 * Math.sin(timeSec * (4.5 + dread * 5.5));
+        const redEdge = Math.min(0.42, (dread - 0.35) * 0.52 * (0.65 + 0.35 * pulseBeat));
+        vig.addColorStop(1, `rgba(48, 10, 12, ${(0.88 + redEdge * 0.12).toFixed(3)})`);
+      } else {
+        vig.addColorStop(1, rgbCss(fogRgb, 0.94));
+      }
       ctx.fillStyle = vig;
       ctx.fillRect(0, 0, width, height);
 
-      // 14. 35mm フィルム微粒状テクスチャ
+      // 影と目が合った瞬間の冷たい一瞬のフラッシュ
+      if (cam.spotFlash > 0.01) {
+        ctx.fillStyle = `rgba(210, 224, 232, ${(cam.spotFlash * 0.16).toFixed(3)})`;
+        ctx.fillRect(0, 0, width, height);
+      }
+
+      // 14. 35mm フィルム微粒状テクスチャ（恐怖が高いほど粒子が荒れる）
       if (grainPattern) {
         ctx.save();
-        ctx.globalAlpha = 0.22;
+        ctx.globalAlpha = 0.24 + dread * 0.22;
         ctx.fillStyle = grainPattern;
         ctx.fillRect(0, 0, width, height);
         ctx.restore();
@@ -2413,17 +2764,22 @@ export default function DreamingClient() {
         for (let i = 0; i < placeChars.length; i++) {
           const cxChar = startX + i * charStep;
           const cyChar =
-            titleY + (reduced ? 0 : Math.sin(timeSec * 1.55 + i * 0.65 + sh[0] * 2) * (1.0 + tempNorm * 1.6));
-          if (!reduced && tempNorm > 0.3) {
-            ctx.fillStyle = rgbCss(accentRgb, placeFadeIn * placeGlow * 0.28);
-            ctx.fillText(placeChars[i], cxChar + ghostShift * 0.42, cyChar - ghostShift * 0.22);
+            titleY + (reduced ? 0 : Math.sin(timeSec * 1.55 + i * 0.65 + sh[0] * 2) * (1.0 + tempNorm * 1.6 + dread * 1.8));
+          if (!reduced && (tempNorm > 0.3 || dread > 0.35)) {
+            ctx.fillStyle =
+              dread > 0.5
+                ? `rgba(204, 86, 74, ${(placeFadeIn * placeGlow * 0.38).toFixed(3)})`
+                : rgbCss(accentRgb, placeFadeIn * placeGlow * 0.28);
+            ctx.fillText(placeChars[i], cxChar + ghostShift * 0.45, cyChar - ghostShift * 0.24);
           }
           ctx.fillStyle = rgbCss(inkRgb, placeFadeIn * placeGlow);
           ctx.fillText(placeChars[i], cxChar, cyChar);
         }
 
-        // 極小の深度・記憶刻印（通常は霧に溶ける 0.26、潜行・採集直後だけ 0.58 にふわっと浮かぶ）
-        const metaPulse = now < mt.metaHighlightUntilMs ? 1 - smoothstep(mt.metaHighlightUntilMs - 1600, mt.metaHighlightUntilMs, now) : 0;
+        const metaPulse =
+          now < mt.metaHighlightUntilMs
+            ? 1 - smoothstep(mt.metaHighlightUntilMs - 1600, mt.metaHighlightUntilMs, now)
+            : 0;
         const metaAlpha = 0.26 + metaPulse * 0.34;
         ctx.font = `400 11px "Shippori Mincho", "Hiragino Mincho ProN", serif`;
         ctx.fillStyle = rgbCss(inkRgb, metaAlpha);
@@ -2431,7 +2787,7 @@ export default function DreamingClient() {
         ctx.restore();
       }
 
-      // 夢の呟き（char-RNN 生成の 1 行が霧から浮かび、数秒かけて静かに消える）
+      // 悪夢の呟き（char-RNN 生成の 1 行が霧から浮かび、数秒かけて静かに消える）
       if (mt.whisperText) {
         const wAge = now - mt.whisperShownMs;
         if (wAge < 5600) {
@@ -2445,17 +2801,35 @@ export default function DreamingClient() {
             ctx.textBaseline = "middle";
             ctx.shadowColor = "rgba(6, 10, 16, 0.94)";
             ctx.shadowBlur = 18;
-            ctx.fillStyle = rgbCss(inkRgb, wAlpha * 0.84);
+            ctx.fillStyle = dread > 0.65 ? `rgba(232, 198, 192, ${(wAlpha * 0.88).toFixed(3)})` : rgbCss(inkRgb, wAlpha * 0.84);
             ctx.fillText(mt.whisperText, centerX, wY + (1 - smoothstep(0, 680, wAge)) * 8, width - 48);
             ctx.restore();
           }
         }
       }
 
-      // 17. 潜行時の静かな霧フェード幕
+      // 17. 潜行時の静かな霧フェード幕 ＋ 影に呑まれたときの暗赤ノイズ暗転幕
       if (cam.descendFlash > 0.01) {
         ctx.fillStyle = rgbCss(fogRgb, cam.descendFlash * 0.9);
         ctx.fillRect(0, 0, width, height);
+      }
+      if (cam.consumedFlash > 0.01) {
+        const cf = cam.consumedFlash;
+        ctx.fillStyle = `rgba(12, 3, 5, ${(cf * 0.92).toFixed(3)})`;
+        ctx.fillRect(0, 0, width, height);
+        if (!reduced) {
+          ctx.save();
+          for (let b = 0; b < 9; b++) {
+            const by = ((tileHash(b, Math.floor(timeSec * 30), 17) * height) | 0);
+            const bh = 2 + Math.round(tileHash(b, Math.floor(timeSec * 24), 41) * 18);
+            ctx.fillStyle =
+              b % 2 === 0
+                ? `rgba(196, 68, 58, ${(cf * 0.24).toFixed(3)})`
+                : `rgba(220, 214, 204, ${(cf * 0.14).toFixed(3)})`;
+            ctx.fillRect(0, by, width, bh);
+          }
+          ctx.restore();
+        }
       }
 
       ctx.restore();
