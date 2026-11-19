@@ -146,12 +146,17 @@ class CommentGachaCogTest(unittest.IsolatedAsyncioTestCase):
         await cog.on_message(FakeMessage(channel=channel))
         channel.create_webhook.assert_not_awaited()
 
-    async def test_cooldown_blocks_second_draw(self):
+    async def test_cooldown_is_one_second(self):
+        # クールダウンは1秒。同時発火だけが抑止され、1秒空ければまた引ける。
         channel = FakeChannel([hist_message(7, "昔の名言")])
-        cog = self.make_cog()
+        now = [1000.0]
+        cog = self.make_cog(clock=lambda: now[0])
         await cog.on_message(FakeMessage(channel=channel))
         await cog.on_message(FakeMessage(channel=channel))
-        channel.webhook.send.assert_awaited_once()
+        self.assertEqual(channel.webhook.send.await_count, 1)
+        now[0] += 1.1
+        await cog.on_message(FakeMessage(channel=channel))
+        self.assertEqual(channel.webhook.send.await_count, 2)
 
     async def test_without_webhook_permission_no_repost(self):
         channel = FakeChannel([hist_message(7, "昔の名言")], manage_webhooks=False)
@@ -182,6 +187,29 @@ class CommentGachaCogTest(unittest.IsolatedAsyncioTestCase):
                 patch.object(commentgacha.random, "choice", side_effect=lambda seq: seq[0]):
             chosen = await commentgacha.draw_random_message(channel, exclude_id=999)
         self.assertEqual(chosen.id, 300)
+
+    async def test_draw_uses_no_oldest_fetch_on_fast_path(self):
+        channel = FakeChannel([
+            hist_message(300, "最新の発言"),
+            hist_message(200, "真ん中の発言"),
+            hist_message(100, "最古の発言"),
+        ])
+        calls = []
+        original = channel.history
+
+        def recording(**kwargs):
+            calls.append(kwargs)
+            return original(**kwargs)
+
+        channel.history = recording
+        with patch.object(commentgacha.random, "randint", return_value=150), \
+                patch.object(commentgacha.random, "choice", side_effect=lambda seq: seq[0]):
+            chosen = await commentgacha.draw_random_message(channel, exclude_id=999)
+        self.assertEqual(chosen.id, 200)
+        # 通常経路では窓取得（limit=DRAW_WINDOW）だけを使い、
+        # 最古取得（after=0 / limit=1）を叩かない。
+        self.assertTrue(calls)
+        self.assertTrue(all(c.get("limit") == commentgacha.DRAW_WINDOW for c in calls))
 
     async def test_draw_falls_back_to_fetching_latest_without_cache(self):
         channel = FakeChannel([
