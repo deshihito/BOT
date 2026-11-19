@@ -462,6 +462,13 @@ body:has(.lll-shell) > main { max-width:none; min-height:0; margin:0; padding:0;
 .games-shell[data-activity-root]:has(.lll-shell) { max-width:none; margin:0; padding:0; }
 .games-shell[data-activity-root]:has(.lll-shell) > .games-embedded-bar { display:none; }
 .lll-shell { min-height:100svh; display:flex; flex-direction:column; background:#0e1014; color:#edeae2; }
+/* --- dreaming 独立シェル（.dreaming-shell） ---
+   /games/dreaming も共通ヘッダー/フッターを出さず（lib/site-chrome.ts）、
+   100svh の夢空間キャンバスで完結させる。共通 main と Activity 埋め込みバーを打ち消す。 */
+body:has(.dreaming-shell) { background:#0d1117; color:#e8e3d5; overscroll-behavior:none; }
+body:has(.dreaming-shell) > main { max-width:none; min-height:0; margin:0; padding:0; }
+.games-shell[data-activity-root]:has(.dreaming-shell) { max-width:none; margin:0; padding:0; }
+.games-shell[data-activity-root]:has(.dreaming-shell) > .games-embedded-bar { display:none; }
 /* --- WORLD BOX 感覚面 B2: アフォーダンス（押下感） ---
    .wb-shell 内だけに効かせる（独立シェル外のボタンには触らない）。
    ボタンは押した瞬間だけ少し縮む。施設チップは出現時にポップし、

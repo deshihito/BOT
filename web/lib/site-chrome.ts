@@ -21,6 +21,9 @@ export const CHROMELESS_PATHS: readonly string[] = [
   // LLL（写真AIカードバトル）も独立シェル（.lll-shell）で画面幅を広く使い切るため、
   // サイト共通ヘッダー/フッターは出さず、アプリバーと独立フッターに一本化する。
   "/games/lll",
+  // dreaming は終わりなき夢空間に没入する独立シェル（.dreaming-shell、100svh 全画面）
+  // のため、サイト共通ヘッダー/フッターを出さず専用バーから /games へ戻す。
+  "/games/dreaming",
 ];
 
 /** 指定パスでサイト共通クロームを省くかどうか。 */

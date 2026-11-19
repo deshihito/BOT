@@ -98,6 +98,7 @@ import ChinchiroClient from "../chinchiro/ChinchiroClient";
 import CrocodileClient from "../crocodile/CrocodileClient";
 import KwordleClient from "../kwordle/KwordleClient";
 import WorldBoxClient from "../worldbox/WorldBoxClient";
+import DreamingClient from "../dreaming/DreamingClient";
 
 export function generateStaticParams() {
   // 外部リンクのタイトルはサイト内にページを持たないため対象外。
@@ -880,6 +881,11 @@ export default async function WebGamePage({ params }: { params: Promise<{ id: st
     // WORLD BOX は独立シェル（100svh 全画面）で完結させるため、
     // ゲーム詳細ヘッダー（パンくず・判断材料）も出さない。
     return <WorldBoxClient />;
+  }
+  if (game.slug === "dreaming" && game.status === "playable") {
+    // dreaming は終わりなき夢空間に没入する独立シェル（.dreaming-shell）で完結させるため、
+    // ゲーム詳細ヘッダー（パンくず・判断材料）も出さない。
+    return <DreamingClient />;
   }
   return (
     <>
