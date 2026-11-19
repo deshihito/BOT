@@ -966,6 +966,15 @@ export const WEB_GAMES: WebGame[] = [
     activity: true,
     players: "1人",
   },
+  {
+    slug: "dreaming",
+    title: "dreaming",
+    description:
+      "小型LSTMと文字n-gram、局所マルコフ場が逐次生成する、終わりなき夢の歩行ゲーム。振り返ると背後の道は忘れられて別の景色に書き換わり、出会ったモチーフは少し変質して戻ってきます。記憶のしおりと温度の調律で、どこまでも深く漂えます。",
+    status: "playable",
+    activity: true,
+    players: "1人",
+  },
 ];
 
 export function getWebGame(slug: string): WebGame | undefined {
