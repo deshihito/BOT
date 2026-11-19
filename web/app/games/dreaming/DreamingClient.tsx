@@ -1,14 +1,17 @@
 "use client";
 // WEB ゲーム「dreaming」のメインクライアント（100svh フルブリード独立シェル .dreaming-shell）。
 //
+// ボタン・設定・パネル等のあらゆる UI を廃し、100% 全面の夢空間キャンバスと
+// 最低限のアナログジョイスティック移動（画面ドラッグ＆キーボード連動）のみで構成。
+//
 // Transformer 以前の生成モデル（小型 LSTM + 文字レベル n-gram + 2D 条件付きマルコフ場）の
-// 隠れ状態ベクトル h_t をそのまま 60fps の連続頂点ワープ場・流体リボン・液状クロスモーフ・
-// 残像フィードバックバッファ・自律夢遊ティック（driftDreamTick）へ直結し、
-// AI 夢特有のリアルタイムにウニョウニョとうねり書き換わり続ける空間を実現する。
+// 隠れ状態 h_t をそのまま 60fps の連続頂点ワープ場・流体リボン・液状クロスモーフ・
+// 残像フィードバックバッファ・自律夢遊ティック（driftDreamTick）へ直結する。
+// - 壁へ押し当て続けると夢の波紋で道が溶けて開く（自動パルス救済）
+// - 歩いた後に静かに佇むと足元の 5×5 が揺れない「記憶の島（しおり）」として定着する
+// - 温度 T は深度と時間波動に応じて自然に呼吸する
 
-import Link from "next/link";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useGesture, type GestureDirection } from "@/lib/gesture";
+import { useCallback, useEffect, useRef } from "react";
 import { isSfxMuted, setSfxMuted } from "@/lib/sfx";
 import {
   DOMAIN_IDS,
@@ -25,18 +28,16 @@ import {
   ANCHOR_RADIUS,
   DREAMING_RECORD_KEY,
   DREAM_MOTIFS,
-  MAX_ANCHORS,
   VIEW_RADIUS,
+  ambientTemperatureFor,
+  chebyshev,
   createDreamGame,
   driftDreamTick,
   findNearestSignal,
-  getAdjacentContext,
-  memoryWindowForDepth,
   mergeRecordWithSession,
   moveDream,
   parseDreamRecord,
   pulseDream,
-  redriftDream,
   setDreamTemperature,
   toggleAnchor,
   tileKey,
@@ -46,7 +47,6 @@ import {
   type DreamTile,
   type MotifId,
 } from "@/lib/games/dreaming";
-import { useGamesNav } from "../GamesShell";
 import {
   sfxDreamAnchor,
   sfxDreamBump,
@@ -160,6 +160,12 @@ type TrailNode = {
 };
 
 type Pt = { x: number; y: number };
+
+const JOY_MAX_RADIUS = 36;
+const JOY_DEADZONE = 0.18;
+const STILL_ANCHOR_DELAY_SEC = 0.85;
+const STILL_ANCHOR_TOTAL_SEC = 2.65;
+const BLOCKED_DISSOLVE_SEC = 0.5;
 
 const KEY_TO_DIR: Record<string, DreamDir> = {
   ArrowUp: "up",
@@ -505,19 +511,56 @@ function createFilmGrainPattern(ctx: CanvasRenderingContext2D): CanvasPattern | 
 }
 
 export default function DreamingClient() {
-  const { prefix } = useGamesNav();
-  const [state, setState] = useState<DreamState>(() => createDreamGame(20261119));
-  const [record, setRecord] = useState<DreamRecord>(() => parseDreamRecord(null));
-  const [muted, setMuted] = useState(false);
-  // 初期表示は夢空間への没入を最優先し、LSTM デバッグモニタは閉じておく
-  const [showRnn, setShowRnn] = useState(false);
-  const [showArchive, setShowArchive] = useState(false);
+  const initialStateRef = useRef<DreamState | null>(null);
+  if (!initialStateRef.current) {
+    initialStateRef.current = createDreamGame(20261119);
+  }
+  const stateRef = useRef<DreamState>(initialStateRef.current);
+  const recordRef = useRef<DreamRecord>(parseDreamRecord(null));
 
-  const stateRef = useRef(state);
   const stageRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const dockJoyRef = useRef<HTMLDivElement | null>(null);
+  const dockKnobRef = useRef<HTMLDivElement | null>(null);
+  const floatRingRef = useRef<HTMLDivElement | null>(null);
+  const floatKnobRef = useRef<HTMLDivElement | null>(null);
 
-  // 滑らか補間・連続LSTM状態・液状モーフ・流線リボン・忘却ゴースト用のレンダー専用 ref
+  // ジョイスティック＆キーボードの連続移動状態（React 再描画ゼロで 60fps 駆動）
+  const joyRef = useRef<{
+    active: boolean;
+    pointerId: number | null;
+    mode: "dock" | "float";
+    originX: number;
+    originY: number;
+    nx: number;
+    ny: number;
+    mag: number;
+    floatShown: boolean;
+  }>({
+    active: false,
+    pointerId: null,
+    mode: "dock",
+    originX: 0,
+    originY: 0,
+    nx: 0,
+    ny: 0,
+    mag: 0,
+    floatShown: false,
+  });
+
+  const keysDownRef = useRef<Set<DreamDir>>(new Set());
+  const moveCtrlRef = useRef({
+    accumX: 0,
+    accumY: 0,
+    wasMoving: false,
+    pushingBlocked: false,
+    blockedHoldSec: 0,
+    stillSec: 0,
+    lastStepMs: 0,
+    lastBumpSfxMs: 0,
+  });
+
+  // 滑らか補間・連続 LSTM 状態・液状モーフ・流線リボン・忘却ゴースト用のレンダー専用 ref
   const camRef = useRef({
     x: 0,
     y: 0,
@@ -530,7 +573,7 @@ export default function DreamingClient() {
     pulseWave: 0,
   });
   const smoothHRef = useRef<number[]>(new Array<number>(RNN_DIM).fill(0));
-  const smoothWeightsRef = useRef<Record<DomainId, number>>({ ...state.domainWeights });
+  const smoothWeightsRef = useRef<Record<DomainId, number>>({ ...stateRef.current.domainWeights });
   const ripplesRef = useRef<RippleFx[]>([]);
   const tapRingsRef = useRef<ScreenTapFx[]>([]);
   const particlesRef = useRef<CharParticle[]>([]);
@@ -545,6 +588,15 @@ export default function DreamingClient() {
   const savedStepsRef = useRef(0);
   const savedForgottenRef = useRef(0);
   const reducedMotionRef = useRef(false);
+
+  // キャンバス霧の中に溶ける詩的テキスト演出（地名変化・呟き・深度ハイライト）
+  const mistTextRef = useRef({
+    placeName: stateRef.current.placeName,
+    placeChangedMs: 0,
+    whisperText: stateRef.current.whisper?.text ?? "",
+    whisperShownMs: 0,
+    metaHighlightUntilMs: 0,
+  });
 
   // タイル集合の差分を監視し、出現・液状クロスモーフ・忘却ゴーストを視覚化する
   const syncTileVisualDiff = useCallback((next: DreamState, resetAll = false) => {
@@ -660,110 +712,46 @@ export default function DreamingClient() {
     }
   }, []);
 
-  useEffect(() => {
-    stateRef.current = state;
-  }, [state]);
+  // 永続記録と霧テキスト演出・環境音の同期
+  const syncMetaAndPersistence = useCallback((next: DreamState) => {
+    const now = performance.now();
+    const mt = mistTextRef.current;
 
-  // クライアント起動後に実シード生成＋保存済み記録＆ミュート設定を読み込む
-  useEffect(() => {
-    setMuted(isSfxMuted());
-    const stored = loadStoredRecord();
-    setRecord(stored);
-    const fresh = createDreamGame((Date.now() ^ 0x5a17d3) % 2147483647);
-    const hydrated: DreamState = {
-      ...fresh,
-      discoveredMotifs: stored.discoveredMotifs,
-      archive: stored.recentArchive,
-      maxGeneration: stored.maxGeneration,
-    };
-    setState(hydrated);
-    stateRef.current = hydrated;
-    smoothHRef.current = [...hydrated.rnn.h];
-    smoothWeightsRef.current = { ...hydrated.domainWeights };
-    camRef.current = {
-      x: 0,
-      y: 0,
-      px: 0,
-      py: 0,
-      facingAngle: 0,
-      bumpX: 0,
-      bumpY: 0,
-      descendFlash: 0.65,
-      pulseWave: 0,
-    };
-    syncTileVisualDiff(hydrated, true);
-    reducedMotionRef.current =
-      typeof window !== "undefined" &&
-      window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
+    if (next.placeName !== mt.placeName) {
+      mt.placeName = next.placeName;
+      mt.placeChangedMs = now;
+    }
+    const nextWhisperText = next.whisper?.text ?? "";
+    if (nextWhisperText && nextWhisperText !== mt.whisperText) {
+      mt.whisperText = nextWhisperText;
+      mt.whisperShownMs = now;
+    }
 
-    return () => {
-      stopDreamAmbience();
-    };
-  }, [syncTileVisualDiff]);
+    const evKind = next.lastEvent.kind;
+    if (evKind === "collect" || evKind === "reunion" || evKind === "descend") {
+      mt.metaHighlightUntilMs = now + 4500;
+    }
 
-  // リアルタイム自律夢遊ループ：立ち止まっていても LSTM と周辺地形・語彙が連続変容し続ける
-  useEffect(() => {
-    if (showArchive) return;
-    let timerId: ReturnType<typeof setTimeout> | null = null;
-    let cancelled = false;
-
-    const scheduleNext = () => {
-      if (cancelled) return;
-      const curTemp = stateRef.current.temperature;
-      // 低温（明晰）ほど緩やか（~2.2s）、高温（深夢）ほど活発にうねる（~0.95s）
-      const intervalMs = Math.round(
-        Math.max(920, Math.min(2350, 2200 - (curTemp - MIN_TEMPERATURE) * 900)),
-      );
-      timerId = setTimeout(() => {
-        if (cancelled) return;
-        if (!reducedMotionRef.current && (typeof document === "undefined" || !document.hidden)) {
-          const next = driftDreamTick(stateRef.current);
-          stateRef.current = next;
-          setState(next);
-          syncTileVisualDiff(next, false);
-        }
-        scheduleNext();
-      }, intervalMs);
-    };
-
-    scheduleNext();
-    return () => {
-      cancelled = true;
-      if (timerId !== null) clearTimeout(timerId);
-    };
-  }, [showArchive, syncTileVisualDiff]);
-
-  // 記録の緩やかな自動保存（歩数・深度・標本を端末内へ永続化）
-  useEffect(() => {
-    const stepDelta = Math.max(0, state.step - savedStepsRef.current);
-    const forgotDelta = Math.max(0, state.forgottenCount - savedForgottenRef.current);
+    const stepDelta = Math.max(0, next.step - savedStepsRef.current);
+    const forgotDelta = Math.max(0, next.forgottenCount - savedForgottenRef.current);
     if (
-      stepDelta === 0 &&
-      forgotDelta === 0 &&
-      state.lastEvent.kind !== "collect" &&
-      state.lastEvent.kind !== "reunion" &&
-      state.lastEvent.kind !== "descend"
+      stepDelta > 0 ||
+      forgotDelta > 0 ||
+      evKind === "collect" ||
+      evKind === "reunion" ||
+      evKind === "descend"
     ) {
-      return;
+      savedStepsRef.current = next.step;
+      savedForgottenRef.current = next.forgottenCount;
+      const merged = mergeRecordWithSession(recordRef.current, next, stepDelta, forgotDelta);
+      recordRef.current = merged;
+      saveStoredRecord(merged);
     }
-    savedStepsRef.current = state.step;
-    savedForgottenRef.current = state.forgottenCount;
-    setRecord((prev) => {
-      const next = mergeRecordWithSession(prev, state, stepDelta, forgotDelta);
-      saveStoredRecord(next);
-      return next;
-    });
-  }, [state]);
 
-  // ユーザー操作後に、現在の RNN 領域分布と温度に合わせて連続環境音を調律
-  useEffect(() => {
-    if (!audioUnlockedRef.current) return;
-    if (muted) {
-      stopDreamAmbience();
-    } else {
-      updateDreamAmbience(state.domainWeights, state.temperature, state.depth);
+    if (audioUnlockedRef.current && !isSfxMuted()) {
+      updateDreamAmbience(next.domainWeights, next.temperature, next.depth);
     }
-  }, [muted, state.domainWeights, state.temperature, state.depth]);
+  }, []);
 
   // イベントに応じた視覚波紋・文字粒子・足跡軌跡・SE を発火
   const handleEventEffects = useCallback(
@@ -778,15 +766,19 @@ export default function DreamingClient() {
       } else {
         syncTileVisualDiff(next, false);
       }
+      syncMetaAndPersistence(next);
 
       if (ev.kind === "move") {
         sfxDreamStep(next.dominantDomain, next.temperature);
         trailRef.current.push({ x: next.player.x, y: next.player.y, atMs: now });
-        if (trailRef.current.length > 10) {
-          trailRef.current = trailRef.current.slice(-10);
+        if (trailRef.current.length > 12) {
+          trailRef.current = trailRef.current.slice(-12);
         }
       } else if (ev.kind === "blocked") {
-        sfxDreamBump();
+        if (now - moveCtrlRef.current.lastBumpSfxMs >= 380) {
+          sfxDreamBump();
+          moveCtrlRef.current.lastBumpSfxMs = now;
+        }
         const dx = Math.sign(ev.x - next.player.x);
         const dy = Math.sign(ev.y - next.player.y);
         camRef.current.bumpX = dx * 0.22;
@@ -798,8 +790,8 @@ export default function DreamingClient() {
           wx: ev.x,
           wy: ev.y,
           startMs: now,
-          durMs: ev.kind === "reunion" ? 1200 : 880,
-          maxRadius: ev.kind === "reunion" ? 4.0 : 2.7,
+          durMs: ev.kind === "reunion" ? 1250 : 900,
+          maxRadius: ev.kind === "reunion" ? 4.2 : 2.8,
           color: ev.kind === "reunion" ? "rgba(228, 194, 118, 0.92)" : accent,
         });
         const chars = Array.from(ev.detail ?? "");
@@ -813,7 +805,7 @@ export default function DreamingClient() {
             vy: Math.sin(angle) * speed - 0.42,
             char: ch,
             startMs: now,
-            durMs: 1650,
+            durMs: 1700,
             color: ink,
           });
         });
@@ -825,8 +817,8 @@ export default function DreamingClient() {
           wx: ev.x,
           wy: ev.y,
           startMs: now,
-          durMs: 920,
-          maxRadius: ANCHOR_RADIUS + 0.7,
+          durMs: 980,
+          maxRadius: ANCHOR_RADIUS + 0.75,
           color: "rgba(216, 178, 106, 0.82)",
         });
       } else if (ev.kind === "pulse") {
@@ -836,7 +828,7 @@ export default function DreamingClient() {
           wx: ev.x,
           wy: ev.y,
           startMs: now,
-          durMs: 1020,
+          durMs: 1040,
           maxRadius: 3.6,
           color: ink,
         });
@@ -851,166 +843,270 @@ export default function DreamingClient() {
           wx: 0,
           wy: 0,
           startMs: now,
-          durMs: 1350,
+          durMs: 1400,
           maxRadius: 5.2,
           color: "rgba(204, 224, 236, 0.82)",
         });
       }
     },
-    [syncTileVisualDiff],
+    [syncMetaAndPersistence, syncTileVisualDiff],
   );
+
+  const unlockAudio = useCallback(() => {
+    if (!audioUnlockedRef.current) {
+      audioUnlockedRef.current = true;
+      if (!isSfxMuted()) {
+        const cur = stateRef.current;
+        updateDreamAmbience(cur.domainWeights, cur.temperature, cur.depth);
+      }
+    }
+  }, []);
 
   const applyTransition = useCallback(
-    (fn: (s: DreamState) => DreamState) => {
-      audioUnlockedRef.current = true;
+    (fn: (s: DreamState) => DreamState): DreamState => {
+      unlockAudio();
       const next = fn(stateRef.current);
       stateRef.current = next;
-      setState(next);
       handleEventEffects(next);
+      return next;
     },
-    [handleEventEffects],
+    [handleEventEffects, unlockAudio],
   );
 
-  const doMove = useCallback(
-    (dir: DreamDir) => {
-      applyTransition((s) => moveDream(s, dir));
-    },
-    [applyTransition],
-  );
+  // クライアント起動後に実シード生成＋保存済み記録を読み込む
+  useEffect(() => {
+    const stored = loadStoredRecord();
+    recordRef.current = stored;
+    const fresh = createDreamGame((Date.now() ^ 0x5a17d3) % 2147483647);
+    const hydrated: DreamState = {
+      ...fresh,
+      discoveredMotifs: stored.discoveredMotifs,
+      archive: stored.recentArchive,
+      maxGeneration: stored.maxGeneration,
+    };
+    stateRef.current = hydrated;
+    smoothHRef.current = [...hydrated.rnn.h];
+    smoothWeightsRef.current = { ...hydrated.domainWeights };
+    const now = performance.now();
+    mistTextRef.current = {
+      placeName: hydrated.placeName,
+      placeChangedMs: now,
+      whisperText: hydrated.whisper?.text ?? "",
+      whisperShownMs: now,
+      metaHighlightUntilMs: now + 4500,
+    };
+    camRef.current = {
+      x: 0,
+      y: 0,
+      px: 0,
+      py: 0,
+      facingAngle: 0,
+      bumpX: 0,
+      bumpY: 0,
+      descendFlash: 0.72,
+      pulseWave: 0,
+    };
+    syncTileVisualDiff(hydrated, true);
+    reducedMotionRef.current =
+      typeof window !== "undefined" &&
+      window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
 
-  const doPulse = useCallback(() => {
-    applyTransition((s) => pulseDream(s));
-  }, [applyTransition]);
-
-  const doAnchor = useCallback(() => {
-    applyTransition((s) => toggleAnchor(s));
-  }, [applyTransition]);
-
-  const doTempChange = useCallback(
-    (nextTemp: number) => {
-      applyTransition((s) => setDreamTemperature(s, nextTemp));
-    },
-    [applyTransition],
-  );
-
-  const doRedrift = useCallback(() => {
-    const nextSeed = ((Date.now() ^ (stateRef.current.step * 7919)) >>> 0) || 1;
-    savedStepsRef.current = 0;
-    applyTransition((s) => redriftDream(s, nextSeed));
-    camRef.current.x = 0;
-    camRef.current.y = 0;
-    camRef.current.px = 0;
-    camRef.current.py = 0;
-    camRef.current.descendFlash = 0.9;
-    setShowArchive(false);
-  }, [applyTransition]);
-
-  const toggleMute = useCallback(() => {
-    const next = !muted;
-    setMuted(next);
-    setSfxMuted(next);
-    if (next) {
+    return () => {
       stopDreamAmbience();
-    } else {
-      audioUnlockedRef.current = true;
-      const cur = stateRef.current;
-      updateDreamAmbience(cur.domainWeights, cur.temperature, cur.depth);
-    }
-  }, [muted]);
+    };
+  }, [syncTileVisualDiff]);
 
-  // キーボード操作
+  // リアルタイム自律夢遊ループ：立ち止まっていても LSTM・温度呼吸・周辺地形・語彙が連続変容し続ける
+  useEffect(() => {
+    let timerId: ReturnType<typeof setTimeout> | null = null;
+    let cancelled = false;
+
+    const scheduleNext = () => {
+      if (cancelled) return;
+      const curTemp = stateRef.current.temperature;
+      const intervalMs = Math.round(
+        Math.max(920, Math.min(2250, 2150 - (curTemp - MIN_TEMPERATURE) * 880)),
+      );
+      timerId = setTimeout(() => {
+        if (cancelled) return;
+        if (!reducedMotionRef.current && (typeof document === "undefined" || !document.hidden)) {
+          const cur = stateRef.current;
+          const breathedTemp = ambientTemperatureFor(cur.depth, cur.rnn.steps);
+          const tempered =
+            Math.abs(breathedTemp - cur.temperature) >= 0.02
+              ? setDreamTemperature(cur, breathedTemp)
+              : cur;
+          const next = driftDreamTick(tempered);
+          stateRef.current = next;
+          syncTileVisualDiff(next, false);
+          syncMetaAndPersistence(next);
+        }
+        scheduleNext();
+      }, intervalMs);
+    };
+
+    scheduleNext();
+    return () => {
+      cancelled = true;
+      if (timerId !== null) clearTimeout(timerId);
+    };
+  }, [syncMetaAndPersistence, syncTileVisualDiff]);
+
+  // キーボード操作（UI ゼロでも矢印・WASD 押しっぱなしでジョイスティックと連動して連続歩行できる）
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      const target = e.target as HTMLElement | null;
-      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA")) return;
-
-      if (e.key === "Escape") {
-        if (showArchive) {
-          e.preventDefault();
-          setShowArchive(false);
-          return;
-        }
-        if (showRnn) {
-          e.preventDefault();
-          setShowRnn(false);
-          return;
-        }
-      }
-      if (e.key === "m" || e.key === "M") {
-        e.preventDefault();
-        setShowArchive((v) => !v);
-        return;
-      }
-      if (e.key === "h" || e.key === "H") {
-        e.preventDefault();
-        setShowRnn((v) => !v);
-        return;
-      }
-      if (showArchive) return;
-
       const dir = KEY_TO_DIR[e.key];
       if (dir) {
         e.preventDefault();
-        doMove(dir);
+        unlockAudio();
+        keysDownRef.current.add(dir);
         return;
       }
       if (e.key === " " || e.key === "Enter") {
         e.preventDefault();
-        doPulse();
+        applyTransition((s) => pulseDream(s));
         return;
       }
-      if (e.key === "f" || e.key === "F" || e.key === "e" || e.key === "E") {
+      if (e.key === "f" || e.key === "F") {
         e.preventDefault();
-        doAnchor();
+        applyTransition((s) => toggleAnchor(s));
         return;
       }
-      if (e.key === "[" || e.key === "-") {
+      if (e.key === "m" || e.key === "M") {
         e.preventDefault();
-        doTempChange(stateRef.current.temperature - 0.12);
-        return;
-      }
-      if (e.key === "]" || e.key === "+" || e.key === "=") {
-        e.preventDefault();
-        doTempChange(stateRef.current.temperature + 0.12);
+        const nextMuted = !isSfxMuted();
+        setSfxMuted(nextMuted);
+        if (nextMuted) {
+          stopDreamAmbience();
+        } else {
+          unlockAudio();
+          const cur = stateRef.current;
+          updateDreamAmbience(cur.domainWeights, cur.temperature, cur.depth);
+        }
       }
     };
+    const onKeyUp = (e: KeyboardEvent) => {
+      const dir = KEY_TO_DIR[e.key];
+      if (dir) keysDownRef.current.delete(dir);
+    };
+    const onBlur = () => {
+      keysDownRef.current.clear();
+      joyRef.current.active = false;
+      joyRef.current.pointerId = null;
+      joyRef.current.nx = 0;
+      joyRef.current.ny = 0;
+      joyRef.current.mag = 0;
+      joyRef.current.floatShown = false;
+      stageRef.current?.setAttribute("data-dragging", "false");
+    };
     window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [doAnchor, doMove, doPulse, doTempChange, showArchive, showRnn]);
+    window.addEventListener("keyup", onKeyUp);
+    window.addEventListener("blur", onBlur);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", onKeyUp);
+      window.removeEventListener("blur", onBlur);
+    };
+  }, [applyTransition, unlockAudio]);
 
-  // 盤面スワイプ・タップは共通 lib/gesture.ts を使う
-  const lastPointerPosRef = useRef<{ x: number; y: number } | null>(null);
-  const stageGesture = useGesture({
-    onSwipe: (dir: GestureDirection) => {
-      if (!showArchive) doMove(dir);
-    },
-    onTap: () => {
-      if (showArchive) return;
-      const canvas = canvasRef.current;
-      const pt = lastPointerPosRef.current;
-      if (!canvas || !pt) {
-        doPulse();
-        return;
+  // ジョイスティック＆全面ドラッグ操作（単一ポインターハンドラで定位置・フローティング両対応）
+  const updateJoyFromPoint = useCallback((clientX: number, clientY: number) => {
+    const joy = joyRef.current;
+    const dx = clientX - joy.originX;
+    const dy = clientY - joy.originY;
+    const dist = Math.hypot(dx, dy);
+    if (joy.mode === "float" && !joy.floatShown && dist >= 5) {
+      joy.floatShown = true;
+    }
+    const clamped = Math.min(JOY_MAX_RADIUS, dist);
+    if (dist > 0.001) {
+      joy.nx = (dx / dist) * (clamped / JOY_MAX_RADIUS);
+      joy.ny = (dy / dist) * (clamped / JOY_MAX_RADIUS);
+      joy.mag = clamped / JOY_MAX_RADIUS;
+    } else {
+      joy.nx = 0;
+      joy.ny = 0;
+      joy.mag = 0;
+    }
+  }, []);
+
+  const handlePointerDown = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      if (e.pointerType === "mouse" && e.button !== 0) return;
+      if (joyRef.current.active) return;
+
+      unlockAudio();
+      e.currentTarget.setPointerCapture(e.pointerId);
+      stageRef.current?.setAttribute("data-dragging", "true");
+
+      const dockEl = dockJoyRef.current;
+      const dockRect = dockEl?.getBoundingClientRect();
+      let isOnDock = false;
+      let dockCx = 0;
+      let dockCy = 0;
+      if (dockRect) {
+        dockCx = dockRect.left + dockRect.width * 0.5;
+        dockCy = dockRect.top + dockRect.height * 0.5;
+        isOnDock = Math.hypot(e.clientX - dockCx, e.clientY - dockCy) <= dockRect.width * 0.62;
       }
-      const rect = canvas.getBoundingClientRect();
-      const localX = pt.x - rect.left;
-      const localY = pt.y - rect.top;
-      tapRingsRef.current.push({ sx: localX, sy: localY, startMs: performance.now(), durMs: 540 });
 
-      const dx = localX - rect.width / 2;
-      const dy = localY - rect.height / 2;
-      const tilePx = Math.max(40, Math.min(64, Math.min(rect.width, rect.height) / 9.8));
-      if (Math.hypot(dx, dy) <= tilePx * 0.85) {
-        doPulse();
-      } else if (Math.abs(dx) > Math.abs(dy)) {
-        doMove(dx > 0 ? "right" : "left");
+      const joy = joyRef.current;
+      joy.active = true;
+      joy.pointerId = e.pointerId;
+      if (isOnDock) {
+        joy.mode = "dock";
+        joy.originX = dockCx;
+        joy.originY = dockCy;
+        joy.floatShown = false;
+        updateJoyFromPoint(e.clientX, e.clientY);
       } else {
-        doMove(dy > 0 ? "down" : "up");
+        joy.mode = "float";
+        joy.originX = e.clientX;
+        joy.originY = e.clientY;
+        joy.nx = 0;
+        joy.ny = 0;
+        joy.mag = 0;
+        joy.floatShown = false;
+        const stageRect = stageRef.current?.getBoundingClientRect();
+        if (stageRect) {
+          tapRingsRef.current.push({
+            sx: e.clientX - stageRect.left,
+            sy: e.clientY - stageRect.top,
+            startMs: performance.now(),
+            durMs: 560,
+          });
+        }
       }
     },
-  });
+    [unlockAudio, updateJoyFromPoint],
+  );
 
-  // Canvas 2D リアルタイム神経流体夢レンダラー（60fps）
+  const handlePointerMove = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      if (!joyRef.current.active || joyRef.current.pointerId !== e.pointerId) return;
+      updateJoyFromPoint(e.clientX, e.clientY);
+    },
+    [updateJoyFromPoint],
+  );
+
+  const handlePointerEnd = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    const joy = joyRef.current;
+    if (!joy.active || joy.pointerId !== e.pointerId) return;
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    } catch {
+      // すでに解放済みなら無視
+    }
+    joy.active = false;
+    joy.pointerId = null;
+    joy.nx = 0;
+    joy.ny = 0;
+    joy.mag = 0;
+    joy.floatShown = false;
+    stageRef.current?.setAttribute("data-dragging", "false");
+  }, []);
+
+  // Canvas 2D リアルタイム神経流体夢レンダラー ＋ 連続ジョイスティック歩行ループ（60fps）
   useEffect(() => {
     const canvas = canvasRef.current;
     const stage = stageRef.current;
@@ -1026,6 +1122,7 @@ export default function DreamingClient() {
 
     const grainPattern = createFilmGrainPattern(ctx);
     let rafId = 0;
+    let lastFrameMs = performance.now();
     let width = 1;
     let height = 1;
     let dpr = 1;
@@ -1090,13 +1187,165 @@ export default function DreamingClient() {
     const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(resize) : null;
     ro?.observe(stage);
 
+    // 1 歩移動の試行（斜め入力での壁スライド＆押し当て自動溶解付き）
+    const attemptStep = (primary: DreamDir, secondary: DreamDir | null, now: number) => {
+      const mc = moveCtrlRef.current;
+      let res = applyTransition((st) => moveDream(st, primary));
+      if (res.lastEvent.kind === "blocked" && secondary) {
+        const slideRes = applyTransition((st) => moveDream(st, secondary));
+        if (slideRes.lastEvent.kind !== "blocked") {
+          res = slideRes;
+        }
+      }
+      if (res.lastEvent.kind === "blocked") {
+        mc.pushingBlocked = true;
+      } else {
+        mc.pushingBlocked = false;
+        mc.blockedHoldSec = 0;
+        mc.lastStepMs = now;
+      }
+    };
+
     const render = (now: number) => {
+      const dt = Math.min(0.05, Math.max(0.001, (now - lastFrameMs) / 1000));
+      lastFrameMs = now;
+
+      // 0. ジョイスティック＆キーボード入力の合成・DOM 反映・連続歩行ステップ
+      const joy = joyRef.current;
+      let ix = 0;
+      let iy = 0;
+      if (joy.active && joy.mag >= JOY_DEADZONE) {
+        ix = joy.nx;
+        iy = joy.ny;
+      } else if (keysDownRef.current.size > 0) {
+        if (keysDownRef.current.has("left")) ix -= 1;
+        if (keysDownRef.current.has("right")) ix += 1;
+        if (keysDownRef.current.has("up")) iy -= 1;
+        if (keysDownRef.current.has("down")) iy += 1;
+        const kLen = Math.hypot(ix, iy);
+        if (kLen > 0) {
+          ix /= kLen;
+          iy /= kLen;
+        }
+      }
+      const inMag = Math.hypot(ix, iy);
+      const isMoving = inMag >= JOY_DEADZONE;
+
+      // ジョイスティック DOM の 60fps 同期
+      const stageRect = stage.getBoundingClientRect();
+      const dockEl = dockJoyRef.current;
+      const dockKnob = dockKnobRef.current;
+      const floatEl = floatRingRef.current;
+      const floatKnob = floatKnobRef.current;
+
+      if (joy.active && joy.mode === "float" && joy.floatShown) {
+        if (floatEl) {
+          floatEl.style.left = `${joy.originX - stageRect.left}px`;
+          floatEl.style.top = `${joy.originY - stageRect.top}px`;
+          floatEl.setAttribute("data-visible", "true");
+        }
+        if (floatKnob) {
+          floatKnob.setAttribute("data-spring", "false");
+          floatKnob.style.transform = `translate3d(${(joy.nx * JOY_MAX_RADIUS).toFixed(1)}px, ${(joy.ny * JOY_MAX_RADIUS).toFixed(1)}px, 0)`;
+        }
+        if (dockEl) {
+          dockEl.setAttribute("data-hidden", "true");
+          dockEl.setAttribute("data-active", "false");
+        }
+      } else {
+        if (floatEl) floatEl.setAttribute("data-visible", "false");
+        const draggingDock = joy.active && joy.mode === "dock";
+        if (dockEl) {
+          dockEl.setAttribute("data-hidden", "false");
+          dockEl.setAttribute("data-active", draggingDock || isMoving ? "true" : "false");
+        }
+        if (dockKnob) {
+          dockKnob.setAttribute("data-spring", draggingDock ? "false" : "true");
+          const visX = draggingDock ? joy.nx : ix * 0.85;
+          const visY = draggingDock ? joy.ny : iy * 0.85;
+          dockKnob.style.transform = `translate3d(${(visX * JOY_MAX_RADIUS).toFixed(1)}px, ${(visY * JOY_MAX_RADIUS).toFixed(1)}px, 0)`;
+        }
+      }
+
+      // 連続移動アキュムレータ・壁押し当て溶解・佇み自動しおり
+      const mc = moveCtrlRef.current;
+      if (isMoving) {
+        mc.stillSec = 0;
+        const normMag = Math.min(1, (inMag - JOY_DEADZONE) / (1 - JOY_DEADZONE));
+        const stepsPerSec = 1.9 + normMag * 3.4;
+
+        const pickDirs = (vx: number, vy: number): [DreamDir, DreamDir | null] => {
+          const horiz: DreamDir = vx >= 0 ? "right" : "left";
+          const vert: DreamDir = vy >= 0 ? "down" : "up";
+          if (Math.abs(vx) >= Math.abs(vy)) {
+            return [horiz, Math.abs(vy) >= 0.35 ? vert : null];
+          }
+          return [vert, Math.abs(vx) >= 0.35 ? horiz : null];
+        };
+
+        if (!mc.wasMoving && now - mc.lastStepMs > 120) {
+          // 倒し始めの 1 歩は即座に反応
+          const [pri, sec] = pickDirs(ix, iy);
+          attemptStep(pri, sec, now);
+          mc.accumX = 0;
+          mc.accumY = 0;
+        } else {
+          mc.accumX += ix * stepsPerSec * dt;
+          mc.accumY += iy * stepsPerSec * dt;
+          if (Math.abs(mc.accumX) >= 1 || Math.abs(mc.accumY) >= 1) {
+            if (Math.abs(mc.accumX) >= Math.abs(mc.accumY)) {
+              const pri: DreamDir = mc.accumX > 0 ? "right" : "left";
+              const sec: DreamDir | null = Math.abs(iy) >= 0.35 ? (iy > 0 ? "down" : "up") : null;
+              mc.accumX -= Math.sign(mc.accumX);
+              attemptStep(pri, sec, now);
+            } else {
+              const pri: DreamDir = mc.accumY > 0 ? "down" : "up";
+              const sec: DreamDir | null = Math.abs(ix) >= 0.35 ? (ix > 0 ? "right" : "left") : null;
+              mc.accumY -= Math.sign(mc.accumY);
+              attemptStep(pri, sec, now);
+            }
+          }
+        }
+
+        // 壁に押し当て続けると夢の波紋で道が溶け開く（詰みゼロ＋ボタン不要）
+        if (mc.pushingBlocked) {
+          mc.blockedHoldSec += dt;
+          if (mc.blockedHoldSec >= BLOCKED_DISSOLVE_SEC) {
+            mc.blockedHoldSec = 0;
+            mc.pushingBlocked = false;
+            applyTransition((st) => pulseDream(st));
+          }
+        }
+        mc.wasMoving = true;
+      } else {
+        mc.accumX = 0;
+        mc.accumY = 0;
+        mc.wasMoving = false;
+        mc.pushingBlocked = false;
+        mc.blockedHoldSec = 0;
+
+        // 歩いた後に同じ場所で静かに佇むと、足元の記憶が「記憶の島（しおり）」として定着する
+        const cur = stateRef.current;
+        const alreadyAnchored = cur.anchors.some(
+          (a) => chebyshev(a.x, a.y, cur.player.x, cur.player.y) <= 1,
+        );
+        if (cur.step > 0 && !alreadyAnchored && !document.hidden) {
+          mc.stillSec += dt;
+          if (mc.stillSec >= STILL_ANCHOR_TOTAL_SEC) {
+            mc.stillSec = 0;
+            applyTransition((st) => toggleAnchor(st));
+          }
+        } else {
+          mc.stillSec = 0;
+        }
+      }
+
       const s = stateRef.current;
       const timeSec = now / 1000;
       const cam = camRef.current;
       const reduced = reducedMotionRef.current;
 
-      // 滑らかなカメラ・視線角・LSTM隠れ状態・領域重み補間（油絵のように色が連続変化する）
+      // 滑らかなカメラ・視線角・LSTM 隠れ状態・領域重み補間
       const lerp = reduced ? 1 : 0.14;
       cam.px += (s.player.x - cam.px) * lerp;
       cam.py += (s.player.y - cam.py) * lerp;
@@ -1117,7 +1366,8 @@ export default function DreamingClient() {
         sw[d] += ((s.domainWeights[d] ?? 0) - sw[d]) * hLerp;
       }
 
-      const targetAngle = FACING_ANGLE[s.player.facing];
+      // ジョイスティックを傾けている間は光錐も滑らかにアナログ角へ追従
+      const targetAngle = isMoving ? Math.atan2(iy, ix) : FACING_ANGLE[s.player.facing];
       let angleDiff = targetAngle - cam.facingAngle;
       while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
       while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
@@ -1130,7 +1380,10 @@ export default function DreamingClient() {
       const accentRgb = blendDomainColors(sw, "accent");
       const inkRgb = blendDomainColors(sw, "ink");
 
-      const tempNorm = Math.max(0, Math.min(1, (s.temperature - MIN_TEMPERATURE) / (MAX_TEMPERATURE - MIN_TEMPERATURE)));
+      const tempNorm = Math.max(
+        0,
+        Math.min(1, (s.temperature - MIN_TEMPERATURE) / (MAX_TEMPERATURE - MIN_TEMPERATURE)),
+      );
 
       // 背景：中心に微かな余韻を帯びた深い夢霧グラデーション
       const bgGrad = ctx.createRadialGradient(
@@ -1166,14 +1419,12 @@ export default function DreamingClient() {
         if (tile.kind === "rift") rifts.push({ x: tile.x, y: tile.y });
       }
 
-      // 8次元 LSTM 隠れ状態 h_t × 温度 T に駆動される連続 2D 流体ワープ場
-      // 隣接タイルが同じ頂点関数を通るため、四角いグリッドが消えて1枚の液状布のようにウニョウニョうねる。
-      // アンカー保護域（5×5）だけはワープがほぼゼロへ収束し、「記憶をピン留めした島」が際立つ。
+      // 8 次元 LSTM 隠れ状態 h_t × 温度 T に駆動される連続 2D 流体ワープ場
       const tSlow = timeSec * (0.9 + tempNorm * 0.85);
       const tFast = timeSec * (1.75 + tempNorm * 1.35);
       const baseWarpAmp = reduced
         ? 0
-        : tileSz * (0.13 + tempNorm * 0.27 + s.bleedEntropy * 0.14 + cam.pulseWave * 0.08);
+        : tileSz * (0.14 + tempNorm * 0.27 + s.bleedEntropy * 0.14 + cam.pulseWave * 0.08);
 
       const warpCache = new Map<string, Pt>();
       const warpWorldToScreen = (wx: number, wy: number): Pt => {
@@ -1233,7 +1484,6 @@ export default function DreamingClient() {
         return out;
       };
 
-      // 任意の画面座標における潜在フロー場の速度ベクトル（流線リボン用）
       const sampleFlowVelocity = (sx: number, sy: number): Pt => {
         const wx = cam.x + (sx - centerX) / tileSz;
         const wy = cam.y + (sy - centerY) / tileSz;
@@ -1345,7 +1595,6 @@ export default function DreamingClient() {
         const accentRgbT = blendDomainColors(tile.domainBlend, "accent");
         const inkRgbT = blendDomainColors(tile.domainBlend, "ink");
 
-        // 共有頂点（4隅＋4辺中点）
         const tl = warpWorldToScreen(tile.x - 0.5, tile.y - 0.5);
         const tm = warpWorldToScreen(tile.x, tile.y - 0.5);
         const tr = warpWorldToScreen(tile.x + 0.5, tile.y - 0.5);
@@ -1397,7 +1646,6 @@ export default function DreamingClient() {
           traceOrganicBlob(ctx, c.x, c.y, rx, ry, timeSec, seed, 0.14 + tempNorm * 0.1, 10);
           ctx.fill();
 
-          // うねる水面の月光コースティクス
           const wave = Math.sin(timeSec * 1.65 + tile.x * 0.9 + tile.y * 0.7);
           ctx.strokeStyle = rgbCss(inkRgbT, alpha * (0.18 + Math.abs(wave) * 0.16));
           ctx.lineWidth = 1.1;
@@ -1441,7 +1689,6 @@ export default function DreamingClient() {
           ctx.fillStyle = rgbCss(wallRgb, alpha * 0.96);
           traceWarpedQuad(ctx, tl, tm, tr, rm, br, bm, bl, lm, 0.8);
           ctx.fill();
-          // 曲がった天面ハイライト（壁が生きているように光る）
           ctx.strokeStyle = rgbCss(inkRgbT, alpha * 0.14);
           ctx.lineWidth = 1.6;
           ctx.beginPath();
@@ -1452,7 +1699,6 @@ export default function DreamingClient() {
           ctx.fillStyle = rgbCss(wallRgb, alpha * 0.96);
           traceWarpedQuad(ctx, tl, tm, tr, rm, br, bm, bl, lm, -1.8);
           ctx.fill();
-          // うねりに沿って傾く古書の背表紙
           for (let i = 0; i < 4; i++) {
             const f = (i + 0.6) / 4.2;
             const topX = tl.x + (tr.x - tl.x) * f;
@@ -1501,7 +1747,6 @@ export default function DreamingClient() {
             x: a.x + (b.x - a.x) * f,
             y: a.y + (b.y - a.y) * f,
           });
-          // 枕木
           ctx.strokeStyle = rgbCss(wallRgb, alpha * 0.6);
           ctx.lineWidth = 2;
           for (const f of [0.22, 0.5, 0.78]) {
@@ -1519,7 +1764,6 @@ export default function DreamingClient() {
             }
             ctx.stroke();
           }
-          // 湾曲してうねる二条の線路
           ctx.strokeStyle = rgbCss(inkRgbT, alpha * glint);
           ctx.lineWidth = 1.5;
           for (const lane of [0.33, 0.67]) {
@@ -1540,7 +1784,6 @@ export default function DreamingClient() {
             ctx.stroke();
           }
         } else if (tile.kind === "rift") {
-          // 脈打つ潜在空間の裂け目：歪んだ有機渦＋吸い込まれる文字トークン
           const pulse = 0.9 + Math.sin(timeSec * 2.4) * 0.12;
           const grad = ctx.createRadialGradient(c.x, c.y, 2, c.x, c.y, tileSz * 0.92);
           grad.addColorStop(0, "rgba(4, 7, 12, 0.98)");
@@ -1582,7 +1825,7 @@ export default function DreamingClient() {
           }
         }
 
-        // 2c. 液状クロスモーフ（別タイル種別へリアルタイム変容中の1.5秒間、旧形状が溶けて滲む）
+        // 2c. 液状クロスモーフ（別タイル種別へリアルタイム変容中の 1.5 秒間、旧形状が溶けて滲む）
         if (morph && morphT < 1) {
           const remain = Math.pow(1 - morphT, 1.35);
           ctx.save();
@@ -1696,7 +1939,7 @@ export default function DreamingClient() {
       }
       ctx.restore();
 
-      // 4. リアルタイム潜在流線リボン（LSTM の 8次元ベクトル場に沿って画面中をウニョウニョ蛇行）
+      // 4. リアルタイム潜在流線リボン（LSTM の 8 次元ベクトル場に沿って画面中をウニョウニョ蛇行）
       if (!reduced) {
         const ribbonAlphaBase = 0.08 + tempNorm * 0.11 + s.bleedEntropy * 0.07;
         const speedMul = 0.9 + tempNorm * 1.5 + cam.pulseWave * 1.6;
@@ -1753,7 +1996,7 @@ export default function DreamingClient() {
         const by = pos.y - boxW / 2;
         ctx.save();
         const corner = tileSz * 0.48;
-        ctx.strokeStyle = "rgba(216, 178, 106, 0.48)";
+        ctx.strokeStyle = "rgba(216, 178, 106, 0.46)";
         ctx.lineWidth = 1.3;
         ctx.beginPath();
         ctx.moveTo(bx + 2, by + corner);
@@ -1772,7 +2015,7 @@ export default function DreamingClient() {
 
         const pulse = reduced ? 1 : 0.94 + Math.sin(timeSec * 2.2) * 0.08;
         const r = tileSz * 0.22 * pulse;
-        ctx.strokeStyle = "rgba(216, 178, 106, 0.9)";
+        ctx.strokeStyle = "rgba(216, 178, 106, 0.88)";
         ctx.lineWidth = 1.5;
         ctx.beginPath();
         ctx.moveTo(pos.x, pos.y - r);
@@ -1798,7 +2041,6 @@ export default function DreamingClient() {
         const origAccent = DOMAIN_PALETTES[tile.motif.originDomain].accent;
         const curAccent = DOMAIN_PALETTES[tile.motif.domain].accent;
 
-        // 有機的に呼吸する光輪
         const halo = ctx.createRadialGradient(pos.x, my, 2, pos.x, my, tileSz * 0.92);
         halo.addColorStop(0, rgbCss(isReunion ? origAccent : curAccent, alpha * 0.44));
         halo.addColorStop(0.55, rgbCss(curAccent, alpha * 0.15));
@@ -1824,7 +2066,6 @@ export default function DreamingClient() {
           ctx.stroke();
         }
 
-        // リアルタイム二重露光（常に微かに公転し、高温・変質ほどズレが広がる）
         if (!reduced) {
           const orbitR = (isReunion ? 3.2 : 1.8) + ghostShift * 0.72;
           const ox = Math.cos(timeSec * 1.35 + tile.x * 1.1 + sh[0] * 2) * orbitR;
@@ -1859,7 +2100,6 @@ export default function DreamingClient() {
           tCtx.fill();
         }
 
-        // 一文字ずつ波打ちながら浮かぶ明朝ラベル（char-RNN の揺らぎを文字単位で表現）
         if (dist <= 5.4) {
           const label =
             tile.motif.generation >= 2
@@ -1927,7 +2167,7 @@ export default function DreamingClient() {
         return true;
       });
 
-      // 9. プレイヤー（夢の中を漂う灯火・視線光錐・残響コンパス弧）
+      // 9. プレイヤー（夢の中を漂う灯火・視線光錐・佇みしおり定着弧・集めた記憶の蛍・残響コンパス弧）
       const pPos = warpWorldToScreen(cam.px + cam.bumpX, cam.py + cam.bumpY);
 
       ctx.save();
@@ -1959,15 +2199,50 @@ export default function DreamingClient() {
         ctx.save();
         ctx.strokeStyle =
           signal.kind === "reunion"
-            ? "rgba(228, 194, 118, 0.86)"
+            ? "rgba(228, 194, 118, 0.84)"
             : signal.kind === "rift"
-              ? "rgba(156, 206, 224, 0.82)"
-              : rgbCss(accentRgb, 0.52);
-        ctx.lineWidth = 1.8;
+              ? "rgba(156, 206, 224, 0.8)"
+              : rgbCss(accentRgb, 0.48);
+        ctx.lineWidth = 1.7;
         ctx.lineCap = "round";
         ctx.beginPath();
         ctx.arc(pPos.x, pPos.y, tileSz * 0.56, angle - 0.3, angle + 0.3);
         ctx.stroke();
+        ctx.restore();
+      }
+
+      // 佇み定着チャージ弧（ボタン無しで静かに記憶の島を結ぶ気配）
+      if (mc.stillSec > STILL_ANCHOR_DELAY_SEC) {
+        const charge = Math.min(
+          1,
+          (mc.stillSec - STILL_ANCHOR_DELAY_SEC) / (STILL_ANCHOR_TOTAL_SEC - STILL_ANCHOR_DELAY_SEC),
+        );
+        ctx.save();
+        ctx.strokeStyle = `rgba(216, 178, 106, ${(0.28 + charge * 0.56).toFixed(3)})`;
+        ctx.lineWidth = 1.6;
+        ctx.lineCap = "round";
+        ctx.beginPath();
+        ctx.arc(pPos.x, pPos.y, tileSz * 0.44, -Math.PI * 0.5, -Math.PI * 0.5 + Math.PI * 2 * charge);
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      // 集めた記憶の蛍（発見済み原型モチーフの数だけ小さな光粒がプレイヤーの周囲を静かに巡る）
+      const discoveredCount = Math.max(s.discoveredMotifs.length, recordRef.current.discoveredMotifs.length);
+      if (discoveredCount > 0 && !reduced) {
+        ctx.save();
+        for (let i = 0; i < discoveredCount; i++) {
+          const a = timeSec * (0.55 + (i % 3) * 0.14) + (i / discoveredCount) * Math.PI * 2;
+          const rx = tileSz * (0.48 + (i % 2) * 0.14);
+          const ry = tileSz * (0.36 + ((i + 1) % 2) * 0.14);
+          const fx = pPos.x + Math.cos(a) * rx;
+          const fy = pPos.y + Math.sin(a) * ry;
+          const twinkle = 0.45 + 0.45 * Math.sin(timeSec * 2.1 + i * 1.7);
+          ctx.fillStyle = rgbCss(accentRgb, 0.58 * twinkle);
+          ctx.beginPath();
+          ctx.arc(fx, fy, 1.8, 0, Math.PI * 2);
+          ctx.fill();
+        }
         ctx.restore();
       }
 
@@ -1999,7 +2274,7 @@ export default function DreamingClient() {
         tCtx.fill();
       }
 
-      // 10. 液状残像フィードバックバッファをスクリーン合成（ウニョウニョと光と幻影が尾を引く）
+      // 10. 液状残像フィードバックバッファをスクリーン合成
       if (tCtx && !reduced) {
         ctx.save();
         ctx.globalCompositeOperation = "screen";
@@ -2107,16 +2382,77 @@ export default function DreamingClient() {
         const t = (now - tr.startMs) / tr.durMs;
         if (t >= 1) return false;
         ctx.save();
-        ctx.strokeStyle = rgbCss(inkRgb, (1 - t) * 0.45);
-        ctx.lineWidth = 1.2;
+        ctx.strokeStyle = rgbCss(inkRgb, (1 - t) * 0.4);
+        ctx.lineWidth = 1.1;
         ctx.beginPath();
-        ctx.arc(tr.sx, tr.sy, 6 + easeOutCubic(t) * 26, 0, Math.PI * 2);
+        ctx.arc(tr.sx, tr.sy, 6 + easeOutCubic(t) * 24, 0, Math.PI * 2);
         ctx.stroke();
         ctx.restore();
         return true;
       });
 
-      // 16. 潜行・転寝時の静かな霧フェード幕
+      // 16. 霧の中に溶け込むダイエジェティック文字（枠なし・UI なし・時間経過で霧へ馴染む）
+      const mt = mistTextRef.current;
+      const placeAge = now - mt.placeChangedMs;
+      const placeFadeIn = smoothstep(0, 520, placeAge);
+      const placeGlow = 0.56 + (1 - smoothstep(400, 3200, placeAge)) * 0.3;
+      const placeChars = Array.from(mt.placeName);
+      if (placeChars.length > 0) {
+        const titleSize = Math.max(15, Math.min(20, Math.round(width * 0.032)));
+        const charStep = titleSize * 1.16;
+        const startX = centerX - ((placeChars.length - 1) * charStep) * 0.5;
+        const titleY = 34;
+
+        ctx.save();
+        ctx.font = `400 ${titleSize}px "Shippori Mincho", "Hiragino Mincho ProN", Georgia, serif`;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.shadowColor = "rgba(6, 10, 16, 0.9)";
+        ctx.shadowBlur = 16;
+
+        for (let i = 0; i < placeChars.length; i++) {
+          const cxChar = startX + i * charStep;
+          const cyChar =
+            titleY + (reduced ? 0 : Math.sin(timeSec * 1.55 + i * 0.65 + sh[0] * 2) * (1.0 + tempNorm * 1.6));
+          if (!reduced && tempNorm > 0.3) {
+            ctx.fillStyle = rgbCss(accentRgb, placeFadeIn * placeGlow * 0.28);
+            ctx.fillText(placeChars[i], cxChar + ghostShift * 0.42, cyChar - ghostShift * 0.22);
+          }
+          ctx.fillStyle = rgbCss(inkRgb, placeFadeIn * placeGlow);
+          ctx.fillText(placeChars[i], cxChar, cyChar);
+        }
+
+        // 極小の深度・記憶刻印（通常は霧に溶ける 0.26、潜行・採集直後だけ 0.58 にふわっと浮かぶ）
+        const metaPulse = now < mt.metaHighlightUntilMs ? 1 - smoothstep(mt.metaHighlightUntilMs - 1600, mt.metaHighlightUntilMs, now) : 0;
+        const metaAlpha = 0.26 + metaPulse * 0.34;
+        ctx.font = `400 11px "Shippori Mincho", "Hiragino Mincho ProN", serif`;
+        ctx.fillStyle = rgbCss(inkRgb, metaAlpha);
+        ctx.fillText(`第${s.depth}層 · ${discoveredCount}/${DREAM_MOTIFS.length}`, centerX, titleY + 23);
+        ctx.restore();
+      }
+
+      // 夢の呟き（char-RNN 生成の 1 行が霧から浮かび、数秒かけて静かに消える）
+      if (mt.whisperText) {
+        const wAge = now - mt.whisperShownMs;
+        if (wAge < 5600) {
+          const wAlpha = smoothstep(0, 680, wAge) * (1 - smoothstep(3200, 5600, wAge));
+          if (wAlpha > 0.01) {
+            const wY = Math.max(height * 0.68, height - 168);
+            const wSize = Math.max(13, Math.min(16, Math.round(width * 0.025)));
+            ctx.save();
+            ctx.font = `400 ${wSize}px "Shippori Mincho", "Hiragino Mincho ProN", Georgia, serif`;
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            ctx.shadowColor = "rgba(6, 10, 16, 0.94)";
+            ctx.shadowBlur = 18;
+            ctx.fillStyle = rgbCss(inkRgb, wAlpha * 0.84);
+            ctx.fillText(mt.whisperText, centerX, wY + (1 - smoothstep(0, 680, wAge)) * 8, width - 48);
+            ctx.restore();
+          }
+        }
+      }
+
+      // 17. 潜行時の静かな霧フェード幕
       if (cam.descendFlash > 0.01) {
         ctx.fillStyle = rgbCss(fogRgb, cam.descendFlash * 0.9);
         ctx.fillRect(0, 0, width, height);
@@ -2131,42 +2467,7 @@ export default function DreamingClient() {
       cancelAnimationFrame(rafId);
       ro?.disconnect();
     };
-  }, []);
-
-  // 上位 2 つの滲み領域ラベル
-  const blendSummary = useMemo(() => {
-    const ranked = [...DOMAIN_IDS]
-      .map((id) => ({ id, pct: Math.round(state.domainWeights[id] * 100) }))
-      .sort((a, b) => b.pct - a.pct);
-    const top = ranked.filter((r) => r.pct >= 14).slice(0, 2);
-    if (top.length === 0) return DOMAIN_PALETTES[state.dominantDomain].label;
-    return top.map((r) => `${DOMAIN_PALETTES[r.id].label} ${r.pct}%`).join(" / ");
-  }, [state.domainWeights, state.dominantDomain]);
-
-  // 周囲 1 マスの文脈（隣接モチーフ／裂け目／しおり有無）
-  const adjacent = useMemo(() => getAdjacentContext(state), [state]);
-
-  const discoveredCount = Math.max(state.discoveredMotifs.length, record.discoveredMotifs.length);
-  const discoveredSet = useMemo(
-    () => new Set<MotifId>([...record.discoveredMotifs, ...state.discoveredMotifs]),
-    [record.discoveredMotifs, state.discoveredMotifs],
-  );
-  const maxDepthDisplay = Math.max(state.depth, record.maxDepth);
-
-  // 文脈に応じた主ボタンのラベル＆発光スタイル
-  const primaryLabel = adjacent.motif
-    ? adjacent.motif.generation >= 2
-      ? `再会「${adjacent.motif.name}」`
-      : `「${adjacent.motif.name}」に共鳴`
-    : adjacent.hasRift
-      ? "深層へ潜る"
-      : "波紋";
-
-  const primaryClass = adjacent.motif
-    ? "dreaming-dock-btn dreaming-dock-btn-motif"
-    : adjacent.hasRift
-      ? "dreaming-dock-btn dreaming-dock-btn-rift"
-      : "dreaming-dock-btn";
+  }, [applyTransition]);
 
   return (
     <div className="dreaming-shell">
@@ -2174,385 +2475,24 @@ export default function DreamingClient() {
         ref={stageRef}
         className="dreaming-stage"
         role="application"
-        aria-label="dreaming の夢空間（矢印キー・WASD・スワイプ・タップで移動、Spaceで共鳴）"
+        aria-label="dreaming の夢空間"
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerEnd}
+        onPointerCancel={handlePointerEnd}
       >
-        <canvas
-          ref={canvasRef}
-          className="dreaming-canvas"
-          {...stageGesture}
-          onPointerDown={(e) => {
-            if (document.activeElement instanceof HTMLElement) {
-              document.activeElement.blur();
-            }
-            lastPointerPosRef.current = { x: e.clientX, y: e.clientY };
-            stageGesture.onPointerDown(e);
-          }}
-        />
+        <canvas ref={canvasRef} className="dreaming-canvas" />
+
+        <div ref={floatRingRef} className="dreaming-joy-float" aria-hidden="true">
+          <div className="dreaming-joy-core" />
+          <div ref={floatKnobRef} className="dreaming-joy-knob" />
+        </div>
+
+        <div ref={dockJoyRef} className="dreaming-joystick" aria-label="移動ジョイスティック">
+          <div className="dreaming-joy-core" aria-hidden="true" />
+          <div ref={dockKnobRef} className="dreaming-joy-knob" aria-hidden="true" />
+        </div>
       </div>
-
-      {/* 上部フローティング HUD：左に地名と層、右に極小ピル 3 つだけ */}
-      <header className="dreaming-hud-top">
-        <div className="dreaming-identity">
-          <Link
-            href={`${prefix}/games`}
-            className="dreaming-back"
-            aria-label="ゲーム一覧へ戻る"
-            title="ゲーム一覧へ戻る"
-          >
-            <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-              <path
-                d="M10.5 3.5L5.5 8L10.5 12.5"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
-          </Link>
-          <div className="dreaming-place">
-            <span key={state.placeName} className="dreaming-place-name">
-              {state.placeName}
-            </span>
-            <div className="dreaming-place-meta">
-              <span className="dreaming-layer-tag">第{state.depth}層</span>
-              <span className="dreaming-meta-sep" aria-hidden="true">
-                ·
-              </span>
-              <span>{blendSummary}</span>
-              {state.echoChain > 0 && (
-                <>
-                  <span className="dreaming-meta-sep" aria-hidden="true">
-                    ·
-                  </span>
-                  <span className="dreaming-chain-tag">再会 {state.echoChain}</span>
-                </>
-              )}
-            </div>
-          </div>
-        </div>
-
-        <div className="dreaming-utilities">
-          <button
-            type="button"
-            className="dreaming-pill-btn"
-            aria-pressed={showArchive}
-            onClick={() => setShowArchive((v) => !v)}
-          >
-            <span>標本</span>
-            <span className="dreaming-pill-count">
-              {discoveredCount}/{DREAM_MOTIFS.length}
-            </span>
-          </button>
-          <button
-            type="button"
-            className="dreaming-pill-btn"
-            aria-pressed={showRnn}
-            onClick={() => setShowRnn((v) => !v)}
-            title="小型LSTMの隠れ状態・確率分布を表示 (H)"
-          >
-            <span>LSTM</span>
-          </button>
-          <button
-            type="button"
-            className="dreaming-pill-btn dreaming-icon-btn"
-            aria-pressed={!muted}
-            aria-label={muted ? "音をオンにする" : "無音にする"}
-            title={muted ? "音をオンにする" : "無音にする"}
-            onClick={toggleMute}
-          >
-            {muted ? (
-              <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                <path
-                  d="M3 6.2H5.8L9 3.5V12.5L5.8 9.8H3V6.2Z"
-                  stroke="currentColor"
-                  strokeWidth="1.35"
-                  strokeLinejoin="round"
-                />
-                <path
-                  d="M11.3 6.2L14 8.9M14 6.2L11.3 8.9"
-                  stroke="currentColor"
-                  strokeWidth="1.35"
-                  strokeLinecap="round"
-                />
-              </svg>
-            ) : (
-              <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                <path
-                  d="M3 6.2H5.8L9 3.5V12.5L5.8 9.8H3V6.2Z"
-                  stroke="currentColor"
-                  strokeWidth="1.35"
-                  strokeLinejoin="round"
-                />
-                <path
-                  d="M11.2 5.6C12.2 6.6 12.2 9.4 11.2 10.4M13 4C14.8 5.9 14.8 10.1 13 12"
-                  stroke="currentColor"
-                  strokeWidth="1.3"
-                  strokeLinecap="round"
-                />
-              </svg>
-            )}
-          </button>
-        </div>
-      </header>
-
-      {/* 折りたたみ式 LSTM 隠れ状態インスペクタ（必要なときだけ開く） */}
-      {showRnn && (
-        <aside className="dreaming-rnn-panel" aria-label="RNN 隠れ状態モニタ">
-          <div className="dreaming-rnn-head">
-            <span>LSTM HIDDEN STATE</span>
-            <span>窓 {memoryWindowForDepth(state.depth)}歩</span>
-          </div>
-          <div className="dreaming-rnn-bars" aria-hidden="true">
-            {state.rnn.h.map((v, i) => {
-              const mag = Math.min(1, Math.abs(v));
-              const color =
-                i < DOMAIN_IDS.length
-                  ? rgbCss(DOMAIN_PALETTES[DOMAIN_IDS[i]].accent, 0.88)
-                  : "rgba(184, 206, 218, 0.72)";
-              return (
-                <div key={i} className="dreaming-rnn-bar-col">
-                  <div
-                    className="dreaming-rnn-bar"
-                    style={{
-                      height: `${Math.max(10, Math.round(mag * 100))}%`,
-                      backgroundColor: color,
-                      opacity: v >= 0 ? 0.95 : 0.34,
-                    }}
-                  />
-                </div>
-              );
-            })}
-          </div>
-          <div className="dreaming-prob-list">
-            {DOMAIN_IDS.map((id) => {
-              const pct = Math.round(state.domainWeights[id] * 100);
-              return (
-                <div key={id} className="dreaming-prob-row">
-                  <span className="dreaming-prob-label">{DOMAIN_PALETTES[id].label}</span>
-                  <div className="dreaming-prob-track">
-                    <div
-                      className="dreaming-prob-fill"
-                      style={{
-                        width: `${pct}%`,
-                        backgroundColor: rgbCss(DOMAIN_PALETTES[id].accent, 0.88),
-                      }}
-                    />
-                  </div>
-                  <span className="dreaming-prob-pct">{pct}%</span>
-                </div>
-              );
-            })}
-          </div>
-          <div className="dreaming-rnn-foot">
-            <span>滲み {Math.round(state.bleedEntropy * 100)}%</span>
-            <span>保持 {Math.round(state.rnn.lastForgetMean * 100)}%</span>
-            <span>忘却 {state.forgottenCount}</span>
-          </div>
-        </aside>
-      )}
-
-      {/* 下部フローティングゾーン：霧に直接浮かぶ明朝ウィスパー ＋ スリムな操作ドック */}
-      <div className="dreaming-hud-bottom">
-        {state.whisper && (
-          <div
-            key={`${state.whisper.step}-${state.whisper.text}`}
-            className="dreaming-whisper"
-            aria-live="polite"
-          >
-            <div className="dreaming-whisper-text">{state.whisper.text}</div>
-            {state.whisper.sub && <div className="dreaming-whisper-sub">{state.whisper.sub}</div>}
-          </div>
-        )}
-
-        {state.step < 2 && (
-          <div className="dreaming-first-hint">
-            矢印 / WASD / スワイプで歩く · 佇んでいても夢は揺らぎ書き換わり続ける
-          </div>
-        )}
-
-        <footer className="dreaming-dock" aria-label="夢の操作">
-          <button type="button" className={primaryClass} onClick={doPulse}>
-            <span>{primaryLabel}</span>
-            <span className="dreaming-kbd">Space</span>
-          </button>
-
-          <span className="dreaming-dock-sep" aria-hidden="true" />
-
-          <button
-            type="button"
-            className={
-              adjacent.hasAnchor ? "dreaming-dock-btn dreaming-dock-btn-anchored" : "dreaming-dock-btn"
-            }
-            onClick={doAnchor}
-          >
-            <span>{adjacent.hasAnchor ? "しおりを外す" : "しおり"}</span>
-            <span className="dreaming-anchor-dots" aria-label={`使用中 ${state.anchors.length}/${MAX_ANCHORS}`}>
-              {Array.from({ length: MAX_ANCHORS }, (_, i) => (
-                <span
-                  key={i}
-                  className={
-                    i < state.anchors.length
-                      ? "dreaming-anchor-dot dreaming-anchor-dot-on"
-                      : "dreaming-anchor-dot"
-                  }
-                />
-              ))}
-            </span>
-            <span className="dreaming-kbd">F</span>
-          </button>
-
-          <span className="dreaming-dock-sep" aria-hidden="true" />
-
-          <label className="dreaming-temp-dial">
-            <span
-              className={
-                state.temperature < 0.85
-                  ? "dreaming-temp-pole dreaming-temp-pole-active"
-                  : "dreaming-temp-pole"
-              }
-            >
-              明晰
-            </span>
-            <input
-              type="range"
-              className="dreaming-temp-slider"
-              min={MIN_TEMPERATURE}
-              max={MAX_TEMPERATURE}
-              step={0.05}
-              value={state.temperature}
-              onChange={(e) => doTempChange(Number(e.target.value))}
-              onPointerUp={(e) => e.currentTarget.blur()}
-              aria-label="サンプリング温度（低いと明晰、高いと夢が滲み崩れる）"
-            />
-            <span
-              className={
-                state.temperature > 1.2
-                  ? "dreaming-temp-pole dreaming-temp-pole-active"
-                  : "dreaming-temp-pole"
-              }
-            >
-              深夢
-            </span>
-            <span className="dreaming-temp-val" aria-hidden="true">
-              {state.temperature.toFixed(2)}
-            </span>
-          </label>
-        </footer>
-      </div>
-
-      {/* 夢の標本帳（フィールドノート風スライドドロワー） */}
-      {showArchive && (
-        <div
-          className="dreaming-drawer-backdrop"
-          onClick={() => setShowArchive(false)}
-          role="dialog"
-          aria-modal="true"
-          aria-label="夢の標本帳"
-        >
-          <div className="dreaming-drawer" onClick={(e) => e.stopPropagation()}>
-            <div className="dreaming-drawer-head">
-              <div className="dreaming-drawer-title-group">
-                <h2>夢の標本帳</h2>
-                <span className="dreaming-drawer-sub">
-                  忘却の縁で拾い上げた記憶と変質の記録
-                </span>
-              </div>
-              <button
-                type="button"
-                className="dreaming-ghost-btn"
-                onClick={() => setShowArchive(false)}
-              >
-                閉じる
-              </button>
-            </div>
-
-            <div className="dreaming-drawer-body">
-              <div className="dreaming-summary-strip">
-                <div className="dreaming-summary-cell">
-                  <span>最深深度</span>
-                  <strong>第{maxDepthDisplay}層</strong>
-                </div>
-                <div className="dreaming-summary-cell">
-                  <span>最高変質</span>
-                  <strong>
-                    {Math.max(state.maxGeneration, record.maxGeneration) > 0
-                      ? `第${Math.max(state.maxGeneration, record.maxGeneration)}世代`
-                      : "未観測"}
-                  </strong>
-                </div>
-                <div className="dreaming-summary-cell">
-                  <span>累計歩数</span>
-                  <strong>{record.totalSteps}</strong>
-                </div>
-                <div className="dreaming-summary-cell">
-                  <span>忘却風景</span>
-                  <strong>{record.totalForgotten}</strong>
-                </div>
-              </div>
-
-              <section>
-                <p className="dreaming-section-title">
-                  原型モチーフ（{discoveredCount} / {DREAM_MOTIFS.length}）
-                </p>
-                <div className="dreaming-archetypes">
-                  {DREAM_MOTIFS.map((m) => {
-                    const found = discoveredSet.has(m.id);
-                    return (
-                      <div
-                        key={m.id}
-                        className={
-                          found
-                            ? "dreaming-archetype-chip dreaming-archetype-chip-found"
-                            : "dreaming-archetype-chip"
-                        }
-                      >
-                        {found ? m.archetypeLabel : "……"}
-                      </div>
-                    );
-                  })}
-                </div>
-              </section>
-
-              <section>
-                <p className="dreaming-section-title">採集した変質記録</p>
-                {state.archive.length === 0 ? (
-                  <p className="dreaming-log-sub">
-                    まだ記録はありません。光るモチーフに触れるか、近くで共鳴してください。
-                  </p>
-                ) : (
-                  <div className="dreaming-log-list">
-                    {state.archive.slice(0, 24).map((entry, idx) => (
-                      <div key={`${entry.step}-${entry.name}-${idx}`} className="dreaming-log-item">
-                        <div className="dreaming-log-top">
-                          <span className="dreaming-log-name">{entry.name}</span>
-                          <span className="dreaming-log-meta">
-                            {entry.generation >= 2 ? `第${entry.generation}変質` : "原型"} · 第{entry.depth}層
-                          </span>
-                        </div>
-                        <div className="dreaming-log-sub">
-                          {entry.archetypeLabel}（{DOMAIN_PALETTES[entry.originDomain].label}
-                          {entry.originDomain !== entry.domain
-                            ? ` → ${DOMAIN_PALETTES[entry.domain].label}`
-                            : ""}
-                          ）
-                        </div>
-                        <div className="dreaming-log-frag">{entry.fragment}</div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </section>
-            </div>
-
-            <div className="dreaming-drawer-foot">
-              <span className="dreaming-log-sub">夢に終わりはありません</span>
-              <button type="button" className="dreaming-ghost-btn" onClick={doRedrift}>
-                浅い層へ漂い直す
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

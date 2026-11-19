@@ -1374,6 +1374,13 @@ export function setDreamTemperature(state: DreamState, temperature: number): Dre
   };
 }
 
+/** 深度と LSTM 経過ステップから、夢が自然に呼吸するサンプリング温度 T を算出する。 */
+export function ambientTemperatureFor(depth: number, rnnSteps: number): number {
+  const base = 0.86 + Math.min(0.46, Math.max(0, depth - 1) * 0.085);
+  const wave = Math.sin(rnnSteps * 0.16) * 0.24 + Math.cos(rnnSteps * 0.07) * 0.08;
+  return Math.round(clampTemperature(base + wave) * 100) / 100;
+}
+
 /**
  * リアルタイム自律夢遊ティック（立ち止まっていても夢がうねり・滲み・書き換わり続ける）。
  * - 小型 LSTM を微細な自律波動入力で 1 ステップ揺らし、領域確率分布を連続漂流させる
