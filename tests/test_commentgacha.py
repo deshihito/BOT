@@ -32,6 +32,8 @@ class FakeWebhook:
 
 
 class FakeChannel:
+    """messages は新しい順（実Discordの既定の履歴順）に渡す。"""
+
     def __init__(self, messages=(), *, manage_webhooks=True, read_history=True):
         self.id = 100
         self._messages = list(messages)
@@ -42,11 +44,19 @@ class FakeChannel:
             read_message_history=read_history,
         )
 
-    def history(self, limit=None):
-        messages = list(self._messages)
+    def history(self, limit=None, *, before=None, after=None, around=None, oldest_first=None):
+        items = list(self._messages)
+        if after is not None:
+            items = [m for m in items if m.id > after.id]
+        if before is not None:
+            items = [m for m in items if m.id < before.id]
+        if oldest_first:
+            items.reverse()
+        if limit is not None:
+            items = items[:limit]
 
         async def gen():
-            for item in messages:
+            for item in items:
                 yield item
 
         return gen()
@@ -95,8 +105,7 @@ class CommentGachaCogTest(unittest.IsolatedAsyncioTestCase):
         channel = FakeChannel([hist_message(7, "昔の名言", author=make_author("名言の主", user_id=7))])
         message = FakeMessage(channel=channel)
         cog = self.make_cog()
-        with patch.object(commentgacha.random, "randrange", return_value=0):
-            await cog.on_message(message)
+        await cog.on_message(message)
         channel.create_webhook.assert_awaited_once_with(name=commentgacha.WEBHOOK_NAME)
         channel.webhook.send.assert_awaited_once()
         kwargs = channel.webhook.send.await_args.kwargs
@@ -111,8 +120,7 @@ class CommentGachaCogTest(unittest.IsolatedAsyncioTestCase):
         channel = FakeChannel([hist_message(7, "掘り起こし")])
         message = FakeMessage(content="ねえコメントガチャして", channel=channel)
         cog = self.make_cog()
-        with patch.object(commentgacha.random, "randrange", return_value=0):
-            await cog.on_message(message)
+        await cog.on_message(message)
         channel.webhook.send.assert_awaited_once()
 
     async def test_no_trigger_no_repost(self):
@@ -130,8 +138,8 @@ class CommentGachaCogTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_trigger_calls_are_not_candidates(self):
         channel = FakeChannel([
-            hist_message(8, "コメントガチャ"),
             hist_message(9, "前のコメントガチャして"),
+            hist_message(8, "コメントガチャ"),
         ])
         cog = self.make_cog()
         await cog.on_message(FakeMessage(channel=channel))
@@ -140,9 +148,8 @@ class CommentGachaCogTest(unittest.IsolatedAsyncioTestCase):
     async def test_cooldown_blocks_second_draw(self):
         channel = FakeChannel([hist_message(7, "昔の名言")])
         cog = self.make_cog()
-        with patch.object(commentgacha.random, "randrange", return_value=0):
-            await cog.on_message(FakeMessage(channel=channel))
-            await cog.on_message(FakeMessage(channel=channel))
+        await cog.on_message(FakeMessage(channel=channel))
+        await cog.on_message(FakeMessage(channel=channel))
         channel.webhook.send.assert_awaited_once()
 
     async def test_without_webhook_permission_no_repost(self):
@@ -152,26 +159,37 @@ class CommentGachaCogTest(unittest.IsolatedAsyncioTestCase):
         channel.create_webhook.assert_not_awaited()
         channel.webhook.send.assert_not_awaited()
 
-    async def test_count_candidates_counts_only_eligible(self):
+    async def test_draw_picks_candidate_after_random_pivot(self):
         channel = FakeChannel([
-            hist_message(1, "対象"),
-            hist_message(2, "ボット", author=make_author("bot", bot=True)),
-            hist_message(3, "webhook", webhook_id=42),
-            hist_message(4, ""),
-            hist_message(5, "対象2"),
+            hist_message(300, "最新の発言"),
+            hist_message(200, "真ん中の発言"),
+            hist_message(100, "最古の発言"),
         ])
-        self.assertEqual(await commentgacha.count_candidates(channel, exclude_id=999), 2)
-
-    async def test_draw_rolls_against_total_and_fetches_only_that_one(self):
-        channel = FakeChannel([
-            hist_message(1, "最初の発言"),
-            hist_message(2, "次の発言"),
-            hist_message(3, "最後の発言"),
-        ])
-        with patch.object(commentgacha.random, "randrange", return_value=2) as roll:
+        with patch.object(commentgacha.random, "randint", return_value=150) as roll, \
+                patch.object(commentgacha.random, "choice", side_effect=lambda seq: seq[0]):
             chosen = await commentgacha.draw_random_message(channel, exclude_id=999)
-        roll.assert_called_once_with(3)
-        self.assertEqual(chosen.id, 3)
+        roll.assert_called_once_with(100, 300)
+        self.assertEqual(chosen.id, 200)
+
+    async def test_draw_skips_ineligible_messages_after_pivot(self):
+        channel = FakeChannel([
+            hist_message(300, "対象の発言"),
+            hist_message(200, "ボット", author=make_author("bot", bot=True)),
+            hist_message(100, "最古の発言"),
+        ])
+        with patch.object(commentgacha.random, "randint", return_value=150), \
+                patch.object(commentgacha.random, "choice", side_effect=lambda seq: seq[0]):
+            chosen = await commentgacha.draw_random_message(channel, exclude_id=999)
+        self.assertEqual(chosen.id, 300)
+
+    async def test_draw_returns_none_without_candidates(self):
+        channel = FakeChannel([
+            hist_message(200, "ボット2", author=make_author("bot", bot=True)),
+            hist_message(100, "ボット1", author=make_author("bot", bot=True)),
+        ])
+        with patch.object(commentgacha.random, "randint", return_value=150):
+            chosen = await commentgacha.draw_random_message(channel, exclude_id=999)
+        self.assertIsNone(chosen)
 
 
 if __name__ == "__main__":

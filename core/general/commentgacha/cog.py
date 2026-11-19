@@ -1,9 +1,14 @@
 """「コメントガチャ」の投稿に反応して、そのチャンネルの過去の発言を1件再投稿する機能。
 
 イースターエッグ枠（今北産業と同じ置き方）: 設定はなく常時オン。
-トリガー語を含む発言に反応し、そのチャンネルの全履歴から候補の総数を
-数え、ダイスロールで決めた1件だけを抜き出して、元の投稿者の名前と
-アバターを付けた webhook で再投稿する。
+トリガー語を含む発言に反応し、そのチャンネルの過去の発言から1件を
+抜き出して、元の投稿者の名前とアバターを付けた webhook で再投稿する。
+
+抜き出しは TakasumiBOT の /top と同じカーソル取得の応用: 最古と最新の
+発言IDの範囲でランダムなIDを引き、after カーソルでその直後の発言を
+ピンポイント取得する。全履歴の走査はしない（API数回で完結）。
+代わりに均一性は「発言数」ではなく「時間」基準になる（発言が密集した
+時期の発言は当たりにくい）。
 """
 from __future__ import annotations
 
@@ -19,8 +24,11 @@ from discord.ext import commands
 logger = logging.getLogger("cogs.commentgacha")
 TRIGGER_PHRASE = "コメントガチャ"
 WEBHOOK_NAME = "AGOBOT-CommentGacha"
-# 全履歴の走査を伴うため、チャンネル単位の間隔は長めに取る。
+# チャンネル単位の連打防止（取得自体は軽いが、再投稿の頻度を抑える）。
 COOLDOWN_SECONDS = 60
+# ランダムIDの直後から候補を探す範囲と、候補が無い場合の引き直し回数。
+DRAW_WINDOW = 50
+DRAW_ATTEMPTS = 3
 
 
 def _eligible(message: Any, *, exclude_id: Any) -> bool:
@@ -46,46 +54,48 @@ def _eligible(message: Any, *, exclude_id: Any) -> bool:
     return bool(str(content).strip() or attachments)
 
 
-async def count_candidates(channel: Any, *, exclude_id: Any) -> int:
-    """候補になる発言の総数を数える（発言自体は保持しない）。"""
-    history = getattr(channel, "history", None)
-    if not callable(history):
-        return 0
-    count = 0
-    async for candidate in history(limit=None):
-        if _eligible(candidate, exclude_id=exclude_id):
-            count += 1
-    return count
-
-
-async def fetch_candidate_at(channel: Any, index: int, *, exclude_id: Any) -> Any | None:
-    """候補を先頭から数えて index 番目の1件だけを取り出す（到達したら打ち切る）。
-
-    走査中に発言が削除されて index に届かなかった場合は、最後に見つけた
-    候補を返す（ガチャ自体は止めない）。
-    """
+async def _edge_message(channel: Any, *, oldest: bool) -> Any | None:
+    """チャンネルの最古（oldest=True）または最新の発言を1件だけ取得する。"""
     history = getattr(channel, "history", None)
     if not callable(history):
         return None
-    seen = -1
-    last: Any | None = None
-    async for candidate in history(limit=None):
-        if not _eligible(candidate, exclude_id=exclude_id):
-            continue
-        seen += 1
-        last = candidate
-        if seen == index:
-            return candidate
-    return last
+    kwargs: dict[str, Any] = {"limit": 1}
+    if oldest:
+        kwargs["oldest_first"] = True
+    async for message in history(**kwargs):
+        return message
+    return None
 
 
 async def draw_random_message(channel: Any, *, exclude_id: Any) -> Any | None:
-    """候補の総数を取得 → ダイスロール → 当たりの1件だけを抜き出す。"""
-    total = await count_candidates(channel, exclude_id=exclude_id)
-    if total <= 0:
+    """最古〜最新の発言IDの範囲でランダムなIDを引き、その直後の候補から1件選ぶ。
+
+    /top の after カーソル取得と同じ仕組みで、全履歴を走査せずに
+    ピンポイントで抜き出す。ランダムIDが削除済み発言や空白期間に
+    落ちても、after 取得は次の実在発言を返すためそのまま候補になる。
+    """
+    first = await _edge_message(channel, oldest=True)
+    latest = await _edge_message(channel, oldest=False)
+    if first is None or latest is None:
         return None
-    index = random.randrange(total)
-    return await fetch_candidate_at(channel, index, exclude_id=exclude_id)
+    if latest.id <= first.id:
+        return latest if _eligible(latest, exclude_id=exclude_id) else None
+    history = getattr(channel, "history", None)
+    if not callable(history):
+        return None
+    for _ in range(DRAW_ATTEMPTS):
+        pivot = random.randint(first.id, latest.id)
+        window = []
+        async for candidate in history(
+            limit=DRAW_WINDOW,
+            after=discord.Object(pivot),
+            oldest_first=True,
+        ):
+            if _eligible(candidate, exclude_id=exclude_id):
+                window.append(candidate)
+        if window:
+            return random.choice(window)
+    return None
 
 
 class CommentGachaCog(commands.Cog):
