@@ -500,17 +500,37 @@ function populateVisionTiles(
   }
 }
 
-/** 忘却処理：記憶窓から外れた非アンカー保護タイルを減衰させ、0 以下になったものを忘却（evict）する。 */
+const DIR_DELTA: Record<DreamDir, [number, number]> = {
+  up: [0, -1],
+  down: [0, 1],
+  left: [-1, 0],
+  right: [1, 0],
+};
+
+/**
+ * 忘却処理：記憶窓から外れた非アンカー保護タイルを減衰させ、0 以下になったものを忘却（evict）する。
+ * また、進行方向の「背後」にあるタイルほど早く薄れ、薄れたまま再び視界の縁へ戻った非保護タイルは
+ * 現在の LSTM 状態から密かに再サンプルされて別の景色へ書き換わる（夢の記憶違い）。
+ */
 function applyForgetting(
   tiles: Map<string, DreamTile>,
   px: number,
   py: number,
+  facing: DreamDir,
   step: number,
   depth: number,
   anchors: readonly DreamAnchor[],
+  domainWeights: Record<DomainId, number>,
+  dominant: DomainId,
+  bleedEntropy: number,
+  stepsSinceDescend: number,
+  temperature: number,
+  rng: Rng,
 ): number {
   const windowSteps = memoryWindowForDepth(depth);
+  const [fx, fy] = DIR_DELTA[facing];
   let forgotten = 0;
+  let misremembered = 0;
 
   for (const [key, tile] of tiles) {
     const dist = chebyshev(px, py, tile.x, tile.y);
@@ -521,7 +541,48 @@ function applyForgetting(
       continue;
     }
 
+    const dx = tile.x - px;
+    const dy = tile.y - py;
+    const behindDot = dx * fx + dy * fy;
+
     if (dist <= 3) {
+      // 薄れかけていた非保護タイルを振り返って見直すと、現在の夢状態に引っ張られて密かに記憶違いを起こす
+      if (
+        dist >= 2 &&
+        tile.memory < 0.56 &&
+        !tile.motif &&
+        tile.kind !== "rift" &&
+        misremembered < 2
+      ) {
+        const shiftProb = Math.max(
+          0.08,
+          Math.min(0.65, 0.16 + (temperature - 0.65) * 0.28 + bleedEntropy * 0.22),
+        );
+        if (rng() < shiftProb) {
+          const resampled = sampleNextTile(
+            domainWeights,
+            {
+              north: tiles.get(tileKey(tile.x, tile.y - 1))?.kind,
+              south: tiles.get(tileKey(tile.x, tile.y + 1))?.kind,
+              east: tiles.get(tileKey(tile.x + 1, tile.y))?.kind,
+              west: tiles.get(tileKey(tile.x - 1, tile.y))?.kind,
+              bleedEntropy,
+              stepsSinceDescend,
+              hasNearbyRift: true,
+            },
+            temperature,
+            rng,
+          );
+          tile.kind = resampled;
+          tile.domain = dominant;
+          tile.domainBlend = { ...domainWeights };
+          tile.glyph = sampleGlyph(domainWeights, temperature, rng);
+          tile.bornStep = step;
+          tile.memory = 0.84;
+          misremembered++;
+          continue;
+        }
+      }
       // 足元の直接視界は鮮明さを取り戻す
       tile.memory = Math.min(1, tile.memory + 0.16);
       continue;
@@ -531,12 +592,15 @@ function applyForgetting(
     let decay = 0;
     if (dist > VIEW_RADIUS) {
       // 視界外に押し出された記憶は急速に薄れる（有限コンテキスト窓の忘却）
-      decay = 0.28 + Math.min(0.24, (depth - 1) * 0.035) + (dist - VIEW_RADIUS) * 0.08;
+      decay = 0.3 + Math.min(0.24, (depth - 1) * 0.035) + (dist - VIEW_RADIUS) * 0.08;
     } else if (dist >= 5) {
-      // 視界の縁でも古い記憶はじわじわ滲み始める
-      decay = age > windowSteps ? 0.14 : 0.04;
-    } else if (age > windowSteps * 1.35) {
-      decay = 0.03;
+      // 視界の縁・背後はじわじわ滲み始める
+      decay = (age > windowSteps ? 0.16 : 0.06) + (behindDot < 0 ? 0.07 : 0);
+    } else if (behindDot < 0 && dist >= 4) {
+      // 背中側（視線の裏）は前よりも早く曖昧になる
+      decay = age > windowSteps * 0.7 ? 0.13 : 0.07;
+    } else if (age > windowSteps * 1.2) {
+      decay = 0.04;
     }
 
     if (decay > 0) {
@@ -551,13 +615,6 @@ function applyForgetting(
   }
   return forgotten;
 }
-
-const DIR_DELTA: Record<DreamDir, [number, number]> = {
-  up: [0, -1],
-  down: [0, 1],
-  left: [-1, 0],
-  right: [1, 0],
-};
 
 /** 反響キューに待機中の変質モチーフを、進行方向の視界内へ再出現させる。 */
 function manifestDueEchoes(
@@ -984,8 +1041,22 @@ export function moveDream(state: DreamState, dir: DreamDir): DreamState {
     rng,
   );
 
-  // 3. 記憶窓から外れた背後タイルを忘却（evict）
-  const forgottenNow = applyForgetting(nextTiles, nx, ny, nextStep, state.depth, state.anchors);
+  // 3. 記憶窓から外れた背後タイルを忘却（evict）＋薄れた記憶の密かな書き換わり
+  const forgottenNow = applyForgetting(
+    nextTiles,
+    nx,
+    ny,
+    dir,
+    nextStep,
+    state.depth,
+    state.anchors,
+    nextWeights,
+    nextDom,
+    nextEntropy,
+    nextSinceDescend,
+    state.temperature,
+    rng,
+  );
 
   // 4. 反響キューの満期モチーフを変質させて進行方向に出現させる
   const { remaining: nextEchoQueue, manifestedName } = manifestDueEchoes(
@@ -1335,6 +1406,29 @@ export function findNearestSignal(
     }
   }
   return best ? { kind: best.kind, dx: best.dx, dy: best.dy, label: best.label } : null;
+}
+
+export type AdjacentContext = {
+  motif: TileMotif | null;
+  hasRift: boolean;
+  hasAnchor: boolean;
+};
+
+/** プレイヤー周囲 1 マスの共鳴対象・裂け目・しおり有無を返す（文脈連動 UI 用）。 */
+export function getAdjacentContext(state: DreamState): AdjacentContext {
+  const { x: px, y: py } = state.player;
+  let motif: TileMotif | null = null;
+  let hasRift = false;
+  for (let dy = -1; dy <= 1; dy++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      const t = state.tiles.get(tileKey(px + dx, py + dy));
+      if (!t) continue;
+      if (!motif && t.motif) motif = t.motif;
+      if (t.kind === "rift") hasRift = true;
+    }
+  }
+  const hasAnchor = state.anchors.some((a) => chebyshev(a.x, a.y, px, py) <= 1);
+  return { motif, hasRift, hasAnchor };
 }
 
 // ============================================================
