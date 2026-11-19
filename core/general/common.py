@@ -194,6 +194,7 @@ GENERAL_ACTIONS = {
         ("画像生成AIモデルを設定", "image_default"),
         ("AI思考強度を設定", "reasoning_default"),
         ("自動翻訳を設定", "translation_settings"),
+        ("オプトアウト設定", "optout_settings"),
         ("AIチャット（!ai）", "ai_chat"),
         ("AI画像生成（!generate）", "ai_generate"),
     ],

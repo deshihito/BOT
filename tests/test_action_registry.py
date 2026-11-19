@@ -231,7 +231,7 @@ class ConfirmTierTest(unittest.TestCase):
         "general:role_shop_manage", "general:gacha_party",
         # sweep2 GEN-03: 個人設定の変更・履歴消去・借金額を含む個人ステータスも
         # AI 代理実行対象外に統一した。
-        "general:translation_settings", "general:zeta_reset", "general:status",
+        "general:translation_settings", "general:optout_settings", "general:zeta_reset", "general:status",
         "support:clear", "support:role_bulk", "support:muted", "support:ticket",
         "support:honeypot", "support:whisper", "support:binjou",
         "support:message_log", "support:moderation_log",

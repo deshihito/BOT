@@ -65,6 +65,8 @@ AI_BLOCKED_IDS = frozenset({
     "general:fujo_register", "general:fujo_freeze", "general:fujo_panic_disable",
     "general:shortcut_manage", "general:aitools", "general:ai_default",
     "general:image_default", "general:reasoning_default",
+    # オプトアウト設定は個人設定の変更なので ai_default 等と同様に明示操作に限定する。
+    "general:optout_settings",
     # 自動翻訳設定は個人設定の変更なので ai_default 等と同様に明示操作に限定する（sweep2 GEN-03）。
     "general:translation_settings",
     # ZetaModoki の履歴消去は不可逆寄りの操作なので AI の代理実行対象外（sweep2 GEN-03）。
@@ -112,6 +114,8 @@ MESSAGE_SHORTCUT_BLOCKED_IDS = frozenset({
     "general:miq_settings",
     "general:ai_default", "general:image_default", "general:reasoning_default",
     "general:translation_settings",
+    # オプトアウト設定は個人設定パネルなので miq_settings と同様に対象外。
+    "general:optout_settings",
     "general:exp_status", "general:status",
     # 植物栽培は本人の庭（個人の育成記録）の表示なので公開に反転させない。
     "general:garden",
