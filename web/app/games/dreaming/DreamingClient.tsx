@@ -2,8 +2,9 @@
 // WEB ゲーム「dreaming」のメインクライアント（100svh フルブリード独立シェル .dreaming-shell）。
 //
 // Transformer 以前の生成モデル（小型 LSTM + 文字レベル n-gram + 2D 条件付きマルコフ場）の
-// 忘却・滲み・変質反復・崩れを、切れ目のない水彩霧キャンバス・光条・忘却ゴースト・
-// 連続環境音・霧に浮くミニマル明朝 UI として体験させる。
+// 隠れ状態ベクトル h_t をそのまま 60fps の連続頂点ワープ場・流体リボン・液状クロスモーフ・
+// 残像フィードバックバッファ・自律夢遊ティック（driftDreamTick）へ直結し、
+// AI 夢特有のリアルタイムにウニョウニョとうねり書き換わり続ける空間を実現する。
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -14,6 +15,7 @@ import {
   DOMAIN_PALETTES,
   MAX_TEMPERATURE,
   MIN_TEMPERATURE,
+  RNN_DIM,
   blendDomainColors,
   rgbCss,
   type DomainId,
@@ -26,6 +28,7 @@ import {
   MAX_ANCHORS,
   VIEW_RADIUS,
   createDreamGame,
+  driftDreamTick,
   findNearestSignal,
   getAdjacentContext,
   memoryWindowForDepth,
@@ -91,8 +94,22 @@ type TileVisualMeta = {
   bornMs: number;
   glyph: string;
   floorRgb: [number, number, number];
+  wallRgb: [number, number, number];
   accentRgb: [number, number, number];
   inkRgb: [number, number, number];
+};
+
+/** タイル種別がリアルタイムに書き換わるときの液状クロスモーフ演出。 */
+type TileMorphAnim = {
+  x: number;
+  y: number;
+  oldKind: TileKind;
+  oldFloorRgb: [number, number, number];
+  oldWallRgb: [number, number, number];
+  oldAccentRgb: [number, number, number];
+  oldGlyph: string;
+  startMs: number;
+  durMs: number;
 };
 
 type DissolvingGhost = {
@@ -124,7 +141,16 @@ type MistGlyph = {
   vy: number;
   char: string;
   phase: number;
-  size: number;
+};
+
+/** LSTM の潜在ベクトル場に沿って画面上をウニョウニョ蛇行する流線リボン。 */
+type FlowRibbon = {
+  pts: Array<{ x: number; y: number }>;
+  age: number;
+  maxAge: number;
+  speed: number;
+  phase: number;
+  tint: "accent" | "ink";
 };
 
 type TrailNode = {
@@ -132,6 +158,8 @@ type TrailNode = {
   y: number;
   atMs: number;
 };
+
+type Pt = { x: number; y: number };
 
 const KEY_TO_DIR: Record<string, DreamDir> = {
   ArrowUp: "up",
@@ -183,39 +211,100 @@ function easeOutCubic(t: number): number {
   return 1 - u * u * u;
 }
 
+function smoothstep(edge0: number, edge1: number, x: number): number {
+  const t = Math.max(0, Math.min(1, (x - edge0) / (edge1 - edge0)));
+  return t * t * (3 - 2 * t);
+}
+
 /** 決定的なタイルハッシュ（毎フレームのチラつきを防ぐ座標由来乱数 0..1）。 */
 function tileHash(x: number, y: number, salt = 0): number {
-  let n = Math.imul(x + 374761393, 668265263) ^ Math.imul(y + 1274126177, 2246822519) ^ (salt * 1597334677);
+  let n =
+    Math.imul(x + 374761393, 668265263) ^
+    Math.imul(y + 1274126177, 2246822519) ^
+    (salt * 1597334677);
   n = Math.imul(n ^ (n >>> 13), 1274126177);
   return ((n ^ (n >>> 16)) >>> 0) / 4294967296;
 }
 
-/** 古い WebView でも確実に動く角丸矩形パス描画（左上・右上・右下・左下個別の半径対応）。 */
-function traceRoundedRect(
+/**
+ * 共有ワープ頂点（4隅＋4辺中点）から滑らかな曲線四辺形パスを張る。
+ * 隣接タイル同士が同一ワープ座標を共有するため、画面全体が亀裂のない1枚の
+ * 液状ファブリックのようにウニョウニョうねる。
+ */
+function traceWarpedQuad(
   ctx: CanvasRenderingContext2D,
-  x: number,
-  y: number,
-  w: number,
-  h: number,
-  radii: number | readonly [number, number, number, number],
+  tl: Pt,
+  tm: Pt,
+  tr: Pt,
+  rm: Pt,
+  br: Pt,
+  bm: Pt,
+  bl: Pt,
+  lm: Pt,
+  expand = 0,
 ): void {
-  const [tl, tr, br, bl] =
-    typeof radii === "number" ? [radii, radii, radii, radii] : radii;
-  const maxR = Math.min(w, h) * 0.5;
-  const rTL = Math.min(maxR, Math.max(0, tl));
-  const rTR = Math.min(maxR, Math.max(0, tr));
-  const rBR = Math.min(maxR, Math.max(0, br));
-  const rBL = Math.min(maxR, Math.max(0, bl));
+  const cx = (tl.x + tr.x + br.x + bl.x) * 0.25;
+  const cy = (tl.y + tr.y + br.y + bl.y) * 0.25;
+  const ex = (p: Pt): Pt => {
+    if (expand === 0) return p;
+    const dx = p.x - cx;
+    const dy = p.y - cy;
+    const len = Math.hypot(dx, dy) || 1;
+    return { x: p.x + (dx / len) * expand, y: p.y + (dy / len) * expand };
+  };
+  const pTL = ex(tl);
+  const pTM = ex(tm);
+  const pTR = ex(tr);
+  const pRM = ex(rm);
+  const pBR = ex(br);
+  const pBM = ex(bm);
+  const pBL = ex(bl);
+  const pLM = ex(lm);
+
   ctx.beginPath();
-  ctx.moveTo(x + rTL, y);
-  ctx.lineTo(x + w - rTR, y);
-  if (rTR > 0) ctx.quadraticCurveTo(x + w, y, x + w, y + rTR);
-  ctx.lineTo(x + w, y + h - rBR);
-  if (rBR > 0) ctx.quadraticCurveTo(x + w, y + h, x + w - rBR, y + h);
-  ctx.lineTo(x + rBL, y + h);
-  if (rBL > 0) ctx.quadraticCurveTo(x, y + h, x, y + h - rBL);
-  ctx.lineTo(x, y + rTL);
-  if (rTL > 0) ctx.quadraticCurveTo(x, y, x + rTL, y);
+  ctx.moveTo(pTL.x, pTL.y);
+  ctx.quadraticCurveTo(pTM.x, pTM.y, pTR.x, pTR.y);
+  ctx.quadraticCurveTo(pRM.x, pRM.y, pBR.x, pBR.y);
+  ctx.quadraticCurveTo(pBM.x, pBM.y, pBL.x, pBL.y);
+  ctx.quadraticCurveTo(pLM.x, pLM.y, pTL.x, pTL.y);
+  ctx.closePath();
+}
+
+/** 多葉フーリエ変調で有機的にウニョウニョ脈打つ閉曲線ブロブを描く（水面・溶融モーフ用）。 */
+function traceOrganicBlob(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  rx: number,
+  ry: number,
+  timeSec: number,
+  seed: number,
+  wobble: number,
+  lobes = 10,
+): void {
+  const pts: Pt[] = [];
+  for (let i = 0; i < lobes; i++) {
+    const a = (i / lobes) * Math.PI * 2;
+    const wave =
+      1 +
+      wobble *
+        (0.55 * Math.sin(a * 2 + timeSec * 1.9 + seed * 6.28) +
+          0.32 * Math.cos(a * 3 - timeSec * 2.4 + seed * 11.3) +
+          0.18 * Math.sin(a * 5 + timeSec * 3.1 - seed * 4.7));
+    pts.push({
+      x: cx + Math.cos(a) * rx * wave,
+      y: cy + Math.sin(a) * ry * wave,
+    });
+  }
+  ctx.beginPath();
+  const last = pts[pts.length - 1];
+  const first = pts[0];
+  ctx.moveTo((last.x + first.x) * 0.5, (last.y + first.y) * 0.5);
+  for (let i = 0; i < pts.length; i++) {
+    const cur = pts[i];
+    const nxt = pts[(i + 1) % pts.length];
+    ctx.quadraticCurveTo(cur.x, cur.y, (cur.x + nxt.x) * 0.5, (cur.y + nxt.y) * 0.5);
+  }
   ctx.closePath();
 }
 
@@ -428,7 +517,7 @@ export default function DreamingClient() {
   const stageRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
-  // 滑らか補間・忘却ゴースト・軌跡・パーティクル・波紋用のレンダー専用 ref
+  // 滑らか補間・連続LSTM状態・液状モーフ・流線リボン・忘却ゴースト用のレンダー専用 ref
   const camRef = useRef({
     x: 0,
     y: 0,
@@ -438,28 +527,33 @@ export default function DreamingClient() {
     bumpX: 0,
     bumpY: 0,
     descendFlash: 0,
-    breathPhase: 0,
+    pulseWave: 0,
   });
+  const smoothHRef = useRef<number[]>(new Array<number>(RNN_DIM).fill(0));
+  const smoothWeightsRef = useRef<Record<DomainId, number>>({ ...state.domainWeights });
   const ripplesRef = useRef<RippleFx[]>([]);
   const tapRingsRef = useRef<ScreenTapFx[]>([]);
   const particlesRef = useRef<CharParticle[]>([]);
   const tileVisualRef = useRef<Map<string, TileVisualMeta>>(new Map());
+  const morphAnimsRef = useRef<Map<string, TileMorphAnim>>(new Map());
   const dissolvingGhostsRef = useRef<DissolvingGhost[]>([]);
   const trailRef = useRef<TrailNode[]>([]);
   const ambientMotesRef = useRef<AmbientMote[]>([]);
   const mistGlyphsRef = useRef<MistGlyph[]>([]);
+  const flowRibbonsRef = useRef<FlowRibbon[]>([]);
   const audioUnlockedRef = useRef(false);
   const savedStepsRef = useRef(0);
   const savedForgottenRef = useRef(0);
   const reducedMotionRef = useRef(false);
 
-  // タイル集合の差分を監視し、出現・書き換わり・忘却ゴーストを視覚化する
+  // タイル集合の差分を監視し、出現・液状クロスモーフ・忘却ゴーストを視覚化する
   const syncTileVisualDiff = useCallback((next: DreamState, resetAll = false) => {
     const now = performance.now();
     const prevMap = tileVisualRef.current;
 
     if (resetAll) {
       prevMap.clear();
+      morphAnimsRef.current.clear();
       dissolvingGhostsRef.current = [];
       trailRef.current = [{ x: next.player.x, y: next.player.y, atMs: now }];
       for (const [key, tile] of next.tiles) {
@@ -470,6 +564,7 @@ export default function DreamingClient() {
           bornMs: now - 160,
           glyph: tile.glyph,
           floorRgb: blendDomainColors(tile.domainBlend, "floor"),
+          wallRgb: blendDomainColors(tile.domainBlend, "wall"),
           accentRgb: blendDomainColors(tile.domainBlend, "accent"),
           inkRgb: blendDomainColors(tile.domainBlend, "ink"),
         });
@@ -489,21 +584,23 @@ export default function DreamingClient() {
           floorRgb: oldMeta.floorRgb,
           inkRgb: oldMeta.inkRgb,
           startMs: now,
-          durMs: 1850,
-          driftX: Math.cos(angle) * 0.28,
-          driftY: -0.45 - tileHash(oldMeta.x, oldMeta.y, 31) * 0.35,
+          durMs: 1950,
+          driftX: Math.cos(angle) * 0.34,
+          driftY: -0.5 - tileHash(oldMeta.x, oldMeta.y, 31) * 0.38,
         });
         prevMap.delete(key);
+        morphAnimsRef.current.delete(key);
       }
     }
-    if (dissolvingGhostsRef.current.length > 80) {
-      dissolvingGhostsRef.current = dissolvingGhostsRef.current.slice(-80);
+    if (dissolvingGhostsRef.current.length > 84) {
+      dissolvingGhostsRef.current = dissolvingGhostsRef.current.slice(-84);
     }
 
-    // 2. 新規生成＆記憶違い（kind の書き換わり）を検出
+    // 2. 新規生成＆リアルタイム変容（kind の書き換わり）を検出し、1.5 秒の液状モーフを開始
     for (const [key, tile] of next.tiles) {
       const existing = prevMap.get(key);
       const floorRgb = blendDomainColors(tile.domainBlend, "floor");
+      const wallRgb = blendDomainColors(tile.domainBlend, "wall");
       const accentRgb = blendDomainColors(tile.domainBlend, "accent");
       const inkRgb = blendDomainColors(tile.domainBlend, "ink");
 
@@ -515,36 +612,48 @@ export default function DreamingClient() {
           bornMs: now,
           glyph: tile.glyph,
           floorRgb,
+          wallRgb,
           accentRgb,
           inkRgb,
         });
       } else {
         if (existing.kind !== tile.kind) {
-          // 視界の縁で密かに記憶違いが起きた／パルスで編み直された瞬間の淡い波紋と文字粒子
+          morphAnimsRef.current.set(key, {
+            x: tile.x,
+            y: tile.y,
+            oldKind: existing.kind,
+            oldFloorRgb: existing.floorRgb,
+            oldWallRgb: existing.wallRgb,
+            oldAccentRgb: existing.accentRgb,
+            oldGlyph: existing.glyph,
+            startMs: now,
+            durMs: 1500,
+          });
           ripplesRef.current.push({
             wx: tile.x,
             wy: tile.y,
             startMs: now,
-            durMs: 720,
-            maxRadius: 1.05,
-            color: rgbCss(accentRgb, 0.55),
+            durMs: 920,
+            maxRadius: 1.15,
+            color: rgbCss(accentRgb, 0.48),
           });
           particlesRef.current.push({
             wx: tile.x,
             wy: tile.y,
-            vx: (tileHash(tile.x, tile.y, next.step) - 0.5) * 0.45,
-            vy: -0.55,
+            vx: (tileHash(tile.x, tile.y, next.rnn.steps) - 0.5) * 0.42,
+            vy: -0.48,
             char: tile.glyph,
             startMs: now,
-            durMs: 1300,
+            durMs: 1450,
             color: rgbCss(inkRgb, 0.72),
-            scale: 0.85,
+            scale: 0.88,
           });
           existing.bornMs = now;
         }
         existing.kind = tile.kind;
         existing.glyph = tile.glyph;
         existing.floorRgb = floorRgb;
+        existing.wallRgb = wallRgb;
         existing.accentRgb = accentRgb;
         existing.inkRgb = inkRgb;
       }
@@ -569,6 +678,8 @@ export default function DreamingClient() {
     };
     setState(hydrated);
     stateRef.current = hydrated;
+    smoothHRef.current = [...hydrated.rnn.h];
+    smoothWeightsRef.current = { ...hydrated.domainWeights };
     camRef.current = {
       x: 0,
       y: 0,
@@ -578,7 +689,7 @@ export default function DreamingClient() {
       bumpX: 0,
       bumpY: 0,
       descendFlash: 0.65,
-      breathPhase: 0,
+      pulseWave: 0,
     };
     syncTileVisualDiff(hydrated, true);
     reducedMotionRef.current =
@@ -589,6 +700,38 @@ export default function DreamingClient() {
       stopDreamAmbience();
     };
   }, [syncTileVisualDiff]);
+
+  // リアルタイム自律夢遊ループ：立ち止まっていても LSTM と周辺地形・語彙が連続変容し続ける
+  useEffect(() => {
+    if (showArchive) return;
+    let timerId: ReturnType<typeof setTimeout> | null = null;
+    let cancelled = false;
+
+    const scheduleNext = () => {
+      if (cancelled) return;
+      const curTemp = stateRef.current.temperature;
+      // 低温（明晰）ほど緩やか（~2.2s）、高温（深夢）ほど活発にうねる（~0.95s）
+      const intervalMs = Math.round(
+        Math.max(920, Math.min(2350, 2200 - (curTemp - MIN_TEMPERATURE) * 900)),
+      );
+      timerId = setTimeout(() => {
+        if (cancelled) return;
+        if (!reducedMotionRef.current && (typeof document === "undefined" || !document.hidden)) {
+          const next = driftDreamTick(stateRef.current);
+          stateRef.current = next;
+          setState(next);
+          syncTileVisualDiff(next, false);
+        }
+        scheduleNext();
+      }, intervalMs);
+    };
+
+    scheduleNext();
+    return () => {
+      cancelled = true;
+      if (timerId !== null) clearTimeout(timerId);
+    };
+  }, [showArchive, syncTileVisualDiff]);
 
   // 記録の緩やかな自動保存（歩数・深度・標本を端末内へ永続化）
   useEffect(() => {
@@ -639,8 +782,8 @@ export default function DreamingClient() {
       if (ev.kind === "move") {
         sfxDreamStep(next.dominantDomain, next.temperature);
         trailRef.current.push({ x: next.player.x, y: next.player.y, atMs: now });
-        if (trailRef.current.length > 9) {
-          trailRef.current = trailRef.current.slice(-9);
+        if (trailRef.current.length > 10) {
+          trailRef.current = trailRef.current.slice(-10);
         }
       } else if (ev.kind === "blocked") {
         sfxDreamBump();
@@ -650,12 +793,13 @@ export default function DreamingClient() {
         camRef.current.bumpY = dy * 0.22;
       } else if (ev.kind === "collect" || ev.kind === "reunion") {
         sfxDreamCollect(ev.generation ?? 1);
+        camRef.current.pulseWave = 1;
         ripplesRef.current.push({
           wx: ev.x,
           wy: ev.y,
           startMs: now,
-          durMs: ev.kind === "reunion" ? 1150 : 820,
-          maxRadius: ev.kind === "reunion" ? 3.8 : 2.5,
+          durMs: ev.kind === "reunion" ? 1200 : 880,
+          maxRadius: ev.kind === "reunion" ? 4.0 : 2.7,
           color: ev.kind === "reunion" ? "rgba(228, 194, 118, 0.92)" : accent,
         });
         const chars = Array.from(ev.detail ?? "");
@@ -669,7 +813,7 @@ export default function DreamingClient() {
             vy: Math.sin(angle) * speed - 0.42,
             char: ch,
             startMs: now,
-            durMs: 1550,
+            durMs: 1650,
             color: ink,
           });
         });
@@ -687,12 +831,13 @@ export default function DreamingClient() {
         });
       } else if (ev.kind === "pulse") {
         sfxDreamPulse();
+        camRef.current.pulseWave = 1;
         ripplesRef.current.push({
           wx: ev.x,
           wy: ev.y,
           startMs: now,
-          durMs: 960,
-          maxRadius: 3.4,
+          durMs: 1020,
+          maxRadius: 3.6,
           color: ink,
         });
       } else if (ev.kind === "descend") {
@@ -850,7 +995,7 @@ export default function DreamingClient() {
       const rect = canvas.getBoundingClientRect();
       const localX = pt.x - rect.left;
       const localY = pt.y - rect.top;
-      tapRingsRef.current.push({ sx: localX, sy: localY, startMs: performance.now(), durMs: 520 });
+      tapRingsRef.current.push({ sx: localX, sy: localY, startMs: performance.now(), durMs: 540 });
 
       const dx = localX - rect.width / 2;
       const dy = localY - rect.height / 2;
@@ -865,7 +1010,7 @@ export default function DreamingClient() {
     },
   });
 
-  // Canvas 2D 夢フィルム描画ループ（60fps）
+  // Canvas 2D リアルタイム神経流体夢レンダラー（60fps）
   useEffect(() => {
     const canvas = canvasRef.current;
     const stage = stageRef.current;
@@ -873,14 +1018,35 @@ export default function DreamingClient() {
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
+    // 液状残像フィードバック用の軽量 0.5x オフスクリーンキャンバス（2枚スワップ）
+    const trailCanvas = document.createElement("canvas");
+    const trailSwap = document.createElement("canvas");
+    const tCtx = trailCanvas.getContext("2d");
+    const sCtx = trailSwap.getContext("2d");
+
     const grainPattern = createFilmGrainPattern(ctx);
     let rafId = 0;
     let width = 1;
     let height = 1;
     let dpr = 1;
+    let tw = 1;
+    let th = 1;
+
+    const spawnRibbon = (w: number, h: number, idx: number): FlowRibbon => {
+      const sx = tileHash(idx, Math.floor(performance.now() * 0.01), 97) * w;
+      const sy = tileHash(idx, Math.floor(performance.now() * 0.01) + 7, 131) * h;
+      return {
+        pts: [{ x: sx, y: sy }],
+        age: 0,
+        maxAge: 70 + Math.round(tileHash(idx, 3, 59) * 90),
+        speed: 0.75 + tileHash(idx, 5, 83) * 1.15,
+        phase: tileHash(idx, 9, 41) * Math.PI * 2,
+        tint: idx % 3 === 0 ? "accent" : "ink",
+      };
+    };
 
     const initAmbientField = (w: number, h: number) => {
-      ambientMotesRef.current = Array.from({ length: 46 }, (_, i) => ({
+      ambientMotesRef.current = Array.from({ length: 42 }, (_, i) => ({
         x: tileHash(i, 1, 7) * w,
         y: tileHash(i, 2, 13) * h,
         speed: 0.25 + tileHash(i, 3, 29) * 0.85,
@@ -896,8 +1062,8 @@ export default function DreamingClient() {
         vy: -4 - tileHash(i, 12, 43) * 8,
         char: seedChars[i % seedChars.length],
         phase: tileHash(i, 13, 61) * Math.PI * 2,
-        size: 14 + Math.round(tileHash(i, 14, 79) * 10),
       }));
+      flowRibbonsRef.current = Array.from({ length: 40 }, (_, i) => spawnRibbon(w, h, i));
     };
 
     const resize = () => {
@@ -907,6 +1073,14 @@ export default function DreamingClient() {
       dpr = Math.min(2, window.devicePixelRatio || 1);
       canvas.width = Math.floor(width * dpr);
       canvas.height = Math.floor(height * dpr);
+
+      tw = Math.max(1, Math.floor(width * 0.5));
+      th = Math.max(1, Math.floor(height * 0.5));
+      trailCanvas.width = tw;
+      trailCanvas.height = th;
+      trailSwap.width = tw;
+      trailSwap.height = th;
+
       if (ambientMotesRef.current.length === 0) {
         initAmbientField(width, height);
       }
@@ -916,305 +1090,32 @@ export default function DreamingClient() {
     const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(resize) : null;
     ro?.observe(stage);
 
-    const drawTileBase = (
-      tile: DreamTile,
-      cx: number,
-      cy: number,
-      sz: number,
-      tiles: Map<string, DreamTile>,
-      timeSec: number,
-      alpha: number,
-      materialize: number,
-      ghostShift: number,
-    ) => {
-      const floorRgb = blendDomainColors(tile.domainBlend, "floor");
-      const wallRgb = blendDomainColors(tile.domainBlend, "wall");
-      const accentRgb = blendDomainColors(tile.domainBlend, "accent");
-      const inkRgb = blendDomainColors(tile.domainBlend, "ink");
-
-      // グリッド線を消すためタイル同士をわずかに重ねてシームレスに敷く
-      const ov = 1.6;
-      const sx = cx - sz / 2 - ov * 0.5;
-      const sy = cy - sz / 2 - ov * 0.5;
-      const w = sz + ov;
-
-      // 領域境界の柔らかい水彩滲みウォッシュ
-      const eastNb = tiles.get(tileKey(tile.x + 1, tile.y));
-      const southNb = tiles.get(tileKey(tile.x, tile.y + 1));
-      const isBorder =
-        tile.bleedShock > 0.14 ||
-        (eastNb && eastNb.domain !== tile.domain) ||
-        (southNb && southNb.domain !== tile.domain);
-
-      if (tile.kind === "water") {
-        // 深い水面＋岸辺の柔らかい丸み
-        ctx.fillStyle = rgbCss(floorRgb, alpha * 0.72);
-        ctx.fillRect(sx, sy, w, w);
-
-        const deep: [number, number, number] = [
-          Math.max(8, Math.round(wallRgb[0] * 0.62)),
-          Math.max(20, Math.round(wallRgb[1] * 0.94 + 14)),
-          Math.max(34, Math.round(wallRgb[2] * 1.18 + 22)),
-        ];
-        const wN = tiles.get(tileKey(tile.x, tile.y - 1))?.kind === "water";
-        const wS = tiles.get(tileKey(tile.x, tile.y + 1))?.kind === "water";
-        const wE = tiles.get(tileKey(tile.x + 1, tile.y))?.kind === "water";
-        const wW = tiles.get(tileKey(tile.x - 1, tile.y))?.kind === "water";
-        const insetN = wN ? 0 : sz * 0.08;
-        const insetS = wS ? 0 : sz * 0.08;
-        const insetE = wE ? 0 : sz * 0.08;
-        const insetW = wW ? 0 : sz * 0.08;
-        const rad = sz * 0.24;
-
-        ctx.fillStyle = rgbCss(deep, alpha * 0.94);
-        traceRoundedRect(
-          ctx,
-          sx + insetW,
-          sy + insetN,
-          w - insetW - insetE,
-          w - insetN - insetS,
-          [
-            !wN && !wW ? rad : 0,
-            !wN && !wE ? rad : 0,
-            !wS && !wE ? rad : 0,
-            !wS && !wW ? rad : 0,
-          ],
-        );
-        ctx.fill();
-
-        // 水面の月光・揺らぎリップル
-        const wave = Math.sin(timeSec * 1.45 + tile.x * 0.85 + tile.y * 0.65);
-        ctx.strokeStyle = rgbCss(inkRgb, alpha * (0.16 + Math.abs(wave) * 0.14));
-        ctx.lineWidth = 1.1;
-        ctx.beginPath();
-        ctx.moveTo(cx - sz * 0.3, cy - sz * 0.12 + wave * 2.2);
-        ctx.quadraticCurveTo(cx, cy - sz * 0.16 - wave * 1.4, cx + sz * 0.26, cy - sz * 0.1 + wave * 1.6);
-        ctx.moveTo(cx - sz * 0.18, cy + sz * 0.18 - wave * 1.8);
-        ctx.quadraticCurveTo(cx + sz * 0.08, cy + sz * 0.14 + wave * 1.6, cx + sz * 0.32, cy + sz * 0.2 - wave * 1.2);
-        ctx.stroke();
-      } else {
-        // シームレス床ベース
-        ctx.fillStyle = rgbCss(floorRgb, alpha);
-        ctx.fillRect(sx, sy, w, w);
-
-        // 穏やかな領域固有の床テクスチャ（角ばりを抑えた有機的トーン）
-        const h = tileHash(tile.x, tile.y, 3);
-        if (tile.kind === "floor" || tile.kind === "lamp") {
-          if (tile.domain === "school") {
-            // 放課後校舎の艶のある木目フローリング
-            ctx.strokeStyle = rgbCss(wallRgb, alpha * 0.18);
-            ctx.lineWidth = 1;
-            ctx.beginPath();
-            ctx.moveTo(sx, cy - sz * 0.18);
-            ctx.lineTo(sx + w, cy - sz * 0.18);
-            ctx.moveTo(sx, cy + sz * 0.2);
-            ctx.lineTo(sx + w, cy + sz * 0.2);
-            ctx.stroke();
-          } else if (tile.domain === "station" && (tile.x + tile.y) % 4 === 0) {
-            ctx.fillStyle = rgbCss(accentRgb, alpha * 0.14);
-            ctx.fillRect(sx + 4, sy + w - 6, w - 8, 2);
-          } else if (tile.domain === "arcade" && h > 0.66) {
-            // 雨濡れ石畳の淡い水たまり反射
-            const pGrad = ctx.createRadialGradient(cx, cy, 1, cx, cy, sz * 0.38);
-            pGrad.addColorStop(0, rgbCss(accentRgb, alpha * 0.18));
-            pGrad.addColorStop(0.6, rgbCss(inkRgb, alpha * 0.08));
-            pGrad.addColorStop(1, rgbCss(inkRgb, 0));
-            ctx.fillStyle = pGrad;
-            ctx.beginPath();
-            ctx.ellipse(cx, cy, sz * 0.36, sz * 0.22, 0.2, 0, Math.PI * 2);
-            ctx.fill();
-          } else if (tile.domain === "meadow" && h > 0.42) {
-            // 夕暮れの草地：風に揺れる草穂
-            const sway = Math.sin(timeSec * 1.5 + tile.x * 0.7 + tile.y * 0.4) * 3.2;
-            ctx.strokeStyle = rgbCss(accentRgb, alpha * 0.2);
-            ctx.lineWidth = 1.05;
-            ctx.beginPath();
-            ctx.moveTo(cx - sz * 0.16, cy + sz * 0.24);
-            ctx.quadraticCurveTo(cx - sz * 0.14 + sway * 0.5, cy + sz * 0.04, cx - sz * 0.09 + sway, cy - sz * 0.12);
-            ctx.moveTo(cx + sz * 0.12, cy + sz * 0.28);
-            ctx.quadraticCurveTo(cx + sz * 0.14 + sway * 0.5, cy + sz * 0.1, cx + sz * 0.19 + sway, cy - sz * 0.05);
-            ctx.stroke();
-          } else if (tile.domain === "harbor" && h > 0.7) {
-            ctx.fillStyle = rgbCss(inkRgb, alpha * 0.06);
-            ctx.beginPath();
-            ctx.ellipse(cx, cy, sz * 0.42, sz * 0.28, -0.3, 0, Math.PI * 2);
-            ctx.fill();
-          }
-        }
-      }
-
-      if (isBorder) {
-        const bleed = ctx.createRadialGradient(cx, cy, sz * 0.08, cx, cy, sz * 0.92);
-        bleed.addColorStop(0, rgbCss(accentRgb, alpha * (0.1 + tile.bleedShock * 0.16)));
-        bleed.addColorStop(1, rgbCss(accentRgb, 0));
-        ctx.fillStyle = bleed;
-        ctx.beginPath();
-        ctx.arc(cx, cy, sz * 0.92, 0, Math.PI * 2);
-        ctx.fill();
-      }
-
-      // 構造物レイヤー（影＋柔らかい建築ディテール）
-      if (tile.kind === "wall" || tile.kind === "shelf" || tile.kind === "window") {
-        // 南東側への柔らかい接地影
-        const southTile = tiles.get(tileKey(tile.x, tile.y + 1));
-        if (southTile && southTile.kind !== "wall" && southTile.kind !== "shelf" && southTile.kind !== "window") {
-          const shGrad = ctx.createLinearGradient(0, sy + w - 1, 0, sy + w + sz * 0.34);
-          shGrad.addColorStop(0, `rgba(4, 7, 12, ${alpha * 0.38})`);
-          shGrad.addColorStop(1, "rgba(4, 7, 12, 0)");
-          ctx.fillStyle = shGrad;
-          ctx.fillRect(sx, sy + w - 1, w, sz * 0.34);
-        }
-
-        if (tile.kind === "wall") {
-          ctx.fillStyle = rgbCss(wallRgb, alpha * 0.96);
-          ctx.fillRect(sx, sy, w, w);
-          // わずかな天面ハイライトで立体感を出す
-          ctx.fillStyle = rgbCss(inkRgb, alpha * 0.11);
-          ctx.fillRect(sx, sy, w, 2.5);
-        } else if (tile.kind === "shelf") {
-          ctx.fillStyle = rgbCss(wallRgb, alpha * 0.96);
-          traceRoundedRect(ctx, sx + 2, sy + 2, w - 4, w - 4, 4);
-          ctx.fill();
-          // 不揃いな古書の背表紙
-          for (let i = 0; i < 4; i++) {
-            const bx = sx + 6 + i * ((w - 12) / 3.6);
-            const bh = (w - 14) * (0.72 + tileHash(tile.x, tile.y, 10 + i) * 0.28);
-            ctx.strokeStyle = i % 2 === 0 ? rgbCss(accentRgb, alpha * 0.34) : rgbCss(inkRgb, alpha * 0.22);
-            ctx.lineWidth = 2;
-            ctx.beginPath();
-            ctx.moveTo(bx, sy + w - 6);
-            ctx.lineTo(bx, sy + w - 6 - bh);
-            ctx.stroke();
-          }
-        } else if (tile.kind === "window") {
-          ctx.fillStyle = rgbCss(wallRgb, alpha * 0.96);
-          ctx.fillRect(sx, sy, w, w);
-          // 窓枠から漏れ出す淡い夕光／月光
-          const winGrad = ctx.createLinearGradient(sx, sy, sx + w, sy + w);
-          winGrad.addColorStop(0, rgbCss(accentRgb, alpha * 0.56));
-          winGrad.addColorStop(1, rgbCss(inkRgb, alpha * 0.28));
-          ctx.fillStyle = winGrad;
-          traceRoundedRect(ctx, sx + 5, sy + 5, w - 10, w - 10, 3);
-          ctx.fill();
-          ctx.strokeStyle = rgbCss(wallRgb, alpha * 0.72);
-          ctx.lineWidth = 1.4;
-          ctx.beginPath();
-          ctx.moveTo(cx, sy + 5);
-          ctx.lineTo(cx, sy + w - 5);
-          ctx.moveTo(sx + 5, cy);
-          ctx.lineTo(sx + w - 5, cy);
-          ctx.stroke();
-        }
-      } else if (tile.kind === "rail") {
-        const hasNS =
-          tiles.get(tileKey(tile.x, tile.y - 1))?.kind === "rail" ||
-          tiles.get(tileKey(tile.x, tile.y + 1))?.kind === "rail";
-        const hasEW =
-          tiles.get(tileKey(tile.x - 1, tile.y))?.kind === "rail" ||
-          tiles.get(tileKey(tile.x + 1, tile.y))?.kind === "rail";
-        const horizontal = hasEW && !hasNS;
-        ctx.strokeStyle = rgbCss(wallRgb, alpha * 0.62);
-        ctx.lineWidth = 2.2;
-        for (let k = 0.18; k <= 0.86; k += 0.32) {
-          ctx.beginPath();
-          if (horizontal) {
-            ctx.moveTo(sx + w * k, sy + w * 0.22);
-            ctx.lineTo(sx + w * k, sy + w * 0.78);
-          } else {
-            ctx.moveTo(sx + w * 0.22, sy + w * k);
-            ctx.lineTo(sx + w * 0.78, sy + w * k);
-          }
-          ctx.stroke();
-        }
-        const glint = 0.38 + Math.max(0, Math.sin(timeSec * 1.4 - (tile.x + tile.y) * 0.55)) * 0.34;
-        ctx.strokeStyle = rgbCss(inkRgb, alpha * glint);
-        ctx.lineWidth = 1.5;
-        ctx.beginPath();
-        if (horizontal) {
-          ctx.moveTo(sx, sy + w * 0.33);
-          ctx.lineTo(sx + w, sy + w * 0.33);
-          ctx.moveTo(sx, sy + w * 0.67);
-          ctx.lineTo(sx + w, sy + w * 0.67);
-        } else {
-          ctx.moveTo(sx + w * 0.33, sy);
-          ctx.lineTo(sx + w * 0.33, sy + w);
-          ctx.moveTo(sx + w * 0.67, sy);
-          ctx.lineTo(sx + w * 0.67, sy + w);
-        }
-        ctx.stroke();
-      } else if (tile.kind === "rift") {
-        // 深層への裂け目：二重露光の墨霧渦＋吸い込まれる文字断片
-        const pulse = 0.88 + Math.sin(timeSec * 2.2) * 0.12;
-        const grad = ctx.createRadialGradient(cx, cy, 2, cx, cy, sz * 0.78);
-        grad.addColorStop(0, "rgba(4, 7, 12, 0.96)");
-        grad.addColorStop(0.45, rgbCss(inkRgb, alpha * 0.26));
-        grad.addColorStop(0.75, rgbCss(accentRgb, alpha * 0.16));
-        grad.addColorStop(1, rgbCss(accentRgb, 0));
-        ctx.fillStyle = grad;
-        ctx.beginPath();
-        ctx.arc(cx, cy, sz * 0.78, 0, Math.PI * 2);
-        ctx.fill();
-
-        for (let ring = 0; ring < 3; ring++) {
-          ctx.strokeStyle =
-            ring === 0 ? rgbCss(accentRgb, alpha * 0.75) : rgbCss(inkRgb, alpha * (0.48 - ring * 0.12));
-          ctx.lineWidth = 1.25;
-          ctx.beginPath();
-          const rad = sz * (0.14 + ring * 0.13) * pulse;
-          const a0 = timeSec * (ring % 2 === 0 ? 0.85 : -0.62) + ring * 1.6;
-          ctx.arc(cx, cy, rad, a0, a0 + Math.PI * 1.35);
-          ctx.stroke();
-        }
-
-        // 裂け目の周縁を漂う文字トークン
-        ctx.font = `400 ${Math.round(sz * 0.24)}px "Shippori Mincho", "Hiragino Mincho ProN", serif`;
-        ctx.textAlign = "center";
-        ctx.textBaseline = "middle";
-        const orbitAngle = timeSec * 0.7 + tile.x;
-        ctx.fillStyle = rgbCss(inkRgb, alpha * 0.55);
-        ctx.fillText(
-          tile.glyph,
-          cx + Math.cos(orbitAngle) * sz * 0.42,
-          cy + Math.sin(orbitAngle) * sz * 0.42,
-        );
-      }
-
-      // 出現直後（materialize < 1）または忘却しかけ・高温時の char-LM 仮名残滓
-      const temp = stateRef.current.temperature;
-      const fadingAlpha = tile.memory < 0.72 ? (0.72 - tile.memory) * 0.68 : 0;
-      const bornAlpha = materialize < 0.95 ? (1 - materialize) * 0.52 : 0;
-      const heatAlpha = temp > 1.22 && tileHash(tile.x, tile.y, 41) > 0.78 ? (temp - 1.22) * 0.34 : 0;
-      const glyphAlpha = Math.min(0.55, Math.max(fadingAlpha, bornAlpha, heatAlpha)) * alpha;
-
-      if (glyphAlpha > 0.04 && tile.kind !== "rift" && !tile.motif) {
-        ctx.font = `400 ${Math.round(sz * 0.36)}px "Shippori Mincho", "Hiragino Mincho ProN", Georgia, serif`;
-        ctx.textAlign = "center";
-        ctx.textBaseline = "middle";
-        // 高温時は二重露光の文字滲み
-        if (ghostShift > 0.5) {
-          ctx.fillStyle = rgbCss(accentRgb, glyphAlpha * 0.45);
-          ctx.fillText(tile.glyph, cx + ghostShift, cy - ghostShift * 0.4);
-        }
-        ctx.fillStyle = rgbCss(inkRgb, glyphAlpha);
-        ctx.fillText(tile.glyph, cx, cy);
-      }
-    };
-
     const render = (now: number) => {
       const s = stateRef.current;
       const timeSec = now / 1000;
       const cam = camRef.current;
       const reduced = reducedMotionRef.current;
 
-      // 滑らかなカメラ・視線角・プレイヤー補間
+      // 滑らかなカメラ・視線角・LSTM隠れ状態・領域重み補間（油絵のように色が連続変化する）
       const lerp = reduced ? 1 : 0.14;
       cam.px += (s.player.x - cam.px) * lerp;
       cam.py += (s.player.y - cam.py) * lerp;
-      cam.x += (s.player.x - cam.x) * (lerp * 0.68);
-      cam.y += (s.player.y - cam.y) * (lerp * 0.68);
+      cam.x += (s.player.x - cam.x) * (lerp * 0.65);
+      cam.y += (s.player.y - cam.y) * (lerp * 0.65);
       cam.bumpX *= 0.76;
       cam.bumpY *= 0.76;
       cam.descendFlash = Math.max(0, cam.descendFlash - 0.02);
+      cam.pulseWave = Math.max(0, cam.pulseWave - 0.025);
+
+      const hLerp = reduced ? 1 : 0.055;
+      const sh = smoothHRef.current;
+      for (let i = 0; i < RNN_DIM; i++) {
+        sh[i] += ((s.rnn.h[i] ?? 0) - sh[i]) * hLerp;
+      }
+      const sw = smoothWeightsRef.current;
+      for (const d of DOMAIN_IDS) {
+        sw[d] += ((s.domainWeights[d] ?? 0) - sw[d]) * hLerp;
+      }
 
       const targetAngle = FACING_ANGLE[s.player.facing];
       let angleDiff = targetAngle - cam.facingAngle;
@@ -1225,14 +1126,16 @@ export default function DreamingClient() {
       ctx.save();
       ctx.scale(dpr, dpr);
 
-      const fogRgb = blendDomainColors(s.domainWeights, "fog");
-      const accentRgb = blendDomainColors(s.domainWeights, "accent");
-      const inkRgb = blendDomainColors(s.domainWeights, "ink");
+      const fogRgb = blendDomainColors(sw, "fog");
+      const accentRgb = blendDomainColors(sw, "accent");
+      const inkRgb = blendDomainColors(sw, "ink");
+
+      const tempNorm = Math.max(0, Math.min(1, (s.temperature - MIN_TEMPERATURE) / (MAX_TEMPERATURE - MIN_TEMPERATURE)));
 
       // 背景：中心に微かな余韻を帯びた深い夢霧グラデーション
       const bgGrad = ctx.createRadialGradient(
-        width * 0.5,
-        height * 0.48,
+        width * 0.5 + Math.sin(timeSec * 0.35) * 24,
+        height * 0.48 + Math.cos(timeSec * 0.28) * 18,
         Math.min(width, height) * 0.08,
         width * 0.5,
         height * 0.5,
@@ -1242,9 +1145,9 @@ export default function DreamingClient() {
         0,
         rgbCss(
           [
-            Math.min(255, fogRgb[0] + 10),
-            Math.min(255, fogRgb[1] + 12),
-            Math.min(255, fogRgb[2] + 14),
+            Math.min(255, fogRgb[0] + 12),
+            Math.min(255, fogRgb[1] + 14),
+            Math.min(255, fogRgb[2] + 16),
           ],
           1,
         ),
@@ -1257,149 +1160,619 @@ export default function DreamingClient() {
       const centerX = width / 2;
       const centerY = height / 2;
 
-      // 温度と滲みに応じた周辺空間の極緩い夢揺らぎ（低 T ほど静止、高 T ほど水中のように揺れる）
-      const dreamIntensity = Math.max(0, (s.temperature - 0.55) * 0.85 + s.bleedEntropy * 0.45);
-      const ghostShift = reduced ? 0 : Math.max(0, (s.temperature - 0.95) * 4.2 + s.bleedEntropy * 2.2);
+      // 視界内の裂け目位置を集める（周囲の空間頂点を渦状に歪ませるため）
+      const rifts: Array<{ x: number; y: number }> = [];
+      for (const tile of s.tiles.values()) {
+        if (tile.kind === "rift") rifts.push({ x: tile.x, y: tile.y });
+      }
 
-      const worldToScreen = (wx: number, wy: number, applyDreamWarp = false) => {
+      // 8次元 LSTM 隠れ状態 h_t × 温度 T に駆動される連続 2D 流体ワープ場
+      // 隣接タイルが同じ頂点関数を通るため、四角いグリッドが消えて1枚の液状布のようにウニョウニョうねる。
+      // アンカー保護域（5×5）だけはワープがほぼゼロへ収束し、「記憶をピン留めした島」が際立つ。
+      const tSlow = timeSec * (0.9 + tempNorm * 0.85);
+      const tFast = timeSec * (1.75 + tempNorm * 1.35);
+      const baseWarpAmp = reduced
+        ? 0
+        : tileSz * (0.13 + tempNorm * 0.27 + s.bleedEntropy * 0.14 + cam.pulseWave * 0.08);
+
+      const warpCache = new Map<string, Pt>();
+      const warpWorldToScreen = (wx: number, wy: number): Pt => {
+        const gx = wx * 2;
+        const gy = wy * 2;
+        const cacheKey = Number.isInteger(gx) && Number.isInteger(gy) ? `${gx},${gy}` : null;
+        if (cacheKey) {
+          const cached = warpCache.get(cacheKey);
+          if (cached) return cached;
+        }
+
         let sx = centerX + (wx - cam.x) * tileSz;
         let sy = centerY + (wy - cam.y) * tileSz;
-        if (applyDreamWarp && !reduced && dreamIntensity > 0.08) {
-          const d = Math.hypot(wx - cam.px, wy - cam.py);
-          const factor = Math.max(0, d - 2.1) * dreamIntensity * 1.15;
-          sx += Math.sin(timeSec * 0.9 + wy * 0.75 + wx * 0.35) * factor;
-          sy += Math.cos(timeSec * 0.75 + wx * 0.7 - wy * 0.4) * factor;
+
+        if (baseWarpAmp > 0.01) {
+          // 1. しおり（Anchor）の安定化井戸：保護域（5×5）全体ではワープが 7% まで静まる
+          let anchorDamp = 1;
+          for (const a of s.anchors) {
+            const ad = Math.max(Math.abs(wx - a.x), Math.abs(wy - a.y));
+            const localDamp = 0.07 + 0.93 * smoothstep(ANCHOR_RADIUS + 0.35, ANCHOR_RADIUS + 1.65, ad);
+            if (localDamp < anchorDamp) anchorDamp = localDamp;
+          }
+
+          // 2. プレイヤー足元は視認性のため少しだけ落ち着かせつつ周辺へ大きくうねらせる
+          const pd = Math.hypot(wx - cam.px, wy - cam.py);
+          const radialBoost = 0.42 + 0.88 * smoothstep(0.6, 4.8, pd);
+
+          // 3. 3オクターブの潜在空間カール波動（sh[0..7] が直接位相・うねりを決める）
+          const w1x = Math.sin(wy * 0.62 + tSlow + sh[0] * 2.6) * Math.cos(wx * 0.46 - tSlow * 0.72 + sh[1] * 2.2);
+          const w1y = Math.cos(wx * 0.62 - tSlow * 0.88 + sh[2] * 2.6) * Math.sin(wy * 0.48 + tSlow * 0.68 + sh[3] * 2.2);
+          const w2x = Math.sin((wx + wy) * 1.15 - tFast + sh[4] * 3.1) * 0.5;
+          const w2y = Math.cos((wx - wy) * 1.15 + tFast * 1.08 + sh[5] * 3.1) * 0.5;
+          const w3x = Math.sin(wy * 1.95 + wx * 0.75 + tFast * 1.3 + sh[6] * 2.8) * 0.25;
+          const w3y = Math.cos(wx * 1.85 - wy * 0.85 - tFast * 1.2 + sh[7] * 2.8) * 0.25;
+
+          const amp = baseWarpAmp * anchorDamp * radialBoost;
+          sx += (w1x + w2x + w3x) * amp;
+          sy += (w1y + w2y + w3y) * amp;
+
+          // 4. 裂け目（rift）の重力渦ワープ：周囲の空間をねじり吸い込む
+          for (const rf of rifts) {
+            const rdx = wx - rf.x;
+            const rdy = wy - rf.y;
+            const rd = Math.hypot(rdx, rdy);
+            if (rd > 0.08 && rd < 3.1) {
+              const pull = Math.pow(1 - rd / 3.1, 2) * tileSz * 0.48 * anchorDamp;
+              const ang = Math.atan2(rdy, rdx);
+              const swirlAng = ang + 1.15;
+              sx += (Math.cos(swirlAng) * 0.78 - Math.cos(ang) * 0.35) * pull;
+              sy += (Math.sin(swirlAng) * 0.78 - Math.sin(ang) * 0.35) * pull;
+            }
+          }
         }
-        return { x: sx, y: sy };
+
+        const out = { x: sx, y: sy };
+        if (cacheKey) warpCache.set(cacheKey, out);
+        return out;
       };
 
-      // 1. 忘却ゴースト層（evict されたタイルが霧と文字へ溶けて消える）
+      // 任意の画面座標における潜在フロー場の速度ベクトル（流線リボン用）
+      const sampleFlowVelocity = (sx: number, sy: number): Pt => {
+        const wx = cam.x + (sx - centerX) / tileSz;
+        const wy = cam.y + (sy - centerY) / tileSz;
+        const ang =
+          Math.sin(wx * 0.55 + tSlow * 0.9 + sh[0] * 2.8) * 2.1 +
+          Math.cos(wy * 0.58 - tSlow * 0.8 + sh[2] * 2.8) * 2.1 +
+          Math.sin((wx - wy) * 0.85 + tFast * 0.5 + sh[4] * 3.0) * 1.3;
+        let vx = Math.cos(ang);
+        let vy = Math.sin(ang);
+        for (const rf of rifts) {
+          const dx = rf.x - wx;
+          const dy = rf.y - wy;
+          const d = Math.hypot(dx, dy);
+          if (d > 0.1 && d < 3.8) {
+            const w = Math.pow(1 - d / 3.8, 1.5) * 2.2;
+            vx += ((dx - dy * 0.9) / d) * w;
+            vy += ((dy + dx * 0.9) / d) * w;
+          }
+        }
+        return { x: vx, y: vy };
+      };
+
+      const ghostShift = reduced ? 0 : Math.max(0.8, (s.temperature - 0.65) * 4.8 + s.bleedEntropy * 2.6);
+
+      // オフスクリーン残像フィードバックバッファの更新（毎フレーム微妙に流しながら薄める）
+      if (tCtx && sCtx && !reduced) {
+        sCtx.clearRect(0, 0, tw, th);
+        sCtx.globalCompositeOperation = "source-over";
+        sCtx.globalAlpha = 0.84 + tempNorm * 0.085;
+        sCtx.imageSmoothingEnabled = true;
+        const driftAngle = timeSec * 0.45 + sh[0] * 2.2;
+        const ox = Math.cos(driftAngle) * (0.45 + tempNorm * 0.95);
+        const oy = Math.sin(driftAngle) * (0.45 + tempNorm * 0.95);
+        const zoom = 1.003 + tempNorm * 0.004;
+        const zw = tw * zoom;
+        const zh = th * zoom;
+        sCtx.drawImage(trailCanvas, (tw - zw) * 0.5 + ox, (th - zh) * 0.5 + oy, zw, zh);
+
+        tCtx.clearRect(0, 0, tw, th);
+        tCtx.globalAlpha = 1;
+        tCtx.drawImage(trailSwap, 0, 0);
+      }
+
+      // 1. 忘却ゴースト層（evict されたタイルが有機ブロブと文字へ溶けて昇る）
       dissolvingGhostsRef.current = dissolvingGhostsRef.current.filter((g) => {
         const t = (now - g.startMs) / g.durMs;
         if (t >= 1) return false;
-        const pos = worldToScreen(g.x + g.driftX * t, g.y + g.driftY * t, true);
-        const a = Math.pow(1 - t, 1.5) * 0.48;
-        const rad = tileSz * (0.58 + t * 0.42);
-        const wash = ctx.createRadialGradient(pos.x, pos.y, 1, pos.x, pos.y, rad);
-        wash.addColorStop(0, rgbCss(g.floorRgb, a));
-        wash.addColorStop(1, rgbCss(g.floorRgb, 0));
-        ctx.fillStyle = wash;
-        ctx.beginPath();
-        ctx.arc(pos.x, pos.y, rad, 0, Math.PI * 2);
+        const pos = warpWorldToScreen(g.x + g.driftX * t, g.y + g.driftY * t);
+        const a = Math.pow(1 - t, 1.45) * 0.52;
+        const rad = tileSz * (0.56 + t * 0.52);
+
+        ctx.fillStyle = rgbCss(g.floorRgb, a * 0.72);
+        traceOrganicBlob(ctx, pos.x, pos.y, rad * 0.8, rad * 0.72, timeSec, tileHash(g.x, g.y, 11), 0.24, 9);
         ctx.fill();
 
-        ctx.font = `400 ${Math.round(tileSz * (0.34 + t * 0.14))}px "Shippori Mincho", "Hiragino Mincho ProN", serif`;
+        ctx.font = `400 ${Math.round(tileSz * (0.34 + t * 0.16))}px "Shippori Mincho", "Hiragino Mincho ProN", serif`;
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
-        ctx.fillStyle = rgbCss(g.inkRgb, a * 1.25);
-        ctx.fillText(g.glyph, pos.x, pos.y - t * 14);
+        ctx.fillStyle = rgbCss(g.inkRgb, a * 1.3);
+        ctx.fillText(g.glyph, pos.x, pos.y - t * 18);
+
+        if (tCtx && !reduced) {
+          tCtx.fillStyle = rgbCss(g.inkRgb, a * 0.35);
+          tCtx.beginPath();
+          tCtx.arc(pos.x * 0.5, pos.y * 0.5, rad * 0.22, 0, Math.PI * 2);
+          tCtx.fill();
+        }
         return true;
       });
 
-      // 2. 記憶されているタイル群を描画（出現フェード＋忘却フェード）
-      const lightSources: Array<{ tile: DreamTile; x: number; y: number; alpha: number }> = [];
+      // 2. 記憶されているタイル群を描画（共有頂点ワープ・曲線メッシュ・有機水辺・液状クロスモーフ）
+      const lightSources: Array<{
+        tile: DreamTile;
+        c: Pt;
+        alpha: number;
+      }> = [];
+
       for (const tile of s.tiles.values()) {
-        const pos = worldToScreen(tile.x, tile.y, true);
+        const c = warpWorldToScreen(tile.x, tile.y);
         if (
-          pos.x + tileSz < -tileSz ||
-          pos.x - tileSz > width + tileSz ||
-          pos.y + tileSz < -tileSz ||
-          pos.y - tileSz > height + tileSz
+          c.x + tileSz * 1.5 < -tileSz ||
+          c.x - tileSz * 1.5 > width + tileSz ||
+          c.y + tileSz * 1.5 < -tileSz ||
+          c.y - tileSz * 1.5 > height + tileSz
         ) {
           continue;
         }
-        const meta = tileVisualRef.current.get(tileKey(tile.x, tile.y));
-        const materialize = meta && !reduced ? easeOutCubic((now - meta.bornMs) / 540) : 1;
-        const distFromPlayer = Math.hypot(tile.x - cam.px, tile.y - cam.py);
-        const visionFade = Math.max(0, Math.min(1, 1 - (distFromPlayer - (VIEW_RADIUS - 2.1)) / 2.9));
-        const alpha = Math.max(0, Math.min(1, tile.memory * visionFade * materialize));
-        if (alpha <= 0.03) continue;
 
-        drawTileBase(tile, pos.x, pos.y, tileSz, s.tiles, timeSec, alpha, materialize, ghostShift);
+        const key = tileKey(tile.x, tile.y);
+        const meta = tileVisualRef.current.get(key);
+        const materialize = meta && !reduced ? easeOutCubic((now - meta.bornMs) / 620) : 1;
+        const distFromPlayer = Math.hypot(tile.x - cam.px, tile.y - cam.py);
+        const visionFade = Math.max(0, Math.min(1, 1 - (distFromPlayer - (VIEW_RADIUS - 2.0)) / 2.8));
+        const alpha = Math.max(0, Math.min(1, tile.memory * visionFade * materialize));
+        if (alpha <= 0.025) continue;
+
+        const morph = morphAnimsRef.current.get(key);
+        let morphT = 1;
+        if (morph) {
+          morphT = (now - morph.startMs) / morph.durMs;
+          if (morphT >= 1) {
+            morphAnimsRef.current.delete(key);
+            morphT = 1;
+          }
+        }
+
+        const floorRgb = blendDomainColors(tile.domainBlend, "floor");
+        const wallRgb = blendDomainColors(tile.domainBlend, "wall");
+        const accentRgbT = blendDomainColors(tile.domainBlend, "accent");
+        const inkRgbT = blendDomainColors(tile.domainBlend, "ink");
+
+        // 共有頂点（4隅＋4辺中点）
+        const tl = warpWorldToScreen(tile.x - 0.5, tile.y - 0.5);
+        const tm = warpWorldToScreen(tile.x, tile.y - 0.5);
+        const tr = warpWorldToScreen(tile.x + 0.5, tile.y - 0.5);
+        const rm = warpWorldToScreen(tile.x + 0.5, tile.y);
+        const br = warpWorldToScreen(tile.x + 0.5, tile.y + 0.5);
+        const bm = warpWorldToScreen(tile.x, tile.y + 0.5);
+        const bl = warpWorldToScreen(tile.x - 0.5, tile.y + 0.5);
+        const lm = warpWorldToScreen(tile.x - 0.5, tile.y);
+
+        // 2a. シームレス曲面床ベース
+        ctx.fillStyle = rgbCss(floorRgb, alpha);
+        traceWarpedQuad(ctx, tl, tm, tr, rm, br, bm, bl, lm, 1.35);
+        ctx.fill();
+
+        const seed = tileHash(tile.x, tile.y, 7);
+
+        // 領域境界の柔らかい水彩滲みウォッシュ
+        const eastNb = s.tiles.get(tileKey(tile.x + 1, tile.y));
+        const southNb = s.tiles.get(tileKey(tile.x, tile.y + 1));
+        if (
+          tile.bleedShock > 0.14 ||
+          (eastNb && eastNb.domain !== tile.domain) ||
+          (southNb && southNb.domain !== tile.domain)
+        ) {
+          const bleed = ctx.createRadialGradient(c.x, c.y, tileSz * 0.06, c.x, c.y, tileSz * 1.02);
+          bleed.addColorStop(0, rgbCss(accentRgbT, alpha * (0.11 + tile.bleedShock * 0.18)));
+          bleed.addColorStop(1, rgbCss(accentRgbT, 0));
+          ctx.fillStyle = bleed;
+          ctx.beginPath();
+          ctx.arc(c.x, c.y, tileSz * 1.02, 0, Math.PI * 2);
+          ctx.fill();
+        }
+
+        // 2b. タイル種別ごとの有機ディテール
+        if (tile.kind === "water") {
+          const deep: [number, number, number] = [
+            Math.max(8, Math.round(wallRgb[0] * 0.58)),
+            Math.max(20, Math.round(wallRgb[1] * 0.94 + 14)),
+            Math.max(36, Math.round(wallRgb[2] * 1.2 + 24)),
+          ];
+          const wN = s.tiles.get(tileKey(tile.x, tile.y - 1))?.kind === "water";
+          const wS = s.tiles.get(tileKey(tile.x, tile.y + 1))?.kind === "water";
+          const wE = s.tiles.get(tileKey(tile.x + 1, tile.y))?.kind === "water";
+          const wW = s.tiles.get(tileKey(tile.x - 1, tile.y))?.kind === "water";
+          const rx = tileSz * (wE || wW ? 0.64 : 0.48);
+          const ry = tileSz * (wN || wS ? 0.64 : 0.48);
+
+          ctx.fillStyle = rgbCss(deep, alpha * 0.94);
+          traceOrganicBlob(ctx, c.x, c.y, rx, ry, timeSec, seed, 0.14 + tempNorm * 0.1, 10);
+          ctx.fill();
+
+          // うねる水面の月光コースティクス
+          const wave = Math.sin(timeSec * 1.65 + tile.x * 0.9 + tile.y * 0.7);
+          ctx.strokeStyle = rgbCss(inkRgbT, alpha * (0.18 + Math.abs(wave) * 0.16));
+          ctx.lineWidth = 1.1;
+          ctx.beginPath();
+          ctx.moveTo(c.x - tileSz * 0.28, c.y - tileSz * 0.1 + wave * 2.8);
+          ctx.quadraticCurveTo(c.x, c.y - tileSz * 0.18 - wave * 2.2, c.x + tileSz * 0.26, c.y - tileSz * 0.08 + wave * 2.0);
+          ctx.moveTo(c.x - tileSz * 0.16, c.y + tileSz * 0.18 - wave * 2.2);
+          ctx.quadraticCurveTo(c.x + tileSz * 0.1, c.y + tileSz * 0.12 + wave * 2.2, c.x + tileSz * 0.3, c.y + tileSz * 0.2 - wave * 1.6);
+          ctx.stroke();
+        } else if (tile.kind === "floor" || tile.kind === "lamp") {
+          if (tile.domain === "school") {
+            ctx.strokeStyle = rgbCss(wallRgb, alpha * 0.17);
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(lm.x, lm.y);
+            ctx.quadraticCurveTo(c.x, c.y, rm.x, rm.y);
+            ctx.stroke();
+          } else if (tile.domain === "station" && (tile.x + tile.y) % 4 === 0) {
+            ctx.strokeStyle = rgbCss(accentRgbT, alpha * 0.18);
+            ctx.lineWidth = 1.8;
+            ctx.beginPath();
+            ctx.moveTo(bl.x, bl.y);
+            ctx.quadraticCurveTo(bm.x, bm.y, br.x, br.y);
+            ctx.stroke();
+          } else if (tile.domain === "arcade" && seed > 0.62) {
+            ctx.fillStyle = rgbCss(accentRgbT, alpha * 0.14);
+            traceOrganicBlob(ctx, c.x, c.y, tileSz * 0.34, tileSz * 0.2, timeSec * 1.1, seed, 0.16, 8);
+            ctx.fill();
+          } else if (tile.domain === "meadow" && seed > 0.38) {
+            const sway = Math.sin(timeSec * 1.7 + tile.x * 0.7 + tile.y * 0.4) * 4.2;
+            ctx.strokeStyle = rgbCss(accentRgbT, alpha * 0.22);
+            ctx.lineWidth = 1.05;
+            ctx.beginPath();
+            ctx.moveTo(c.x - tileSz * 0.16, c.y + tileSz * 0.22);
+            ctx.quadraticCurveTo(c.x - tileSz * 0.12 + sway * 0.5, c.y, c.x - tileSz * 0.08 + sway, c.y - tileSz * 0.15);
+            ctx.moveTo(c.x + tileSz * 0.12, c.y + tileSz * 0.25);
+            ctx.quadraticCurveTo(c.x + tileSz * 0.15 + sway * 0.5, c.y + tileSz * 0.08, c.x + tileSz * 0.2 + sway, c.y - tileSz * 0.08);
+            ctx.stroke();
+          }
+        } else if (tile.kind === "wall") {
+          ctx.fillStyle = rgbCss(wallRgb, alpha * 0.96);
+          traceWarpedQuad(ctx, tl, tm, tr, rm, br, bm, bl, lm, 0.8);
+          ctx.fill();
+          // 曲がった天面ハイライト（壁が生きているように光る）
+          ctx.strokeStyle = rgbCss(inkRgbT, alpha * 0.14);
+          ctx.lineWidth = 1.6;
+          ctx.beginPath();
+          ctx.moveTo(tl.x, tl.y);
+          ctx.quadraticCurveTo(tm.x, tm.y, tr.x, tr.y);
+          ctx.stroke();
+        } else if (tile.kind === "shelf") {
+          ctx.fillStyle = rgbCss(wallRgb, alpha * 0.96);
+          traceWarpedQuad(ctx, tl, tm, tr, rm, br, bm, bl, lm, -1.8);
+          ctx.fill();
+          // うねりに沿って傾く古書の背表紙
+          for (let i = 0; i < 4; i++) {
+            const f = (i + 0.6) / 4.2;
+            const topX = tl.x + (tr.x - tl.x) * f;
+            const topY = tl.y + (tr.y - tl.y) * f;
+            const botX = bl.x + (br.x - bl.x) * f;
+            const botY = bl.y + (br.y - bl.y) * f;
+            const hFrac = 0.22 + tileHash(tile.x, tile.y, 10 + i) * 0.24;
+            ctx.strokeStyle = i % 2 === 0 ? rgbCss(accentRgbT, alpha * 0.36) : rgbCss(inkRgbT, alpha * 0.22);
+            ctx.lineWidth = 1.9;
+            ctx.beginPath();
+            ctx.moveTo(botX + (topX - botX) * 0.14, botY + (topY - botY) * 0.14);
+            ctx.lineTo(botX + (topX - botX) * (1 - hFrac), botY + (topY - botY) * (1 - hFrac));
+            ctx.stroke();
+          }
+        } else if (tile.kind === "window") {
+          ctx.fillStyle = rgbCss(wallRgb, alpha * 0.96);
+          traceWarpedQuad(ctx, tl, tm, tr, rm, br, bm, bl, lm, 0.6);
+          ctx.fill();
+
+          const winGrad = ctx.createLinearGradient(tl.x, tl.y, br.x, br.y);
+          winGrad.addColorStop(0, rgbCss(accentRgbT, alpha * 0.62));
+          winGrad.addColorStop(1, rgbCss(inkRgbT, alpha * 0.3));
+          ctx.fillStyle = winGrad;
+          traceWarpedQuad(ctx, tl, tm, tr, rm, br, bm, bl, lm, -5.2);
+          ctx.fill();
+
+          ctx.strokeStyle = rgbCss(wallRgb, alpha * 0.72);
+          ctx.lineWidth = 1.3;
+          ctx.beginPath();
+          ctx.moveTo(tm.x, tm.y);
+          ctx.quadraticCurveTo(c.x, c.y, bm.x, bm.y);
+          ctx.moveTo(lm.x, lm.y);
+          ctx.quadraticCurveTo(c.x, c.y, rm.x, rm.y);
+          ctx.stroke();
+        } else if (tile.kind === "rail") {
+          const hasNS =
+            s.tiles.get(tileKey(tile.x, tile.y - 1))?.kind === "rail" ||
+            s.tiles.get(tileKey(tile.x, tile.y + 1))?.kind === "rail";
+          const hasEW =
+            s.tiles.get(tileKey(tile.x - 1, tile.y))?.kind === "rail" ||
+            s.tiles.get(tileKey(tile.x + 1, tile.y))?.kind === "rail";
+          const horizontal = hasEW && !hasNS;
+          const glint = 0.4 + Math.max(0, Math.sin(timeSec * 1.6 - (tile.x + tile.y) * 0.55)) * 0.36;
+
+          const lerpPt = (a: Pt, b: Pt, f: number): Pt => ({
+            x: a.x + (b.x - a.x) * f,
+            y: a.y + (b.y - a.y) * f,
+          });
+          // 枕木
+          ctx.strokeStyle = rgbCss(wallRgb, alpha * 0.6);
+          ctx.lineWidth = 2;
+          for (const f of [0.22, 0.5, 0.78]) {
+            ctx.beginPath();
+            if (horizontal) {
+              const p1 = lerpPt(tl, tr, f);
+              const p2 = lerpPt(bl, br, f);
+              ctx.moveTo(p1.x + (p2.x - p1.x) * 0.22, p1.y + (p2.y - p1.y) * 0.22);
+              ctx.lineTo(p1.x + (p2.x - p1.x) * 0.78, p1.y + (p2.y - p1.y) * 0.78);
+            } else {
+              const p1 = lerpPt(tl, bl, f);
+              const p2 = lerpPt(tr, br, f);
+              ctx.moveTo(p1.x + (p2.x - p1.x) * 0.22, p1.y + (p2.y - p1.y) * 0.22);
+              ctx.lineTo(p1.x + (p2.x - p1.x) * 0.78, p1.y + (p2.y - p1.y) * 0.78);
+            }
+            ctx.stroke();
+          }
+          // 湾曲してうねる二条の線路
+          ctx.strokeStyle = rgbCss(inkRgbT, alpha * glint);
+          ctx.lineWidth = 1.5;
+          for (const lane of [0.33, 0.67]) {
+            ctx.beginPath();
+            if (horizontal) {
+              const a = lerpPt(tl, bl, lane);
+              const b = lerpPt(tr, br, lane);
+              const m = lerpPt(tm, bm, lane);
+              ctx.moveTo(a.x, a.y);
+              ctx.quadraticCurveTo(m.x, m.y, b.x, b.y);
+            } else {
+              const a = lerpPt(tl, tr, lane);
+              const b = lerpPt(bl, br, lane);
+              const m = lerpPt(lm, rm, lane);
+              ctx.moveTo(a.x, a.y);
+              ctx.quadraticCurveTo(m.x, m.y, b.x, b.y);
+            }
+            ctx.stroke();
+          }
+        } else if (tile.kind === "rift") {
+          // 脈打つ潜在空間の裂け目：歪んだ有機渦＋吸い込まれる文字トークン
+          const pulse = 0.9 + Math.sin(timeSec * 2.4) * 0.12;
+          const grad = ctx.createRadialGradient(c.x, c.y, 2, c.x, c.y, tileSz * 0.92);
+          grad.addColorStop(0, "rgba(4, 7, 12, 0.98)");
+          grad.addColorStop(0.45, rgbCss(inkRgbT, alpha * 0.3));
+          grad.addColorStop(0.75, rgbCss(accentRgbT, alpha * 0.18));
+          grad.addColorStop(1, rgbCss(accentRgbT, 0));
+          ctx.fillStyle = grad;
+          traceOrganicBlob(ctx, c.x, c.y, tileSz * 0.85 * pulse, tileSz * 0.78 * pulse, timeSec * 1.4, seed, 0.18, 12);
+          ctx.fill();
+
+          for (let ring = 0; ring < 3; ring++) {
+            ctx.strokeStyle =
+              ring === 0 ? rgbCss(accentRgbT, alpha * 0.82) : rgbCss(inkRgbT, alpha * (0.5 - ring * 0.12));
+            ctx.lineWidth = 1.3;
+            ctx.beginPath();
+            const rad = tileSz * (0.14 + ring * 0.14) * pulse;
+            const a0 = timeSec * (ring % 2 === 0 ? 1.15 : -0.82) + ring * 1.6;
+            ctx.arc(c.x, c.y, rad, a0, a0 + Math.PI * 1.35);
+            ctx.stroke();
+          }
+
+          ctx.font = `400 ${Math.round(tileSz * 0.25)}px "Shippori Mincho", "Hiragino Mincho ProN", serif`;
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          const orbitAngle = timeSec * 0.95 + tile.x;
+          ctx.fillStyle = rgbCss(inkRgbT, alpha * 0.62);
+          ctx.fillText(
+            tile.glyph,
+            c.x + Math.cos(orbitAngle) * tileSz * 0.44,
+            c.y + Math.sin(orbitAngle) * tileSz * 0.44,
+          );
+
+          if (tCtx && !reduced) {
+            tCtx.strokeStyle = rgbCss(inkRgbT, alpha * 0.28);
+            tCtx.lineWidth = 1.4;
+            tCtx.beginPath();
+            tCtx.arc(c.x * 0.5, c.y * 0.5, tileSz * 0.22 * pulse, timeSec * 1.4, timeSec * 1.4 + Math.PI * 1.2);
+            tCtx.stroke();
+          }
+        }
+
+        // 2c. 液状クロスモーフ（別タイル種別へリアルタイム変容中の1.5秒間、旧形状が溶けて滲む）
+        if (morph && morphT < 1) {
+          const remain = Math.pow(1 - morphT, 1.35);
+          ctx.save();
+          ctx.fillStyle = rgbCss(morph.oldWallRgb, remain * 0.55 * alpha);
+          traceOrganicBlob(
+            ctx,
+            c.x,
+            c.y,
+            tileSz * (0.52 * remain + 0.12),
+            tileSz * (0.48 * remain + 0.1),
+            timeSec * 2.1,
+            seed + morphT,
+            0.32,
+            10,
+          );
+          ctx.fill();
+
+          ctx.strokeStyle = rgbCss(morph.oldAccentRgb, remain * 0.65 * alpha);
+          ctx.lineWidth = 1.2;
+          traceOrganicBlob(
+            ctx,
+            c.x,
+            c.y,
+            tileSz * (0.28 + morphT * 0.45),
+            tileSz * (0.24 + morphT * 0.42),
+            timeSec * 1.8,
+            seed * 2.1,
+            0.28,
+            10,
+          );
+          ctx.stroke();
+          ctx.restore();
+
+          if (tCtx && !reduced) {
+            tCtx.fillStyle = rgbCss(accentRgbT, remain * 0.26);
+            tCtx.beginPath();
+            tCtx.arc(c.x * 0.5, c.y * 0.5, tileSz * 0.2, 0, Math.PI * 2);
+            tCtx.fill();
+          }
+        }
+
+        // 2d. 忘却しかけ・出現直後・高温時の文字トークン揺らぎ（二重露光）
+        const fadingAlpha = tile.memory < 0.76 ? (0.76 - tile.memory) * 0.66 : 0;
+        const bornAlpha = materialize < 0.96 ? (1 - materialize) * 0.56 : 0;
+        const heatAlpha = s.temperature > 1.08 && seed > 0.72 ? (s.temperature - 1.08) * 0.36 : 0;
+        const glyphAlpha = Math.min(0.58, Math.max(fadingAlpha, bornAlpha, heatAlpha)) * alpha;
+
+        if (glyphAlpha > 0.04 && tile.kind !== "rift" && !tile.motif) {
+          const wobX = reduced ? 0 : Math.sin(timeSec * 2.1 + tile.x * 1.4 + tile.y) * (1.2 + tempNorm * 2.6);
+          const wobY = reduced ? 0 : Math.cos(timeSec * 1.7 + tile.y * 1.3) * (1.0 + tempNorm * 2.2);
+          ctx.font = `400 ${Math.round(tileSz * 0.36)}px "Shippori Mincho", "Hiragino Mincho ProN", Georgia, serif`;
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          if (ghostShift > 0.5) {
+            ctx.fillStyle = rgbCss(accentRgbT, glyphAlpha * 0.46);
+            ctx.fillText(tile.glyph, c.x + wobX + ghostShift, c.y + wobY - ghostShift * 0.45);
+          }
+          ctx.fillStyle = rgbCss(inkRgbT, glyphAlpha);
+          ctx.fillText(tile.glyph, c.x + wobX, c.y + wobY);
+        }
+
         if (tile.kind === "window" || tile.kind === "lamp") {
-          lightSources.push({ tile, x: pos.x, y: pos.y, alpha });
+          lightSources.push({ tile, c, alpha });
         }
       }
 
-      // 3. 夢の光学レイヤー（窓からの斜め光条＋街灯の柔らかい加算ブルーム）
+      // 3. 夢の光学レイヤー（ワープに沿って曲がり揺れる窓の光条＋街灯の呼吸ブルーム）
       ctx.save();
       ctx.globalCompositeOperation = "lighter";
       for (const src of lightSources) {
         const lAccent = blendDomainColors(src.tile.domainBlend, "accent");
         const lInk = blendDomainColors(src.tile.domainBlend, "ink");
         if (src.tile.kind === "window") {
-          // 窓から床へ斜めに差し込む夕日／月光のボリューメトリック光条
-          const sway = reduced ? 0 : Math.sin(timeSec * 0.65 + src.tile.x) * 4;
-          const beamLen = tileSz * 2.5;
-          const bx = src.x + tileSz * 0.95 + sway;
-          const by = src.y + beamLen * 0.78;
-          const bGrad = ctx.createLinearGradient(src.x, src.y, bx, by);
-          bGrad.addColorStop(0, rgbCss(lAccent, src.alpha * 0.24));
-          bGrad.addColorStop(0.55, rgbCss(lInk, src.alpha * 0.09));
+          const tip = warpWorldToScreen(src.tile.x + 1.45, src.tile.y + 1.95);
+          const bGrad = ctx.createLinearGradient(src.c.x, src.c.y, tip.x, tip.y);
+          bGrad.addColorStop(0, rgbCss(lAccent, src.alpha * 0.25));
+          bGrad.addColorStop(0.55, rgbCss(lInk, src.alpha * 0.1));
           bGrad.addColorStop(1, rgbCss(lAccent, 0));
           ctx.fillStyle = bGrad;
           ctx.beginPath();
-          ctx.moveTo(src.x - tileSz * 0.32, src.y + tileSz * 0.15);
-          ctx.lineTo(src.x + tileSz * 0.34, src.y - tileSz * 0.22);
-          ctx.lineTo(bx + tileSz * 0.78, by - tileSz * 0.25);
-          ctx.lineTo(bx - tileSz * 0.42, by + tileSz * 0.52);
+          ctx.moveTo(src.c.x - tileSz * 0.3, src.c.y + tileSz * 0.14);
+          ctx.lineTo(src.c.x + tileSz * 0.34, src.c.y - tileSz * 0.22);
+          ctx.lineTo(tip.x + tileSz * 0.72, tip.y - tileSz * 0.22);
+          ctx.lineTo(tip.x - tileSz * 0.44, tip.y + tileSz * 0.48);
           ctx.closePath();
           ctx.fill();
         } else if (src.tile.kind === "lamp") {
-          const breathe = reduced ? 1 : 0.92 + Math.sin(timeSec * 2.1 + src.tile.x * 1.3) * 0.08;
-          const rad = tileSz * 1.95 * breathe;
-          const glow = ctx.createRadialGradient(src.x, src.y, 1, src.x, src.y, rad);
+          const breathe = reduced ? 1 : 0.9 + Math.sin(timeSec * 2.2 + src.tile.x * 1.3) * 0.1;
+          const rad = tileSz * 2.0 * breathe;
+          const glow = ctx.createRadialGradient(src.c.x, src.c.y, 1, src.c.x, src.c.y, rad);
           glow.addColorStop(0, rgbCss(lAccent, src.alpha * 0.42));
           glow.addColorStop(0.35, rgbCss(lAccent, src.alpha * 0.16));
           glow.addColorStop(1, rgbCss(lAccent, 0));
           ctx.fillStyle = glow;
           ctx.beginPath();
-          ctx.arc(src.x, src.y, rad, 0, Math.PI * 2);
+          ctx.arc(src.c.x, src.c.y, rad, 0, Math.PI * 2);
           ctx.fill();
 
-          // ランプの芯
           ctx.fillStyle = rgbCss(lInk, src.alpha * 0.92);
           ctx.beginPath();
-          ctx.arc(src.x, src.y, Math.max(2.6, tileSz * 0.075), 0, Math.PI * 2);
+          ctx.arc(src.c.x, src.c.y, Math.max(2.6, tileSz * 0.075), 0, Math.PI * 2);
           ctx.fill();
+
+          if (tCtx && !reduced) {
+            tCtx.fillStyle = rgbCss(lAccent, src.alpha * 0.18);
+            tCtx.beginPath();
+            tCtx.arc(src.c.x * 0.5, src.c.y * 0.5, tileSz * 0.36, 0, Math.PI * 2);
+            tCtx.fill();
+          }
         }
       }
       ctx.restore();
 
-      // 4. 記憶のしおり（Anchor）の穏やかな保護枠と真鍮の菱形標
+      // 4. リアルタイム潜在流線リボン（LSTM の 8次元ベクトル場に沿って画面中をウニョウニョ蛇行）
+      if (!reduced) {
+        const ribbonAlphaBase = 0.08 + tempNorm * 0.11 + s.bleedEntropy * 0.07;
+        const speedMul = 0.9 + tempNorm * 1.5 + cam.pulseWave * 1.6;
+
+        ctx.save();
+        ctx.lineCap = "round";
+        for (let i = 0; i < flowRibbonsRef.current.length; i++) {
+          const rb = flowRibbonsRef.current[i];
+          rb.age++;
+          const head = rb.pts[rb.pts.length - 1];
+          const vel = sampleFlowVelocity(head.x, head.y);
+          const nx = head.x + vel.x * rb.speed * speedMul;
+          const ny = head.y + vel.y * rb.speed * speedMul;
+          rb.pts.push({ x: nx, y: ny });
+          if (rb.pts.length > 11) rb.pts.shift();
+
+          const outOfBounds = nx < -40 || nx > width + 40 || ny < -40 || ny > height + 40;
+          if (rb.age > rb.maxAge || outOfBounds) {
+            flowRibbonsRef.current[i] = spawnRibbon(width, height, i + Math.floor(timeSec * 7));
+            continue;
+          }
+
+          if (rb.pts.length >= 3) {
+            const lifeFade =
+              smoothstep(0, 14, rb.age) * (1 - smoothstep(rb.maxAge - 22, rb.maxAge, rb.age));
+            const col = rb.tint === "accent" ? accentRgb : inkRgb;
+            ctx.strokeStyle = rgbCss(col, ribbonAlphaBase * lifeFade);
+            ctx.lineWidth = 1.05 + tempNorm * 0.65;
+            ctx.beginPath();
+            ctx.moveTo(rb.pts[0].x, rb.pts[0].y);
+            for (let k = 1; k < rb.pts.length - 1; k++) {
+              const midX = (rb.pts[k].x + rb.pts[k + 1].x) * 0.5;
+              const midY = (rb.pts[k].y + rb.pts[k + 1].y) * 0.5;
+              ctx.quadraticCurveTo(rb.pts[k].x, rb.pts[k].y, midX, midY);
+            }
+            ctx.stroke();
+
+            if (tCtx && i % 2 === 0) {
+              tCtx.fillStyle = rgbCss(col, ribbonAlphaBase * lifeFade * 0.55);
+              tCtx.beginPath();
+              tCtx.arc(nx * 0.5, ny * 0.5, 1.3, 0, Math.PI * 2);
+              tCtx.fill();
+            }
+          }
+        }
+        ctx.restore();
+      }
+
+      // 5. 記憶のしおり（Anchor）の穏やかな安定枠（周囲がうねるほど「ここだけ静かに静止」が際立つ）
       for (const anchor of s.anchors) {
-        const pos = worldToScreen(anchor.x, anchor.y, false);
+        const pos = warpWorldToScreen(anchor.x, anchor.y);
         const boxW = (ANCHOR_RADIUS * 2 + 1) * tileSz;
         const bx = pos.x - boxW / 2;
         const by = pos.y - boxW / 2;
         ctx.save();
-        // 角だけの繊細なブックマーク枠（全面の破線より上品で夢を壊さない）
         const corner = tileSz * 0.48;
-        ctx.strokeStyle = "rgba(216, 178, 106, 0.44)";
-        ctx.lineWidth = 1.25;
+        ctx.strokeStyle = "rgba(216, 178, 106, 0.48)";
+        ctx.lineWidth = 1.3;
         ctx.beginPath();
-        // 左上
         ctx.moveTo(bx + 2, by + corner);
         ctx.lineTo(bx + 2, by + 2);
         ctx.lineTo(bx + corner, by + 2);
-        // 右上
         ctx.moveTo(bx + boxW - corner, by + 2);
         ctx.lineTo(bx + boxW - 2, by + 2);
         ctx.lineTo(bx + boxW - 2, by + corner);
-        // 右下
         ctx.moveTo(bx + boxW - 2, by + boxW - corner);
         ctx.lineTo(bx + boxW - 2, by + boxW - 2);
         ctx.lineTo(bx + boxW - corner, by + boxW - 2);
-        // 左下
         ctx.moveTo(bx + corner, by + boxW - 2);
         ctx.lineTo(bx + 2, by + boxW - 2);
         ctx.lineTo(bx + 2, by + boxW - corner);
         ctx.stroke();
 
-        // 中央の呼吸する真鍮菱形
         const pulse = reduced ? 1 : 0.94 + Math.sin(timeSec * 2.2) * 0.08;
         const r = tileSz * 0.22 * pulse;
-        ctx.strokeStyle = "rgba(216, 178, 106, 0.88)";
+        ctx.strokeStyle = "rgba(216, 178, 106, 0.9)";
         ctx.lineWidth = 1.5;
         ctx.beginPath();
         ctx.moveTo(pos.x, pos.y - r);
@@ -1411,50 +1784,59 @@ export default function DreamingClient() {
         ctx.restore();
       }
 
-      // 5. モチーフ描画（線画シルエット＋二重露光エコー＋明朝体ラベル）
+      // 6. モチーフ描画（線画シルエット＋公転二重露光エコー＋一文字ずつ揺れる明朝ラベル）
       for (const tile of s.tiles.values()) {
         if (!tile.motif) continue;
-        const pos = worldToScreen(tile.x, tile.y, true);
+        const pos = warpWorldToScreen(tile.x, tile.y);
         const dist = Math.hypot(tile.x - cam.px, tile.y - cam.py);
         const alpha = Math.max(0.14, Math.min(1, tile.memory * (1 - (dist - (VIEW_RADIUS - 1.5)) / 2.7)));
         if (alpha <= 0.06) continue;
 
         const isReunion = tile.motif.generation >= 2;
-        const bob = reduced ? 0 : Math.sin(timeSec * 1.9 + tile.x + tile.y) * 2.8;
+        const bob = reduced ? 0 : Math.sin(timeSec * 2.1 + tile.x + tile.y) * 3.2;
         const my = pos.y + bob;
         const origAccent = DOMAIN_PALETTES[tile.motif.originDomain].accent;
         const curAccent = DOMAIN_PALETTES[tile.motif.domain].accent;
 
-        // 背後の柔らかな光輪
-        const halo = ctx.createRadialGradient(pos.x, my, 2, pos.x, my, tileSz * 0.85);
-        halo.addColorStop(0, rgbCss(isReunion ? origAccent : curAccent, alpha * 0.42));
-        halo.addColorStop(0.55, rgbCss(curAccent, alpha * 0.14));
+        // 有機的に呼吸する光輪
+        const halo = ctx.createRadialGradient(pos.x, my, 2, pos.x, my, tileSz * 0.92);
+        halo.addColorStop(0, rgbCss(isReunion ? origAccent : curAccent, alpha * 0.44));
+        halo.addColorStop(0.55, rgbCss(curAccent, alpha * 0.15));
         halo.addColorStop(1, rgbCss(curAccent, 0));
         ctx.fillStyle = halo;
-        ctx.beginPath();
-        ctx.arc(pos.x, my, tileSz * 0.85, 0, Math.PI * 2);
+        traceOrganicBlob(ctx, pos.x, my, tileSz * 0.85, tileSz * 0.8, timeSec * 1.5, tileHash(tile.x, tile.y, 23), 0.16, 9);
         ctx.fill();
 
         if (isReunion) {
-          ctx.strokeStyle = rgbCss(origAccent, alpha * 0.65);
-          ctx.lineWidth = 1.15;
-          ctx.beginPath();
-          ctx.arc(pos.x, my, tileSz * (0.4 + Math.sin(timeSec * 2.4) * 0.03), 0, Math.PI * 2);
+          ctx.strokeStyle = rgbCss(origAccent, alpha * 0.68);
+          ctx.lineWidth = 1.2;
+          traceOrganicBlob(
+            ctx,
+            pos.x,
+            my,
+            tileSz * 0.42,
+            tileSz * 0.4,
+            timeSec * 2.0,
+            tileHash(tile.x, tile.y, 47),
+            0.14,
+            10,
+          );
           ctx.stroke();
         }
 
-        // 高温・変質時は二重露光の幻影を重ねる
-        if ((isReunion || ghostShift > 0.9) && !reduced) {
-          const ox = Math.cos(timeSec * 1.1 + tile.x) * (2.2 + ghostShift * 0.65);
-          const oy = Math.sin(timeSec * 0.9 + tile.y) * (1.8 + ghostShift * 0.45);
+        // リアルタイム二重露光（常に微かに公転し、高温・変質ほどズレが広がる）
+        if (!reduced) {
+          const orbitR = (isReunion ? 3.2 : 1.8) + ghostShift * 0.72;
+          const ox = Math.cos(timeSec * 1.35 + tile.x * 1.1 + sh[0] * 2) * orbitR;
+          const oy = Math.sin(timeSec * 1.15 + tile.y * 1.1 + sh[1] * 2) * orbitR * 0.85;
           drawMotifGlyph(
             ctx,
             tile.motif.id,
             pos.x + ox,
             my + oy,
             tileSz * 0.34,
-            rgbCss(origAccent, alpha * 0.34),
-            rgbCss(origAccent, alpha * 0.18),
+            rgbCss(origAccent, alpha * (0.28 + tempNorm * 0.18)),
+            rgbCss(origAccent, alpha * 0.16),
             timeSec,
           );
         }
@@ -1466,31 +1848,53 @@ export default function DreamingClient() {
           my,
           tileSz * 0.33,
           rgbCss(inkRgb, alpha * 0.96),
-          rgbCss(isReunion ? origAccent : curAccent, alpha * 0.72),
+          rgbCss(isReunion ? origAccent : curAccent, alpha * 0.74),
           timeSec,
         );
 
-        // 枠のない霧テキストで崩れた名前を浮かべる
-        if (dist <= 5.2) {
+        if (tCtx && !reduced) {
+          tCtx.fillStyle = rgbCss(isReunion ? origAccent : curAccent, alpha * 0.22);
+          tCtx.beginPath();
+          tCtx.arc(pos.x * 0.5, my * 0.5, tileSz * 0.22, 0, Math.PI * 2);
+          tCtx.fill();
+        }
+
+        // 一文字ずつ波打ちながら浮かぶ明朝ラベル（char-RNN の揺らぎを文字単位で表現）
+        if (dist <= 5.4) {
           const label =
             tile.motif.generation >= 2
               ? `${tile.motif.name} ${romanGeneration(tile.motif.generation)}`
               : tile.motif.name;
+          const chars = Array.from(label);
+          const fontSize = Math.max(11, Math.round(tileSz * 0.23));
           ctx.save();
-          ctx.font = `400 ${Math.max(11, Math.round(tileSz * 0.23))}px "Shippori Mincho", "Hiragino Mincho ProN", serif`;
+          ctx.font = `400 ${fontSize}px "Shippori Mincho", "Hiragino Mincho ProN", serif`;
           ctx.textAlign = "center";
           ctx.textBaseline = "top";
-          ctx.shadowColor = "rgba(6, 10, 16, 0.95)";
+          ctx.shadowColor = "rgba(6, 10, 16, 0.96)";
           ctx.shadowBlur = 10;
-          ctx.fillStyle = isReunion
-            ? rgbCss(origAccent, alpha * 0.98)
-            : rgbCss(inkRgb, alpha * 0.92);
-          ctx.fillText(label, pos.x, my + tileSz * 0.4);
+          const stepW = fontSize * 0.96;
+          const startX = pos.x - ((chars.length - 1) * stepW) * 0.5;
+          const baseY = my + tileSz * 0.42;
+          const labelAmp = reduced ? 0 : 1.1 + tempNorm * 2.4;
+
+          for (let ci = 0; ci < chars.length; ci++) {
+            const cxChar = startX + ci * stepW;
+            const cyChar = baseY + Math.sin(timeSec * 2.4 + ci * 0.85 + tile.x) * labelAmp;
+            if (!reduced && tempNorm > 0.35) {
+              ctx.fillStyle = rgbCss(origAccent, alpha * 0.34);
+              ctx.fillText(chars[ci], cxChar + ghostShift * 0.45, cyChar - ghostShift * 0.25);
+            }
+            ctx.fillStyle = isReunion
+              ? rgbCss(origAccent, alpha * 0.98)
+              : rgbCss(inkRgb, alpha * 0.94);
+            ctx.fillText(chars[ci], cxChar, cyChar);
+          }
           ctx.restore();
         }
       }
 
-      // 6. 足跡の記憶軌跡（歩いてきた数歩が背後に淡く光って消えていく）
+      // 7. 足跡の記憶軌跡（歩いてきた数歩が背後に淡く光って消えていく）
       trailRef.current = trailRef.current.filter((node) => now - node.atMs < 6500);
       if (trailRef.current.length >= 2) {
         ctx.save();
@@ -1498,7 +1902,7 @@ export default function DreamingClient() {
           const node = trailRef.current[i];
           const age = (now - node.atMs) / 6500;
           const a = Math.max(0, (1 - age) * 0.24);
-          const pos = worldToScreen(node.x, node.y, false);
+          const pos = warpWorldToScreen(node.x, node.y);
           ctx.fillStyle = rgbCss(inkRgb, a);
           ctx.beginPath();
           ctx.arc(pos.x, pos.y, tileSz * (0.065 * (1 - age * 0.4)), 0, Math.PI * 2);
@@ -1507,34 +1911,30 @@ export default function DreamingClient() {
         ctx.restore();
       }
 
-      // 7. 波紋エフェクト
+      // 8. 波紋エフェクト
       ripplesRef.current = ripplesRef.current.filter((rp) => {
         const t = (now - rp.startMs) / rp.durMs;
         if (t >= 1) return false;
-        const pos = worldToScreen(rp.wx, rp.wy, false);
+        const pos = warpWorldToScreen(rp.wx, rp.wy);
         const rad = (0.22 + rp.maxRadius * easeOutCubic(t)) * tileSz;
         ctx.save();
         ctx.globalAlpha = Math.max(0, Math.pow(1 - t, 1.4) * 0.72);
         ctx.strokeStyle = rp.color;
         ctx.lineWidth = 1.8 * (1 - t * 0.5);
-        ctx.beginPath();
-        ctx.arc(pos.x, pos.y, rad, 0, Math.PI * 2);
+        traceOrganicBlob(ctx, pos.x, pos.y, rad, rad * 0.96, timeSec * 1.8, rp.wx * 0.3 + rp.wy, 0.08 + tempNorm * 0.08, 12);
         ctx.stroke();
         ctx.restore();
         return true;
       });
 
-      // 8. プレイヤー（夢の中を漂う灯火・視線光錐・残響コンパス弧）
-      const pPos = worldToScreen(cam.px + cam.bumpX, cam.py + cam.bumpY, false);
+      // 9. プレイヤー（夢の中を漂う灯火・視線光錐・残響コンパス弧）
+      const pPos = warpWorldToScreen(cam.px + cam.bumpX, cam.py + cam.bumpY);
 
-      // 進行方向へそっと伸びる柔らかい視線の光錐
       ctx.save();
       ctx.globalCompositeOperation = "lighter";
-      const coneLen = tileSz * 3.1;
-      const gx = pPos.x + Math.cos(cam.facingAngle) * coneLen;
-      const gy = pPos.y + Math.sin(cam.facingAngle) * coneLen;
+      const coneLen = tileSz * 3.15;
       const coneGrad = ctx.createRadialGradient(pPos.x, pPos.y, 4, pPos.x, pPos.y, coneLen);
-      coneGrad.addColorStop(0, "rgba(244, 234, 212, 0.14)");
+      coneGrad.addColorStop(0, "rgba(244, 234, 212, 0.15)");
       coneGrad.addColorStop(1, "rgba(244, 234, 212, 0)");
       ctx.fillStyle = coneGrad;
       ctx.beginPath();
@@ -1543,30 +1943,26 @@ export default function DreamingClient() {
       ctx.closePath();
       ctx.fill();
 
-      // 周囲の霧を押し返す提灯のような柔光
-      const pHalo = ctx.createRadialGradient(pPos.x, pPos.y, 2, pPos.x, pPos.y, tileSz * 2.2);
-      pHalo.addColorStop(0, "rgba(246, 236, 212, 0.28)");
-      pHalo.addColorStop(0.45, rgbCss(accentRgb, 0.1));
+      const pHalo = ctx.createRadialGradient(pPos.x, pPos.y, 2, pPos.x, pPos.y, tileSz * 2.25);
+      pHalo.addColorStop(0, "rgba(246, 236, 212, 0.3)");
+      pHalo.addColorStop(0.45, rgbCss(accentRgb, 0.11));
       pHalo.addColorStop(1, "rgba(246, 236, 212, 0)");
       ctx.fillStyle = pHalo;
       ctx.beginPath();
-      ctx.arc(pPos.x, pPos.y, tileSz * 2.2, 0, Math.PI * 2);
+      ctx.arc(pPos.x, pPos.y, tileSz * 2.25, 0, Math.PI * 2);
       ctx.fill();
       ctx.restore();
-      void gx;
-      void gy;
 
-      // 最も近い変質モチーフ／裂け目の方向を示す控えめな弧
       const signal = findNearestSignal(s);
       if (signal) {
         const angle = Math.atan2(signal.dy, signal.dx);
         ctx.save();
         ctx.strokeStyle =
           signal.kind === "reunion"
-            ? "rgba(228, 194, 118, 0.85)"
+            ? "rgba(228, 194, 118, 0.86)"
             : signal.kind === "rift"
-              ? "rgba(156, 206, 224, 0.8)"
-              : rgbCss(accentRgb, 0.5);
+              ? "rgba(156, 206, 224, 0.82)"
+              : rgbCss(accentRgb, 0.52);
         ctx.lineWidth = 1.8;
         ctx.lineCap = "round";
         ctx.beginPath();
@@ -1575,25 +1971,50 @@ export default function DreamingClient() {
         ctx.restore();
       }
 
-      // 灯火のコア（呼吸する光球）
       const corePulse = reduced ? 1 : 1 + Math.sin(timeSec * 2.8) * 0.08;
       ctx.fillStyle = "#f5efe0";
       ctx.beginPath();
       ctx.arc(pPos.x, pPos.y, tileSz * 0.16 * corePulse, 0, Math.PI * 2);
       ctx.fill();
 
-      ctx.strokeStyle = rgbCss(accentRgb, 0.72);
+      ctx.strokeStyle = rgbCss(accentRgb, 0.74);
       ctx.lineWidth = 1.3;
-      ctx.beginPath();
-      ctx.arc(pPos.x, pPos.y, tileSz * 0.28 + (reduced ? 0 : Math.sin(timeSec * 2.4) * 1.4), 0, Math.PI * 2);
+      traceOrganicBlob(
+        ctx,
+        pPos.x,
+        pPos.y,
+        tileSz * 0.28,
+        tileSz * 0.28,
+        timeSec * 2.2,
+        1.7,
+        reduced ? 0 : 0.08 + tempNorm * 0.06,
+        10,
+      );
       ctx.stroke();
 
-      // 9. 舞い散る文字トークン粒子
+      if (tCtx && !reduced) {
+        tCtx.fillStyle = "rgba(245, 236, 214, 0.22)";
+        tCtx.beginPath();
+        tCtx.arc(pPos.x * 0.5, pPos.y * 0.5, tileSz * 0.16, 0, Math.PI * 2);
+        tCtx.fill();
+      }
+
+      // 10. 液状残像フィードバックバッファをスクリーン合成（ウニョウニョと光と幻影が尾を引く）
+      if (tCtx && !reduced) {
+        ctx.save();
+        ctx.globalCompositeOperation = "screen";
+        ctx.globalAlpha = 0.3 + tempNorm * 0.26;
+        ctx.imageSmoothingEnabled = true;
+        ctx.drawImage(trailCanvas, 0, 0, width, height);
+        ctx.restore();
+      }
+
+      // 11. 舞い散る文字トークン粒子
       particlesRef.current = particlesRef.current.filter((pt) => {
         const t = (now - pt.startMs) / pt.durMs;
         if (t >= 1) return false;
         const elapsed = (now - pt.startMs) / 1000;
-        const pos = worldToScreen(pt.wx + pt.vx * elapsed, pt.wy + pt.vy * elapsed, false);
+        const pos = warpWorldToScreen(pt.wx + pt.vx * elapsed, pt.wy + pt.vy * elapsed);
         ctx.save();
         ctx.globalAlpha = Math.max(0, Math.pow(1 - t, 1.3));
         ctx.fillStyle = pt.color;
@@ -1605,11 +2026,11 @@ export default function DreamingClient() {
         return true;
       });
 
-      // 10. 領域連動の環境パーティクル（商店街の雨・校舎の塵・草地の蛍・港の霧）
+      // 12. 領域連動の環境パーティクル（商店街の雨・校舎の光塵・草地の蛍・外縁の漂流仮名）
       if (!reduced) {
-        const rainW = s.domainWeights.arcade ?? 0;
-        const dustW = (s.domainWeights.school ?? 0) + (s.domainWeights.library ?? 0);
-        const fireflyW = s.domainWeights.meadow ?? 0;
+        const rainW = sw.arcade ?? 0;
+        const dustW = (sw.school ?? 0) + (sw.library ?? 0);
+        const fireflyW = sw.meadow ?? 0;
 
         ctx.save();
         for (const m of ambientMotesRef.current) {
@@ -1623,7 +2044,7 @@ export default function DreamingClient() {
             ctx.lineTo(m.x - 4.5, m.y + 15 * m.depth);
             ctx.stroke();
           } else {
-            m.x = (m.x + Math.sin(timeSec * 0.35 + m.phase) * 0.32 + m.speed * 0.18 + width) % width;
+            m.x = (m.x + Math.sin(timeSec * 0.35 + m.phase) * 0.35 + m.speed * 0.18 + width) % width;
             m.y = (m.y - m.speed * (0.14 + dustW * 0.1) + height) % height;
             const twinkle = 0.35 + 0.65 * Math.abs(Math.sin(timeSec * (0.8 + fireflyW * 1.4) + m.phase));
             const r = m.size * (fireflyW > 0.3 ? 1.25 : 1);
@@ -1637,26 +2058,26 @@ export default function DreamingClient() {
           }
         }
 
-        // 外縁の霧にぼんやり浮かぶ char-LM 断片文字（画面の端だけに控えめに漂う）
         const whisperChars = Array.from(s.whisper?.text ?? s.placeName);
         ctx.font = `400 17px "Shippori Mincho", "Hiragino Mincho ProN", serif`;
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
         for (let i = 0; i < mistGlyphsRef.current.length; i++) {
           const mg = mistGlyphsRef.current[i];
-          mg.x = (mg.x + mg.vx * 0.016 + width) % width;
-          mg.y = (mg.y + mg.vy * 0.016 + height) % height;
+          const fv = sampleFlowVelocity(mg.x, mg.y);
+          mg.x = (mg.x + (mg.vx * 0.014 + fv.x * 0.25) + width) % width;
+          mg.y = (mg.y + (mg.vy * 0.014 + fv.y * 0.25) + height) % height;
           const edgeDist = Math.hypot((mg.x - centerX) / (width * 0.5), (mg.y - centerY) / (height * 0.5));
-          if (edgeDist < 0.62) continue;
+          if (edgeDist < 0.6) continue;
           const ch = whisperChars.length > 0 ? whisperChars[i % whisperChars.length] : mg.char;
-          const gA = Math.min(0.16, (edgeDist - 0.62) * 0.28) * (0.55 + 0.45 * Math.sin(timeSec * 0.7 + mg.phase));
+          const gA = Math.min(0.18, (edgeDist - 0.6) * 0.3) * (0.55 + 0.45 * Math.sin(timeSec * 0.8 + mg.phase));
           ctx.fillStyle = rgbCss(inkRgb, gA);
           ctx.fillText(ch, mg.x, mg.y);
         }
         ctx.restore();
       }
 
-      // 11. 深度に応じてわずかに狭まる周辺霧ビネット（有限コンテキスト窓の体感）
+      // 13. 深度に応じてわずかに狭まる周辺霧ビネット（有限コンテキスト窓の体感）
       const depthTighten = Math.min(0.1, (s.depth - 1) * 0.014);
       const vig = ctx.createRadialGradient(
         centerX,
@@ -1667,12 +2088,12 @@ export default function DreamingClient() {
         Math.max(width, height) * 0.66,
       );
       vig.addColorStop(0, "rgba(0, 0, 0, 0)");
-      vig.addColorStop(0.7, rgbCss(fogRgb, 0.42));
+      vig.addColorStop(0.72, rgbCss(fogRgb, 0.4));
       vig.addColorStop(1, rgbCss(fogRgb, 0.92));
       ctx.fillStyle = vig;
       ctx.fillRect(0, 0, width, height);
 
-      // 12. 35mm フィルム微粒状テクスチャ
+      // 14. 35mm フィルム微粒状テクスチャ
       if (grainPattern) {
         ctx.save();
         ctx.globalAlpha = 0.22;
@@ -1681,7 +2102,7 @@ export default function DreamingClient() {
         ctx.restore();
       }
 
-      // 13. 画面タップ波紋フィードバック
+      // 15. 画面タップ波紋フィードバック
       tapRingsRef.current = tapRingsRef.current.filter((tr) => {
         const t = (now - tr.startMs) / tr.durMs;
         if (t >= 1) return false;
@@ -1695,7 +2116,7 @@ export default function DreamingClient() {
         return true;
       });
 
-      // 14. 潜行・転寝時の静かな霧フェード幕
+      // 16. 潜行・転寝時の静かな霧フェード幕
       if (cam.descendFlash > 0.01) {
         ctx.fillStyle = rgbCss(fogRgb, cam.descendFlash * 0.9);
         ctx.fillRect(0, 0, width, height);
@@ -1789,7 +2210,9 @@ export default function DreamingClient() {
             </svg>
           </Link>
           <div className="dreaming-place">
-            <span className="dreaming-place-name">{state.placeName}</span>
+            <span key={state.placeName} className="dreaming-place-name">
+              {state.placeName}
+            </span>
             <div className="dreaming-place-meta">
               <span className="dreaming-layer-tag">第{state.depth}層</span>
               <span className="dreaming-meta-sep" aria-hidden="true">
@@ -1943,7 +2366,7 @@ export default function DreamingClient() {
 
         {state.step < 2 && (
           <div className="dreaming-first-hint">
-            矢印 / WASD / スワイプで歩く · 振り返ると背後の記憶は静かに書き換わる
+            矢印 / WASD / スワイプで歩く · 佇んでいても夢は揺らぎ書き換わり続ける
           </div>
         )}
 

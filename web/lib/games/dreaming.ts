@@ -230,7 +230,8 @@ export type DreamEventKind =
   | "anchor_remove"
   | "pulse"
   | "descend"
-  | "temp";
+  | "temp"
+  | "drift";
 
 export type DreamEvent = {
   kind: DreamEventKind;
@@ -1370,6 +1371,133 @@ export function setDreamTemperature(state: DreamState, temperature: number): Dre
     dominantDomain: nextDom,
     bleedEntropy: nextEntropy,
     lastEvent: { kind: "temp", step: state.step, x: state.player.x, y: state.player.y },
+  };
+}
+
+/**
+ * リアルタイム自律夢遊ティック（立ち止まっていても夢がうねり・滲み・書き換わり続ける）。
+ * - 小型 LSTM を微細な自律波動入力で 1 ステップ揺らし、領域確率分布を連続漂流させる
+ * - 非アンカー保護・非プレイヤー足元の周辺タイルを 1〜3 マス局所再サンプルし、空間をリアルタイム変容させる
+ * - 高温時や領域移り変わり時に地名・未採集モチーフ名も文字 n-gram で微かに揺らぐ
+ * プレイヤーの歩数（step）やアンカー保護域は一切変えない。
+ */
+export function driftDreamTick(state: DreamState): DreamState {
+  const { rng, nextTick } = nextStepRng(state.seed, state.rngTick);
+  const { x: px, y: py } = state.player;
+  const temp = state.temperature;
+
+  // 1. 隠れ状態へ微かな自律ゆらぎ入力を与え、立ち止まっていても潜在空間が漂い続ける
+  const waveScale = 0.14 + Math.max(0, temp - 0.5) * 0.22;
+  const phase = state.rnn.steps * 0.37;
+  const driftInput = new Array<number>(8);
+  for (let i = 0; i < 6; i++) {
+    const gentleWave = Math.sin(phase + i * 1.15) * 0.45 + (rng() - 0.48) * 0.9;
+    driftInput[i] = gentleWave * waveScale;
+  }
+  driftInput[6] = (rng() - 0.5) * waveScale * 0.8;
+  driftInput[7] = (state.bleedEntropy - 0.5) * 0.25 + (rng() - 0.5) * waveScale;
+
+  const nextRnn = stepRnn(state.rnn, driftInput, state.depth, temp);
+  const nextWeights = domainProbsFromRnn(nextRnn, temp);
+  const nextDom = dominantDomainOf(nextWeights);
+  const nextEntropy = normalizedEntropy(DOMAIN_IDS.map((d) => nextWeights[d]));
+
+  // 2. タイルを浅く複製し、視界内の非アンカー周辺タイルを 1〜3 マス確率再サンプルして空間をうねらせる
+  const nextTiles = new Map<string, DreamTile>();
+  for (const [k, v] of state.tiles) {
+    nextTiles.set(k, { ...v, motif: v.motif ? { ...v.motif } : null });
+  }
+
+  const candidates: DreamTile[] = [];
+  const motifCandidates: DreamTile[] = [];
+  for (const tile of nextTiles.values()) {
+    const dist = chebyshev(px, py, tile.x, tile.y);
+    if (dist < 2 || dist > VIEW_RADIUS) continue;
+    if (isProtectedByAnchor(tile.x, tile.y, state.anchors)) continue;
+    if (tile.motif) {
+      motifCandidates.push(tile);
+      continue;
+    }
+    if (tile.kind === "rift") continue;
+    candidates.push(tile);
+  }
+
+  const morphBudget = temp >= 1.3 ? 3 : temp >= 0.78 ? 2 : 1;
+  const hasRift = hasNearbyRift(px, py, nextTiles, VIEW_RADIUS);
+
+  for (let m = 0; m < morphBudget && candidates.length > 0; m++) {
+    const idx = Math.floor(rng() * candidates.length);
+    const target = candidates.splice(idx, 1)[0];
+    const shock = computeBoundaryShock(target.x, target.y, nextDom, nextTiles, state.anchors);
+    const resampled = sampleNextTile(
+      nextWeights,
+      {
+        north: nextTiles.get(tileKey(target.x, target.y - 1))?.kind,
+        south: nextTiles.get(tileKey(target.x, target.y + 1))?.kind,
+        east: nextTiles.get(tileKey(target.x + 1, target.y))?.kind,
+        west: nextTiles.get(tileKey(target.x - 1, target.y))?.kind,
+        boundaryShock: shock,
+        bleedEntropy: nextEntropy,
+        stepsSinceDescend: state.stepsSinceDescend,
+        hasNearbyRift: hasRift || chebyshev(px, py, target.x, target.y) <= 2,
+      },
+      temp,
+      rng,
+    );
+    target.kind = resampled;
+    target.domain = nextDom;
+    target.domainBlend = { ...nextWeights };
+    target.glyph = sampleGlyph(nextWeights, temp, rng);
+    target.bleedShock = shock;
+    target.memory = Math.max(0.55, Math.min(1, target.memory));
+  }
+
+  // 3. 高温時または領域変遷時、未採集モチーフ名や地名が文字 n-gram でじわっと揺らぐ
+  const models = getDreamLanguageModels();
+  if (motifCandidates.length > 0 && rng() < Math.max(0.05, (temp - 0.72) * 0.28)) {
+    const mt = motifCandidates[Math.floor(rng() * motifCandidates.length)];
+    if (mt.motif) {
+      mt.motif = {
+        ...mt.motif,
+        name: mutateDreamName(models, nextWeights, mt.motif.name, mt.motif.generation, temp, rng),
+        domain: nextDom,
+      };
+    }
+  }
+
+  const domainShifted = nextDom !== state.dominantDomain;
+  let nextPlaceName = state.placeName;
+  let nextWhisper = state.whisper;
+
+  if (domainShifted || (temp >= 1.18 && rng() < 0.24)) {
+    nextPlaceName = mutateDreamName(
+      models,
+      nextWeights,
+      state.placeName,
+      domainShifted ? 2 : 1,
+      temp,
+      rng,
+    );
+  }
+  if (domainShifted) {
+    nextWhisper = {
+      text: generateDreamFragment(models, nextWeights, temp, rng),
+      sub: `佇むうちに「${DOMAIN_PALETTES[nextDom].label}」へ滲んでいく — ${nextPlaceName}`,
+      step: state.step,
+    };
+  }
+
+  return {
+    ...state,
+    rngTick: nextTick,
+    rnn: nextRnn,
+    domainWeights: nextWeights,
+    dominantDomain: nextDom,
+    bleedEntropy: nextEntropy,
+    placeName: nextPlaceName,
+    tiles: nextTiles,
+    whisper: nextWhisper,
+    lastEvent: { kind: "drift", step: state.step, x: px, y: py },
   };
 }
 
