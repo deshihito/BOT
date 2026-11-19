@@ -26,8 +26,6 @@ from discord.ext import commands
 logger = logging.getLogger("cogs.commentgacha")
 TRIGGER_PHRASE = "コメントガチャ"
 WEBHOOK_NAME = "AGOBOT-CommentGacha"
-# チャンネル単位の連打防止（取得自体は軽いが、再投稿の頻度を抑える）。
-COOLDOWN_SECONDS = 60
 # ランダムIDの直後から候補を探す範囲と、候補が無い場合の引き直し回数。
 DRAW_WINDOW = 50
 DRAW_ATTEMPTS = 3
@@ -117,10 +115,8 @@ async def draw_random_message(channel: Any, *, exclude_id: Any) -> Any | None:
 
 
 class CommentGachaCog(commands.Cog):
-    def __init__(self, bot: commands.Bot, clock=time.monotonic):
+    def __init__(self, bot: commands.Bot):
         self.bot = bot
-        self.clock = clock
-        self._last_drawn: dict[int, float] = {}
         self._locks: dict[int, asyncio.Lock] = {}
         self._webhooks: dict[int, Any] = {}
 
@@ -137,10 +133,6 @@ class CommentGachaCog(commands.Cog):
         if lock.locked():
             return
         async with lock:
-            now = self.clock()
-            if now - self._last_drawn.get(channel_id, float("-inf")) < COOLDOWN_SECONDS:
-                return
-            self._last_drawn[channel_id] = now
             await self._draw(message)
 
     async def _draw(self, trigger_message: discord.Message):

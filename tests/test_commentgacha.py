@@ -92,8 +92,8 @@ class FakeMessage:
 
 
 class CommentGachaCogTest(unittest.IsolatedAsyncioTestCase):
-    def make_cog(self, clock=lambda: 1000.0):
-        return CommentGachaCog(types.SimpleNamespace(), clock=clock)
+    def make_cog(self):
+        return CommentGachaCog(types.SimpleNamespace())
 
     def test_registered_in_general_entry(self):
         import cogs.general
@@ -146,12 +146,13 @@ class CommentGachaCogTest(unittest.IsolatedAsyncioTestCase):
         await cog.on_message(FakeMessage(channel=channel))
         channel.create_webhook.assert_not_awaited()
 
-    async def test_cooldown_blocks_second_draw(self):
+    async def test_second_draw_also_reposts(self):
+        # クールダウンは無い（連打しても毎回引ける）。
         channel = FakeChannel([hist_message(7, "昔の名言")])
         cog = self.make_cog()
         await cog.on_message(FakeMessage(channel=channel))
         await cog.on_message(FakeMessage(channel=channel))
-        channel.webhook.send.assert_awaited_once()
+        self.assertEqual(channel.webhook.send.await_count, 2)
 
     async def test_without_webhook_permission_no_repost(self):
         channel = FakeChannel([hist_message(7, "昔の名言")], manage_webhooks=False)
