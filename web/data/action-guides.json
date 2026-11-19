@@ -1,11 +1,11 @@
 {
   "version": 1,
-  "total": 256,
+  "total": 257,
   "counts": {
     "general": 75,
     "vc": 47,
     "game": 48,
-    "support": 85,
+    "support": 86,
     "help": 1
   },
   "game_count": 47,
@@ -1565,6 +1565,12 @@
               "value": "assist_customreplies",
               "title": "カスタム返信",
               "description": "言葉に反応して、Botが返信・リアクション・ロール付与をします。"
+            },
+            {
+              "id": "support:assist_commentgacha",
+              "value": "assist_commentgacha",
+              "title": "コメントガチャ",
+              "description": "言葉に反応して、そのチャンネルの過去の発言から1件をランダムに再投稿します。"
             },
             {
               "id": "support:assist_shiritori_resident",

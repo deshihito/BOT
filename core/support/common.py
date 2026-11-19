@@ -155,6 +155,7 @@ SUPPORT_ACTIONS = [
     app_commands.Choice(name="リアクションロール", value="assist_reactionroles"),
     app_commands.Choice(name="ロール復元", value="assist_stickyroles"),
     app_commands.Choice(name="カスタム返信", value="assist_customreplies"),
+    app_commands.Choice(name="コメントガチャ", value="assist_commentgacha"),
     app_commands.Choice(name="常駐しりとり", value="assist_shiritori_resident"),
     app_commands.Choice(name="Luna AI", value="assist_luna_ai"),
     app_commands.Choice(name="応募フォーム", value="assist_applications"),
@@ -220,7 +221,7 @@ SUPPORT_ACTIONS_BY_GENRE = {
         "assist_serverlog", "assist_invites",
     ),
     # 自動化・通知は36件ありセレクト上限（25件）を超えて2ページ化していたため、
-    # 導線最適化 U2 で通知系14件を "notices" へ分離し、自動化22件・通知14件の
+    # 導線最適化 U2 で通知系14件を "notices" へ分離し、自動化23件・通知14件の
     # 1ページ構成にした。assist_warning_escalation / assist_application_review は、
     # 元機能（警告・応募フォーム）が moderation 側にあるが、preset 入口は
     # 「自動化」の分割としてここに置く。
@@ -230,7 +231,7 @@ SUPPORT_ACTIONS_BY_GENRE = {
         "assist_polls", "assist_autothread", "assist_stats", "assist_embed", "assist_embed_templates",
         "assist_webhook",
         "assist_timed", "assist_reminder", "assist_autoreact", "assist_events", "assist_events_link",
-        "assist_customreplies",
+        "assist_customreplies", "assist_commentgacha",
         "assist_shiritori_resident", "assist_luna_ai", "assist_warning_escalation", "assist_application_review",
     ),
     "notices": _support_actions(
