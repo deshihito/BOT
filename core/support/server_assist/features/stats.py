@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from typing import Any
 
 import discord
@@ -16,6 +17,14 @@ logger = logging.getLogger(__name__)
 
 KEY = "stats"
 INTERVAL_SECONDS = 600
+# Discord のチャンネル名変更は同一チャンネルにつき10分に2回まで。
+# 超えると 429（retry_after 約600秒）が返り、discord.py が呼び出しの内側で
+# 寝てリトライするため、定期ループごと長時間止まってしまう。
+# 改名間隔をコード側で10分以上に保証し（前回改名時刻は設定ストアに残して
+# 再起動をまたいでも効かせる）、踏んでしまった場合も EDIT_TIMEOUT で
+# その周期は諦める。
+MIN_RENAME_INTERVAL_SECONDS = 600
+EDIT_TIMEOUT_SECONDS = 20
 
 FEATURE = Feature(
     key=KEY,
@@ -52,11 +61,28 @@ def _counts(guild: Any) -> dict[str, int]:
     return {"member": member_count, "online": online, "boost": int(boosts)}
 
 
-async def update_stats(guild: Any, current: dict[str, Any]) -> None:
+def _as_epoch(value: Any) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return 0.0
+    return float(value)
+
+
+def _last_renames(guild_id: int) -> dict[str, float]:
+    raw = get_settings(guild_id, KEY)
+    return {
+        name: _as_epoch(raw.get(f"last_rename_{name}"))
+        for name in ("member", "online", "boost")
+    }
+
+
+async def update_stats(guild: Any, current: dict[str, Any], *, force: bool = False) -> None:
     if not current["enabled"]:
         return
+    guild_id = getattr(guild, "id", None)
     counts = _counts(guild)
     labels = {"member": "メンバー", "online": "オンライン", "boost": "ブースト"}
+    last_renames = _last_renames(guild_id) if isinstance(guild_id, int) else {}
+    now = time.time()
     for key, label in labels.items():
         channel_id = current.get(f"{key}_channel_id")
         channel = guild.get_channel(channel_id) if channel_id else None
@@ -65,10 +91,26 @@ async def update_stats(guild: Any, current: dict[str, Any]) -> None:
         name = f"{label}: {counts[key]}"
         if getattr(channel, "name", None) == name:
             continue
+        if not force and now - last_renames.get(key, 0.0) < MIN_RENAME_INTERVAL_SECONDS:
+            # 前回の改名から10分経っていない。Discord の上限（10分に2回）を
+            # 踏まないよう、この周期は見送る。
+            continue
+        if isinstance(guild_id, int):
+            # 試行自体を先に記録する（失敗・429でも間隔は空ける）。
+            try:
+                await update_settings(guild_id, KEY, **{f"last_rename_{key}": now})
+            except Exception:
+                logger.debug("サーバースタッツの改名時刻を記録できませんでした: guild=%s", guild_id)
         try:
-            await channel.edit(name=name, reason="Server stats")
+            await asyncio.wait_for(
+                channel.edit(name=name, reason="Server stats"),
+                timeout=EDIT_TIMEOUT_SECONDS,
+            )
+        except TimeoutError:
+            # 429 の retry_after 待ちなどで edit がぶら下がった場合は諦める。
+            logger.debug("サーバースタッツの更新がタイムアウトしました: guild=%s channel=%s", guild_id, channel_id)
         except (discord.Forbidden, discord.HTTPException):
-            logger.debug("サーバースタッツを更新できませんでした: guild=%s channel=%s", getattr(guild, "id", None), channel_id)
+            logger.debug("サーバースタッツを更新できませんでした: guild=%s channel=%s", guild_id, channel_id)
 
 
 async def _runner(cog: Any) -> None:
@@ -102,7 +144,7 @@ class StatsRefreshButton(discord.ui.Button):
             return await interaction.response.send_message(
                 "先にサーバースタッツをオンにしてください。", ephemeral=True,
             )
-        await update_stats(interaction.guild, view.settings)
+        await update_stats(interaction.guild, view.settings, force=True)
         return await interaction.response.send_message("スタッツを更新しました。")
 
 
