@@ -22,10 +22,15 @@ from core.support import command_control
 from core.support import guild_settings  # noqa: E402
 from core.support.command_control import (  # noqa: E402
     COMMAND_CONTROL_SECTION,
+    COMMENTGACHA_ACTION_ID,
+    IMAKITA_ACTION_ID,
+    MESSAGE_ONLY_ACTION_LABELS,
+    OMIKUJI_ACTION_ID,
     RateCounter,
     check,
     get_settings,
     guard,
+    guard_message,
     is_manager,
     mode_blocks,
     normalize_settings,
@@ -214,6 +219,61 @@ class GuardTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(await guard(interaction, "general:pay"))
 
 
+def fake_message(guild_id=42, user=None):
+    return types.SimpleNamespace(
+        guild=None if guild_id is None else types.SimpleNamespace(id=guild_id),
+        author=user or fake_user(),
+        content="今北産業",
+    )
+
+
+class GuardMessageTest(unittest.IsolatedAsyncioTestCase):
+    """メッセージ発動機能（今北産業／コメントガチャ／おみくじ）用のガード。"""
+
+    async def asyncSetUp(self):
+        self.store = make_store()
+        guild_settings.set_store(self.store)
+
+    async def asyncTearDown(self):
+        guild_settings.set_store(None)
+
+    async def test_default_allows(self):
+        self.assertTrue(await guard_message(fake_message(), IMAKITA_ACTION_ID))
+
+    async def test_deny_blocks_each_message_trigger(self):
+        await self.store.update(42, COMMAND_CONTROL_SECTION, mode="deny",
+                                actions=[IMAKITA_ACTION_ID, COMMENTGACHA_ACTION_ID,
+                                         OMIKUJI_ACTION_ID],
+                                rates={})
+        for action_id in (IMAKITA_ACTION_ID, COMMENTGACHA_ACTION_ID, OMIKUJI_ACTION_ID):
+            with self.subTest(action_id=action_id):
+                self.assertFalse(await guard_message(fake_message(), action_id))
+
+    async def test_allow_mode_blocks_unlisted_message_trigger(self):
+        await self.store.update(42, COMMAND_CONTROL_SECTION, mode="allow",
+                                actions=[IMAKITA_ACTION_ID], rates={})
+        self.assertTrue(await guard_message(fake_message(), IMAKITA_ACTION_ID))
+        self.assertFalse(await guard_message(fake_message(), COMMENTGACHA_ACTION_ID))
+
+    async def test_manager_not_blocked(self):
+        await self.store.update(42, COMMAND_CONTROL_SECTION, mode="deny",
+                                actions=[IMAKITA_ACTION_ID], rates={})
+        message = fake_message(user=fake_user(manage_guild=True))
+        self.assertTrue(await guard_message(message, IMAKITA_ACTION_ID))
+
+    async def test_dm_allows(self):
+        await self.store.update(42, COMMAND_CONTROL_SECTION, mode="deny",
+                                actions=[IMAKITA_ACTION_ID], rates={})
+        self.assertTrue(await guard_message(fake_message(guild_id=None), IMAKITA_ACTION_ID))
+
+    async def test_rate_blocks_second_trigger(self):
+        await self.store.update(4242, COMMAND_CONTROL_SECTION, mode="off", actions=[],
+                                rates={IMAKITA_ACTION_ID: {"count": 1, "window_seconds": 600}})
+        message = fake_message(guild_id=4242, user=fake_user(user_id=777))
+        self.assertTrue(await guard_message(message, IMAKITA_ACTION_ID))
+        self.assertFalse(await guard_message(message, IMAKITA_ACTION_ID))
+
+
 class PanelTest(unittest.TestCase):
     def test_panel_builds_and_picker_excludes_self(self):
         from core.support.bot_fixer import BotFixerPanel, _actions_of_root
@@ -225,6 +285,29 @@ class PanelTest(unittest.TestCase):
         self.assertIn("support:clear", values)
         # game ルートは25件を超えるのでページング前提の一覧が返る
         self.assertGreater(len(_actions_of_root("game")), 25)
+
+    def test_message_triggers_listed_under_general(self):
+        from core.support.bot_fixer import _action_labels, _actions_of_root
+
+        general_ids = [spec.id for spec in _actions_of_root("general")]
+        # メッセージ発動の3機能がフィクサーの対象リストに入る
+        self.assertIn(IMAKITA_ACTION_ID, general_ids)
+        self.assertIn(COMMENTGACHA_ACTION_ID, general_ids)
+        self.assertIn(OMIKUJI_ACTION_ID, general_ids)
+        labels = _action_labels()
+        self.assertEqual(labels[IMAKITA_ACTION_ID], "今北産業")
+        self.assertEqual(labels[COMMENTGACHA_ACTION_ID], "コメントガチャ")
+        self.assertEqual(set(MESSAGE_ONLY_ACTION_LABELS),
+                         {IMAKITA_ACTION_ID, COMMENTGACHA_ACTION_ID})
+
+    def test_message_only_actions_not_in_registry(self):
+        # レジストリには載せない（ショートカット／AI tools の候補に混ぜない）
+        from core.general import action_registry
+
+        registry = action_registry.default_registry()
+        self.assertNotIn(IMAKITA_ACTION_ID, registry)
+        self.assertNotIn(COMMENTGACHA_ACTION_ID, registry)
+        self.assertIn(OMIKUJI_ACTION_ID, registry)
 
 
 class RegistryTest(unittest.TestCase):

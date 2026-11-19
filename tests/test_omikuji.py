@@ -277,6 +277,15 @@ class TriggerTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(replies), 1)
         self.assertIn("file", replies[0])
 
+    async def test_bot_fixer_blocked_guild_does_not_trigger(self):
+        message, replies = _fake_message()
+        with mock.patch("core.general.omikuji.cog.command_control.guard_message",
+                        new=mock.AsyncMock(return_value=False)) as guard:
+            await self._dispatch(message)
+        guard.assert_awaited_once()
+        self.assertEqual(guard.await_args.args[1], "general:omikuji")
+        self.assertEqual(replies, [])
+
     async def test_non_ja_guild_does_not_trigger(self):
         message, replies = _fake_message()
         await self._dispatch(message, locale="en")

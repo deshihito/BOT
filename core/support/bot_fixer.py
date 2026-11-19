@@ -14,6 +14,7 @@ from core.support.bot_control import BOT_CONTROL_SECTION
 from core.support.messages import MANAGE_GUILD_REQUIRED, SETTINGS_UPDATE_FAILED
 from core.support.command_control import (
     COMMAND_CONTROL_SECTION,
+    MESSAGE_ONLY_ACTION_LABELS,
     MODE_ALLOW,
     MODE_DENY,
     MODE_LABELS,
@@ -33,7 +34,27 @@ def _action_labels() -> dict[str, str]:
     global _label_cache
     if _label_cache is None:
         _label_cache = {spec.id: spec.label for spec in action_registry.default_registry().all()}
+        # レジストリに無いメッセージ専用アクション（今北産業／コメントガチャ）
+        # のラベルも、状態表示で ID のまま出ないようここで足す。
+        _label_cache.update(MESSAGE_ONLY_ACTION_LABELS)
     return _label_cache
+
+
+def _message_only_specs() -> list:
+    """レジストリに無いメッセージ発動機能を、フィクサー一覧用の spec で返す。
+
+    レジストリ自体には登録しない（ショートカットや AI tools の候補に
+    混ぜない）。一覧表示と選択に必要な形だけをここで組み立てる。
+    """
+    return [
+        action_registry.make_action(
+            "general", action_id.split(":", 1)[1], label,
+            "message_trigger", "メッセージ発動",
+            description="メッセージをきっかけに発動する機能",
+            surfaces=frozenset({"panel"}),
+        )
+        for action_id, label in MESSAGE_ONLY_ACTION_LABELS.items()
+    ]
 
 
 def _actions_of_root(root: str) -> list:
@@ -41,6 +62,8 @@ def _actions_of_root(root: str) -> list:
         spec for spec in action_registry.default_registry().by_root(root)
         if spec.id not in SELF_ACTION_IDS
     ]
+    if root == "general":
+        specs = specs + _message_only_specs()
     return specs
 
 

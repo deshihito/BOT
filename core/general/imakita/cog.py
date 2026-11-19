@@ -1,4 +1,8 @@
-"""「今北産業」の投稿に反応して、直近の会話を短く要約する機能。"""
+"""「今北産業」の投稿に反応して、直近の会話を短く要約する機能。
+
+BOT fixer のコマンド制限の対象（アクションIDは general:imakita）。
+制限されているサーバーでは無言で発動しない。
+"""
 from __future__ import annotations
 
 import asyncio
@@ -9,6 +13,7 @@ import time
 import discord
 from discord.ext import commands
 from groq import APIStatusError, AsyncGroq, RateLimitError
+from core.support import command_control
 from core.support.localization.localization import guild_locale
 
 logger = logging.getLogger("cogs.imakita")
@@ -40,6 +45,9 @@ class ImakitaSummaryCog(commands.Cog):
         if getattr(getattr(message, "author", None), "bot", False):
             return
         if TRIGGER_PHRASE not in (getattr(message, "content", "") or ""):
+            return
+        # BOT fixer のコマンド制限（制限中は無言で発動しない）。
+        if not await command_control.guard_message(message, command_control.IMAKITA_ACTION_ID):
             return
         # 要約プロンプトと返信は日本語固定のため、英語など別言語のサーバーでは
         # 実行しない。guild属性のないテスト/DM相当のメッセージは従来どおり扱う。

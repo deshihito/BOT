@@ -141,6 +141,16 @@ class CommentGachaCogTest(unittest.IsolatedAsyncioTestCase):
         await cog.on_message(message)
         channel.webhook.send.assert_awaited_once()
 
+    async def test_bot_fixer_blocked_guild_does_not_repost(self):
+        channel = FakeChannel([hist_message(7, "昔の名言")])
+        cog = self.make_cog()
+        with patch("core.general.commentgacha.cog.command_control.guard_message",
+                   new=AsyncMock(return_value=False)) as guard:
+            await cog.on_message(FakeMessage(channel=channel))
+        guard.assert_awaited_once()
+        self.assertEqual(guard.await_args.args[1], "general:commentgacha")
+        channel.create_webhook.assert_not_awaited()
+
     async def test_no_trigger_no_repost(self):
         channel = FakeChannel([hist_message(7, "昔の名言")])
         cog = self.make_cog()
