@@ -89,6 +89,11 @@ const server = await loadBundle(
     "listPvpRivals",
     "startPvpBattle",
     "battleAutoStep",
+    "craftRelic",
+    "equipRelics",
+    "tuneCardTrait",
+    "tuneCardSkill2",
+    "parseGrowBody",
   ],
   PREFIX,
 );
@@ -475,4 +480,58 @@ test("深淵の試練 & 模擬PvP & オート進行", async () => {
   assert.equal(pvpCur.phase, "finished");
   assert.ok(latestProfile);
 });
+
+test("遺物鍛造・2枠装備・カード調律（特性/技2）・地脈とバースト契約", async () => {
+  const { token, profile } = await server.getOrCreateProfile(null);
+  // 鍛造＆調律に必要なリソースを補充（テスト用メモリ正本）
+  profile.shards += 200;
+  profile.lumen += 800;
+
+  // 遺物を3つ鍛造して、最大2枠装備・未所持/3枠拒否を検証
+  const c1 = await server.craftRelic(token, "relic_aegis");
+  assert.ok(c1.profile.unlockedRelics.includes("relic_aegis"));
+  await assert.rejects(() => server.craftRelic(token, "relic_aegis"), server.LllError);
+  await server.craftRelic(token, "relic_chronometer");
+  await server.craftRelic(token, "relic_ember_core");
+
+  await assert.rejects(
+    () => server.equipRelics(token, ["relic_aegis", "relic_chronometer", "relic_ember_core"]),
+    server.LllError,
+  );
+  await assert.rejects(() => server.equipRelics(token, ["relic_vampire_fang"]), server.LllError);
+  const eq = await server.equipRelics(token, ["relic_aegis", "relic_chronometer"]);
+  assert.deepEqual(eq.profile.equippedRelics, ["relic_aegis", "relic_chronometer"]);
+
+  // 特性調律＆技2調律
+  const card = eq.profile.cards[0];
+  const nextTrait = card.trait.kind === "focus" ? "haste" : "focus";
+  const tunedTrait = await server.tuneCardTrait(token, card.id, nextTrait);
+  assert.equal(tunedTrait.card.trait.kind, nextTrait);
+  await assert.rejects(() => server.tuneCardTrait(token, card.id, nextTrait), server.LllError);
+
+  const nextSkill2 = card.skills[1].kind === "burn" ? "guard_break" : "burn";
+  const tunedSkill = await server.tuneCardSkill2(token, card.id, nextSkill2);
+  assert.equal(tunedSkill.card.skills[1].kind, nextSkill2);
+  await assert.rejects(() => server.tuneCardSkill2(token, card.id, nextSkill2), server.LllError);
+
+  // parseGrowBody & parsePlayerAction burst 契約
+  assert.equal(server.parseGrowBody({ token, action: "craftRelic", relicId: "relic_aegis" }).action, "craftRelic");
+  assert.equal(server.parseGrowBody({ token, action: "equipRelics", relicIds: ["relic_aegis"] }).action, "equipRelics");
+  assert.equal(server.parseGrowBody({ token, action: "tuneTrait", cardId: card.id, traitKind: "guard" }).action, "tuneTrait");
+  assert.equal(server.parseGrowBody({ token, action: "tuneSkill2", cardId: card.id, skillKind: "heal" }).action, "tuneSkill2");
+  assert.deepEqual(server.parsePlayerAction({ skill: "burst", targetKey: "cpu_0" }), {
+    skill: "burst",
+    targetKey: "cpu_0",
+  });
+
+  // バトル開始時に fieldId・resonance・relics・burst が正しく伝播する
+  const started = await server.startBattle(token, 0);
+  assert.equal(started.battle.fieldId, "neutral");
+  assert.ok(started.battle.resonance?.player?.id);
+  assert.deepEqual(started.battle.relics?.player, ["relic_aegis", "relic_chronometer"]);
+  assert.equal(typeof started.battle.burst?.player, "number");
+  assert.equal(started.battle.tactics.player.tp, 6);
+  assert.equal(started.battle.tactics.player.hand.length, 5);
+});
+
 

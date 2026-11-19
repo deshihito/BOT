@@ -4,6 +4,7 @@
 // 呼び出し側で LllCardView に正規化してから渡す。比率は常に 5:7、
 // 枠はティア（normal=マット / elite=光沢+紫縁 / legend=金箔）で変わる。
 import type { CSSProperties, PointerEventHandler, ReactNode } from "react";
+import { IconBolt, IconLock, IconStar } from "./LllIcons";
 
 export type LllElement = "fire" | "water" | "wind" | "earth" | "light" | "dark";
 export type LllTier = "normal" | "elite" | "legend";
@@ -49,6 +50,8 @@ export type LllCardView = {
   alive?: boolean;
   /** ダメージ予測ラベル（対象選択中にカードへ重ねて表示）。 */
   forecastLabel?: string | null;
+  /** 対象選択中に誘発する属性反応名。 */
+  reactionLabel?: string | null;
 };
 
 export const ELEMENT_LABEL: Record<LllElement, string> = {
@@ -174,7 +177,7 @@ export default function LllCard({
           {view.name}
           {lb > 0 && (
             <span className="lll-lb-stars" aria-label={`限界突破+${lb}`}>
-              {"★".repeat(lb)}
+              +{lb}
             </span>
           )}
         </span>
@@ -186,19 +189,32 @@ export default function LllCard({
           <img className="lll-card-img" src={view.imageDataUrl} alt="" draggable={false} />
         ) : (
           <span className="lll-card-glyph" aria-hidden="true">
-            {view.glyph ?? "✦"}
+            {view.glyph ?? ELEMENT_LABEL[view.element]}
           </span>
         )}
         <span className={`lll-element lll-element-${view.element}`}>{ELEMENT_LABEL[view.element] ?? view.element}</span>
         {(view.favorite || view.locked || view.awakened) && (
           <span className="lll-card-icons">
-            {view.favorite && <span title="お気に入り">♥</span>}
-            {view.locked && <span title="保護中">🔒</span>}
-            {view.awakened && <span title="覚醒済み">✦</span>}
+            {view.favorite && (
+              <span title="お気に入り">
+                <IconStar size={11} />
+              </span>
+            )}
+            {view.locked && (
+              <span title="保護中">
+                <IconLock size={11} />
+              </span>
+            )}
+            {view.awakened && (
+              <span title="覚醒済み">
+                <IconBolt size={11} />
+              </span>
+            )}
           </span>
         )}
         {view.shield !== undefined && view.shield > 0 && <span className="lll-shield-badge">盾{view.shield}</span>}
         {view.defending && <span className="lll-shield-badge lll-defend-badge">防御中</span>}
+        {view.reactionLabel && <span className="lll-reaction-badge">反応：{view.reactionLabel}</span>}
         {view.forecastLabel && <span className="lll-forecast-badge">{view.forecastLabel}</span>}
       </div>
       {view.hpBar ? (
@@ -239,12 +255,12 @@ export default function LllCard({
           })}
           {view.trait && (
             <li className="lll-trait">
-              <span className="lll-skill-name">✦{view.trait.name}</span>
+              <span className="lll-skill-name">特性：{view.trait.name}</span>
             </li>
           )}
         </ul>
       )}
-      {size === "sm" && view.trait && <div className="lll-trait-sm">✦{view.trait.name}</div>}
+      {size === "sm" && view.trait && <div className="lll-trait-sm">{view.trait.name}</div>}
       {view.statuses && view.statuses.length > 0 && (
         <div className="lll-statuses">
           {view.statuses.map((s, i) => (

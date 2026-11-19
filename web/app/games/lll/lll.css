@@ -1,27 +1,318 @@
-/* LLL ソシャゲ化＋3D対応 追加スタイルシート */
+/* LLL 独立フルビューポートシェル・ホームハブ・拡張ギミック専用スタイルシート */
+/* カラー設計: 黒曜スレート（#0e1014 / #15181f / #1c2029）× アンティーク真鍮（#d4a24c）× スチールブルー（#5b9bd5） */
 
-/* --- ホログラム箔・限界突破・予兆バッジ --- */
+/* --- フルビューポートシェル & 独立トップバー --- */
+.lll-shell {
+  min-height: 100dvh;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--lll-bg);
+  color: var(--lll-text);
+}
+
+.lll-appbar {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  width: 100%;
+  border-bottom: 1px solid var(--lll-line);
+  background: rgba(14, 16, 20, 0.94);
+  backdrop-filter: blur(8px);
+}
+.lll-appbar-inner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 16px;
+  width: min(1380px, 100%);
+  min-height: 54px;
+  margin: 0 auto;
+  padding: 8px 24px;
+}
+.lll-appbar-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.lll-back-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 10px;
+  border: 1px solid var(--lll-line);
+  border-radius: 6px;
+  color: var(--lll-muted);
+  font-size: 12px;
+  font-weight: 700;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: color var(--lll-dur) var(--lll-ease), border-color var(--lll-dur), background var(--lll-dur);
+}
+.lll-back-link:hover {
+  color: var(--lll-text);
+  border-color: var(--lll-line-strong);
+  background: var(--lll-surface-2);
+}
+.lll-brand-btn {
+  padding: 3px 10px;
+  border: 1px solid rgba(212, 162, 76, 0.42);
+  border-radius: 6px;
+  background: rgba(212, 162, 76, 0.1);
+  color: var(--lll-accent-soft);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 900;
+  letter-spacing: 0.2em;
+  cursor: pointer;
+}
+.lll-player-pill {
+  padding: 4px 10px;
+  border: 1px solid var(--lll-line);
+  border-radius: 6px;
+  background: var(--lll-surface);
+  color: var(--lll-text);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+  max-width: 148px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.lll-player-pill:hover {
+  border-color: var(--lll-line-strong);
+}
+.lll-name-form {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.lll-name-input {
+  width: 132px;
+  padding: 4px 8px;
+  border: 1px solid var(--lll-accent);
+  border-radius: 6px;
+  background: var(--lll-surface-2);
+  color: var(--lll-text);
+  font: inherit;
+  font-size: 12px;
+}
+
+.lll-appbar-nav {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.lll-nav-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--lll-muted);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color var(--lll-dur) var(--lll-ease), background var(--lll-dur), border-color var(--lll-dur);
+}
+.lll-nav-btn:hover {
+  color: var(--lll-text);
+  background: var(--lll-surface);
+}
+.lll-nav-active {
+  color: var(--lll-text);
+  background: var(--lll-surface-2);
+  border-color: rgba(212, 162, 76, 0.5);
+  box-shadow: inset 0 -2px 0 var(--lll-accent);
+}
+.lll-count-pill {
+  display: inline-grid;
+  place-items: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--lll-bad);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.lll-appbar-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.lll-res-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* --- メイン作業領域（広いフル幅ワークスペース） --- */
+.lll-workspace {
+  flex: 1;
+  width: min(1380px, 100%);
+  margin: 0 auto;
+  padding: 20px 24px 44px;
+  display: grid;
+  align-content: start;
+  gap: 18px;
+}
+
+/* --- 共通パネル・セグメント・チップ補助 --- */
+.lll-panel {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--lll-line);
+  border-radius: 12px;
+  background: var(--lll-surface);
+}
+.lll-panel-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.lll-panel-title {
+  margin: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 15px;
+  font-weight: 800;
+  color: var(--lll-text);
+  letter-spacing: 0.03em;
+}
+.lll-seg {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px;
+  border: 1px solid var(--lll-line);
+  border-radius: 8px;
+  background: var(--lll-bg);
+}
+.lll-seg-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--lll-muted);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background var(--lll-dur), color var(--lll-dur);
+}
+.lll-seg-btn:hover {
+  color: var(--lll-text);
+}
+.lll-seg-active {
+  background: var(--lll-surface-2);
+  color: var(--lll-accent-soft);
+  box-shadow: inset 0 0 0 1px rgba(212, 162, 76, 0.35);
+}
+.lll-chip-ticket {
+  color: #f0d295;
+  border-color: rgba(212, 162, 76, 0.45);
+  background: rgba(212, 162, 76, 0.1);
+}
+.lll-chip-rating {
+  color: #9ec5eb;
+  border-color: rgba(91, 155, 213, 0.42);
+  background: rgba(91, 155, 213, 0.09);
+}
+.lll-el-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border: 1px solid var(--lll-line);
+  border-radius: 5px;
+  background: var(--lll-surface-2);
+  font-size: 12px;
+  font-weight: 800;
+}
+.lll-field-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--lll-muted);
+}
+.lll-field-dot {
+  flex: none;
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+}
+.lll-inline-link {
+  width: max-content;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--lll-accent-soft);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.lll-inline-link:hover {
+  color: #f4d898;
+}
+.lll-mission-meta {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--lll-muted);
+}
+.lll-reward-inline {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+/* --- カード装飾・箔・予兆バッジ --- */
 .lll-foil {
   position: absolute;
   inset: -40%;
   pointer-events: none;
   z-index: 1;
   mix-blend-mode: screen;
-  opacity: 0.35;
-  background: linear-gradient(115deg, transparent 35%, rgba(255, 255, 255, 0.45) 48%, rgba(167, 139, 250, 0.35) 54%, transparent 65%);
-  animation: lll-foil-sweep 4.5s ease-in-out infinite;
+  opacity: 0.24;
+  background: linear-gradient(115deg, transparent 36%, rgba(255, 255, 255, 0.36) 49%, rgba(91, 155, 213, 0.28) 55%, transparent 66%);
+  animation: lll-foil-sweep 5.2s ease-in-out infinite;
 }
 .lll-foil-legend {
-  opacity: 0.5;
-  background: linear-gradient(115deg, transparent 32%, rgba(255, 236, 150, 0.55) 47%, rgba(255, 160, 220, 0.4) 55%, transparent 68%);
+  opacity: 0.38;
+  background: linear-gradient(115deg, transparent 34%, rgba(240, 212, 138, 0.52) 48%, rgba(212, 162, 76, 0.28) 56%, transparent 68%);
 }
 .lll-lb-stars {
   display: inline-block;
   margin-left: 4px;
-  color: #f5c518;
+  color: var(--lll-accent-soft);
   font-size: 0.8em;
-  letter-spacing: -1px;
-  text-shadow: 0 0 6px rgba(245, 197, 24, 0.6);
+  font-weight: 800;
 }
 .lll-card-icons {
   position: absolute;
@@ -29,30 +320,45 @@
   left: 4px;
   z-index: 2;
   display: inline-flex;
-  gap: 3px;
-  padding: 1px 6px;
-  border-radius: 999px;
-  background: rgba(0, 0, 0, 0.65);
-  font-size: 10px;
-  color: #ffe69a;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  border-radius: 5px;
+  background: rgba(10, 12, 16, 0.78);
+  color: var(--lll-accent-soft);
 }
-.lll-forecast-badge {
+.lll-reaction-badge {
   position: absolute;
-  inset-x: 4px;
-  bottom: 24px;
+  left: 4px;
+  right: 4px;
+  top: 24px;
   z-index: 3;
   text-align: center;
-  padding: 2px 6px;
-  border-radius: 6px;
-  background: rgba(12, 8, 24, 0.88);
-  border: 1px solid rgba(245, 197, 24, 0.75);
-  color: #ffe27a;
+  padding: 2px 5px;
+  border-radius: 5px;
+  background: rgba(24, 18, 10, 0.92);
+  border: 1px solid var(--lll-accent);
+  color: #ffd882;
   font-size: 10px;
   font-weight: 800;
   pointer-events: none;
 }
-
-/* 追従する赤/白トレイル HP バー */
+.lll-forecast-badge {
+  position: absolute;
+  left: 4px;
+  right: 4px;
+  bottom: 24px;
+  z-index: 3;
+  text-align: center;
+  padding: 2px 6px;
+  border-radius: 5px;
+  background: rgba(12, 14, 18, 0.9);
+  border: 1px solid rgba(212, 162, 76, 0.7);
+  color: var(--lll-accent-soft);
+  font-size: 10px;
+  font-weight: 800;
+  pointer-events: none;
+}
 .lll-hpbar {
   position: relative;
 }
@@ -61,26 +367,614 @@
   left: 0;
   top: 0;
   bottom: 0;
-  background: rgba(255, 118, 108, 0.65);
-  transition: width 700ms ease-out 180ms;
+  background: rgba(217, 99, 90, 0.58);
+  transition: width 650ms ease-out 180ms;
 }
 .lll-hpbar-fill {
   position: relative;
   z-index: 1;
 }
 
-/* --- 通貨チップ（チケット・レート） --- */
-.lll-chip-ticket {
-  color: #ffd5f3;
-  border-color: rgba(244, 143, 212, 0.55);
-  background: rgba(190, 65, 150, 0.18);
+/* --- ホームハブ（2カラム整理拠点） --- */
+.lll-hub {
+  display: grid;
+  grid-template-columns: minmax(310px, 380px) minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
 }
-.lll-chip-rating {
-  color: #9ce7ff;
-  border-color: rgba(110, 210, 255, 0.45);
+.lll-hub-left,
+.lll-hub-right {
+  display: grid;
+  gap: 16px;
+  align-content: start;
+  min-width: 0;
+}
+.lll-showcase {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--lll-line);
+  border-radius: 12px;
+  background: var(--lll-surface);
+}
+.lll-showcase-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.lll-showcase-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 15px;
+}
+.lll-showcase-stage {
+  display: grid;
+  place-items: center;
+  min-height: 270px;
+  border: 1px solid var(--lll-line);
+  border-radius: 10px;
+  background: #101319;
+  overflow: hidden;
+}
+.lll-showcase-meta {
+  display: grid;
+  gap: 10px;
+}
+.lll-showcase-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
-/* --- スキルカットインバナー --- */
+.lll-party-strip {
+  display: grid;
+  gap: 8px;
+}
+.lll-party-mini {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 12px;
+  border: 1px solid var(--lll-line);
+  border-radius: 8px;
+  background: var(--lll-surface-2);
+  color: var(--lll-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--lll-dur), background var(--lll-dur);
+}
+.lll-party-mini:hover {
+  border-color: var(--lll-line-strong);
+  background: #232833;
+}
+.lll-party-slot {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border: 1px solid rgba(212, 162, 76, 0.5);
+  border-radius: 6px;
+  background: rgba(212, 162, 76, 0.14);
+  color: var(--lll-accent-soft);
+  font-size: 12px;
+  font-weight: 800;
+}
+.lll-party-mini-info {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.lll-party-mini-info strong {
+  font-size: 13px;
+  font-weight: 800;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.lll-party-mini-info small {
+  font-size: 11px;
+  color: var(--lll-muted);
+}
+.lll-synergy-strip {
+  display: grid;
+  gap: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--lll-line);
+}
+.lll-synergy-row {
+  display: grid;
+  gap: 4px;
+}
+.lll-synergy-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--lll-muted);
+}
+.lll-synergy-val {
+  font-size: 14px;
+  color: var(--lll-accent-soft);
+}
+
+.lll-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+.lll-kpi-box {
+  display: grid;
+  gap: 4px;
+  padding: 12px 14px;
+  border: 1px solid var(--lll-line);
+  border-radius: 10px;
+  background: var(--lll-surface);
+}
+.lll-kpi-box span {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--lll-muted);
+}
+.lll-kpi-box strong {
+  font-size: 16px;
+  font-weight: 800;
+  color: var(--lll-text);
+  font-variant-numeric: tabular-nums;
+}
+
+.lll-mode-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.lll-mode-card {
+  display: grid;
+  gap: 8px;
+  align-content: start;
+  padding: 16px;
+  border: 1px solid var(--lll-line);
+  border-radius: 10px;
+  background: var(--lll-surface-2);
+  color: var(--lll-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--lll-dur), background var(--lll-dur), transform var(--lll-dur);
+}
+.lll-mode-card:hover {
+  border-color: rgba(212, 162, 76, 0.55);
+  background: #232833;
+  transform: translateY(-1px);
+}
+.lll-mode-card-primary {
+  border-color: rgba(212, 162, 76, 0.48);
+  background: linear-gradient(155deg, rgba(212, 162, 76, 0.14), var(--lll-surface-2) 60%);
+}
+.lll-mode-card-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.lll-mode-card-top strong {
+  font-size: 15px;
+  font-weight: 800;
+}
+.lll-mode-icon {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--lll-line);
+  border-radius: 8px;
+  background: var(--lll-surface);
+  color: var(--lll-accent-soft);
+}
+.lll-mode-arrow {
+  margin-left: auto;
+  color: var(--lll-muted);
+}
+.lll-mode-sub {
+  margin: 0;
+  font-size: 12px;
+  color: #cfd4de;
+}
+
+.lll-shortcut-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+.lll-shortcut-btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--lll-line);
+  border-radius: 10px;
+  background: var(--lll-surface);
+  color: var(--lll-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--lll-dur), background var(--lll-dur);
+}
+.lll-shortcut-btn:hover {
+  border-color: var(--lll-line-strong);
+  background: var(--lll-surface-2);
+}
+.lll-shortcut-btn > svg {
+  flex: none;
+  color: var(--lll-accent-soft);
+}
+.lll-shortcut-btn > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.lll-shortcut-btn strong {
+  font-size: 13px;
+  font-weight: 800;
+}
+.lll-shortcut-btn small {
+  font-size: 11px;
+  color: var(--lll-muted);
+}
+
+/* --- 連続ログイン & ミッション --- */
+.lll-login-strip {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 6px;
+}
+.lll-login-day {
+  display: grid;
+  gap: 2px;
+  place-items: center;
+  padding: 8px 4px;
+  border: 1px solid var(--lll-line);
+  border-radius: 8px;
+  background: var(--lll-surface-2);
+  font-size: 11px;
+  color: var(--lll-muted);
+  text-align: center;
+}
+.lll-login-day strong {
+  color: var(--lll-text);
+}
+.lll-login-day-done {
+  border-color: rgba(82, 183, 136, 0.5);
+  background: rgba(82, 183, 136, 0.11);
+  color: #a6e2c2;
+}
+.lll-login-day-today {
+  border-color: var(--lll-accent);
+  box-shadow: inset 0 0 0 1px rgba(212, 162, 76, 0.45);
+}
+.lll-login-ticket {
+  color: var(--lll-accent-soft);
+  font-weight: 800;
+}
+.lll-mission-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.lll-mission-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--lll-line);
+  border-radius: 8px;
+  background: var(--lll-surface-2);
+}
+.lll-mission-info {
+  flex: 1;
+  min-width: 180px;
+  display: grid;
+  gap: 4px;
+}
+.lll-mission-title {
+  font-size: 13px;
+  font-weight: 700;
+}
+.lll-mission-bar {
+  width: 100%;
+  height: 5px;
+  border-radius: 999px;
+  background: rgba(237, 234, 226, 0.1);
+  overflow: hidden;
+}
+.lll-mission-bar > span {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--lll-accent);
+  transition: width 260ms ease;
+}
+
+/* --- バインダー: 属性共鳴・遺物工房・調律 --- */
+.lll-team-panel {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--lll-line);
+  border-radius: 12px;
+  background: var(--lll-surface);
+}
+.lll-team-panel .lll-team-slots {
+  border: 0;
+  padding: 4px 0;
+  background: transparent;
+}
+.lll-resonance-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--lll-line);
+}
+.lll-resonance-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.lll-relic-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 10px;
+}
+.lll-relic-card {
+  display: grid;
+  gap: 8px;
+  align-content: space-between;
+  padding: 12px 14px;
+  border: 1px solid var(--lll-line);
+  border-radius: 10px;
+  background: var(--lll-surface-2);
+}
+.lll-relic-equipped {
+  border-color: var(--lll-accent);
+  background: linear-gradient(160deg, rgba(212, 162, 76, 0.12), var(--lll-surface-2) 65%);
+}
+.lll-relic-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.lll-relic-head strong {
+  font-size: 13px;
+  font-weight: 800;
+}
+.lll-relic-foot {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.lll-filterbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  padding: 10px 12px;
+  border: 1px solid var(--lll-line);
+  border-radius: 10px;
+  background: var(--lll-surface);
+}
+.lll-select {
+  padding: 6px 10px;
+  border: 1px solid var(--lll-line-strong);
+  border-radius: 7px;
+  background: var(--lll-surface-2);
+  color: var(--lll-text);
+  font: inherit;
+  font-size: 12px;
+}
+.lll-dismantle-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border: 1px solid rgba(217, 99, 90, 0.5);
+  border-radius: 10px;
+  background: rgba(217, 99, 90, 0.1);
+  font-size: 13px;
+}
+
+/* カード詳細オーバーレイ内の特性・技2調律 */
+.lll-tune-panel {
+  display: grid;
+  gap: 14px;
+}
+.lll-tune-block {
+  display: grid;
+  gap: 8px;
+}
+.lll-tune-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(175px, 1fr));
+  gap: 8px;
+}
+.lll-tune-opt {
+  display: grid;
+  gap: 3px;
+  padding: 9px 11px;
+  border: 1px solid var(--lll-line);
+  border-radius: 8px;
+  background: var(--lll-surface-2);
+  color: var(--lll-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--lll-dur), background var(--lll-dur);
+}
+.lll-tune-opt:hover:not(:disabled) {
+  border-color: var(--lll-accent);
+  background: #242936;
+}
+.lll-tune-opt:disabled {
+  opacity: 0.48;
+  cursor: not-allowed;
+}
+.lll-tune-opt-cur {
+  border-color: var(--lll-accent);
+  background: rgba(212, 162, 76, 0.12);
+  opacity: 1 !important;
+}
+.lll-tune-opt strong {
+  font-size: 12px;
+  font-weight: 800;
+}
+.lll-tune-opt span {
+  font-size: 11px;
+  color: var(--lll-muted);
+  line-height: 1.4;
+}
+
+/* --- アリーナ: ブリーフィング・地脈・共鳴バースト・カットイン --- */
+.lll-arena-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.lll-briefing {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+.lll-briefing-cell {
+  display: grid;
+  gap: 4px;
+  align-content: start;
+  padding: 12px 14px;
+  border: 1px solid var(--lll-line);
+  border-radius: 10px;
+  background: var(--lll-surface);
+}
+.lll-briefing-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--lll-muted);
+}
+.lll-briefing-val {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  font-weight: 800;
+  color: var(--lll-text);
+}
+
+.lll-abyss-card,
+.lll-pvp-card {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 14px 16px;
+  border: 1px solid var(--lll-line);
+  border-radius: 10px;
+  background: var(--lll-surface);
+  color: var(--lll-text);
+  font: inherit;
+  cursor: pointer;
+}
+.lll-abyss-card {
+  cursor: default;
+}
+.lll-pvp-card:hover {
+  border-color: var(--lll-line-strong);
+  background: var(--lll-surface-2);
+}
+.lll-pvp-selected {
+  border-color: var(--lll-accent);
+  background: rgba(212, 162, 76, 0.09);
+}
+
+.lll-battle-hud {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(240px, 320px);
+  gap: 10px;
+  align-items: center;
+}
+.lll-field-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  border: 1px solid var(--lll-line);
+  border-radius: 8px;
+  background: var(--lll-surface);
+}
+.lll-burst-meter {
+  display: grid;
+  gap: 5px;
+  padding: 8px 12px;
+  border: 1px solid var(--lll-line);
+  border-radius: 8px;
+  background: var(--lll-surface);
+}
+.lll-burst-ready {
+  border-color: var(--lll-accent);
+  background: rgba(212, 162, 76, 0.12);
+}
+.lll-burst-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--lll-accent-soft);
+}
+.lll-burst-head > span:first-child {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.lll-burst-track {
+  height: 7px;
+  border-radius: 999px;
+  background: rgba(237, 234, 226, 0.1);
+  overflow: hidden;
+}
+.lll-burst-fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #b88435, #e6c07b);
+  transition: width 260ms var(--lll-ease);
+}
+.lll-btn-burst {
+  background: linear-gradient(150deg, #d4a24c, #b58230);
+  border-color: #f0ce8c;
+  color: #101216;
+  box-shadow: 0 0 18px rgba(212, 162, 76, 0.38);
+}
+.lll-btn-burst:hover:not(:disabled) {
+  background: linear-gradient(150deg, #e2b45f, #c7933d);
+}
+
 .lll-battle-stage {
   position: relative;
   display: grid;
@@ -97,589 +991,244 @@
   justify-content: center;
   gap: 14px;
   padding: 12px 24px;
-  background: linear-gradient(90deg, transparent, rgba(22, 14, 48, 0.94) 18%, rgba(124, 92, 255, 0.92) 50%, rgba(22, 14, 48, 0.94) 82%, transparent);
-  border-top: 2px solid #f5c518;
-  border-bottom: 2px solid #f5c518;
-  box-shadow: 0 0 34px rgba(124, 92, 255, 0.65);
+  background: linear-gradient(90deg, transparent, rgba(16, 20, 28, 0.94) 18%, rgba(44, 36, 20, 0.95) 50%, rgba(16, 20, 28, 0.94) 82%, transparent);
+  border-top: 2px solid var(--lll-accent);
+  border-bottom: 2px solid var(--lll-accent);
+  box-shadow: 0 0 30px rgba(212, 162, 76, 0.35);
   pointer-events: none;
   animation: lll-cutin-slide 650ms cubic-bezier(0.15, 0.85, 0.25, 1) both;
 }
 .lll-cutin-actor {
   font-size: 13px;
   font-weight: 800;
-  color: #ffe27a;
+  color: var(--lll-accent-soft);
   letter-spacing: 0.08em;
 }
 .lll-cutin-skill {
   font-size: 22px;
   font-weight: 900;
-  color: #ffffff;
-  letter-spacing: 0.14em;
-  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.85);
+  color: var(--lll-text);
+  letter-spacing: 0.12em;
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.85);
 }
 
-/* --- シェル & 全体スペーシング --- */
-.lll-shell {
+/* --- スカウト --- */
+.lll-scout-grid {
   display: grid;
-  gap: 36px;
-  padding-bottom: 16px;
-}
-.lll-shell .lll-table {
-  gap: 22px;
-  padding: 24px 22px 20px;
-}
-.lll-main-stage {
-  display: grid;
-  align-content: start;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
   gap: 16px;
-  min-height: 460px;
-  padding: 4px 0 10px;
+  width: 100%;
+}
+.lll-ticket-card {
+  display: grid;
+  gap: 10px;
+  align-content: center;
+  justify-items: center;
+  min-height: 220px;
+  padding: 24px;
+  border: 1px solid rgba(212, 162, 76, 0.42);
+  border-radius: 12px;
+  background: var(--lll-surface);
+  text-align: center;
+}
+.lll-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+}
+.lll-rates-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.lll-rates-table th,
+.lll-rates-table td {
+  padding: 9px 10px;
+  border-bottom: 1px solid var(--lll-line);
+  text-align: left;
+}
+.lll-rates-table th {
+  color: var(--lll-muted);
+  font-size: 12px;
+  font-weight: 700;
 }
 
-/* --- ソシャゲ風ホームロビー --- */
-.lll-home-stage {
+/* --- 図鑑・規則 --- */
+.lll-codex {
   display: grid;
-  gap: 20px;
+  gap: 16px;
 }
-.lll-home-hero {
-  display: grid;
-  grid-template-columns: minmax(270px, 340px) minmax(0, 1fr);
-  gap: 18px;
-  align-items: stretch;
-}
-.lll-lobby-character {
-  position: relative;
-  display: grid;
-  gap: 12px;
-  align-content: space-between;
-  padding: 16px;
-  border: 1px solid rgba(167, 139, 250, 0.35);
-  border-radius: 16px;
-  background: radial-gradient(circle at 50% 35%, rgba(124, 92, 255, 0.25), rgba(10, 8, 22, 0.72));
-  overflow: hidden;
-}
-.lll-lobby-el-fire {
-  border-color: rgba(255, 145, 95, 0.42);
-  background: radial-gradient(circle at 50% 32%, rgba(255, 118, 72, 0.26), rgba(20, 10, 18, 0.78));
-}
-.lll-lobby-el-water {
-  border-color: rgba(110, 200, 255, 0.42);
-  background: radial-gradient(circle at 50% 32%, rgba(72, 168, 255, 0.25), rgba(10, 16, 30, 0.78));
-}
-.lll-lobby-el-wind {
-  border-color: rgba(120, 232, 162, 0.42);
-  background: radial-gradient(circle at 50% 32%, rgba(80, 210, 140, 0.22), rgba(10, 22, 18, 0.78));
-}
-.lll-lobby-el-earth {
-  border-color: rgba(235, 194, 115, 0.42);
-  background: radial-gradient(circle at 50% 32%, rgba(215, 165, 78, 0.24), rgba(22, 16, 10, 0.78));
-}
-.lll-lobby-el-light {
-  border-color: rgba(250, 224, 128, 0.48);
-  background: radial-gradient(circle at 50% 32%, rgba(245, 205, 90, 0.24), rgba(22, 18, 34, 0.78));
-}
-.lll-lobby-el-dark {
-  border-color: rgba(176, 136, 255, 0.46);
-  background: radial-gradient(circle at 50% 32%, rgba(138, 86, 255, 0.28), rgba(12, 8, 24, 0.82));
-}
-.lll-lobby-top-meta {
+.lll-codex-head {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-}
-.lll-lobby-viewer {
-  display: grid;
-  place-items: center;
-  min-height: 276px;
-}
-.lll-home-quote {
-  display: grid;
-  gap: 4px;
-  width: 100%;
-  padding: 12px 14px;
-  border: 1px solid rgba(236, 231, 251, 0.22);
-  border-radius: 12px;
-  background: rgba(12, 9, 24, 0.74);
-  color: #ece7fb;
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-  transition: border-color 180ms ease, background 180ms ease, transform 180ms ease;
-}
-.lll-home-quote:hover {
-  border-color: rgba(247, 215, 116, 0.65);
-  background: rgba(18, 13, 36, 0.88);
-}
-.lll-home-quote:active {
-  transform: scale(0.99);
-}
-.lll-quote-speaker {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  font-size: 13px;
-  font-weight: 900;
-  color: #f7d774;
-}
-.lll-quote-speaker small {
-  color: #b7abdd;
-  font-size: 11px;
-  font-weight: 700;
-}
-.lll-quote-text {
-  font-size: 13px;
-  line-height: 1.55;
-  color: #ece7fb;
-}
-
-.lll-home-command {
-  display: grid;
-  gap: 14px;
-  align-content: start;
-}
-.lll-trainer-card {
-  gap: 12px;
-  background: linear-gradient(145deg, rgba(124, 92, 255, 0.14), rgba(0, 0, 0, 0.34));
-}
-.lll-trainer-id {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-}
-.lll-trainer-badge {
-  padding: 2px 8px;
-  border: 1px solid rgba(167, 139, 250, 0.55);
-  border-radius: 6px;
-  background: rgba(124, 92, 255, 0.28);
-  color: #e2d8ff;
-  font-size: 10px;
-  font-weight: 900;
-  letter-spacing: 0.14em;
-}
-.lll-trainer-name {
-  font-size: 17px;
-  font-weight: 900;
-  color: #fff;
-  letter-spacing: 0.04em;
-}
-.lll-kpi-grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 8px;
-}
-.lll-kpi-box {
-  display: grid;
-  gap: 2px;
-  padding: 9px 10px;
-  border: 1px solid rgba(236, 231, 251, 0.14);
-  border-radius: 10px;
-  background: rgba(0, 0, 0, 0.28);
-}
-.lll-kpi-box span {
-  font-size: 11px;
-  font-weight: 700;
-  color: #b7abdd;
-}
-.lll-kpi-box strong {
-  font-size: 15px;
-  font-weight: 900;
-  color: #fff;
-  font-variant-numeric: tabular-nums;
-}
-
-.lll-home-banners {
-  display: grid;
   gap: 10px;
 }
-.lll-home-subbanners {
+.lll-codex-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-}
-.lll-banner {
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  width: 100%;
-  padding: 14px 16px;
-  border: 1px solid rgba(236, 231, 251, 0.24);
-  border-radius: 14px;
-  color: #fff;
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-  transition: transform 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
-}
-.lll-banner:hover {
-  transform: translateY(-1px);
-  border-color: rgba(247, 215, 116, 0.72);
-}
-.lll-banner:active {
-  transform: scale(0.99);
-}
-.lll-banner-quest {
-  padding: 18px 20px;
-  border-color: rgba(245, 197, 24, 0.52);
-  background: linear-gradient(125deg, rgba(124, 92, 255, 0.42), rgba(40, 22, 82, 0.88) 65%, rgba(245, 197, 24, 0.2));
-  box-shadow: 0 8px 24px rgba(124, 92, 255, 0.26);
-}
-.lll-banner-gacha {
-  border-color: rgba(244, 143, 212, 0.48);
-  background: linear-gradient(135deg, rgba(190, 65, 150, 0.28), rgba(24, 16, 48, 0.86));
-}
-.lll-banner-deck {
-  border-color: rgba(110, 210, 255, 0.42);
-  background: linear-gradient(135deg, rgba(60, 130, 220, 0.24), rgba(20, 18, 46, 0.86));
-}
-.lll-banner-copy {
-  display: grid;
-  gap: 3px;
-  min-width: 0;
-}
-.lll-banner-copy strong {
-  font-size: 16px;
-  font-weight: 900;
-  letter-spacing: 0.04em;
-}
-.lll-banner-copy small {
-  font-size: 12px;
-  color: #d7cef5;
-  line-height: 1.45;
-}
-.lll-banner-tag {
-  font-size: 10px;
-  font-weight: 900;
-  letter-spacing: 0.14em;
-  color: #f7d774;
-}
-.lll-banner-arrow {
-  flex: none;
-  font-size: 20px;
-  font-weight: 900;
-  color: #f7d774;
-}
-.lll-badge-pill {
-  flex: none;
-  min-width: 24px;
-  height: 24px;
-  padding: 0 7px;
-  border-radius: 999px;
-  background: #e36a61;
-  color: #fff;
-  font-size: 12px;
-  font-weight: 900;
-  line-height: 24px;
-  text-align: center;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.45);
-}
-
-.lll-party-strip {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
-}
-.lll-party-mini {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 12px;
-  border: 1px solid rgba(167, 139, 250, 0.28);
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.04);
-  color: #ece7fb;
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-  transition: border-color 180ms ease, background 180ms ease;
-}
-.lll-party-mini:hover {
-  border-color: rgba(167, 139, 250, 0.65);
-  background: rgba(124, 92, 255, 0.14);
-}
-.lll-party-slot {
-  flex: none;
-  display: grid;
-  place-items: center;
-  width: 24px;
-  height: 24px;
-  border: 1px solid rgba(167, 139, 250, 0.6);
-  border-radius: 999px;
-  background: rgba(124, 92, 255, 0.34);
-  color: #fff;
-  font-size: 12px;
-  font-weight: 900;
-}
-.lll-party-mini-info {
-  display: grid;
-  gap: 2px;
-  min-width: 0;
-}
-.lll-party-mini-info strong {
-  font-size: 13px;
-  font-weight: 800;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.lll-party-mini-info small {
-  font-size: 11px;
-  color: #b7abdd;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.lll-home-bottom {
-  display: grid;
   gap: 16px;
 }
-.lll-panel {
+.lll-codex-span {
+  grid-column: 1 / -1;
+}
+.lll-cycle-wrap {
   display: grid;
-  gap: 10px;
-  padding: 14px;
-  border: 1px solid rgba(236, 231, 251, 0.16);
-  border-radius: 12px;
-  background: rgba(0, 0, 0, 0.26);
-}
-.lll-panel-head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-.lll-panel-title {
-  margin: 0;
-  font-size: 15px;
-  font-weight: 900;
-  color: #fff;
-  letter-spacing: 0.06em;
-}
-.lll-name-form {
-  display: flex;
-  gap: 6px;
-  align-items: center;
-}
-.lll-input {
-  padding: 6px 10px;
-  border: 1px solid rgba(167, 139, 250, 0.45);
-  border-radius: 8px;
-  background: rgba(0, 0, 0, 0.4);
-  color: #fff;
-  font: inherit;
-  font-size: 13px;
-}
-.lll-mission-list {
-  display: grid;
-  gap: 8px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-.lll-mission-item {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 10px 12px;
-  border: 1px solid rgba(236, 231, 251, 0.14);
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.04);
-}
-.lll-mission-info {
-  flex: 1;
-  min-width: 180px;
-  display: grid;
-  gap: 3px;
-}
-.lll-mission-title {
-  font-size: 13px;
-  font-weight: 800;
-}
-.lll-mission-bar {
-  width: 100%;
-  height: 6px;
-  margin: 2px 0;
-  border-radius: 999px;
-  background: rgba(236, 231, 251, 0.14);
-  overflow: hidden;
-}
-.lll-mission-bar > span {
-  display: block;
-  height: 100%;
-  border-radius: 999px;
-  background: linear-gradient(90deg, #7c5cff, #f5c518);
-  transition: width 260ms ease;
-}
-.lll-mission-meta {
-  font-size: 11px;
-  color: #b7abdd;
-}
-.lll-login-strip {
-  display: grid;
-  grid-template-columns: repeat(7, minmax(0, 1fr));
-  gap: 8px;
-}
-.lll-login-day {
-  display: grid;
-  gap: 2px;
   place-items: center;
-  padding: 8px 4px;
-  border: 1px solid rgba(236, 231, 251, 0.16);
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.04);
-  font-size: 11px;
-  text-align: center;
+  padding: 8px;
+  border: 1px solid var(--lll-line);
+  border-radius: 8px;
+  background: #101319;
 }
-.lll-login-day-done {
-  border-color: rgba(87, 199, 133, 0.65);
-  background: rgba(87, 199, 133, 0.14);
-  color: #b5f5cf;
+.lll-cycle-svg {
+  width: 100%;
+  max-width: 380px;
+  height: auto;
 }
-.lll-login-day-today {
-  border-color: var(--lll-gold);
-  box-shadow: 0 0 12px rgba(245, 197, 24, 0.35);
-}
-
-/* --- ソシャゲ式ボトムドックナビゲーション --- */
-.lll-dock {
+.lll-codex-list {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 10px;
-  padding-top: 14px;
-  border-top: 1px solid rgba(167, 139, 250, 0.22);
+  gap: 8px;
 }
-.lll-dock-btn {
-  position: relative;
+.lll-codex-row {
   display: grid;
-  justify-items: center;
-  align-content: center;
-  gap: 3px;
-  min-height: 60px;
-  padding: 8px 10px;
-  border: 1px solid rgba(236, 231, 251, 0.2);
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.05);
-  color: #c9bdf2;
-  font: inherit;
-  cursor: pointer;
-  transition: transform 180ms ease, background 180ms ease, border-color 180ms ease, color 180ms ease, box-shadow 180ms ease;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--lll-line);
+  border-radius: 8px;
+  background: var(--lll-surface-2);
 }
-.lll-dock-btn:hover {
-  background: rgba(124, 92, 255, 0.18);
-  border-color: rgba(167, 139, 250, 0.55);
-  color: #fff;
+.lll-codex-row-active {
+  border-color: var(--lll-accent);
+  background: rgba(212, 162, 76, 0.1);
 }
-.lll-dock-btn:active {
-  transform: scale(0.98);
+.lll-codex-row-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
 }
-.lll-dock-btn-active {
-  background: linear-gradient(160deg, rgba(124, 92, 255, 0.85), rgba(86, 58, 195, 0.92));
-  border-color: #a78bfa;
-  color: #fff;
-  box-shadow: 0 6px 18px rgba(124, 92, 255, 0.45);
-}
-.lll-dock-icon {
-  font-size: 18px;
-  line-height: 1.1;
-}
-.lll-dock-label {
+.lll-codex-row-head strong {
   font-size: 13px;
-  font-weight: 900;
-  letter-spacing: 0.05em;
 }
-.lll-dock-badge {
-  position: absolute;
-  top: 6px;
-  right: 8px;
-  min-width: 18px;
-  padding: 1px 6px;
-  border-radius: 999px;
-  background: #e36a61;
-  color: #fff;
-  font-size: 10px;
-  font-weight: 900;
-  line-height: 1.4;
-  text-align: center;
+.lll-codex-row p {
+  margin: 0;
+}
+.lll-burst-catalog {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 10px;
 }
 
-/* --- AGOBOT 風 独立フッター（広めのスペース確保・globals.css の footer 打ち消し） --- */
+/* --- モーダル & カスタム戦術デッキビルダー --- */
+.lll-modal-card {
+  display: grid;
+  gap: 14px;
+  padding: 22px;
+  border: 1px solid var(--lll-line-strong);
+  border-radius: 12px;
+  background: var(--lll-surface);
+  box-shadow: 0 20px 52px rgba(0, 0, 0, 0.72);
+  max-width: 560px;
+  width: 100%;
+}
+.lll-deck-builder {
+  display: grid;
+  gap: 12px;
+  padding: 20px;
+  border: 1px solid var(--lll-line-strong);
+  border-radius: 12px;
+  background: var(--lll-surface);
+  max-width: 720px;
+  width: 100%;
+}
+.lll-deck-card-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 8px;
+  max-height: 380px;
+  overflow-y: auto;
+}
+.lll-deck-card-item {
+  display: grid;
+  gap: 4px;
+  padding: 9px 10px;
+  border: 1px solid var(--lll-line);
+  border-radius: 8px;
+  background: var(--lll-surface-2);
+  font-size: 12px;
+}
+
+/* --- 独立フッター（AGOBOT 風のゆとりある余白・globals.css の footer 打ち消し） --- */
 .lll-shell .lll-footer {
   position: relative;
   z-index: 10;
-  margin-top: 8px;
-  padding: 40px 28px 44px;
-  border: 1px solid rgba(167, 139, 250, 0.22);
-  border-radius: 16px;
-  background: linear-gradient(170deg, rgba(25, 20, 44, 0.96), rgba(14, 11, 27, 0.98));
-  box-shadow: 0 12px 32px rgba(10, 6, 24, 0.35);
-  color: #ece7fb;
+  width: 100%;
+  margin-top: auto;
+  padding: 44px 28px 48px;
+  border-top: 1px solid var(--lll-line);
+  border-radius: 0;
+  background: #11141a;
+  color: var(--lll-text);
 }
 .lll-footer-inner {
   display: flex;
   flex-wrap: wrap;
   justify-content: space-between;
-  gap: 28px 48px;
-  max-width: 880px;
+  gap: 28px 56px;
+  width: min(1380px, 100%);
   margin: 0 auto;
 }
 .lll-footer-brand {
   display: grid;
   align-content: start;
   gap: 8px;
-  min-width: 210px;
-  max-width: 300px;
+  min-width: 220px;
+  max-width: 360px;
 }
 .lll-footer-logo {
-  font-size: 20px;
+  font-size: 18px;
   font-weight: 900;
-  letter-spacing: 0.2em;
-  color: #fff;
-  text-shadow: 0 0 14px rgba(124, 92, 255, 0.7);
+  letter-spacing: 0.22em;
+  color: var(--lll-accent-soft);
 }
-.lll-footer-tagline {
+.lll-footer-meta {
   margin: 0;
   font-size: 13px;
-  color: #c9bdf2;
+  color: #cfd4de;
 }
 .lll-footer-stats {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px 12px;
-  margin-top: 4px;
+  gap: 6px 14px;
+  margin-top: 2px;
   font-size: 12px;
-  color: #b7abdd;
+  color: var(--lll-muted);
+  font-variant-numeric: tabular-nums;
 }
 .lll-footer-groups {
   display: flex;
   flex-wrap: wrap;
-  gap: 24px 48px;
+  gap: 24px 52px;
 }
 .lll-footer-group {
   display: grid;
   align-content: start;
   gap: 8px;
-  min-width: 120px;
+  min-width: 136px;
 }
 .lll-footer-group-title {
   margin: 0 0 2px;
   font-size: 12px;
   font-weight: 800;
-  letter-spacing: 0.12em;
-  color: #a78bfa;
+  letter-spacing: 0.1em;
+  color: var(--lll-accent-soft);
 }
 .lll-footer-link {
   width: max-content;
   padding: 2px 0;
   border: 0;
   background: transparent;
-  color: #ece7fb;
+  color: var(--lll-text);
   font: inherit;
   font-size: 13px;
   text-align: left;
@@ -688,7 +1237,7 @@
   transition: color 150ms ease;
 }
 .lll-footer-link:hover {
-  color: #f7d774;
+  color: var(--lll-accent-soft);
   text-decoration: underline;
 }
 .lll-footer-link:disabled {
@@ -700,135 +1249,17 @@
   flex-wrap: wrap;
   justify-content: space-between;
   gap: 10px 24px;
-  max-width: 880px;
-  margin: 30px auto 0;
+  width: min(1380px, 100%);
+  margin: 32px auto 0;
   padding-top: 20px;
-  border-top: 1px solid rgba(236, 231, 251, 0.14);
+  border-top: 1px solid var(--lll-line);
   font-size: 12px;
-  color: #9c8fd0;
+  color: var(--lll-muted);
 }
 
-/* --- スカウト（チケット召喚＋排出率＋3D召喚演出） --- */
-.lll-scout-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-  gap: 14px;
-  width: 100%;
-}
-.lll-ticket-card {
-  display: grid;
-  gap: 10px;
-  align-content: center;
-  justify-items: center;
-  padding: 20px;
-  border: 2px solid rgba(244, 143, 212, 0.45);
-  border-radius: 16px;
-  background: radial-gradient(circle at 50% 25%, rgba(244, 143, 212, 0.18), rgba(20, 12, 42, 0.7));
-  text-align: center;
-}
-.lll-rates-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 13px;
-}
-.lll-rates-table th,
-.lll-rates-table td {
-  padding: 8px 10px;
-  border-bottom: 1px solid rgba(236, 231, 251, 0.15);
-  text-align: left;
-}
-
-/* --- バインダーフィルタ & 一括分解 --- */
-.lll-filterbar {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  align-items: center;
-  padding: 10px 12px;
-  border: 1px solid rgba(236, 231, 251, 0.14);
-  border-radius: 10px;
-  background: rgba(0, 0, 0, 0.22);
-}
-.lll-select {
-  padding: 6px 10px;
-  border: 1px solid rgba(236, 231, 251, 0.25);
-  border-radius: 8px;
-  background: #1a152e;
-  color: #ece7fb;
-  font: inherit;
-  font-size: 12px;
-}
-.lll-dismantle-bar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 12px;
-  border: 1px solid rgba(227, 106, 97, 0.5);
-  border-radius: 10px;
-  background: rgba(227, 106, 97, 0.1);
-}
-
-/* --- アリーナモード切替 ＆ 戦術デッキビルダー --- */
-.lll-mode-tabs {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-.lll-abyss-card,
-.lll-pvp-card {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 12px 16px;
-  border: 1px solid rgba(167, 139, 250, 0.3);
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.04);
-}
-.lll-pvp-selected {
-  border-color: var(--lll-gold);
-  box-shadow: 0 0 0 1px var(--lll-gold);
-}
-.lll-deck-builder {
-  display: grid;
-  gap: 10px;
-  padding: 14px;
-  border: 1px solid rgba(167, 139, 250, 0.35);
-  border-radius: 12px;
-  background: #17122b;
-  max-width: 680px;
-  width: 100%;
-}
-.lll-deck-card-list {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 8px;
-  max-height: 360px;
-  overflow-y: auto;
-}
-.lll-deck-card-item {
-  display: grid;
-  gap: 4px;
-  padding: 8px 10px;
-  border: 1px solid rgba(236, 231, 251, 0.16);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.04);
-  font-size: 12px;
-}
-
-/* --- モーダル中身パネル --- */
-.lll-modal-card {
-  display: grid;
-  gap: 12px;
-  padding: 20px;
-  border: 1px solid rgba(167, 139, 250, 0.45);
-  border-radius: 14px;
-  background: #17122c;
-  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.7);
-  max-width: 560px;
-  width: 100%;
+/* --- モバイル専用ボトムナビ（デスクトップは非表示） --- */
+.lll-mobile-nav {
+  display: none;
 }
 
 @keyframes lll-foil-sweep {
@@ -836,53 +1267,102 @@
   50% { transform: translateX(35%) rotate(12deg); }
 }
 @keyframes lll-cutin-slide {
-  0% { opacity: 0; transform: translateX(-40px) skewX(-12deg) scale(0.95); }
-  20% { opacity: 1; transform: translateX(0) skewX(-8deg) scale(1.03); }
-  82% { opacity: 1; transform: translateX(0) skewX(-8deg) scale(1); }
-  100% { opacity: 0; transform: translateX(30px) skewX(-8deg) scale(0.98); }
+  0% { opacity: 0; transform: translateX(-40px) skewX(-10deg) scale(0.96); }
+  20% { opacity: 1; transform: translateX(0) skewX(-6deg) scale(1.02); }
+  82% { opacity: 1; transform: translateX(0) skewX(-6deg) scale(1); }
+  100% { opacity: 0; transform: translateX(30px) skewX(-6deg) scale(0.98); }
 }
 
-@media (max-width: 760px) {
-  .lll-shell {
-    gap: 24px;
-  }
-  .lll-shell .lll-table {
-    gap: 16px;
-    padding: 14px 12px;
-  }
-  .lll-main-stage {
-    min-height: 360px;
-  }
-  .lll-home-hero {
+/* --- タブレット以下（<= 1040px） --- */
+@media (max-width: 1040px) {
+  .lll-hub {
     grid-template-columns: 1fr;
+  }
+  .lll-briefing {
+    grid-template-columns: 1fr;
+  }
+  .lll-codex-grid {
+    grid-template-columns: 1fr;
+  }
+  .lll-battle-hud {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* --- モバイル（<= 760px） --- */
+@media (max-width: 760px) {
+  .lll-appbar-inner {
+    padding: 8px 12px;
+    gap: 8px;
+  }
+  .lll-appbar-nav {
+    display: none;
+  }
+  .lll-res-group .lll-chip {
+    padding: 3px 7px;
+    font-size: 11px;
+  }
+  .lll-workspace {
+    padding: 14px 12px 28px;
   }
   .lll-kpi-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
-  .lll-home-subbanners,
-  .lll-party-strip {
+  .lll-mode-grid,
+  .lll-shortcut-row {
     grid-template-columns: 1fr;
   }
   .lll-login-strip {
     grid-template-columns: repeat(4, minmax(0, 1fr));
   }
-  .lll-dock {
-    gap: 6px;
-  }
-  .lll-dock-btn {
-    min-height: 54px;
-    padding: 6px 4px;
-  }
-  .lll-dock-label {
-    font-size: 11px;
-  }
   .lll-shell .lll-footer {
-    padding: 28px 18px 32px;
+    padding: 28px 16px 84px;
   }
-  .lll-footer-inner {
+  .lll-footer-inner,
+  .lll-footer-groups {
     gap: 20px 28px;
   }
-  .lll-footer-groups {
-    gap: 20px 32px;
+  .lll-mobile-nav {
+    position: sticky;
+    bottom: 0;
+    z-index: 45;
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    border-top: 1px solid var(--lll-line);
+    background: rgba(14, 16, 20, 0.97);
+    backdrop-filter: blur(8px);
+  }
+  .lll-mobile-btn {
+    position: relative;
+    display: grid;
+    justify-items: center;
+    align-content: center;
+    gap: 3px;
+    min-height: 54px;
+    padding: 6px 2px;
+    border: 0;
+    background: transparent;
+    color: var(--lll-muted);
+    font: inherit;
+    font-size: 10px;
+    font-weight: 700;
+    cursor: pointer;
+  }
+  .lll-mobile-active {
+    color: var(--lll-accent-soft);
+    box-shadow: inset 0 2px 0 var(--lll-accent);
+  }
+  .lll-mobile-badge {
+    position: absolute;
+    top: 4px;
+    right: 6px;
+    min-width: 15px;
+    padding: 1px 4px;
+    border-radius: 999px;
+    background: var(--lll-bad);
+    color: #fff;
+    font-size: 9px;
+    font-weight: 800;
+    line-height: 1.3;
   }
 }

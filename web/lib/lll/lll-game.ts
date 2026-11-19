@@ -146,7 +146,9 @@ export function elementFromFeatures(f: ImageFeatures): LllElement {
 }
 
 /** 相性循環: 火→風→土→光→闇→水→火（矢印方向に有利）。 */
-const BEATS: Record<LllElement, LllElement> = {
+export const ELEMENTAL_CYCLE: readonly LllElement[] = ["fire", "wind", "earth", "light", "dark", "water"];
+
+export const BEATS: Record<LllElement, LllElement> = {
   fire: "wind",
   wind: "earth",
   earth: "light",
@@ -175,7 +177,7 @@ export function tierFromFeatures(f: ImageFeatures, imageSha: string): LllTier {
 
 /* --- 技・特性の説明とプール --- */
 
-const SKILL_DESCRIPTION: Record<LllSkillKind, string> = {
+export const SKILL_DESCRIPTION: Record<LllSkillKind, string> = {
   damage: "敵1体にダメージを与える",
   heal: "味方1体のHPを回復する",
   shield: "味方1体にシールドを付与する",
@@ -186,12 +188,45 @@ const SKILL_DESCRIPTION: Record<LllSkillKind, string> = {
   drain: "敵1体にダメージを与え、与えたダメージの半分を回復する",
 };
 
-const TRAIT_DESCRIPTION: Record<LllTraitKind, string> = {
+export const TRAIT_DESCRIPTION: Record<LllTraitKind, string> = {
   regen: "自分のターン開始時にHPが少し回復する",
   thorns: "受けたダメージの一部を相手に返す",
   haste: "行動順が速くなる",
   guard: "受けるダメージが軽減される",
   focus: "与えるダメージが増える",
+};
+
+export const ALL_TRAIT_KINDS: readonly LllTraitKind[] = ["regen", "thorns", "haste", "guard", "focus"];
+export const TUNABLE_SKILL2_KINDS: readonly LllSkillKind[] = [
+  "burn",
+  "stun",
+  "guard_break",
+  "overdrive",
+  "heal",
+  "shield",
+  "drain",
+];
+
+export const TUNE_TRAIT_COST = { shards: 5, lumen: 25 } as const;
+export const TUNE_SKILL2_COST = { shards: 10, lumen: 40 } as const;
+
+export const TRAIT_DEFAULT_NAME: Record<LllTraitKind, string> = {
+  regen: "再生の脈動",
+  thorns: "茨の反撃",
+  haste: "疾風の心得",
+  guard: "鉄壁の構え",
+  focus: "集中の極意",
+};
+
+export const SKILL2_KIND_LABEL: Record<LllSkillKind, string> = {
+  damage: "強打",
+  heal: "回復",
+  shield: "防護シールド",
+  burn: "やけど付与",
+  stun: "スタン付与",
+  guard_break: "防御崩し",
+  overdrive: "攻撃上昇",
+  drain: "HP吸収",
 };
 
 /** 属性ごとの技種別プール。技1は素直な攻撃系、技2は状態・支援系。 */
@@ -214,12 +249,12 @@ const ELEMENT_SKILL_NAMES: Record<LllElement, string[]> = {
   dark: ["影縫い", "深淵の囁き", "月蝕の刃", "闇の抱擁", "影喰らい", "夜霧の舞"],
 };
 
-function makeSkill(name: string, kind: LllSkillKind, power: number, cooldown: number): LllSkill {
+export function makeSkill(name: string, kind: LllSkillKind, power: number, cooldown: number): LllSkill {
   // AP は表示上の技コストとして保持する（原作 AP=100 固定の名残。仕様 §4）
   return { name, kind, power, cooldown, ap: 100, description: SKILL_DESCRIPTION[kind] };
 }
 
-function makeTrait(name: string, kind: LllTraitKind): LllTrait {
+export function makeTrait(name: string, kind: LllTraitKind): LllTrait {
   return { name, kind, description: TRAIT_DESCRIPTION[kind] };
 }
 
@@ -717,5 +752,465 @@ export const ACHIEVEMENTS: AchievementDef[] = [
   { id: "ach_legend_1", title: "黄金の切り札", description: "レジェンドカードを所持または覚醒させる", reward: { shards: 50, lumen: 160, tickets: 2 } },
   { id: "ach_lv10_1", title: "極致の一枚", description: "カードをLv10まで強化する", reward: { shards: 60, lumen: 180, tickets: 1 } },
   { id: "ach_abyss_5", title: "深淵踏破者", description: "深淵の試練 第5階層をクリアする", reward: { shards: 75, lumen: 240, tickets: 2 } },
+  { id: "ach_relic_1", title: "遺物の鍛冶師", description: "遺物を1つ鍛造する", reward: { shards: 25, lumen: 80, tickets: 1 } },
+  { id: "ach_wins_10", title: "歴戦の調律者", description: "通算10勝を達成する", reward: { shards: 55, lumen: 180, tickets: 2 } },
 ];
+
+/* --- 属性共鳴（編成ボーナス） --- */
+
+export type PartyResonanceId = "mono" | "dual" | "eclipse" | "triad" | "harmony";
+
+export type PartyResonance = {
+  id: PartyResonanceId;
+  name: string;
+  shortLabel: string;
+  description: string;
+  /** mono / dual の主軸属性（任意）。 */
+  element?: LllElement;
+  atkMult: number;
+  defMult: number;
+  spdMult: number;
+  healShieldMult: number;
+  weakBonusMult: number;
+  startBurst: number;
+};
+
+export const PARTY_RESONANCE_CATALOG: Omit<PartyResonance, "element">[] = [
+  {
+    id: "mono",
+    name: "単色極致",
+    shortLabel: "同属性×3",
+    description: "ATK +16% / 共鳴バースト初期値 +25%",
+    atkMult: 1.16,
+    defMult: 1,
+    spdMult: 1,
+    healShieldMult: 1,
+    weakBonusMult: 1,
+    startBurst: 25,
+  },
+  {
+    id: "eclipse",
+    name: "光闇交錯",
+    shortLabel: "光＋闇を含む",
+    description: "ATK +8% / 弱点ダメージさらに +12%",
+    atkMult: 1.08,
+    defMult: 1,
+    spdMult: 1,
+    healShieldMult: 1,
+    weakBonusMult: 1.12,
+    startBurst: 10,
+  },
+  {
+    id: "dual",
+    name: "双星共鳴",
+    shortLabel: "同属性×2",
+    description: "ATK +9% / SPD +6%",
+    atkMult: 1.09,
+    defMult: 1,
+    spdMult: 1.06,
+    healShieldMult: 1,
+    weakBonusMult: 1,
+    startBurst: 10,
+  },
+  {
+    id: "triad",
+    name: "四元循環",
+    shortLabel: "火・水・風・土から3種",
+    description: "SPD +10% / 弱点ダメージさらに +10%",
+    atkMult: 1,
+    defMult: 1,
+    spdMult: 1.1,
+    healShieldMult: 1,
+    weakBonusMult: 1.1,
+    startBurst: 10,
+  },
+  {
+    id: "harmony",
+    name: "三界調和",
+    shortLabel: "異なる3属性",
+    description: "ATK +6% / DEF +6% / 回復・シールド +10%",
+    atkMult: 1.06,
+    defMult: 1.06,
+    spdMult: 1,
+    healShieldMult: 1.1,
+    weakBonusMult: 1,
+    startBurst: 0,
+  },
+];
+
+const CORE_FOUR_ELEMENTS = new Set<LllElement>(["fire", "water", "wind", "earth"]);
+const ELEMENT_JP: Record<LllElement, string> = {
+  fire: "火",
+  water: "水",
+  wind: "風",
+  earth: "土",
+  light: "光",
+  dark: "闇",
+};
+
+/** 3枚（または任意枚数）の編成から発動する属性共鳴を判定する。 */
+export function evaluatePartyResonance(cards: readonly { element: LllElement }[]): PartyResonance {
+  const counts = new Map<LllElement, number>();
+  for (const c of cards) {
+    counts.set(c.element, (counts.get(c.element) ?? 0) + 1);
+  }
+  const byId = (id: PartyResonanceId) => PARTY_RESONANCE_CATALOG.find((r) => r.id === id)!;
+
+  for (const [el, cnt] of counts.entries()) {
+    if (cnt >= 3) {
+      const base = byId("mono");
+      return { ...base, name: `${ELEMENT_JP[el]}・${base.name}`, element: el };
+    }
+  }
+  if ((counts.get("light") ?? 0) >= 1 && (counts.get("dark") ?? 0) >= 1) {
+    return { ...byId("eclipse") };
+  }
+  for (const [el, cnt] of counts.entries()) {
+    if (cnt >= 2) {
+      const base = byId("dual");
+      return { ...base, name: `${ELEMENT_JP[el]}・${base.name}`, element: el };
+    }
+  }
+  const uniqueCore = [...counts.keys()].filter((el) => CORE_FOUR_ELEMENTS.has(el)).length;
+  if (uniqueCore >= 3) {
+    return { ...byId("triad") };
+  }
+  return { ...byId("harmony") };
+}
+
+/* --- フィールド地脈（アリーナギミック） --- */
+
+export type BattleFieldId =
+  | "neutral"
+  | "inferno"
+  | "mirror_lake"
+  | "gale_corridor"
+  | "monolith"
+  | "eclipse_sanctum"
+  | "abyss_miasma";
+
+export type BattleFieldDef = {
+  id: BattleFieldId;
+  name: string;
+  shortTag: string;
+  description: string;
+  accentHex: string;
+  /** 3Dアリーナの床リング＆ライティング色。 */
+  arenaTintHex: string;
+  /** 該当属性への攻撃強化（1.0 = 等倍）。 */
+  elementBoost?: Partial<Record<LllElement, number>>;
+  healShieldMult?: number;
+  burnDamageMult?: number;
+  weakBonusMult?: number;
+  guardMult?: number;
+  roundErosionPct?: number;
+};
+
+export const BATTLE_FIELDS: BattleFieldDef[] = [
+  {
+    id: "neutral",
+    name: "調律の石盤",
+    shortTag: "標準地脈",
+    description: "属性補正のない均整の取れた戦場。基本の相性と戦術が勝敗を分ける。",
+    accentHex: "#d4a24c",
+    arenaTintHex: "#8a7a5a",
+  },
+  {
+    id: "inferno",
+    name: "紅蓮の炉心",
+    shortTag: "火強化・灼熱",
+    description: "火属性の与ダメージ +15% / やけどダメージが 1.5倍。",
+    accentHex: "#e06d53",
+    arenaTintHex: "#b8462c",
+    elementBoost: { fire: 1.15 },
+    burnDamageMult: 1.5,
+  },
+  {
+    id: "mirror_lake",
+    name: "鏡面の蒼湖",
+    shortTag: "水強化・癒し",
+    description: "水属性の与ダメージ +15% / すべての回復・シールド効果 +20%。",
+    accentHex: "#4e98c8",
+    arenaTintHex: "#2d6f9e",
+    elementBoost: { water: 1.15 },
+    healShieldMult: 1.2,
+  },
+  {
+    id: "gale_corridor",
+    name: "蒼穹の風廊",
+    shortTag: "風強化・疾走",
+    description: "風属性の与ダメージ +15% / 共鳴バーストの蓄積速度 +25%。",
+    accentHex: "#55b084",
+    arenaTintHex: "#2e7f5a",
+    elementBoost: { wind: 1.15 },
+  },
+  {
+    id: "monolith",
+    name: "玄武の岩窟",
+    shortTag: "土強化・堅牢",
+    description: "土属性の与ダメージ +15% / 防御時の軽減がさらに強化（被ダメ 0.4倍）。",
+    accentHex: "#c99a49",
+    arenaTintHex: "#8d6b32",
+    elementBoost: { earth: 1.15 },
+    guardMult: 0.4,
+  },
+  {
+    id: "eclipse_sanctum",
+    name: "黄昏の聖域",
+    shortTag: "光闇強化・鋭利",
+    description: "光・闇属性の与ダメージ +15% / 属性弱点ダメージさらに +12%。",
+    accentHex: "#d7b46a",
+    arenaTintHex: "#7b6c4a",
+    elementBoost: { light: 1.15, dark: 1.15 },
+    weakBonusMult: 1.12,
+  },
+  {
+    id: "abyss_miasma",
+    name: "深淵の瘴気",
+    shortTag: "毎R侵蝕・高揚",
+    description: "毎ラウンド開始時に全員へ最大HPの3%侵蝕（最低HP1残る） / 反応ダメージ +20%。",
+    accentHex: "#c46373",
+    arenaTintHex: "#7d2e3d",
+    roundErosionPct: 0.03,
+  },
+];
+
+export const BATTLE_FIELD_BY_ID: Record<BattleFieldId, BattleFieldDef> = Object.fromEntries(
+  BATTLE_FIELDS.map((f) => [f.id, f]),
+) as Record<BattleFieldId, BattleFieldDef>;
+
+const LADDER_FIELD_SEQUENCE: BattleFieldId[] = [
+  "neutral",
+  "monolith",
+  "mirror_lake",
+  "eclipse_sanctum",
+  "gale_corridor",
+  "inferno",
+  "eclipse_sanctum",
+  "abyss_miasma",
+];
+
+export function fieldForLadderTier(tierIndex: number): BattleFieldId {
+  const idx = clamp(Math.floor(tierIndex), 0, LADDER_FIELD_SEQUENCE.length - 1);
+  return LADDER_FIELD_SEQUENCE[idx];
+}
+
+const ABYSS_FIELD_CYCLE: BattleFieldId[] = [
+  "inferno",
+  "mirror_lake",
+  "gale_corridor",
+  "monolith",
+  "abyss_miasma",
+];
+
+export function fieldForAbyssFloor(floor: number): BattleFieldId {
+  const f = Math.max(1, Math.floor(floor));
+  if (f % 5 === 0) return "abyss_miasma";
+  return ABYSS_FIELD_CYCLE[(f - 1) % ABYSS_FIELD_CYCLE.length];
+}
+
+export function fieldForPvpRival(rivalId: string): BattleFieldId {
+  if (rivalId === "ghost_iris") return "mirror_lake";
+  if (rivalId === "ghost_ren") return "gale_corridor";
+  if (rivalId === "ghost_kuro") return "eclipse_sanctum";
+  return "neutral";
+}
+
+/* --- 属性反応（状態異常×攻撃属性コンボ） --- */
+
+export type ElementalReactionId = "vaporize" | "spread" | "shatter" | "judgment" | "overload";
+
+export type ElementalReactionDef = {
+  id: ElementalReactionId;
+  name: string;
+  triggerElement: LllElement | "light_or_dark";
+  requiredStatus: "burn" | "guard_break" | "stun";
+  consumesStatus: boolean;
+  /** 直前ダメージに対する追加ダメージ係数（または固定最小値あり）。 */
+  bonusRatio: number;
+  minBonus: number;
+  extraEffect: string;
+  summary: string;
+};
+
+export const ELEMENTAL_REACTIONS: ElementalReactionDef[] = [
+  {
+    id: "vaporize",
+    name: "蒸発",
+    triggerElement: "water",
+    requiredStatus: "burn",
+    consumesStatus: true,
+    bonusRatio: 0.45,
+    minBonus: 14,
+    extraEffect: "やけどを消費して大ダメージ",
+    summary: "やけど中の敵へ水属性攻撃 → やけど消費＋与ダメの45%追加ダメージ",
+  },
+  {
+    id: "spread",
+    name: "熱風拡散",
+    triggerElement: "wind",
+    requiredStatus: "burn",
+    consumesStatus: false,
+    bonusRatio: 0.22,
+    minBonus: 8,
+    extraEffect: "他の生存敵にもやけど(2T)を拡散",
+    summary: "やけど中の敵へ風属性攻撃 → 22%追加ダメージ＋他の敵全員にやけど拡散",
+  },
+  {
+    id: "shatter",
+    name: "岩盤粉砕",
+    triggerElement: "earth",
+    requiredStatus: "guard_break",
+    consumesStatus: true,
+    bonusRatio: 0.35,
+    minBonus: 12,
+    extraEffect: "防御崩しを消費し、攻撃者にシールド+24",
+    summary: "防御崩し中の敵へ土属性攻撃 → 防御崩し消費＋35%追加ダメージ＋自身シールド24",
+  },
+  {
+    id: "judgment",
+    name: "断罪閃光",
+    triggerElement: "light_or_dark",
+    requiredStatus: "stun",
+    consumesStatus: false,
+    bonusRatio: 0.4,
+    minBonus: 14,
+    extraEffect: "スタン中の敵へ追撃＋防御崩し(2T)",
+    summary: "スタン中の敵へ光/闇属性攻撃 → 40%追加ダメージ＋防御崩し(2T)",
+  },
+  {
+    id: "overload",
+    name: "過負荷",
+    triggerElement: "fire",
+    requiredStatus: "guard_break",
+    consumesStatus: true,
+    bonusRatio: 0.35,
+    minBonus: 12,
+    extraEffect: "防御崩しを消費し、共鳴バースト +18%",
+    summary: "防御崩し中の敵へ火属性攻撃 → 防御崩し消費＋35%追加ダメージ＋バースト+18%",
+  },
+];
+
+/** 攻撃属性と対象の現在状態から誘発する属性反応を返す（該当なければ null）。 */
+export function detectElementalReaction(
+  attackElement: LllElement,
+  targetStatuses: readonly { kind: string }[],
+): ElementalReactionDef | null {
+  const has = (k: string) => targetStatuses.some((s) => s.kind === k);
+  for (const r of ELEMENTAL_REACTIONS) {
+    if (!has(r.requiredStatus)) continue;
+    if (r.triggerElement === "light_or_dark") {
+      if (attackElement === "light" || attackElement === "dark") return r;
+    } else if (r.triggerElement === attackElement) {
+      return r;
+    }
+  }
+  return null;
+}
+
+/* --- 共鳴バースト（チーム必殺技） --- */
+
+export const RESONANCE_BURST_INFO: Record<LllElement, { name: string; summary: string }> = {
+  fire: { name: "紅蓮覇壊", summary: "敵全体へ威力68ダメージ＋全員にやけど(2T)" },
+  water: { name: "蒼穹星癒", summary: "敵全体へ威力52ダメージ＋味方全員を回復＆シールド20" },
+  wind: { name: "烈風連刃", summary: "敵全体へ威力58ダメージ＋戦術カードを2枚ドロー" },
+  earth: { name: "玄武要塞", summary: "味方全員にシールド45＋敵全体へ威力42ダメージ" },
+  light: { name: "暁光裁定", summary: "敵単体へ威力115の極大ダメージ＋味方全員にシールド20" },
+  dark: { name: "深淵蝕滅", summary: "敵全体へ威力64ダメージ＋敵全員に防御崩し(2T)＋HP吸収" },
+};
+
+/* --- 遺物（アーティファクト装備: 最大2枠） --- */
+
+export type LllRelicId =
+  | "relic_aegis"
+  | "relic_chronometer"
+  | "relic_ember_core"
+  | "relic_prism_lens"
+  | "relic_resonance_bell"
+  | "relic_vampire_fang"
+  | "relic_iron_vow"
+  | "relic_gale_feather";
+
+export type LllRelicDef = {
+  id: LllRelicId;
+  name: string;
+  category: "offense" | "defense" | "tactics" | "resonance";
+  summary: string;
+  craftShards: number;
+  craftLumen: number;
+};
+
+export const MAX_EQUIPPED_RELICS = 2;
+
+export const RELICS: LllRelicDef[] = [
+  {
+    id: "relic_aegis",
+    name: "真鍮の防壁章",
+    category: "defense",
+    summary: "開幕時、味方全員にシールド +28 を付与。",
+    craftShards: 18,
+    craftLumen: 90,
+  },
+  {
+    id: "relic_chronometer",
+    name: "星刻の懐中時計",
+    category: "tactics",
+    summary: "開幕の戦術TP +1・初期手札 +1枚。",
+    craftShards: 22,
+    craftLumen: 110,
+  },
+  {
+    id: "relic_ember_core",
+    name: "炉心の熾火玉",
+    category: "offense",
+    summary: "与ダメージ +8%、敵へのやけどダメージ +35%。",
+    craftShards: 24,
+    craftLumen: 120,
+  },
+  {
+    id: "relic_prism_lens",
+    name: "分光プリズム",
+    category: "offense",
+    summary: "弱点ダメージさらに +15%、属性反応ダメージ +25%。",
+    craftShards: 28,
+    craftLumen: 140,
+  },
+  {
+    id: "relic_resonance_bell",
+    name: "共鳴の調律鈴",
+    category: "resonance",
+    summary: "共鳴バースト初期値 +35%、蓄積速度 +20%。",
+    craftShards: 26,
+    craftLumen: 130,
+  },
+  {
+    id: "relic_vampire_fang",
+    name: "紅玉の吸血牙",
+    category: "defense",
+    summary: "直接攻撃の与ダメージの 12% を自身のHPとして吸収。",
+    craftShards: 30,
+    craftLumen: 150,
+  },
+  {
+    id: "relic_iron_vow",
+    name: "黒鉄の誓約印",
+    category: "defense",
+    summary: "防御コマンド選択時、自身にシールド +24 とバースト +10%。",
+    craftShards: 20,
+    craftLumen: 100,
+  },
+  {
+    id: "relic_gale_feather",
+    name: "白銀の疾風羽",
+    category: "tactics",
+    summary: "味方全員の行動順 SPD +12%。先手を取りやすい。",
+    craftShards: 22,
+    craftLumen: 110,
+  },
+];
+
+export const RELIC_BY_ID: Record<string, LllRelicDef> = Object.fromEntries(
+  RELICS.map((r) => [r.id, r]),
+);
+
 

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { TACTIC_CARDS } from "@/lib/lll/lll-tactics";
 import type { RewardBundle } from "@/lib/lll/lll-game";
+import { IconLumen, IconShard, IconTicket } from "./LllIcons";
 
 export function LoginBonusModal({
   bonus,
@@ -14,12 +15,20 @@ export function LoginBonusModal({
   return (
     <div className="lll-overlay" role="dialog" aria-label="ログインボーナス" onClick={onClose}>
       <div className="lll-modal-card" onClick={(e) => e.stopPropagation()}>
-        <h2 className="lll-panel-title">✦ ログインボーナス {bonus.day}日目</h2>
-        <p className="lll-mission-meta">本日のログイン報酬を獲得しました！</p>
+        <h2 className="lll-panel-title">ログインボーナス {bonus.day}日目</h2>
+        <p className="lll-mission-meta">本日のログイン報酬を獲得しました。</p>
         <div className="lll-currencies">
-          <span className="lll-chip lll-chip-shards">◆ 欠片 +{bonus.reward.shards}</span>
-          <span className="lll-chip lll-chip-lumen">● ルーメン +{bonus.reward.lumen}</span>
-          {bonus.reward.tickets > 0 && <span className="lll-chip lll-chip-ticket">🎫 スカウト券 +{bonus.reward.tickets}</span>}
+          <span className="lll-chip lll-chip-shards">
+            <IconShard size={13} /> 欠片 +{bonus.reward.shards}
+          </span>
+          <span className="lll-chip lll-chip-lumen">
+            <IconLumen size={13} /> ルーメン +{bonus.reward.lumen}
+          </span>
+          {bonus.reward.tickets > 0 && (
+            <span className="lll-chip lll-chip-ticket">
+              <IconTicket size={13} /> スカウト券 +{bonus.reward.tickets}
+            </span>
+          )}
         </div>
         <div className="lll-actions">
           <button type="button" className="lll-btn lll-btn-primary" onClick={onClose}>
@@ -53,7 +62,7 @@ export function DropRatesModal({ onClose }: { onClose: () => void }) {
               <td>残り</td>
             </tr>
             <tr>
-              <td>🎫 チケット召喚（エリート以上確定）</td>
+              <td>チケット召喚（エリート以上確定）</td>
               <td>20%</td>
               <td>80%</td>
               <td>0%</td>
@@ -61,11 +70,11 @@ export function DropRatesModal({ onClose }: { onClose: () => void }) {
           </tbody>
         </table>
         <p className="lll-mission-meta">
-          ※同じ画像を再スカウトすると強化の欠片を獲得し、既存の同名カードが自動で+1限界突破（最大★5）します。
+          同じ画像を再スカウトすると強化の欠片を獲得し、既存の同名カードが自動で限界突破 +1（最大+5）します。
         </p>
         <div className="lll-actions">
           <button type="button" className="lll-btn lll-btn-primary" onClick={onClose}>
-            OK
+            閉じる
           </button>
         </div>
       </div>

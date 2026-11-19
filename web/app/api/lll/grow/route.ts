@@ -2,7 +2,9 @@ import { NextResponse } from "next/server";
 import {
   LllError,
   awakenCard,
+  craftRelic,
   dismantleCards,
+  equipRelics,
   exchangeLumen,
   growCard,
   limitBreakCard,
@@ -11,12 +13,14 @@ import {
   setFavoriteCard,
   setPlayerName,
   toggleLockCard,
+  tuneCardSkill2,
+  tuneCardTrait,
 } from "@/lib/lll/lll-server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-/** 強化・限界突破・覚醒・分解・ロック・お気に入り・カスタムデッキ・両替。 */
+/** 強化・限界突破・覚醒・分解・ロック・お気に入り・調律・遺物・カスタムデッキ・両替。 */
 export async function POST(request: Request) {
   let body: unknown;
   try {
@@ -43,6 +47,14 @@ export async function POST(request: Request) {
         return NextResponse.json({ profile: await setCustomTacticDeck(input.token, input.counts) });
       case "playerName":
         return NextResponse.json({ profile: await setPlayerName(input.token, input.name) });
+      case "craftRelic":
+        return NextResponse.json(await craftRelic(input.token, input.relicId));
+      case "equipRelics":
+        return NextResponse.json(await equipRelics(input.token, input.relicIds));
+      case "tuneTrait":
+        return NextResponse.json(await tuneCardTrait(input.token, input.cardId, input.traitKind));
+      case "tuneSkill2":
+        return NextResponse.json(await tuneCardSkill2(input.token, input.cardId, input.skillKind));
       case "levelup":
       default:
         return NextResponse.json(await growCard(input.token, input.cardId));

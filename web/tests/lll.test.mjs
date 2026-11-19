@@ -82,6 +82,18 @@ const game = await loadBundle(
     "abyssEnemyDeck",
     "abyssRewards",
     "autoPlayerTurn",
+    "PARTY_RESONANCE_CATALOG",
+    "evaluatePartyResonance",
+    "BATTLE_FIELDS",
+    "BATTLE_FIELD_BY_ID",
+    "fieldForLadderTier",
+    "fieldForAbyssFloor",
+    "fieldForPvpRival",
+    "ELEMENTAL_REACTIONS",
+    "detectElementalReaction",
+    "RESONANCE_BURST_INFO",
+    "RELICS",
+    "RELIC_BY_ID",
   ],
 );
 
@@ -504,4 +516,109 @@ test("逐次再生 VFX & カットイン: 強襲・弱点・カットイン尺�
   assert.equal(steps[1].vfx?.kind, "attack");
   assert.equal(steps[1].vfx?.strong, true);
 });
+
+test("属性共鳴: 5種すべての編成条件が正しく判定される", () => {
+  const mono = game.evaluatePartyResonance([{ element: "fire" }, { element: "fire" }, { element: "fire" }]);
+  assert.equal(mono.id, "mono");
+  assert.equal(mono.element, "fire");
+  assert.ok(mono.name.includes("火"));
+  assert.equal(mono.startBurst, 25);
+
+  const eclipse = game.evaluatePartyResonance([{ element: "light" }, { element: "dark" }, { element: "fire" }]);
+  assert.equal(eclipse.id, "eclipse");
+  assert.ok(eclipse.weakBonusMult > 1);
+
+  const dual = game.evaluatePartyResonance([{ element: "water" }, { element: "water" }, { element: "wind" }]);
+  assert.equal(dual.id, "dual");
+  assert.equal(dual.element, "water");
+  assert.ok(dual.name.includes("水"));
+
+  const triad = game.evaluatePartyResonance([{ element: "fire" }, { element: "water" }, { element: "wind" }]);
+  assert.equal(triad.id, "triad");
+  assert.ok(triad.spdMult > 1);
+
+  const harmony = game.evaluatePartyResonance([{ element: "fire" }, { element: "water" }, { element: "light" }]);
+  assert.equal(harmony.id, "harmony");
+  assert.ok(harmony.defMult > 1 && harmony.healShieldMult > 1);
+});
+
+test("属性反応: 全5反応の判定・実戦発動・やけど消費と再生状態の一致", () => {
+  assert.equal(game.detectElementalReaction("water", [{ kind: "burn" }])?.id, "vaporize");
+  assert.equal(game.detectElementalReaction("wind", [{ kind: "burn" }])?.id, "spread");
+  assert.equal(game.detectElementalReaction("earth", [{ kind: "guard_break" }])?.id, "shatter");
+  assert.equal(game.detectElementalReaction("light", [{ kind: "stun" }])?.id, "judgment");
+  assert.equal(game.detectElementalReaction("dark", [{ kind: "stun" }])?.id, "judgment");
+  assert.equal(game.detectElementalReaction("fire", [{ kind: "guard_break" }])?.id, "overload");
+  assert.equal(game.detectElementalReaction("water", []), null);
+
+  // 実戦で水属性アクターがやけど中の敵へ攻撃 → 「蒸発」発動＆やけど消費＆再生ステップと完全一致
+  const waterCard = { ...game.STARTER_CARDS[1], element: "water", stats: { hp: 160, atk: 80, def: 60, spd: 200 } };
+  const state = game.createBattle("rx1", [waterCard, game.STARTER_CARDS[0], game.STARTER_CARDS[2]], game.ladderDeck(1), 1, 77);
+  const actor = game.currentActor(state);
+  assert.equal(actor.side, "player");
+  assert.equal(actor.element, "water");
+  const target = state.actors.find((a) => a.side === "cpu" && a.alive);
+  target.statuses = [{ kind: "burn", turns: 2 }];
+  const prevActors = structuredClone(state.actors);
+  const prevLogLen = state.log.length;
+  game.applyAction(state, { skill: "basic", targetKey: target.key });
+  const events = state.log.slice(prevLogLen);
+  const rxEv = events.find((e) => e.reactionName === "蒸発");
+  assert.ok(rxEv, "蒸発反応イベントがログに出る");
+  assert.equal(rxEv.removeStatusKind, "burn");
+  // 再生ステップの最終状態がサーバー状態と一致する
+  const steps = game.buildPlaybackSteps(prevActors, events);
+  const finalTarget = steps[steps.length - 1].actors.find((a) => a.key === target.key);
+  assert.equal(finalTarget.hp, Math.max(0, target.hp));
+  assert.equal(finalTarget.alive, target.alive);
+});
+
+test("フィールド地脈・共鳴バースト・遺物（防壁章/懐中時計/吸血牙）の実戦効果", () => {
+  assert.equal(game.BATTLE_FIELDS.length, 7);
+  assert.equal(game.fieldForLadderTier(0), "neutral");
+  assert.equal(game.fieldForAbyssFloor(5), "abyss_miasma");
+  assert.equal(game.fieldForPvpRival("ghost_iris"), "mirror_lake");
+
+  // 遺物: 真鍮の防壁章（開幕シールド+28） + 星刻の懐中時計（TP+1, 初期手札+1）
+  const fastTeam = game.STARTER_CARDS.map((c) => ({ ...c, stats: { ...c.stats, spd: 180 } }));
+  const state = game.createBattle("rel1", fastTeam, game.ladderDeck(0), 0, 12, {
+    fieldId: "abyss_miasma",
+    playerRelics: ["relic_aegis", "relic_chronometer"],
+    tacticDecks: { player: game.tacticDeckList("chain"), cpu: null },
+  });
+  assert.equal(state.fieldId, "abyss_miasma");
+  const pActors = state.actors.filter((a) => a.side === "player");
+  for (const a of pActors) {
+    assert.ok(a.shield >= 28, "relic_aegis の開幕シールド+28が付与される");
+  }
+  assert.equal(state.tactics.player.hand.length, 5, "relic_chronometer で初期手札+1");
+  assert.equal(state.tactics.player.tp, 6, "relic_chronometer で開幕TP+1");
+
+  // 共鳴バースト 100% で burst 行動を実行できる
+  state.burst.player = 100;
+  const actor = game.currentActor(state);
+  assert.equal(actor.side, "player");
+  const prevLen = state.log.length;
+  game.applyAction(state, { skill: "burst", targetKey: "cpu_0" });
+  const newEvents = state.log.slice(prevLen);
+  assert.ok(newEvents.some((e) => e.burst === true), "共鳴バーストのイベントが記録される");
+  assert.ok(state.burst.player < 100, "バースト消費後にゲージがリセットされる");
+
+  // 吸血牙（relic_vampire_fang）で与ダメ時に自身HPを回復する
+  const vampState = game.createBattle("rel2", fastTeam, game.ladderDeck(1), 1, 15, {
+    playerRelics: ["relic_vampire_fang"],
+  });
+  const vampActor = game.currentActor(vampState);
+  vampActor.hp = Math.max(10, Math.floor(vampActor.maxHp / 2));
+  const hpBefore = vampActor.hp;
+  const enemy = vampState.actors.find((a) => a.side === "cpu" && a.alive);
+  const logStart = vampState.log.length;
+  game.applyAction(vampState, { skill: "basic", targetKey: enemy.key });
+  assert.ok(
+    vampState.log.slice(logStart).some((e) => e.type === "heal" && e.targetKey === vampActor.key && e.text.includes("紅玉の吸血牙")),
+    "紅玉の吸血牙のHP吸収イベントが発生する",
+  );
+  assert.ok(vampActor.hp > hpBefore || vampState.log.slice(logStart).some((e) => e.type === "damage" && e.targetKey === vampActor.key));
+});
+
 

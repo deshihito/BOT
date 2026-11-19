@@ -9,6 +9,7 @@ import { createStage, type Stage } from "@/lib/three-kit/stage";
 import { attachPickPointer } from "@/lib/three-kit/pointer";
 import SceneBox from "@/lib/three-kit/SceneBox";
 import type { PlaybackVfx } from "@/lib/lll/lll-playback";
+import { BATTLE_FIELD_BY_ID, type BattleFieldId } from "@/lib/lll/lll-game";
 import {
   ELEMENT_NUM,
   TIER_NUM,
@@ -33,6 +34,7 @@ interface Props {
   vfxNonce: number;
   shakeIntensity: 0 | 1 | 2 | 3;
   isBossOrAbyss?: boolean;
+  fieldId?: BattleFieldId;
   onActorTap: (actorKey: string) => void;
   onFail: () => void;
   fallback: ReactNode;
@@ -116,10 +118,11 @@ export default function LllBattleScene3D({
   vfxNonce,
   shakeIntensity,
   isBossOrAbyss = false,
+  fieldId = "neutral",
   onActorTap,
   onFail,
   fallback,
-  height = 360,
+  height = 380,
 }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [ready, setReady] = useState(false);
@@ -142,8 +145,11 @@ export default function LllBattleScene3D({
   guideKeyRef.current = guideTargetKey;
 
   const simClockRef = useRef(0);
+  const fieldDef = BATTLE_FIELD_BY_ID[fieldId] ?? BATTLE_FIELD_BY_ID.neutral;
+  const fieldAccentNum = Number.parseInt(fieldDef.accentHex.replace("#", ""), 16) || 0xd4a24c;
+  const fieldTintNum = Number.parseInt(fieldDef.arenaTintHex.replace("#", ""), 16) || 0x8a7a5a;
 
-  // ステージ初期化（アンマウントまで維持）
+  // ステージ初期化（アンマウントまたは地脈変化まで維持）
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
@@ -152,22 +158,22 @@ export default function LllBattleScene3D({
     let circleMesh: THREE.Mesh | null = null;
 
     const stage = createStage(el, {
-      background: isBossOrAbyss ? 0x13091f : 0x0d0a1b,
+      background: isBossOrAbyss ? 0x120d11 : 0x0c0f15,
       camera: { position: [0, 5.9, 6.8], lookAt: [0, 0.35, 0.0], fov: 42 },
       pixelRatioCap: 2,
       onFrame: (dt, t) => {
         simClockRef.current = t;
-        if (circleMesh) circleMesh.rotation.z = t * 0.11;
+        if (circleMesh) circleMesh.rotation.z = t * 0.09;
 
         if (ambientParticles) {
           const pos = ambientParticles.geometry.getAttribute("position") as THREE.BufferAttribute;
           for (let i = 0; i < pos.count; i++) {
-            let y = pos.getY(i) + dt * 0.35;
+            let y = pos.getY(i) + dt * 0.32;
             if (y > 3.6) y = 0.08;
             pos.setY(i, y);
           }
           pos.needsUpdate = true;
-          ambientParticles.rotation.y = t * 0.04;
+          ambientParticles.rotation.y = t * 0.035;
         }
 
         const nowMs = performance.now();
@@ -198,13 +204,13 @@ export default function LllBattleScene3D({
           if (nowMs < node.recoilUntil) {
             const r = (node.recoilUntil - nowMs) / 260;
             pz += (node.side === "player" ? 0.24 : -0.24) * r;
-            node.frameMat.emissive.setHex(0xff5247);
+            node.frameMat.emissive.setHex(0xd9635a);
             node.frameMat.emissiveIntensity = 1.4 * r;
           } else {
             node.frameMat.emissive.setHex(
-              isGuide ? 0xf5c518 : isTgt ? 0xff4d4d : isCur ? 0xf5c518 : 0x000000,
+              isGuide ? 0xd4a24c : isTgt ? 0xd9635a : isCur ? 0xd4a24c : 0x000000,
             );
-            node.frameMat.emissiveIntensity = isGuide ? 0.9 : isTgt ? 0.65 + Math.sin(t * 6) * 0.25 : isCur ? 0.55 : 0;
+            node.frameMat.emissiveIntensity = isGuide ? 0.85 : isTgt ? 0.65 + Math.sin(t * 6) * 0.25 : isCur ? 0.5 : 0;
           }
 
           node.root.position.set(px, py, pz);
@@ -219,12 +225,12 @@ export default function LllBattleScene3D({
           node.ringMesh.position.set(node.basePos.x, 0.025, node.basePos.z);
           if (isGuide || isCur) {
             node.ringMesh.visible = true;
-            node.ringMat.color.setHex(0xf5c518);
+            node.ringMat.color.setHex(0xd4a24c);
             const s = 1 + Math.sin(t * 5) * 0.08;
             node.ringMesh.scale.set(s, s, 1);
           } else if (isTgt) {
             node.ringMesh.visible = true;
-            node.ringMat.color.setHex(0xff5a52);
+            node.ringMat.color.setHex(0xd9635a);
             const s = 1.05 + Math.sin(t * 8) * 0.1;
             node.ringMesh.scale.set(s, s, 1);
           } else {
@@ -287,25 +293,30 @@ export default function LllBattleScene3D({
     glowTexRef.current = createGlowSpriteTexture();
     backTexRef.current = createCardBackTexture();
 
-    // 祭壇フロア + 魔方陣
+    // 地脈環境ライト
+    const fieldLight = new THREE.PointLight(fieldAccentNum, 1.8, 16);
+    fieldLight.position.set(0, 3.6, 0);
+    stage.scene.add(fieldLight);
+
+    // 祭壇フロア + 地脈リング
     const floor = new THREE.Mesh(
       new THREE.CylinderGeometry(5.6, 5.9, 0.28, 48),
       new THREE.MeshStandardMaterial({
-        color: isBossOrAbyss ? 0x1a102b : 0x17132a,
-        roughness: 0.72,
-        metalness: 0.25,
+        color: isBossOrAbyss ? 0x1a1418 : 0x151921,
+        roughness: 0.76,
+        metalness: 0.22,
       }),
     );
     floor.position.y = -0.15;
     stage.scene.add(floor);
 
-    const circleTex = createArenaCircleTexture(isBossOrAbyss ? "#e36a61" : "#7c5cff");
+    const circleTex = createArenaCircleTexture(fieldDef.arenaTintHex);
     circleMesh = new THREE.Mesh(
       new THREE.PlaneGeometry(8.8, 8.8),
       new THREE.MeshBasicMaterial({
         map: circleTex,
         transparent: true,
-        opacity: 0.85,
+        opacity: 0.78,
         depthWrite: false,
       }),
     );
@@ -320,9 +331,9 @@ export default function LllBattleScene3D({
         const pad = new THREE.Mesh(
           new THREE.RingGeometry(0.42, 0.56, 32),
           new THREE.MeshBasicMaterial({
-            color: side === "cpu" ? 0xe36a61 : 0x7c5cff,
+            color: side === "cpu" ? 0xd9635a : fieldTintNum,
             transparent: true,
-            opacity: 0.35,
+            opacity: 0.36,
             side: THREE.DoubleSide,
           }),
         );
@@ -332,8 +343,8 @@ export default function LllBattleScene3D({
       }
     }
 
-    // 浮遊マナ粒子
-    const moteCount = 46;
+    // 地脈浮遊粒子
+    const moteCount = 42;
     const positions = new Float32Array(moteCount * 3);
     for (let i = 0; i < moteCount; i++) {
       positions[i * 3] = (Math.random() - 0.5) * 8.4;
@@ -345,11 +356,11 @@ export default function LllBattleScene3D({
     ambientParticles = new THREE.Points(
       moteGeo,
       new THREE.PointsMaterial({
-        color: isBossOrAbyss ? 0xff9a8a : 0xbba6ff,
-        size: 0.14,
+        color: fieldAccentNum,
+        size: 0.13,
         map: glowTexRef.current,
         transparent: true,
-        opacity: 0.65,
+        opacity: 0.55,
         depthWrite: false,
         blending: THREE.AdditiveBlending,
       }),
@@ -382,10 +393,11 @@ export default function LllBattleScene3D({
       beamsRef.current = [];
       glowTexRef.current?.dispose();
       backTexRef.current?.dispose();
+      circleTex.dispose();
       stage.dispose();
       stageRef.current = null;
     };
-  }, [isBossOrAbyss, onFail]);
+  }, [isBossOrAbyss, fieldAccentNum, fieldTintNum, fieldDef.arenaTintHex, onFail]);
 
   // アクター配列の変更に応じてカードノードを生成・更新
   useEffect(() => {
@@ -583,8 +595,8 @@ export default function LllBattleScene3D({
       spawnBurst(toNode.basePos.clone(), elColor, 12);
     } else if (vfx.kind === "ko" && toNode) {
       toNode.recoilUntil = nowMs + 320;
-      spawnBurst(toNode.basePos.clone(), 0xf5c518, 24);
-      spawnBurst(toNode.basePos.clone(), 0xe36a61, 16);
+      spawnBurst(toNode.basePos.clone(), 0xd4a24c, 24);
+      spawnBurst(toNode.basePos.clone(), 0xd9635a, 16);
     }
 
     if (shakeIntensity > 0) {
@@ -601,8 +613,8 @@ export default function LllBattleScene3D({
       failed={failed}
       fallback={fallback}
       containerRef={containerRef}
-      background={isBossOrAbyss ? "#13091f" : "#0d0a1b"}
-      radius={12}
+      background={isBossOrAbyss ? "#120d11" : "#0c0f15"}
+      radius={10}
     />
   );
 }

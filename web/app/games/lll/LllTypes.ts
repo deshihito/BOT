@@ -1,4 +1,9 @@
-import { effectiveStats, type LllCard } from "@/lib/lll/lll-game";
+import {
+  effectiveStats,
+  type BattleFieldId,
+  type LllCard,
+  type PartyResonance,
+} from "@/lib/lll/lll-game";
 import type { LllCardView } from "./LllCard";
 
 export type Skill = {
@@ -36,6 +41,8 @@ export type Profile = {
   playerName?: string;
   favoriteCardId?: string | null;
   lockedCardIds?: string[];
+  unlockedRelics?: string[];
+  equippedRelics?: string[];
   loginStreak?: number;
   lastLoginDate?: string | null;
   dailyDate?: string;
@@ -97,6 +104,9 @@ export type BattleLog = {
   shieldAfter?: number;
   affinity?: number;
   statusKind?: string;
+  removeStatusKind?: string;
+  reactionName?: string;
+  burst?: boolean;
   element?: string;
   skillName?: string;
   skillPower?: number;
@@ -118,6 +128,10 @@ export type Battle = {
   winner?: string | null;
   log: BattleLog[];
   tactics?: TacticsView;
+  fieldId?: BattleFieldId;
+  resonance?: { player: PartyResonance; cpu: PartyResonance };
+  relics?: { player: string[]; cpu: string[] };
+  burst?: { player: number; cpu: number };
 };
 
 export type PvpRival = {
@@ -138,7 +152,8 @@ export type AppraiseResult = {
   aiUsed: boolean;
 };
 
-export type Tab = "home" | "scout" | "binder" | "arena";
+export type Tab = "hub" | "arena" | "binder" | "scout" | "codex";
+export type ArenaMode = "ladder" | "abyss" | "pvp";
 
 export function cardToView(card: CardT, profile?: Profile | null): LllCardView {
   const eff = effectiveStats(card);
@@ -165,7 +180,11 @@ export function cardToView(card: CardT, profile?: Profile | null): LllCardView {
   };
 }
 
-export function actorToView(actor: BattleActor, forecastLabel?: string | null): LllCardView {
+export function actorToView(
+  actor: BattleActor,
+  forecastLabel?: string | null,
+  reactionLabel?: string | null,
+): LllCardView {
   return {
     id: actor.key,
     name: actor.name,
@@ -189,6 +208,7 @@ export function actorToView(actor: BattleActor, forecastLabel?: string | null): 
     defending: actor.defending,
     alive: actor.alive,
     forecastLabel: forecastLabel ?? null,
+    reactionLabel: reactionLabel ?? null,
   };
 }
 
@@ -200,12 +220,16 @@ export function checkAchievementDone(profile: Profile, id: string): boolean {
       return profile.cards.length >= 12;
     case "ach_wins_5":
       return profile.wins >= 5;
+    case "ach_wins_10":
+      return profile.wins >= 10;
     case "ach_legend_1":
       return profile.cards.some((c) => c.tier === "legend");
     case "ach_lv10_1":
       return profile.cards.some((c) => c.level >= 10);
     case "ach_abyss_5":
       return (profile.abyssBestFloor ?? 0) >= 5;
+    case "ach_relic_1":
+      return (profile.unlockedRelics?.length ?? 0) >= 1;
     default:
       return false;
   }
