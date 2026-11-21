@@ -149,6 +149,8 @@ export function changePenParam(state, param, v) {
 }
 /** ペンレイヤー（ステージ座標 480x360 のキャンバス）。 */
 export class PenLayer {
+    /** 描画が起きたことを Runtime へ伝えるフック (redrawRequested 用)。 */
+    onDraw = null;
     canvas;
     ctx;
     /** 描画解像度倍率（表示キャンバスに合わせて上げる） */
@@ -164,6 +166,7 @@ export class PenLayer {
         this.ctx = ctx;
     }
     clear() {
+        this.onDraw?.();
         this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
     }
     toPx(x, y) {
@@ -171,6 +174,7 @@ export class PenLayer {
     }
     /** 線を引く。太さはペンサイズ（ステージ座標単位）、端は丸める（Scratch の描画に合わせる）。 */
     drawLine(state, x0, y0, x1, y1) {
+        this.onDraw?.();
         const ctx = this.ctx;
         const [ax, ay] = this.toPx(x0, y0);
         const [bx, by] = this.toPx(x1, y1);
@@ -189,6 +193,7 @@ export class PenLayer {
     }
     /** スタンプ: 画像をペンレイヤーへ焼き付ける。 */
     stampImage(img, w, h, cx, cy, rotationRad, flipX, alpha) {
+        this.onDraw?.();
         const ctx = this.ctx;
         const [px, py] = this.toPx(cx, cy);
         ctx.save();

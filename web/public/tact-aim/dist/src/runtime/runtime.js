@@ -85,6 +85,7 @@ export class Sprite {
     switchCostume(v) {
         if (this.costumes.length === 0)
             return;
+        this.rt.redrawRequested = true;
         if (typeof v === "number" || (typeof v === "string" && v.trim() !== "" && !Number.isNaN(Number(v)))) {
             // 数値（または数値文字列）: 1始まり、範囲外は回り込む
             const n = Math.round(toNumber(v));
@@ -99,6 +100,7 @@ export class Sprite {
     nextCostume() {
         if (this.costumes.length === 0)
             return;
+        this.rt.redrawRequested = true;
         this.costumeIndex = (this.costumeIndex + 1) % this.costumes.length;
     }
     costumeNumberName(kind) {
@@ -268,8 +270,16 @@ class SoundEngine {
     }
 }
 export class Runtime {
+    /** 1フレームの総ステップ数上限（決定論モードの作業予算。暴走防止）。 */
+    static FRAME_STEP_BUDGET = 200000;
     sprites = [];
-    penLayer = new PenLayer(2);
+    penLayer = (() => {
+        const pl = new PenLayer(2);
+        pl.onDraw = () => { this.redrawRequested = true; };
+        return pl;
+    })();
+    /** 描画要求: ペン描画やコスチューム変更が起きたら立つ (scratch-vm の redrawRequested)。 */
+    redrawRequested = false;
     cloud = new CloudStore();
     sound = new SoundEngine();
     mouse = { x: 0, y: 0, down: false };
@@ -451,39 +461,78 @@ export class Runtime {
         if (this.deterministic)
             this.virtualNow += 1000 / 60; // 仮想時計は 60fps 固定で進める
         const now = this.nowMs();
-        for (const t of this.threads) {
-            if (t.done)
-                continue;
-            if (t.wakeAt > now)
-                continue;
-            if (t.waitUntil && !t.waitUntil())
-                continue;
-            t.wakeAt = 0;
-            t.waitUntil = null;
-            this.currentThread = t;
-            this.stepStartedAt = performance.now();
-            let result;
-            try {
-                result = t.gen.next();
+        this.redrawRequested = false;
+        // TurboWarp (scratch-vm Sequencer) のフレーム意味論に合わせる:
+        // - 1フレームは「全スレッドを1ステップずつ進めるパス」の繰り返し。
+        // - ループ端の yield は STATUS_YIELD (ソフト yield) で、予算が残っていれば
+        //   次のパスで同じフレームのまま再開される。wait 系はフレームをまたぐ
+        //   (このフレームでは再評価しない)。
+        // - パスの繰り返しは、フレーム時間の 75% を使い切るか、描画要求
+        //   (redrawRequested) が立つか、ソフト yield したスレッドが
+        //   無くなったら終わる。メインループ All() は先頭でペンを消すため
+        //   描画要求が立ち、結果として 1フレームに約1回だけ進む。
+        // 旧実装は全 yield をフレーム境界にしていたため、非 warp の反復1回が
+        // 1フレームに固定され、起動時の走査ループ (約7,800回) に約7,800フレーム
+        // かかっていた (TurboWarp では同じ走査が1フレーム未満で終わる)。
+        const deadline = this.deterministic ? Infinity : performance.now() + (1000 / this.targetFps) * 0.75;
+        let stepsLeft = Runtime.FRAME_STEP_BUDGET;
+        const parked = new Set();
+        while (true) {
+            let anyYielded = false;
+            let anyAlive = false;
+            for (const t of this.threads) {
+                if (t.done)
+                    continue;
+                anyAlive = true;
+                if (parked.has(t))
+                    continue;
+                if (t.wakeAt > now || (t.waitUntil && !t.waitUntil())) {
+                    parked.add(t);
+                    continue;
+                }
+                if (stepsLeft <= 0)
+                    break;
+                t.wakeAt = 0;
+                t.waitUntil = null;
+                this.currentThread = t;
+                this.stepStartedAt = performance.now();
+                stepsLeft--;
+                let result;
+                try {
+                    result = t.gen.next();
+                }
+                catch (e) {
+                    console.error("[TACT-AIM] script error", e);
+                    t.done = true;
+                    this.currentThread = null;
+                    continue;
+                }
+                this.currentThread = null;
+                if (result.done) {
+                    t.done = true;
+                    continue;
+                }
+                const cmd = result.value;
+                if (cmd && "waitSeconds" in cmd) {
+                    t.wakeAt = now + cmd.waitSeconds * 1000;
+                    parked.add(t);
+                }
+                else if (cmd && "waitUntil" in cmd) {
+                    t.waitUntil = cmd.waitUntil;
+                    parked.add(t);
+                }
+                else {
+                    anyYielded = true; // ソフト yield: 次のパスで再開可能
+                }
             }
-            catch (e) {
-                console.error("[TACT-AIM] script error", e);
-                t.done = true;
-                continue;
-            }
-            this.currentThread = null;
-            if (result.done) {
-                t.done = true;
-                continue;
-            }
-            const cmd = result.value;
-            if (cmd && "waitSeconds" in cmd) {
-                t.wakeAt = now + cmd.waitSeconds * 1000;
-            }
-            else if (cmd && "waitUntil" in cmd) {
-                t.waitUntil = cmd.waitUntil;
-            }
-            // undefined の yield は次フレームまで休止（何もしない＝次回の step で進む）
+            if (!anyAlive || !anyYielded)
+                break;
+            if (this.redrawRequested)
+                break;
+            if (stepsLeft <= 0)
+                break;
+            if (performance.now() >= deadline)
+                break;
         }
         this.threads = this.threads.filter((t) => !t.done);
     }

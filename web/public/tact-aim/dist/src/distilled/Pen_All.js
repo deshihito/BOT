@@ -3059,9 +3059,19 @@ export class Pen_All extends Sprite {
             // クラウド同期の本体。毎フレーム All から呼ばれる。
             // 1. 全クラウド変数（CLOUD1..10）を読み直し、レコードを G.CLOUD へ反映する。
             //    Load cloud data へは "=" + 生文字列を渡す（先頭 "=" が番兵）。
-            for (let n = 1; n <= 10; n++) {
-                yield* this.Load_cloud_data(S(n), S("=") + S(G.cloudGet("☁ CLOUD" + n)));
-            }
+            //    ※原作どおり10回の直書きを保つ。変数名を動的に組み立てる形（ループ化）に
+            //    すると、逆変換でクラウド変数参照を復元できず読み取りが 0 に化ける
+            //    （Stage D 検証で実証）。ブロック構造との 1:1 対応が往復の前提。
+            yield* this.Load_cloud_data("1", (S("=") + S(G.cloudGet("☁ CLOUD1"))));
+            yield* this.Load_cloud_data("2", (S("=") + S(G.cloudGet("☁ CLOUD2"))));
+            yield* this.Load_cloud_data("3", (S("=") + S(G.cloudGet("☁ CLOUD3"))));
+            yield* this.Load_cloud_data("4", (S("=") + S(G.cloudGet("☁ CLOUD4"))));
+            yield* this.Load_cloud_data("5", (S("=") + S(G.cloudGet("☁ CLOUD5"))));
+            yield* this.Load_cloud_data("6", (S("=") + S(G.cloudGet("☁ CLOUD6"))));
+            yield* this.Load_cloud_data("7", (S("=") + S(G.cloudGet("☁ CLOUD7"))));
+            yield* this.Load_cloud_data("8", (S("=") + S(G.cloudGet("☁ CLOUD8"))));
+            yield* this.Load_cloud_data("9", (S("=") + S(G.cloudGet("☁ CLOUD9"))));
+            yield* this.Load_cloud_data("10", (S("=") + S(G.cloudGet("☁ CLOUD10"))));
             // 2. スロットごとの最終確認タイマ（Cloud check）を進める。
             //    "" は「消失を確認済み」の印。消失したのに名前が残っていたら名前だけ消す。
             //    値がある間は FPS_temp ずつ加算し、90 を超えたらレコード全体を消去して "" に戻す。
@@ -3252,13 +3262,40 @@ export class Pen_All extends Sprite {
             }
             // 9. 保存: Save が "1" で自分の ID が 4 文字のときだけ、10 本のクラウド変数から
             //    ランダムな 1 本へ Cloud data を書く（書き込み競合の分散）。
+            //    ※読み取り側と同じく直書きを保つ。動的な変数名（"☁ CLOUD" + n）は
+            //    逆変換で復元できず、保存が無言で消える（Stage D 検証で実証）。
             if (B(equals(Save, "1"))) {
                 if (B(equals(S(G.ID).length, "4"))) {
                     this.Temp1 = random(1, 10);
-                    for (let n = 1; n <= 10; n++) {
-                        if (B(equals(this.Temp1, S(n)))) {
-                            G.cloudSet("☁ CLOUD" + n, G.Cloud_data);
-                        }
+                    if (B(equals(this.Temp1, "1"))) {
+                        G.cloudSet("☁ CLOUD1", G.Cloud_data);
+                    }
+                    if (B(equals(this.Temp1, "2"))) {
+                        G.cloudSet("☁ CLOUD2", G.Cloud_data);
+                    }
+                    if (B(equals(this.Temp1, "3"))) {
+                        G.cloudSet("☁ CLOUD3", G.Cloud_data);
+                    }
+                    if (B(equals(this.Temp1, "4"))) {
+                        G.cloudSet("☁ CLOUD4", G.Cloud_data);
+                    }
+                    if (B(equals(this.Temp1, "5"))) {
+                        G.cloudSet("☁ CLOUD5", G.Cloud_data);
+                    }
+                    if (B(equals(this.Temp1, "6"))) {
+                        G.cloudSet("☁ CLOUD6", G.Cloud_data);
+                    }
+                    if (B(equals(this.Temp1, "7"))) {
+                        G.cloudSet("☁ CLOUD7", G.Cloud_data);
+                    }
+                    if (B(equals(this.Temp1, "8"))) {
+                        G.cloudSet("☁ CLOUD8", G.Cloud_data);
+                    }
+                    if (B(equals(this.Temp1, "9"))) {
+                        G.cloudSet("☁ CLOUD9", G.Cloud_data);
+                    }
+                    if (B(equals(this.Temp1, "10"))) {
+                        G.cloudSet("☁ CLOUD10", G.Cloud_data);
                     }
                 }
             }
