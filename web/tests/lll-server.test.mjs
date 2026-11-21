@@ -201,7 +201,7 @@ test("対戦: 未解放ティアは開始できない", async () => {
   await assert.rejects(() => server.startBattle(token, 5), server.LllError);
 });
 
-test("鑑定モデルチェーン: 既定モデルが失敗したら画像対応モデルへ進み aiUsed=true になる", async () => {
+test("鑑定モデル: gemma-4-26b で言葉が取れ aiUsed=true になる", async () => {
   const PREFIX_WITH_KEY = `
 import { createHash, randomBytes } from "node:crypto";
 function isBotApiConfigured() { return false; }
@@ -247,8 +247,8 @@ function logfareApiKeys() { return ["test-key"]; }
     const words = await withAi.appraiseWordsWithLogfare(IMG_A);
     assert.ok(words, "どこかのモデルで言葉が取れる");
     assert.equal(words.name, "夕焼けの番人");
-    assert.equal(calls[0], "claude-haiku-5-5", "最初は既定モデルを試す");
-    assert.equal(calls[calls.length - 1], "gemma-4-26b", "失敗したら画像対応モデルへ進む");
+    assert.equal(calls[0], "gemma-4-26b", "既定モデルは gemma-4-26b");
+    assert.equal(calls[calls.length - 1], "gemma-4-26b", "最後まで gemma-4-26b のみを使う");
     const { token } = await withAi.getOrCreateProfile(null);
     const res = await withAi.appraise(token, FEATURES, IMG_A);
     assert.equal(res.aiUsed, true);

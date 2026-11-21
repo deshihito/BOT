@@ -139,7 +139,7 @@ const LUMEN_EXCHANGE_COST = 50;
 const LUMEN_EXCHANGE_SHARDS = 5;
 const MAX_IMAGE_DATA_URL_LENGTH = 400_000;
 const LOGFARE_TIMEOUT_MS = 30_000;
-const DEFAULT_LLL_MODEL = "claude-haiku-5-5";
+const DEFAULT_LLL_MODEL = "gemma-4-26b";
 
 // 仕様書（lll-spec-2026-11-10 §4.1）の報酬表。LADDER_TIERS の項目から
 // 報酬フィールドが読み取れない場合のフォールバックとしてだけ使う。
@@ -503,19 +503,11 @@ const APPRAISE_WORDS_PROMPT = [
  * 決定的フォールバック生成に倒す。キー切替は HTTP 429 のときだけ。
  */
 /**
- * 鑑定モデルの優先順。既定モデルの次に、Logfare の公開カタログで画像入力
- * 対応（chat_vision）が確認できるモデルを並べ、最後に自動ルーティング。
- * 既定モデルはカタログ未掲載で、自動ルーティングはテキスト専用のため、
- * どちらかが画像入力で失敗しても AI の言葉生成を諦めないための並び
- * （2026-11-10 に GET /v1/models で実測して選定）。
+ * 鑑定モデル。Logfare の他プロバイダが終了したため、画像入力
+ * 対応（chat_vision:true）が確認できる gemma-4-26b に一本化した
+ * （2026-11-21 に GET /v1/models で実測して選定）。
  */
-const APPRAISE_MODEL_CHAIN: string[] = [
-  DEFAULT_LLL_MODEL,
-  "gemma-4-26b",
-  "gemma-4-31b-it",
-  "qwen-3.8-27b",
-  "logfare/auto",
-];
+const APPRAISE_MODEL_CHAIN: string[] = [DEFAULT_LLL_MODEL];
 
 export async function appraiseWordsWithLogfare(imageDataUrl: string): Promise<AiWords | null> {
   const keys = logfareApiKeys();

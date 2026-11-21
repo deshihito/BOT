@@ -13,8 +13,10 @@ from typing import Any, AsyncIterator
 import aiohttp
 
 BASE_URL = os.getenv("LOGFARE_BASE_URL", "https://logfare.ai/v1").rstrip("/")
-DEFAULT_MODEL = "claude-haiku-5-5"
+DEFAULT_MODEL = "gemma-4-26b"
 DEFAULT_IMAGE_MODEL = "flux-2-dev"
+# 旧既定（logfare/auto）で保存されたユーザー設定の互換用。実リクエストでは使わず、
+# resolve_model が既定の Gemma へフォールバックさせる。
 AUTO_MODEL = "logfare/auto"
 # nova-3 は日本語音声を認識できず空の結果を返したため（!sttdebug で検証）、日本語に強い Whisper を既定にする。
 # 環境変数 LOGFARE_TRANSCRIPTION_MODEL で変更できる。
@@ -187,7 +189,7 @@ async def fetch_free_chat_models() -> list[dict[str, Any]]:
             response.raise_for_status()
             payload = await response.json()
     models = [model for model in payload.get("data", []) if _is_chat_model(model)]
-    return sorted(models, key=lambda model: (model["id"] != AUTO_MODEL, model["id"]))
+    return sorted(models, key=lambda model: (model["id"] != DEFAULT_MODEL, model["id"]))
 
 
 async def fetch_image_models() -> list[dict[str, Any]]:
@@ -218,16 +220,16 @@ async def resolve_image_model(preferred: str | None = None) -> tuple[str, bool]:
 
 
 async def resolve_model(preferred: str | None = None) -> tuple[str, bool]:
-    """指定モデルを使えるか確認し、使えなければ auto にフォールバックする。"""
-    requested = (preferred or configured_default_model()).strip() or AUTO_MODEL
+    """指定モデルを使えるか確認し、使えなければ既定の Gemma にフォールバックする。"""
+    requested = (preferred or configured_default_model()).strip() or DEFAULT_MODEL
     try:
         model_ids = {item["id"] for item in await fetch_free_chat_models()}
     except (aiohttp.ClientError, asyncio.TimeoutError, ValueError, KeyError):
-        # カタログが一時的に取得できなくても、auto は Logfare 側で解決できる。
+        # カタログが一時的に取得できなくても、指定モデルはそのまま試す。
         return requested, False
     if requested in model_ids:
         return requested, True
-    return AUTO_MODEL, False
+    return DEFAULT_MODEL, False
 
 
 async def chat(

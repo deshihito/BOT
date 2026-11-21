@@ -878,10 +878,10 @@ class SlimContextTest(unittest.TestCase):
         self.assertEqual(luna.MEMORY_MAX_CHARS, 3500)
         self.assertEqual(luna.RAG_BUDGET_CHARS, 800)
 
-    def test_integration_model_is_deepseek_on_logfare(self):
+    def test_integration_model_is_gemma_on_logfare(self):
         with patch.dict(os.environ, {"LUNA_AI_PROVIDER": "logfare"}, clear=False):
             os.environ.pop("LUNA_AI_INTEGRATION_MODEL", None)
-            self.assertEqual(luna.integration_model_name(), "deepseek-v4.1-flash-1017")
+            self.assertEqual(luna.integration_model_name(), "gemma-4-26b")
 
     def test_integration_model_falls_back_to_reply_model_on_kiosapi(self):
         with patch.dict(os.environ, {"LUNA_AI_PROVIDER": "kiosapi"}, clear=False):
@@ -979,9 +979,9 @@ class LoggerLevelTest(unittest.TestCase):
 
 
 class ModelSelectionTest(unittest.TestCase):
-    def test_default_model_is_logfare_deepseek(self):
+    def test_default_model_is_logfare_gemma(self):
         self.assertEqual(luna.DEFAULT_PROVIDER, "logfare")
-        self.assertEqual(luna.DEFAULT_MODEL, "deepseek-v4.1-flash-1017")
+        self.assertEqual(luna.DEFAULT_MODEL, "gemma-4-26b")
         self.assertEqual(luna.REASONING_EFFORT, "none")
 
     def test_provider_name_defaults_to_logfare_and_env_selects_kiosapi(self):
