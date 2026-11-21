@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TACT-AIM distilled — 開発用プレイヤー</title>
+<style>
+  body { background: #111; color: #ddd; font-family: system-ui, sans-serif; margin: 16px; }
+  #stage { background: #fff; width: 960px; max-width: 100%; aspect-ratio: 4 / 3; display: block; }
+  .row { display: flex; gap: 8px; align-items: center; margin: 8px 0; flex-wrap: wrap; }
+  button { font-size: 16px; padding: 4px 14px; }
+  input { font-size: 14px; padding: 4px; }
+  #ask { background: #222; border: 1px solid #555; padding: 10px; margin: 8px 0; max-width: 940px; }
+  small { color: #999; }
+</style>
+</head>
+<body>
+<h1 style="font-size:18px">TACT-AIM distilled — 開発用プレイヤー（Phase 1）</h1>
+<div class="row">
+  <button id="flag" title="緑の旗">▶ 実行</button>
+  <button id="stop" title="止める">■ 停止</button>
+  <label>ユーザー名 <input id="username" size="14" placeholder="username"></label>
+  <span id="debug"><small>threads: 0</small></span>
+</div>
+<canvas id="stage" width="960" height="720"></canvas>
+<div id="ask" style="display:none">
+  <span id="ask-label"></span>
+  <input id="ask-input" size="30">
+  <button id="ask-send">答える</button>
+</div>
+<p><small>
+  原作: TACT-AIM 16.8 by uk-400（CC BY-SA 2.0） / 移植の正解（オラクル）は original/ の .sb3。<br>
+  クラウド対戦: URL に ?cloud=wss://サーバー&amp;user=名前&amp;project=TACT-AIM-distilled を付けると
+  TurboWarp cloud-server 互換サーバーへ接続する。未指定時はオフライン（初期スナップショット）で動作。
+</small></p>
+<script type="module" src="dist/src/main.js"></script>
+</body>
+</html>
