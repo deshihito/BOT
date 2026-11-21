@@ -297,6 +297,8 @@ export class Runtime {
     lastFrameAt = 0;
     /** 目標 FPS。TurboWarp の既定に合わせて 60（docs 参照、要オラクル実測で校正）。 */
     targetFps = 60;
+    /** プレイヤーの一時停止（TurboWarp のポーズボタン相当）。true の間はスレッドを進めない。 */
+    paused = false;
     // ---- 決定論モード（テスト用） ----
     // 有効時は仮想時計（1フレーム = 1/60 秒で進行）とシード付き RNG を使い、
     // 日時は固定エポック（2026-11-21 UTC）から仮想時刻で進む。同一入力列に対して
@@ -359,6 +361,7 @@ export class Runtime {
         return performance.now() - this.stepStartedAt > 100;
     }
     greenFlag() {
+        this.paused = false;
         this.threads = [];
         this.timerStart = this.nowMs();
         for (const hat of this.hats) {
@@ -386,6 +389,7 @@ export class Runtime {
         }
     }
     stopAll() {
+        this.paused = false;
         for (const t of this.threads)
             t.done = true;
         this.threads = [];
@@ -458,6 +462,8 @@ export class Runtime {
     }
     /** 1フレーム分スレッドを進める。 */
     stepThreads() {
+        if (this.paused)
+            return;
         if (this.deterministic)
             this.virtualNow += 1000 / 60; // 仮想時計は 60fps 固定で進める
         const now = this.nowMs();

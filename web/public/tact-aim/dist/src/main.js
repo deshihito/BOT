@@ -1,67 +1,48 @@
-// 開発用プレイヤー: ランタイム + 生成コードを起動し、入力を Scratch 座標系で渡す。
+// TurboWarp 風プレイヤー: ランタイム + 生成コードを起動し、入力を Scratch 座標系で渡す。
+// 流れは TurboWarp のプロジェクトページに合わせる:
+//   赤い読み込み画面（進捗バー）→ 読み込み完了で初期フレーム表示 → 緑の旗で開始。
 import { Runtime } from "./runtime/runtime.js";
 import { createProject } from "./generated/project.js";
 const canvas = document.getElementById("stage");
+const stageWrap = document.getElementById("stage-wrap");
 const rt = new Runtime();
 const params = new URLSearchParams(location.search);
-const userInput = document.getElementById("username");
 rt.username = params.get("user") ?? "";
 createProject(rt);
-// ---- ローディング画面（TurboWarp 風） ----
-// コスチューム画像の読み込み進捗を表示し、全て揃ってから起動する。
-// 起動後もゲーム側の描画が始まるまで「起動中」表示（経過秒・描画回数）を出す。
+// ---- 読み込み画面 ----
 const loaderEl = document.getElementById("loader");
 const loadFill = document.getElementById("loadbar-fill");
-const loadPct = document.getElementById("load-pct");
-const loadStatus = document.getElementById("load-status");
-const loadHint = document.getElementById("load-hint");
-const flagBtn = document.getElementById("flag");
-let drawCount = 0;
-const penLayer = rt.penLayer;
-const origDrawLine = penLayer.drawLine.bind(penLayer);
-penLayer.drawLine = (...args) => { drawCount++; return origDrawLine(...args); };
-const origStampImage = penLayer.stampImage.bind(penLayer);
-penLayer.stampImage = (...args) => { drawCount++; return origStampImage(...args); };
+const toolbarEl = document.getElementById("toolbar");
+const pauseBtn = document.getElementById("pause");
 const allImages = [
     ...rt.backdrop.images,
     ...rt.sprites.flatMap((s) => s.costumeImages.filter((i) => i !== null)),
 ];
 let settledImages = 0;
-let gameStarted = false;
+let loadFinished = false;
+let loopStarted = false;
 function renderLoadProgress() {
     const total = allImages.length;
     const pct = total === 0 ? 100 : Math.floor((settledImages / total) * 100);
     loadFill.style.width = `${pct}%`;
-    loadPct.textContent = `${pct}%`;
-    loadStatus.textContent = `アセット読み込み中 ${settledImages} / ${total}`;
 }
-function startGame() {
-    if (gameStarted)
+function finishLoad() {
+    if (loadFinished)
         return;
-    gameStarted = true;
-    flagBtn.disabled = false;
-    loaderEl.classList.add("booting");
+    loadFinished = true;
     loadFill.style.width = "100%";
-    loadPct.textContent = "";
-    loadHint.textContent = "起動シーケンスは原作仕様で 1〜3 分かかります（タップで閉じる）";
-    const t0 = performance.now();
-    rt.startLoop(canvas);
-    rt.greenFlag();
-    const hideLoader = () => {
-        clearInterval(timer);
-        loaderEl.classList.add("done");
-        setTimeout(() => loaderEl.remove(), 700);
-    };
-    const timer = setInterval(() => {
-        const sec = Math.floor((performance.now() - t0) / 1000);
-        loadStatus.textContent = `起動中… ${sec} 秒 / 描画 ${drawCount} 回 / threads ${rt.activeThreadCount}`;
-        if (drawCount >= 200 || sec >= 12)
-            hideLoader();
-    }, 250);
-    loaderEl.addEventListener("click", hideLoader);
+    // 読み込み完了: ループを開始して初期フレーム（タイトル画面）を表示する。
+    // ゲームの開始は TurboWarp と同じく緑の旗で行う。
+    if (!loopStarted) {
+        loopStarted = true;
+        rt.startLoop(canvas);
+    }
+    toolbarEl.classList.remove("loading");
+    loaderEl.classList.add("done");
+    setTimeout(() => loaderEl.remove(), 500);
 }
 if (allImages.length === 0) {
-    startGame();
+    finishLoad();
 }
 else {
     for (const img of allImages) {
@@ -73,7 +54,7 @@ else {
                 settledImages++;
                 renderLoadProgress();
                 if (settledImages >= allImages.length)
-                    startGame();
+                    finishLoad();
             };
             img.addEventListener("load", done, { once: true });
             img.addEventListener("error", done, { once: true });
@@ -81,8 +62,8 @@ else {
     }
     renderLoadProgress();
     if (settledImages >= allImages.length)
-        startGame();
-    setTimeout(startGame, 45000); // 保険: 一部アセットが詰まっても起動はする
+        finishLoad();
+    setTimeout(finishLoad, 45000); // 保険: 一部アセットが詰まっても表示は進める
 }
 // クラウドサーバーが指定されていれば接続する（TurboWarp cloud-server 互換プロトコル）
 const cloudUrl = params.get("cloud");
@@ -113,6 +94,25 @@ canvas.addEventListener("mousemove", (e) => {
 });
 canvas.addEventListener("mousedown", () => { rt.mouse.down = true; });
 window.addEventListener("mouseup", () => { rt.mouse.down = false; });
+// タッチ操作（スマホ）: タップ位置をマウス座標として渡す
+canvas.addEventListener("touchstart", (e) => {
+    const t = e.touches[0];
+    if (!t)
+        return;
+    const rect = canvas.getBoundingClientRect();
+    rt.mouse.x = ((t.clientX - rect.left) / rect.width) * 480 - 240;
+    rt.mouse.y = 180 - ((t.clientY - rect.top) / rect.height) * 360;
+    rt.mouse.down = true;
+}, { passive: true });
+canvas.addEventListener("touchmove", (e) => {
+    const t = e.touches[0];
+    if (!t)
+        return;
+    const rect = canvas.getBoundingClientRect();
+    rt.mouse.x = ((t.clientX - rect.left) / rect.width) * 480 - 240;
+    rt.mouse.y = 180 - ((t.clientY - rect.top) / rect.height) * 360;
+}, { passive: true });
+window.addEventListener("touchend", () => { rt.mouse.down = false; });
 window.addEventListener("keydown", (e) => {
     const k = normalizeKey(e.key);
     if (!rt.keysDown.has(k)) {
@@ -126,12 +126,48 @@ window.addEventListener("keydown", (e) => {
 window.addEventListener("keyup", (e) => {
     rt.keysDown.delete(normalizeKey(e.key));
 });
+// ---- ツールバー ----
 document.getElementById("flag")?.addEventListener("click", () => {
-    rt.username = userInput.value;
+    if (!loopStarted) {
+        loopStarted = true;
+        rt.startLoop(canvas);
+    }
+    pauseBtn.classList.remove("active");
     rt.greenFlag();
 });
-document.getElementById("stop")?.addEventListener("click", () => rt.stopAll());
-userInput.addEventListener("change", () => { rt.username = userInput.value; });
+pauseBtn.addEventListener("click", () => {
+    rt.paused = !rt.paused;
+    pauseBtn.classList.toggle("active", rt.paused);
+});
+document.getElementById("stop")?.addEventListener("click", () => {
+    pauseBtn.classList.remove("active");
+    rt.stopAll();
+});
+document.getElementById("fullscreen")?.addEventListener("click", () => {
+    if (document.fullscreenElement)
+        void document.exitFullscreen();
+    else
+        void stageWrap.requestFullscreen();
+});
+// ---- ユーザー名（クラウド注意ボックス内の「ユーザー名を変更」） ----
+const usernameInput = document.getElementById("username");
+const usernameCurrent = document.getElementById("username-current");
+const usernameRow = document.getElementById("username-row");
+function renderUsername() {
+    usernameCurrent.textContent = rt.username || "（未設定）";
+}
+usernameInput.value = rt.username;
+renderUsername();
+document.getElementById("username-change")?.addEventListener("click", () => {
+    usernameRow.classList.toggle("open");
+    if (usernameRow.classList.contains("open"))
+        usernameInput.focus();
+});
+document.getElementById("username-set")?.addEventListener("click", () => {
+    rt.username = usernameInput.value;
+    renderUsername();
+    usernameRow.classList.remove("open");
+});
 // ask and wait の UI
 const askBox = document.getElementById("ask");
 const askLabel = document.getElementById("ask-label");
@@ -141,18 +177,12 @@ document.getElementById("ask-send")?.addEventListener("click", () => {
     askInput.value = "";
 });
 setInterval(() => {
-    if (rt.askState && askBox.style.display === "none") {
+    if (rt.askState && askBox.style.display !== "flex") {
         askLabel.textContent = rt.askState.question;
-        askBox.style.display = "block";
+        askBox.style.display = "flex";
         askInput.focus();
     }
-    else if (!rt.askState && askBox.style.display !== "none") {
+    else if (!rt.askState && askBox.style.display === "flex") {
         askBox.style.display = "none";
     }
 }, 100);
-// スレッド数の表示（デバッグ用）
-const dbg = document.getElementById("debug");
-setInterval(() => {
-    dbg.textContent = `threads: ${rt.activeThreadCount}`;
-}, 500);
-// 起動はローディング画面側（アセット完了後）が startLoop + greenFlag を行う。
