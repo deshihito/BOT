@@ -28,7 +28,7 @@ class AIDefaultSelect(discord.ui.Select):
                 label=label[:100], value=model_id, default=model_id == current,
             ))
         if not options:
-            options = [discord.SelectOption(label="logfare/auto", value="logfare/auto")]
+            options = [discord.SelectOption(label=logfare.DEFAULT_MODEL, value=logfare.DEFAULT_MODEL)]
         super().__init__(placeholder="デフォルトAIを選択", options=options, row=0)
 
     async def callback(self, interaction: discord.Interaction):

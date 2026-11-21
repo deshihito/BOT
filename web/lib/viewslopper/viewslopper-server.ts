@@ -1,6 +1,6 @@
 // viewslopper のサーバー側処理（URL取得とLLM診断の呼び出し）。
 // LLM 呼び出し自体は One Prompter の Logfare クライアント（one-prompter-server の
-// logfareChat）をそのまま使う: キー管理・429フェイルオーバー・モデル（ds1017固定）は
+// logfareChat）をそのまま使う: キー管理・429フェイルオーバー・モデル（gemma-4-26b 固定）は
 // サービス間で共通の流儀に寄せる。ここが持つのは「URLを安全に取りに行く」部分だけ。
 
 import { lookup } from "node:dns/promises";
@@ -176,8 +176,7 @@ async function fetchScreenshot(url: string): Promise<{ dataUrl: string; screensh
 
 // 外観採点の vision モデル優先順。LLL の鑑定と同じく、Logfare の公開カタログで
 // 画像入力（chat_vision:true）が実測確認できたモデルだけを並べる。
-// 既定の ds1017 はテキスト専用なのでここでは使わない。
-const APPEARANCE_MODEL_CHAIN: string[] = ["gemma-4-26b", "gemma-4-31b-it", "qwen-3.8-27b"];
+const APPEARANCE_MODEL_CHAIN: string[] = ["gemma-4-26b"];
 
 function logfareBaseUrl(): string {
   return (process.env.LOGFARE_BASE_URL?.trim() || "https://logfare.ai/v1").replace(/\/+$/, "");
@@ -250,7 +249,7 @@ export async function assessAppearance(page: PageData): Promise<AppearanceOutcom
 }
 
 /**
- * LLM（ds1017）で診断文を作る。キーがない・失敗・形式崩れのときは
+ * LLM（gemma-4-26b）で診断文を作る。キーがない・失敗・形式崩れのときは
  * ルールベース診断に落とす（スコアはどちらでも同じ決定的計算のもの）。
  * LLM 主採点（assess）が成功した場合はこちらは使わない。
  */

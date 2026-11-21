@@ -55,7 +55,7 @@ export function resolvePromptLang(value: unknown): PromptLang {
 
 /**
  * API の think フィールドを検証する。true のときだけオン、それ以外（不正値・未指定）はオフに丸める。
- * 生成モデルは ds1017 固定（サーバー側 onePrompterModel）で、reasoning の出し分けは
+ * 生成モデルは gemma-4-26b 固定（サーバー側 onePrompterModel）で、reasoning の出し分けは
  * サーバー側（one-prompter-server.ts の resolveReasoning）が担う。
  */
 export function resolveThink(value: unknown): boolean {

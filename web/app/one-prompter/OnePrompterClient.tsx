@@ -116,7 +116,7 @@ export default function OnePrompterClient() {
   const [questionCount, setQuestionCount] = useState(DEFAULT_QUESTION_COUNT);
   /** 完成プロンプトの出力言語モード（ja/en/hybrid）。LLM 経路でのみ有効（fallback は日本語のみ）。 */
   const [promptLang, setPromptLang] = useState<PromptLang>(DEFAULT_PROMPT_LANG);
-  /** 「より考える」（思考強度のオン）。既定はオフ。生成モデルは ds1017 固定で、LLM 経路でのみ有効。 */
+  /** 「より考える」（思考強度のオン）。既定はオフ。生成モデルは gemma-4-26b 固定で、LLM 経路でのみ有効。 */
   const [think, setThink] = useState(false);
   /** 自由入力の展開状態と下書き（質問が切り替わるたびにリセットする）。 */
   const [freeOpen, setFreeOpen] = useState(false);

@@ -27,7 +27,7 @@ export const maxDuration = 60;
 // action=revise: 現在の完成プロンプトを修正指示（200字以内）どおりに書き直す
 // 任意フィールド lang（"ja" | "en" | "hybrid"）は synthesize / revise の出力言語モード。
 // 不正値は hybrid に丸める。questions では使わない（質問は常に日本語）。
-// 生成モデルは ds1017 固定（サーバー側 onePrompterModel、env で差し替え可）。
+// 生成モデルは gemma-4-26b 固定（サーバー側 onePrompterModel、env で差し替え可）。
 // 任意フィールド think（boolean）は「より考える」= 思考強度のオン。
 // 全 LLM 呼び出しに伝播し、reasoning を "high" に上げる。
 // true 以外（不正値・未指定）はオフに丸める。

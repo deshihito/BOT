@@ -1,5 +1,5 @@
 // ハンバーガーメニュー・サービス名の表示回数・「より考える」トグルの配線・
-// モデル選択の廃止（ds1017 固定）・選択中ボタンのスタイルを、
+// モデル選択の廃止（gemma-4-26b 固定）・選択中ボタンのスタイルを、
 // ソースコードの静的チェックで確かめる（画面描画はしない）。
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -115,7 +115,7 @@ test("クライアント側コードと表示文言にプロバイダ名（Logfa
   }
 });
 
-test("モデル選択は廃止され、生成は ds1017 固定（env 差し替えのみ）", () => {
+test("モデル選択は廃止され、生成は gemma-4-26b 固定（env 差し替えのみ）", () => {
   // 選択肢・キー解決・対応表の痕跡がどこにもない
   for (const [name, src] of [
     ["one-prompter/one-prompter-llm.ts", llmSrc],
@@ -133,7 +133,7 @@ test("モデル選択は廃止され、生成は ds1017 固定（env 差し替�
   // サーバー側は固定モデルを env でだけ差し替える
   assert.match(serverSrc, /model: onePrompterModel\(env\)/);
   assert.match(serverSrc, /env\.ONE_PROMPTER_MODEL/);
-  assert.match(serverSrc, /"deepseek-v4\.1-flash-1017"/);
+  assert.match(serverSrc, /"gemma-4-26b"/);
 });
 
 test("入力画面の設定グループは質問の数・言語・思考トグルだけ", () => {
@@ -146,7 +146,7 @@ test("入力画面の設定グループは質問の数・言語・思考トグ�
   assert.ok(!group.includes("モデル"), "設定グループにモデルが残っている");
 });
 
-test("「より考える」トグルは既定オフで、無効化されない（ds1017 専用の挙動）", () => {
+test("「より考える」トグルは既定オフで、無効化されない（gemma-4-26b 固定時の挙動）", () => {
   assert.match(clientSrc, /const \[think, setThink\] = useState\(false\);/);
   assert.match(clientSrc, /className=\{think \? "op-suboption selected" : "op-suboption"\}/);
   assert.match(clientSrc, /aria-pressed=\{think\}/);

@@ -26,7 +26,7 @@ import {
   type LlmQuestion,
 } from "./one-prompter-llm";
 
-export const DEFAULT_MODEL = "deepseek-v4.1-flash-1017";
+export const DEFAULT_MODEL = "gemma-4-26b";
 const DEFAULT_BASE_URL = "https://logfare.ai/v1";
 const REQUEST_TIMEOUT_MS = 30_000;
 /**
@@ -56,8 +56,8 @@ export function onePrompterModel(env: Env = process.env): string {
 }
 
 /**
- * reasoning_effort の解決。生成モデルは ds1017（deepseek-v4.1-flash-1017）固定で、
- * このモデルは reasoning "none"（思考オフ）が使える。
+ * reasoning_effort の解決。生成モデルは gemma-4-26b 固定で、
+ * reasoning "none"（思考オフ）を既定にする。
  * 「より考える」オン（think）のときだけ "high" に上げる（"max" は合成の
  * 連鎖呼び出しで遅延・タイムアウトのリスクが大きいため使わない）。
  * モデル ID 自体は onePrompterModel() が env ONE_PROMPTER_MODEL で差し替え可能。

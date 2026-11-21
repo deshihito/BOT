@@ -107,7 +107,7 @@ test("logfareChat は 429 のときだけ次のキーへ切り替える", async 
   assert.ok(calls[0].url.endsWith("/chat/completions"));
   assert.equal(calls[1].init.headers.Authorization, "Bearer dummy-2");
   const payload = JSON.parse(calls[0].init.body);
-  assert.equal(payload.model, "deepseek-v4.1-flash-1017");
+  assert.equal(payload.model, "gemma-4-26b");
   assert.equal(payload.reasoning_effort, "none");
 });
 
@@ -121,7 +121,7 @@ test("logfareChat は 429 以外のエラーを即座に投げ、モデル上書
   await assert.rejects(() => server.logfareChat([{ role: "user", content: "hi" }], { maxTokens: 100, env, fetchImpl }));
   assert.equal(count, 1);
   assert.equal(server.onePrompterModel(env), "other-model");
-  assert.equal(server.onePrompterModel({}), "deepseek-v4.1-flash-1017");
+  assert.equal(server.onePrompterModel({}), "gemma-4-26b");
 });
 
 test("logfareChat はキー未設定で投げる（ルート側のフォールバック判定に使う）", async () => {
@@ -655,7 +655,7 @@ test("synthesizeWithLlm は検証・直しの失敗時に下書きをそのま�
   assert.equal(await server.synthesizeWithLlm("転職したい", answers, { env, fetchImpl: fetchRefineTooLong }), "下書きのプロンプト");
 });
 
-test("resolveReasoning は think オンで high、オフ・不正値では none を返す（モデルは ds1017 固定）", () => {
+test("resolveReasoning は think オンで high、オフ・不正値では none を返す（モデルは gemma-4-26b 固定）", () => {
   assert.equal(server.resolveReasoning(true), "high");
   assert.equal(server.resolveReasoning(false), "none");
   assert.equal(server.resolveReasoning(undefined), "none");
@@ -663,7 +663,7 @@ test("resolveReasoning は think オンで high、オフ・不正値では none 
   assert.equal(server.resolveReasoning(1), "none");
 });
 
-test("logfareChat は常に ds1017 を使い、env ONE_PROMPTER_MODEL でだけ差し替えられる", async () => {
+test("logfareChat は常に gemma-4-26b を使い、env ONE_PROMPTER_MODEL でだけ差し替えられる", async () => {
   const env = { LOGFARE_API_KEY: "dummy" };
   let seenBody = "";
   const fetchImpl = async (url, init) => {
@@ -672,7 +672,7 @@ test("logfareChat は常に ds1017 を使い、env ONE_PROMPTER_MODEL でだけ�
   };
   await server.logfareChat([{ role: "user", content: "hi" }], { maxTokens: 10, env, fetchImpl });
   const payload = JSON.parse(seenBody);
-  assert.equal(payload.model, "deepseek-v4.1-flash-1017");
+  assert.equal(payload.model, "gemma-4-26b");
   assert.equal(payload.reasoning_effort, "none");
   await server.logfareChat([{ role: "user", content: "hi" }], {
     maxTokens: 10,
@@ -700,7 +700,7 @@ test("logfareChat は think を reasoning_effort に反映する", async () => {
   };
   await server.logfareChat([{ role: "user", content: "hi" }], { maxTokens: 10, env, fetchImpl, think: true });
   assert.equal(bodies[0].reasoning_effort, "high");
-  assert.equal(bodies[0].model, "deepseek-v4.1-flash-1017");
+  assert.equal(bodies[0].model, "gemma-4-26b");
   await server.logfareChat([{ role: "user", content: "hi" }], { maxTokens: 10, env, fetchImpl, think: false });
   assert.equal(bodies[1].reasoning_effort, "none");
   await server.logfareChat([{ role: "user", content: "hi" }], { maxTokens: 10, env, fetchImpl });

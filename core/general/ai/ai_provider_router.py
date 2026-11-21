@@ -76,7 +76,7 @@ def routes() -> list[Route]:
         prefix = f"AI_{name.upper()}"
         if name == "logfare":
             key = logfare.api_key() or ""
-            model = os.getenv(f"{prefix}_MODEL", "").strip() or logical_model() or logfare.AUTO_MODEL
+            model = os.getenv(f"{prefix}_MODEL", "").strip() or logical_model() or logfare.DEFAULT_MODEL
             base_url = logfare.BASE_URL
         else:
             key = (os.getenv(f"{prefix}_API_KEY", "").strip()

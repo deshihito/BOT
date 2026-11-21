@@ -66,7 +66,7 @@ CUSTOM_ICON_URL_MAX_CHARS = 500
 FORBIDDEN_NAME_WORDS = ("discord", "clyde")
 
 DEFAULT_PROVIDER = "logfare"
-DEFAULT_MODEL = "deepseek-v4.1-flash-1017"
+DEFAULT_MODEL = "gemma-4-26b"
 DEBOUNCE_SECONDS = 3.0
 COOLDOWN_SECONDS = 8.0
 MAX_REPLIES_PER_HOUR = 120
@@ -136,9 +136,9 @@ def model_name() -> str:
 
 
 # 記憶統合は裏側の処理で、返信の速さより統合の質と長文耐性が要る。
-# 返信モデルとは分けて deepseek-v4.1-flash-1017 を使う (Logfare 経路のみ。
+# 返信モデルとは分けて gemma-4-26b を使う (Logfare 経路のみ。
 # KiosAPI 経路では返信モデルをそのまま使う)。
-INTEGRATION_MODEL = "deepseek-v4.1-flash-1017"
+INTEGRATION_MODEL = "gemma-4-26b"
 
 
 def integration_model_name() -> str:
@@ -156,8 +156,7 @@ def provider_name() -> str:
     return "kiosapi" if raw == "kiosapi" else "logfare"
 
 
-# Logfare 経路の思考はオフにする。deepseek-v4.1-flash-1017 はカタログ上
-# "none" に対応している。KiosAPI 経路では送らない（!ai ルーターも
+# Logfare 経路の思考はオフにする。KiosAPI 経路では送らない（!ai ルーターも
 # KiosAPI には送らない作法）。
 REASONING_EFFORT = "none"
 
