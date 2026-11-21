@@ -127,7 +127,7 @@ class BinjouViewEmojiTest(unittest.TestCase):
         view = EmojiBinjouView(types.SimpleNamespace(), {})
         thinking = [
             child for child in view.children
-            if getattr(child, "emoji", None) is not None and child.emoji.name == "thinking"
+            if getattr(child, "emoji", None) is not None and child.emoji.name == "🤔"
         ]
         self.assertEqual(sorted(child.label for child in thinking), ["オフ", "オン"])
         for child in view.children:

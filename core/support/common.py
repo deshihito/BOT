@@ -273,7 +273,8 @@ AUTH_MODE_FORM = "form"
 AUTH_MAX_QUESTIONS = 5
 ROLE_PANEL_MAX_ROLES = 25
 
-THINKING_EMOJI = discord.PartialEmoji(name="thinking", id=1561695212814995596)
+# binjou の thinking はアプリ絵文字（あごむに）ではなく通常の 🤔 を使う
+THINKING_EMOJI = discord.PartialEmoji(name="🤔")
 BINJOU_DEFAULTS = {"thinking": True, "thumbsup": True}
 
 AUTH_DEFAULT_QUESTIONS = [

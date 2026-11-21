@@ -135,7 +135,7 @@ class SupportThinkingReactionTest(unittest.IsolatedAsyncioTestCase):
     def test_raw_reaction_listener_is_registered_on_the_cog(self):
         listeners = dict(SupportCog.__cog_listeners__)
         self.assertEqual(listeners.get("on_raw_reaction_add"), "on_raw_reaction_add")
-        self.assertEqual(THINKING_EMOJI._as_reaction(), "thinking:1561695212814995596")
+        self.assertEqual(THINKING_EMOJI._as_reaction(), "🤔")
 
     def make_cog(self, enabled):
         message = types.SimpleNamespace(reactions=[], add_reaction=AsyncMock())
@@ -153,7 +153,7 @@ class SupportThinkingReactionTest(unittest.IsolatedAsyncioTestCase):
         )
         return cog, store, channel, message
 
-    async def test_adds_custom_reaction_when_enabled(self):
+    async def test_adds_thinking_reaction_when_enabled(self):
         cog, store, channel, message = self.make_cog(True)
         payload = types.SimpleNamespace(
             guild_id=1, user_id=2, emoji="🤔", member=types.SimpleNamespace(bot=False),
@@ -163,6 +163,18 @@ class SupportThinkingReactionTest(unittest.IsolatedAsyncioTestCase):
             await cog.on_raw_reaction_add(payload)
         message.add_reaction.assert_awaited_once_with(THINKING_EMOJI)
         channel.fetch_message.assert_awaited_once_with(4)
+
+    async def test_agomuni_thinking_emoji_no_longer_triggers(self):
+        cog, store, channel, message = self.make_cog(True)
+        payload = types.SimpleNamespace(
+            guild_id=1, user_id=2, emoji="<:thinking:1561695212814995596>",
+            member=types.SimpleNamespace(bot=False),
+            channel_id=3, message_id=4,
+        )
+        with patch("cogs.support.guild_settings.get_store", return_value=store):
+            await cog.on_raw_reaction_add(payload)
+        channel.fetch_message.assert_not_awaited()
+        message.add_reaction.assert_not_awaited()
 
     async def test_setting_defaults_to_enabled_for_unconfigured_guild(self):
         cog, store, channel, message = self.make_cog(None)
