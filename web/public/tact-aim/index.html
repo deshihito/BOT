@@ -5,24 +5,58 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>TACT-AIM distilled — 開発用プレイヤー</title>
 <style>
-  body { background: #111; color: #ddd; font-family: system-ui, sans-serif; margin: 16px; }
-  #stage { background: #fff; width: 960px; max-width: 100%; aspect-ratio: 4 / 3; display: block; }
+  body { background: #1f1f23; color: #ddd; font-family: system-ui, sans-serif; margin: 16px; }
+  h1 { font-size: 18px; }
   .row { display: flex; gap: 8px; align-items: center; margin: 8px 0; flex-wrap: wrap; }
   button { font-size: 16px; padding: 4px 14px; }
+  button:disabled { opacity: 0.4; }
   input { font-size: 14px; padding: 4px; }
   #ask { background: #222; border: 1px solid #555; padding: 10px; margin: 8px 0; max-width: 940px; }
   small { color: #999; }
+  #stage-wrap { position: relative; width: 960px; max-width: 100%; }
+  #stage { background: #fff; width: 100%; aspect-ratio: 4 / 3; display: block; }
+  /* TurboWarp 風ローディング画面（ステージ上のオーバーレイ） */
+  #loader {
+    position: absolute; inset: 0; background: #2b2b30;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 14px; z-index: 5; transition: opacity 0.6s ease; text-align: center; padding: 16px;
+  }
+  #loader.done { opacity: 0; pointer-events: none; }
+  #loader .logo { font-size: 40px; font-weight: 800; letter-spacing: 2px; color: #fff; }
+  #loader .logo span { color: #ff8c1a; }
+  #loader .sub { color: #aaa; font-size: 13px; margin-top: -8px; }
+  #loadbar-track { width: 70%; max-width: 480px; height: 12px; background: #48484f; border-radius: 6px; overflow: hidden; }
+  #loadbar-fill {
+    height: 100%; width: 0%;
+    background: linear-gradient(90deg, #ff8c1a, #ff6a00);
+    border-radius: 6px; transition: width 0.2s ease;
+  }
+  #loader.booting #loadbar-fill { animation: pulse 1.2s ease-in-out infinite; }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
+  #load-pct { font-size: 22px; font-weight: 700; color: #fff; }
+  #load-status { color: #ccc; font-size: 14px; min-height: 1.2em; }
+  #load-hint { color: #888; font-size: 12px; min-height: 1.2em; }
 </style>
 </head>
 <body>
-<h1 style="font-size:18px">TACT-AIM distilled — 開発用プレイヤー（Phase 1）</h1>
+<h1>TACT-AIM distilled — 開発用プレイヤー</h1>
 <div class="row">
-  <button id="flag" title="緑の旗">▶ 実行</button>
+  <button id="flag" title="緑の旗" disabled>▶ 実行</button>
   <button id="stop" title="止める">■ 停止</button>
   <label>ユーザー名 <input id="username" size="14" placeholder="username"></label>
   <span id="debug"><small>threads: 0</small></span>
 </div>
-<canvas id="stage" width="960" height="720"></canvas>
+<div id="stage-wrap">
+  <canvas id="stage" width="960" height="720"></canvas>
+  <div id="loader">
+    <div class="logo">TACT<span>-</span>AIM</div>
+    <div class="sub">distilled player</div>
+    <div id="loadbar-track"><div id="loadbar-fill"></div></div>
+    <div id="load-pct">0%</div>
+    <div id="load-status">読み込み中…</div>
+    <div id="load-hint"></div>
+  </div>
+</div>
 <div id="ask" style="display:none">
   <span id="ask-label"></span>
   <input id="ask-input" size="30">
