@@ -29,7 +29,7 @@ from core.vc import voice_restore
 from core.vc.voice_session import SHARED_FEATURES, VoiceBusy, get_manager
 from core.vc.voice_media import add_audio_source, has_audio_source, remove_audio_source
 from core.support.legacy import Responder
-from core.support.emojis import CLOCK, CROCK, FAILED, LOUPE, MUSIC, PAUSE, SUCCESS
+from core.support.emojis import CLOCK, CROCK, FAILED, LOUPE, MUSIC, SUCCESS
 from core.vc.music.music_activity import build_music_activity_snapshot
 
 from core.vc.music.common import *  # noqa: F401,F403 - shared helpers/constants
@@ -567,39 +567,6 @@ class PlaybackMixin:
         await interaction.response.send_message(view=as_embed_v2(we(f"再生位置を `{int(seconds)}秒` に移動しました。")))
 
 
-    async def _pause_impl(self, interaction: discord.Interaction):
-        vc = interaction.guild.voice_client
-        state = self.get_state(interaction.guild_id)
-
-        if not vc:
-            return await interaction.response.send_message(view=as_embed_v2(we("ボットがボイスチャンネルに入っていません。")), ephemeral=True)
-        if not is_same_voice_channel(interaction.user, vc):
-            return await interaction.response.send_message(view=as_embed_v2(we(MUSIC_VC_REQUIRED_MESSAGE)), ephemeral=True)
-
-        # 1. 再生中の場合 -> 一時停止処理
-        if has_audio_source(vc, "music"):
-            actual_played = (time.time() - state['start_time']) * state.get('speed', 1.0)
-            state['elapsed_offset'] += actual_played
-            state['is_paused'] = True
-            remove_audio_source(vc, "music", notify=True)
-            
-            await interaction.response.send_message(
-                view=as_embed_v2(we(f"{PAUSE} 再生を一時停止しました。(`{int(state['elapsed_offset'])}秒` 時点)\nもう一度 `/vc` の音楽操作パネルから再開できます。"))
-            )
-            await self.update_panel(interaction.guild_id)
-            self._save_music_snapshot(interaction.guild_id)
-
-        # 2. 一時停止中の場合 -> 再生再開処理
-        elif state['is_paused'] and state['current_track']:
-            state['is_paused'] = False
-            await self.check_queue(interaction.guild_id)
-            await interaction.response.send_message(view=as_embed_v2(we("▶️ 一時停止位置から再生を再開しました。")))
-
-        # 3. どちらでもない場合
-        else:
-            await interaction.response.send_message(view=as_embed_v2(we("現在再生中・一時停止中のトラックがありません。")), ephemeral=True)
-
-
     async def _skip_impl(self, interaction: discord.Interaction):
         vc = interaction.guild.voice_client
         state = self.get_state(interaction.guild_id)
@@ -615,24 +582,6 @@ class PlaybackMixin:
             await interaction.response.send_message(view=as_embed_v2(we("スキップしました。")))
         else:
             await interaction.response.send_message(view=as_embed_v2(we("現在再生中の楽曲がありません。")))
-
-
-    async def _loop_impl(self, interaction: discord.Interaction, mode: str):
-        state = self.get_state(interaction.guild_id)
-        state['loop_mode'] = mode
-        labels = {'off': 'OFF', 'track': '1曲ループ', 'queue': 'キューループ'}
-        await interaction.response.send_message(view=as_embed_v2(we(f"ループ設定を **{labels[mode]}** に変更しました。")))
-        await self.update_panel(interaction.guild_id)
-        self._save_music_snapshot(interaction.guild_id)
-
-
-    async def _shuffle_impl(self, interaction: discord.Interaction):
-        state = self.get_state(interaction.guild_id)
-        state['shuffle_enabled'] = not state.get('shuffle_enabled', False)
-        label = 'ON' if state['shuffle_enabled'] else 'OFF'
-        await interaction.response.send_message(view=as_embed_v2(we(f"シャッフル再生を **{label}** に変更しました。")))
-        await self.update_panel(interaction.guild_id)
-        self._save_music_snapshot(interaction.guild_id)
 
 
     async def _files_impl(self, r: Responder, limit: int = 20):
