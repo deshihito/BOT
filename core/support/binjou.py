@@ -2,7 +2,6 @@
 """便乗 (binjou) の UI と設定取得。元 cogs/support.py から分割。"""
 from __future__ import annotations
 from core.support.messages import MANAGE_GUILD_REQUIRED, SETTINGS_UPDATE_FAILED
-from core.support.emojis import THINKING
 
 from .common import *
 
@@ -109,11 +108,11 @@ class EmojiBinjouView(discord.ui.View):
                 ephemeral=True,
             )
 
-    @discord.ui.button(label='オン', emoji=THINKING, style=discord.ButtonStyle.success, row=0)
+    @discord.ui.button(label='オン', emoji=THINKING_EMOJI, style=discord.ButtonStyle.success, row=0)
     async def thinking_on(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.set_enabled(interaction, "thinking", True)
 
-    @discord.ui.button(label='オフ', emoji=THINKING, style=discord.ButtonStyle.secondary, row=0)
+    @discord.ui.button(label='オフ', emoji=THINKING_EMOJI, style=discord.ButtonStyle.secondary, row=0)
     async def thinking_off(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.set_enabled(interaction, "thinking", False)
 
@@ -168,7 +167,7 @@ class BinjouSupportMixin:
         return discord.Embed(
             title="絵文字便乗設定（binjou）",
             description=(
-                f"{THINKING} → {THINKING_EMOJI}: **{'オン' if settings['thinking'] else 'オフ'}**\n"
+                f"{THINKING_EMOJI} → {THINKING_EMOJI}: **{'オン' if settings['thinking'] else 'オフ'}**\n"
                 f"👍 → 👍: **{'オン' if settings['thumbsup'] else 'オフ'}**\n\n"
                 f"カスタム便乗（{len(rules)}/20）\n{custom_text}\n\n"
                 "同じ絵文字ならその絵文字を付加し、異なる場合は追加リアクションとして動作します。"
@@ -194,7 +193,7 @@ class BinjouSupportMixin:
         await store.ensure_loaded()
         settings = get_binjou_settings(store, payload.guild_id)
 
-        key = "thinking" if source_emoji in {THINKING, "🤔"} else ("thumbsup" if source_emoji in {"👍", "👍️"} else None)
+        key = "thinking" if source_emoji in {"🤔", "🤔️"} else ("thumbsup" if source_emoji in {"👍", "👍️"} else None)
         target = None
         if key is not None:
             if not settings[key]:
