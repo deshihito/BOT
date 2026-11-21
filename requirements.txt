@@ -29,5 +29,4 @@ scipy
 pypdf
 vosk
 yfinance
-duckduckgo-search
 webrtcvad-wheels
