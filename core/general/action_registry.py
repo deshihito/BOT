@@ -167,6 +167,8 @@ SUPPORT_AI_EXCLUDED_VALUES = frozenset({
     "muted_settings", "ticket_types", "ticket_transcript", "ticket_assign",
     "auth_questions", "globalchat_mod", "worldbox_link", "tempvoice_panel",
     "levelup_card_theme", "binjou_custom", "quest_manual",
+    # コメントガチャ設定もサーバー管理者向け設定パネルのため明示操作に限定する。
+    "commentgacha",
 })
 
 

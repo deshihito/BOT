@@ -1,8 +1,11 @@
 """「コメントガチャ」の投稿に反応して、そのチャンネルの過去の発言を1件再投稿する機能。
 
-イースターエッグ枠（今北産業と同じ置き方）: 専用の設定はなく常時オン。
-ただし BOT fixer のコマンド制限の対象（アクションIDは
-general:commentgacha）で、制限されているサーバーでは無言で発動しない。
+イースターエッグ枠（今北産業と同じ置き方）で既定は常時オン。
+サーバー管理者は /support「自動化」>「コメントガチャ」で制限できる
+（core/general/commentgacha/settings.py: 有効/無効・クールダウン・
+掘り返し元ブラックリスト・発動チャンネルブラックリスト。未設定は
+従来どおり）。BOT fixer のコマンド制限の対象（アクションIDは
+general:commentgacha）でもあり、制限されているサーバーでは無言で発動しない。
 トリガー語を含む発言に反応し、そのチャンネルの過去の発言から1件を
 抜き出して、元の投稿者の名前とアバターを付けた webhook で再投稿する。
 
@@ -32,15 +35,17 @@ import discord
 from discord.ext import commands
 
 from core.general import optout
+from core.general.commentgacha import settings as gacha_settings
 from core.support import command_control
 
 logger = logging.getLogger("cogs.commentgacha")
 TRIGGER_PHRASE = "コメントガチャ"
 WEBHOOK_NAME = "AGOBOT-CommentGacha"
-# チャンネル単位のクールダウン。同時発火の抑止のみが目的なので1秒だけ置く
-# （60秒あった頃は、無反応で握りつぶされる時間が「2回目だけすごく遅い」
-# 体感を生んでいた）。
-COOLDOWN_SECONDS = 1
+# チャンネル単位のクールダウンの既定値。同時発火の抑止のみが目的なので
+# 1秒だけ置く（60秒あった頃は、無反応で握りつぶされる時間が「2回目だけ
+# すごく遅い」体感を生んでいた）。サーバー管理者は /support の
+# コメントガチャ設定でプリセットから変更できる。
+COOLDOWN_SECONDS = gacha_settings.DEFAULT_COOLDOWN_SECONDS
 # ランダムIDの直後から候補を探す範囲と、候補が無い場合の引き直し回数。
 DRAW_WINDOW = 50
 DRAW_ATTEMPTS = 3
@@ -217,17 +222,27 @@ class CommentGachaCog(commands.Cog):
         # BOT fixer のコマンド制限（制限中は無言で発動しない）。
         if not await command_control.guard_message(message, command_control.COMMENTGACHA_ACTION_ID):
             return
+        # /support のコメントガチャ設定（無効・発動チャンネル制限・
+        # 掘り返し元制限・クールダウン。いずれも無言で発動しない）。
+        settings = await gacha_settings.fetch_settings(message.guild.id)
+        if not settings["enabled"]:
+            return
+        if message.channel.id in settings["blocked_trigger_channel_ids"]:
+            return
         source_channel = _resolve_source_channel(message)
         if source_channel is None:
             # #指定があったのに掘り返し先が解決できない場合は何もしない。
+            return
+        if getattr(source_channel, "id", None) in settings["blocked_source_channel_ids"]:
             return
         channel_id = message.channel.id
         lock = self._locks.setdefault(channel_id, asyncio.Lock())
         if lock.locked():
             return
         async with lock:
+            cooldown = settings["cooldown_seconds"]
             now = self.clock()
-            if now - self._last_drawn.get(channel_id, float("-inf")) < COOLDOWN_SECONDS:
+            if cooldown > 0 and now - self._last_drawn.get(channel_id, float("-inf")) < cooldown:
                 return
             self._last_drawn[channel_id] = now
             await self._draw(message, source_channel)

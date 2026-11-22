@@ -111,6 +111,7 @@ SUPPORT_ACTIONS = [
     app_commands.Choice(name="グローバルチャット モデレーション", value="globalchat_mod"),
     app_commands.Choice(name="WORLD BOX連携", value="worldbox_link"),
     app_commands.Choice(name="Auto react設定", value="auto_react"),
+    app_commands.Choice(name="コメントガチャ", value="commentgacha"),
     # SNS 再編: 旧 sns_notify は正リストから外し、プラットフォーム別入口
     # （sns ジャンル）に置き換える。旧 value は dispatch 互換で従来パネルを開く。
     app_commands.Choice(name="YouTube通知", value="sns_youtube"),
@@ -229,7 +230,7 @@ SUPPORT_ACTIONS_BY_GENRE = {
         "assist_suggestions",
         "assist_polls", "assist_autothread", "assist_stats", "assist_embed", "assist_embed_templates",
         "assist_webhook",
-        "assist_timed", "assist_reminder", "assist_autoreact", "assist_events", "assist_events_link",
+        "assist_timed", "assist_reminder", "assist_autoreact", "commentgacha", "assist_events", "assist_events_link",
         "assist_customreplies",
         "assist_shiritori_resident", "assist_luna_ai", "assist_warning_escalation", "assist_application_review",
     ),
@@ -266,6 +267,7 @@ AUTH_SECTION = "auth"
 ROLE_PANEL_SECTION = "role_panel"
 HONEYPOT_SECTION = "honeypot"
 AUTO_REACT_SECTION = "auto_react"
+COMMENTGACHA_SECTION = "commentgacha"
 VOICE_TRIGGER_SETTINGS_SECTION = "voice_trigger"
 
 AUTH_MODE_SIMPLE = "simple"

@@ -43,6 +43,7 @@ from core.support.vc_auto_start import *  # noqa: F401,F403
 from core.support.vc_auto_start import VcAutoStartSupportMixin
 from core.support.globalchat.globalchat_panel import GlobalChatSupportMixin
 from core.support.bot_fixer import BotFixerSupportMixin
+from core.support.commentgacha import CommentGachaSupportMixin
 from core.support.worldbox.link_panel import WorldBoxLinkSupportMixin
 
 # 分割前の cogs.support が持っていた内部ヘルパーも互換のため再エクスポートする
@@ -152,6 +153,7 @@ class SupportCog(
     VcAutoStartSupportMixin,
     GlobalChatSupportMixin,
     BotFixerSupportMixin,
+    CommentGachaSupportMixin,
     WorldBoxLinkSupportMixin,
     commands.Cog,
 ):
@@ -191,6 +193,7 @@ class SupportCog(
         "levelup_card_theme": "manage_guild",
         "vc_auto_start": "manage_guild",
         "news_notify": "manage_guild",
+        "commentgacha": "manage_guild",
         "bot_fixer": "manage_guild",
         "bot_fixer_bots": "manage_guild",
         "bot_fixer_rates": "manage_guild",
@@ -579,6 +582,9 @@ class SupportCog(
 
         if selected == "vc_auto_start":
             return await self.show_vc_auto_start_settings(interaction)
+
+        if selected == "commentgacha":
+            return await self.show_commentgacha_settings(interaction)
 
         if selected == "bot_fixer":
             return await self.show_bot_fixer_settings(interaction)
