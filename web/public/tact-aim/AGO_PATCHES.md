@@ -40,3 +40,21 @@ Title の `script6`（フェス日判定ブロック）を即 return に置換�
   （ユーザー呼称「MODブロック（フェスデイ）」）。
 - AGO 側ではこれを外し、`Festival` は初期値 0（通常モード）のままにする。
   2026-11-22 ユーザー指示。
+
+## 4. スタンプ/描画への画像効果の適用（dist/src/runtime/runtime.js）
+
+本作のフォントコスチュームは真っ赤 (#ff0000) で、ゲームは画像効果の
+color（色相回転）と brightness（白/黒への加算シフト）で文字色を作る。
+従来のプレイヤーはスタンプに効果を一切適用せず（alpha=1 固定）、スプライト
+描画も CSS filter の brightness()（乗算）近似だったため、**全ての文字が
+赤いまま**表示されていた（例: HP 表示は brightness 100 で白になるべき）。
+
+- `_scratchTintedImage` を追加: Scratch (scratch-render) のシェーダと同じ
+  計算（color = HSV 色相を 値/200 回転、brightness = RGB に 値/100*255 を
+  加算）をピクセル単位で適用し、(画像, 効果値) でキャッシュする。
+- `Sprite.stamp()` が color / brightness / ghost を引き継ぐよう変更。
+- `Sprite.draw()` の CSS filter 近似を同じ計算に置換。
+- fisheye / whirl / pixelate / mosaic は従来どおり未再現（値のみ保持）。
+- 2026-11-22、ユーザーのスクリーンショット比較（正規版 TurboWarp との
+  対比）で判明。TACT-AIM-distilled 本体のランタイムにも同修正が要るが、
+  まずは AGO 側のみ（本体へ入れるかはユーザーの判断待ち）。

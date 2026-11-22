@@ -9,6 +9,91 @@
 import { toNumber, toString, setRngSource } from "./cast.js";
 import { PenLayer, defaultPenState, setPenColorToColor, setPenParam, changePenParam } from "./pen.js";
 const ASSET_BASE = "assets/";
+// [AGO patch] Scratch の画像効果（color / brightness）をピクセル単位で再現する。
+// 本作のフォントコスチュームは真っ赤 (#ff0000) で、ゲームは color 効果（色相回転）と
+// brightness 効果（白/黒への加算シフト）で文字色を作る。従来のプレイヤーは
+// スタンプに効果を一切適用せず、CSS filter の brightness()（乗算）で近似していたため、
+// 全ての文字が赤いまま表示されていた（HP 表示は brightness 100 で白になるべき等）。
+// Scratch (scratch-render) のシェーダと同じ計算: color = HSV 色相を (値/200) 回転、
+// brightness = RGB に (値/100)*255 を加算。結果は (画像, 効果値) でキャッシュする。
+const _tintCache = new WeakMap();
+function _scratchTintedImage(img, colorEff, brightnessEff) {
+    const colorQ = ((Math.round(colorEff) % 200) + 200) % 200;
+    const brightQ = Math.max(-100, Math.min(100, Math.round(brightnessEff)));
+    if (colorQ === 0 && brightQ === 0)
+        return img;
+    let perImg = _tintCache.get(img);
+    if (!perImg) {
+        perImg = new Map();
+        _tintCache.set(img, perImg);
+    }
+    const key = colorQ + "/" + brightQ;
+    const hit = perImg.get(key);
+    if (hit)
+        return hit;
+    const w = img.naturalWidth, h = img.naturalHeight;
+    const cv = document.createElement("canvas");
+    cv.width = w;
+    cv.height = h;
+    const cx2 = cv.getContext("2d", { willReadFrequently: true });
+    if (!cx2)
+        return img;
+    cx2.drawImage(img, 0, 0);
+    let data;
+    try {
+        data = cx2.getImageData(0, 0, w, h);
+    }
+    catch {
+        return img;
+    }
+    const px = data.data;
+    const brightAdd = (brightQ / 100) * 255;
+    for (let i = 0; i < px.length; i += 4) {
+        if (px[i + 3] === 0)
+            continue;
+        let r = px[i], g = px[i + 1], b = px[i + 2];
+        if (colorQ !== 0) {
+            const mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn;
+            if (d !== 0) {
+                let hh;
+                if (mx === r)
+                    hh = (((g - b) / d) % 6) * 60;
+                else if (mx === g)
+                    hh = ((b - r) / d + 2) * 60;
+                else
+                    hh = ((r - g) / d + 4) * 60;
+                if (hh < 0)
+                    hh += 360;
+                hh = (hh + colorQ * 1.8) % 360;
+                const ss = mx === 0 ? 0 : d / mx, vv = mx / 255;
+                const c = vv * ss, x = c * (1 - Math.abs(((hh / 60) % 2) - 1)), m = vv - c;
+                let rr = 0, gg = 0, bb = 0;
+                if (hh < 60) { rr = c; gg = x; }
+                else if (hh < 120) { rr = x; gg = c; }
+                else if (hh < 180) { gg = c; bb = x; }
+                else if (hh < 240) { gg = x; bb = c; }
+                else if (hh < 300) { rr = x; bb = c; }
+                else { rr = c; bb = x; }
+                r = (rr + m) * 255;
+                g = (gg + m) * 255;
+                b = (bb + m) * 255;
+            }
+        }
+        if (brightQ !== 0) {
+            r += brightAdd;
+            g += brightAdd;
+            b += brightAdd;
+        }
+        px[i] = r < 0 ? 0 : r > 255 ? 255 : r;
+        px[i + 1] = g < 0 ? 0 : g > 255 ? 255 : g;
+        px[i + 2] = b < 0 ? 0 : b > 255 ? 255 : b;
+    }
+    cx2.putImageData(data, 0, 0);
+    if (perImg.size > 64)
+        perImg.clear();
+    perImg.set(key, cv);
+    return cv;
+}
 export class Sprite {
     rt;
     name;
@@ -139,20 +224,15 @@ export class Sprite {
             ctx.scale(-1, 1);
         const ghost = this.effects.get("ghost") ?? 0;
         ctx.globalAlpha = Math.max(0, Math.min(1, 1 - ghost / 100));
-        const filters = [];
+        // [AGO patch] color / brightness は CSS filter でなく Scratch のシェーダ計算で適用する
         const brightness = this.effects.get("brightness") ?? 0;
-        if (brightness !== 0)
-            filters.push(`brightness(${1 + brightness / 100})`);
         const color = this.effects.get("color") ?? 0;
-        if (color !== 0)
-            filters.push(`hue-rotate(${color * 1.8}deg)`);
+        const drawImg = _scratchTintedImage(img, color, brightness);
         // fisheye / whirl / pixelate / mosaic は Canvas 2D では再現できない（WebGL シェーダ効果）。
         // 値だけ保持し描画は近似する。docs/COVERAGE.md の既知の差異を参照。
-        if (filters.length > 0)
-            ctx.filter = filters.join(" ");
         const rcx = (info.rotationCenterX - img.naturalWidth / 2) * (this.size / 100) * (flipX ? -1 : 1);
         const rcy = (info.rotationCenterY - img.naturalHeight / 2) * (this.size / 100);
-        ctx.drawImage(img, (-w / 2 - rcx) * scale, (-h / 2 - rcy) * scale, w * scale, h * scale);
+        ctx.drawImage(drawImg, (-w / 2 - rcx) * scale, (-h / 2 - rcy) * scale, w * scale, h * scale);
         ctx.restore();
     }
     // ---- ペン ----
@@ -180,7 +260,12 @@ export class Sprite {
             rot = ((this.direction - 90) * Math.PI) / 180;
         else if (this.rotationStyle === "left-right")
             flipX = this.direction < 0;
-        this.rt.penLayer.stampImage(img, w, h, this.x, this.y, rot, flipX, 1);
+        // [AGO patch] スタンプにも画像効果を適用する（Scratch ではスタンプは効果を引き継ぐ）。
+        // これが無いとフォント（真っ赤なコスチューム）が常に赤で焼き付いていた。
+        const ghost = this.effects.get("ghost") ?? 0;
+        const alpha = Math.max(0, Math.min(1, 1 - ghost / 100));
+        const drawImg = _scratchTintedImage(img, this.effects.get("color") ?? 0, this.effects.get("brightness") ?? 0);
+        this.rt.penLayer.stampImage(drawImg, w, h, this.x, this.y, rot, flipX, alpha);
     }
 }
 /** クラウド変数ストア。TurboWarp cloud-server と同一プロトコル（WebSocket/JSON）を話す。 */
