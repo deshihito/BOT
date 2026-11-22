@@ -7,10 +7,11 @@
 // - 起動時の武器ダメージ表（G.Bullet_damage）の構築（Check bullet damage）
 // - 4/1 のエイプリルフール処理（キャラ名シャッフル）
 // - Festival フラグの期間判定（2000年からの通算日数による絶対ウィンドウ）
+//   ※ 2026-11-22 ユーザー指示により無効化（script6 参照）。原作からの意図的な乖離。
 // - "Hide title" でタイトルをゴースト化して消す
 import { Sprite } from "../runtime/runtime.js";
 import { SList } from "../runtime/list.js";
-import { toNumber as N, toString as S, toBoolean as B, compare, equals, mod, random, mathop } from "../runtime/cast.js";
+import { toNumber as N, toString as S, toBoolean as B, compare, equals, random } from "../runtime/cast.js";
 import { G } from "../generated/globals.js";
 export class Title extends Sprite {
     /** 走査位置（Check bullet damage と script5 で共用。生成版の a） */
@@ -141,15 +142,14 @@ export class Title extends Sprite {
             }
         }
     }
-    // Festival 期間の判定: 2000年からの通算日数（+0.375 は日境界の調整）が
-    // 9821〜9851（2026年の 11/24〜12/24 相当）の間だけ、その日の偶奇で Festival を切り替える。
-    // 絶対日数のウィンドウなので他年では発動しない。原作の実装のまま保持する。
+    // Festival 期間の判定は 2026-11-22 のユーザー指示で無効化した（意図的な乖離）。
+    // 原作の script6 は、2000年からの通算日数（+0.375 は日境界の調整）が
+    // 9821〜9851（2026年の 11/24〜12/24 相当）の間だけ、その日の偶奇で
+    // G.Festival を "0"/"1" に切り替えていた（フェスの日はタイトルが
+    // 「Festival!」表示になり MOD 側へ誘導される）。無効化により Festival は
+    // 初期値 0（通常モード）のままになる。戻す場合はこの return を外し、
+    // 上記の判定ループ（30回、0.1秒間隔）を復元する。
     *script6() {
-        // [AGO patch] フェス日判定を無効化 (2026-11-22 ユーザー指示)。
-        // 原作は 2026-11-24〜12-24 の間、日数の偶奇で Festival を切り替え
-        // 「今日はMODの日」として MOD 側へ誘導する。AGO 側ではこのブロックを
-        // 外し、Festival は初期値 0 (通常モード) のままにする。
-        // TACT-AIM-distilled 本体はコピーとして無変更。詳細は AGO_PATCHES.md。
         return;
     }
     // 武器ダメージ表の構築（warp）。

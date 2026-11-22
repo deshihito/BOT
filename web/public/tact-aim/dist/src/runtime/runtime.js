@@ -8,16 +8,15 @@
 // - wait 系は YieldCmd を返してスケジューラが再開条件を見る
 import { toNumber, toString, setRngSource } from "./cast.js";
 import { PenLayer, defaultPenState, setPenColorToColor, setPenParam, changePenParam } from "./pen.js";
-const ASSET_BASE = "assets/";
-// [AGO patch] Scratch の画像効果（color / brightness）をピクセル単位で再現する。
-// 本作のフォントコスチュームは真っ赤 (#ff0000) で、ゲームは color 効果（色相回転）と
-// brightness 効果（白/黒への加算シフト）で文字色を作る。従来のプレイヤーは
-// スタンプに効果を一切適用せず、CSS filter の brightness()（乗算）で近似していたため、
-// 全ての文字が赤いまま表示されていた（HP 表示は brightness 100 で白になるべき等）。
-// Scratch (scratch-render) のシェーダと同じ計算: color = HSV 色相を (値/200) 回転、
-// brightness = RGB に (値/100)*255 を加算。結果は (画像, 効果値) でキャッシュする。
+/** Scratch の画像効果（color / brightness）をピクセル単位で再現する。
+ *  本作のフォントコスチュームは真っ赤 (#ff0000) で、ゲームは color 効果（色相回転）と
+ *  brightness 効果（白/黒への加算シフト）で文字色を作る。CSS filter の brightness()
+ *  は乗算なので赤を白くできず、スタンプに至っては効果未適用だったため、全ての文字が
+ *  赤いまま表示されていた（2026-11-22、ユーザーのスクショ比較で判明）。
+ *  Scratch (scratch-render) のシェーダと同じ計算: color = HSV 色相を (値/200) 回転、
+ *  brightness = RGB に (値/100)*255 を加算。結果は (画像, 効果値) でキャッシュする。 */
 const _tintCache = new WeakMap();
-function _scratchTintedImage(img, colorEff, brightnessEff) {
+export function scratchTintedImage(img, colorEff, brightnessEff) {
     const colorQ = ((Math.round(colorEff) % 200) + 200) % 200;
     const brightQ = Math.max(-100, Math.min(100, Math.round(brightnessEff)));
     if (colorQ === 0 && brightQ === 0)
@@ -68,12 +67,30 @@ function _scratchTintedImage(img, colorEff, brightnessEff) {
                 const ss = mx === 0 ? 0 : d / mx, vv = mx / 255;
                 const c = vv * ss, x = c * (1 - Math.abs(((hh / 60) % 2) - 1)), m = vv - c;
                 let rr = 0, gg = 0, bb = 0;
-                if (hh < 60) { rr = c; gg = x; }
-                else if (hh < 120) { rr = x; gg = c; }
-                else if (hh < 180) { gg = c; bb = x; }
-                else if (hh < 240) { gg = x; bb = c; }
-                else if (hh < 300) { rr = x; bb = c; }
-                else { rr = c; bb = x; }
+                if (hh < 60) {
+                    rr = c;
+                    gg = x;
+                }
+                else if (hh < 120) {
+                    rr = x;
+                    gg = c;
+                }
+                else if (hh < 180) {
+                    gg = c;
+                    bb = x;
+                }
+                else if (hh < 240) {
+                    gg = x;
+                    bb = c;
+                }
+                else if (hh < 300) {
+                    rr = x;
+                    bb = c;
+                }
+                else {
+                    rr = c;
+                    bb = x;
+                }
                 r = (rr + m) * 255;
                 g = (gg + m) * 255;
                 b = (bb + m) * 255;
@@ -94,6 +111,7 @@ function _scratchTintedImage(img, colorEff, brightnessEff) {
     perImg.set(key, cv);
     return cv;
 }
+const ASSET_BASE = "assets/";
 export class Sprite {
     rt;
     name;
@@ -224,10 +242,10 @@ export class Sprite {
             ctx.scale(-1, 1);
         const ghost = this.effects.get("ghost") ?? 0;
         ctx.globalAlpha = Math.max(0, Math.min(1, 1 - ghost / 100));
-        // [AGO patch] color / brightness は CSS filter でなく Scratch のシェーダ計算で適用する
+        // color / brightness は CSS filter でなく Scratch のシェーダ計算で適用する
         const brightness = this.effects.get("brightness") ?? 0;
         const color = this.effects.get("color") ?? 0;
-        const drawImg = _scratchTintedImage(img, color, brightness);
+        const drawImg = scratchTintedImage(img, color, brightness);
         // fisheye / whirl / pixelate / mosaic は Canvas 2D では再現できない（WebGL シェーダ効果）。
         // 値だけ保持し描画は近似する。docs/COVERAGE.md の既知の差異を参照。
         const rcx = (info.rotationCenterX - img.naturalWidth / 2) * (this.size / 100) * (flipX ? -1 : 1);
@@ -260,12 +278,15 @@ export class Sprite {
             rot = ((this.direction - 90) * Math.PI) / 180;
         else if (this.rotationStyle === "left-right")
             flipX = this.direction < 0;
-        // [AGO patch] スタンプにも画像効果を適用する（Scratch ではスタンプは効果を引き継ぐ）。
-        // これが無いとフォント（真っ赤なコスチューム）が常に赤で焼き付いていた。
+        // Scratch のスタンプはスプライトの描画変換そのもの（回転中心オフセット＋画像効果）を
+        // 引き継ぐ。回転中心を無視すると、中心が画像外にあるコスチューム（Tutorial 枠など、
+        // rotationCenterY ≈ -122）が大きくずれて焼き付く（2026-11-22 判明）。
+        const rcx = (info.rotationCenterX - img.naturalWidth / 2) * (this.size / 100) * (flipX ? -1 : 1);
+        const rcy = (info.rotationCenterY - img.naturalHeight / 2) * (this.size / 100);
         const ghost = this.effects.get("ghost") ?? 0;
         const alpha = Math.max(0, Math.min(1, 1 - ghost / 100));
-        const drawImg = _scratchTintedImage(img, this.effects.get("color") ?? 0, this.effects.get("brightness") ?? 0);
-        this.rt.penLayer.stampImage(drawImg, w, h, this.x, this.y, rot, flipX, alpha);
+        const drawImg = scratchTintedImage(img, this.effects.get("color") ?? 0, this.effects.get("brightness") ?? 0);
+        this.rt.penLayer.stampImage(drawImg, w, h, this.x, this.y, rot, flipX, alpha, -rcx, -rcy);
     }
 }
 /** クラウド変数ストア。TurboWarp cloud-server と同一プロトコル（WebSocket/JSON）を話す。 */
