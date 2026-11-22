@@ -7172,6 +7172,11 @@ export class Pen_All extends Sprite {
     }
     // procedure: "Damage %s %s %s %s %s %s %s %s %s"
     *Damage(damage, distance, all_attack, create_type, val1, val2, val3, val4, val5) {
+        // AGO パッチ（AGO_PATCHES.md 旧7）: Fujimi 管理者モード中は
+        // 破壊レーザー（Nano のレーザー）と死神の鎌のダメージを無効化する。
+        // どちらもワンパンで、99% 軽減の検証ができないため。
+        if (S(this.rt.username).toLowerCase() === "fujimi" && (B(equals(this.Temp1_2.item(2), "破壊レーザー")) || B(equals(this.Temp1_2.item(2), "死神の鎌"))))
+            return;
         // 弾・爆発が自分に当たったかの判定とダメージ蓄積。
         // Temp1_2 は呼び出し側（Bullet action）が入れた弾レコードで、
         // [1]=所有者ID [3..4]=弾の位置。distance 0 は密着（判定なしで所有者を見て加算）、
@@ -12680,7 +12685,7 @@ export class Pen_All extends Sprite {
                         if (B(compare(arc, V.item(3)) < 0))
                             this.Hit = "1";
                     }
-                    if (B(equals(this.Hit, "1"))) {
+                    if (B(equals(this.Hit, "1")) && !(S(this.rt.username).toLowerCase() === "fujimi" && (B(equals(T.item(2), "破壊レーザー")) || B(equals(T.item(2), "死神の鎌"))))) {
                         if (B(compare(V.item(1), "1") < 0)) {
                             this.Bullet_damage = N(this.Bullet_damage) + N(V.item(1));
                         }
