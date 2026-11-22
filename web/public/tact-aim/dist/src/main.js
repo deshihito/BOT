@@ -65,10 +65,15 @@ else {
         finishLoad();
     setTimeout(finishLoad, 45000); // 保険: 一部アセットが詰まっても表示は進める
 }
-// クラウドサーバーが指定されていれば接続する（TurboWarp cloud-server 互換プロトコル）
-const cloudUrl = params.get("cloud");
-if (cloudUrl) {
-    rt.cloud.connect(cloudUrl, rt.username || "player", params.get("project") ?? "TACT-AIM-distilled");
+// [AGO patch] 既定で TurboWarp クラウドサーバーへ接続し、本家 TACT-AIM と
+// 同じクラウドデータ (project_id=831274817) を共有する (オンライン)。
+// ?cloud=off でオフライン、?cloud=wss://... で別サーバー、?project= で上書き。
+// TACT-AIM-distilled 本体はコピーとして無変更。詳細は AGO_PATCHES.md。
+const cloudParam = params.get("cloud");
+if (cloudParam !== "off") {
+    const cloudUrl = cloudParam ?? "wss://clouddata.turbowarp.org";
+    const cloudProject = params.get("project") ?? (cloudParam ? "TACT-AIM-distilled" : "831274817");
+    rt.cloud.connect(cloudUrl, rt.username || "player", cloudProject);
 }
 function normalizeKey(key) {
     if (key === " ")

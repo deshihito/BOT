@@ -178,18 +178,29 @@ export class PenLayer {
         const ctx = this.ctx;
         const [ax, ay] = this.toPx(x0, y0);
         const [bx, by] = this.toPx(x1, y1);
-        ctx.strokeStyle = penCssColor(state);
-        ctx.lineWidth = Math.max(0.5, state.penSize * this.scale);
-        ctx.lineCap = "round";
-        ctx.lineJoin = "round";
+        // [AGO patch] Scratch (WebGL PenSkin) と同じクアッド描画にする:
+        // 線分を「太さ分の矩形」として塗る。端は平らになり、継ぎ目は原作どおり
+        // 重なりと欠けが出る (丸キャップ+丸ジョイントの stroke とは縁の出方が違う)。
+        // TACT-AIM-distilled 本体はコピーとして無変更。詳細は AGO_PATCHES.md。
+        ctx.fillStyle = penCssColor(state);
+        const dx = bx - ax;
+        const dy = by - ay;
+        const len = Math.hypot(dx, dy);
+        const half = (state.penSize * this.scale) / 2;
+        if (len < 1e-9) {
+            // 点: ペンサイズ四方の正方形 (Scratch のペン下ろし点)
+            ctx.fillRect(ax - half, ay - half, half * 2, half * 2);
+            return;
+        }
+        const nx = (-dy / len) * half;
+        const ny = (dx / len) * half;
         ctx.beginPath();
-        ctx.moveTo(ax, ay);
-        // 同一点の場合は丸キャップで点になるよう僅かにずらす
-        if (ax === bx && ay === by)
-            ctx.lineTo(bx + 0.01, by);
-        else
-            ctx.lineTo(bx, by);
-        ctx.stroke();
+        ctx.moveTo(ax + nx, ay + ny);
+        ctx.lineTo(bx + nx, by + ny);
+        ctx.lineTo(bx - nx, by - ny);
+        ctx.lineTo(ax - nx, ay - ny);
+        ctx.closePath();
+        ctx.fill();
     }
     /** スタンプ: 画像をペンレイヤーへ焼き付ける。 */
     stampImage(img, w, h, cx, cy, rotationRad, flipX, alpha) {
