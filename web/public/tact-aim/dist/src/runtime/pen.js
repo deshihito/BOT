@@ -98,13 +98,19 @@ export function penCssColor(state) {
     const alpha = 1 - clamp100(state.transparency) / 100;
     return `rgba(${r},${g},${b},${alpha})`;
 }
-/** "色を〜にする" ブロック: RGB→HSV 変換して color/saturation/brightness を設定する。 */
+/** "色を〜にする" ブロック: RGB→HSV 変換して color/saturation/brightness を設定する。
+ *  scratch-vm の setPenColorToColor と同じく、transparency は 0 にリセットされる
+ *  （alpha を持つ色値の場合だけ、その alpha から transparency を決める）。
+ *  本作の色値は数値/hex 文字列で alpha を持たないため常に 0 リセットになる。
+ *  これを怠ると、直前の手順が残した transparency（例: 茂みの 50、演出の 100）が
+ *  次の setPenColor 後も効き続け、グリッド線や UI が薄く/透明に描かれてしまう。 */
 export function setPenColorToColor(state, v) {
     const { r, g, b } = parseScratchColor(v);
     const hsv = rgbToHsv(r, g, b);
     state.color = hsv.h / 3.6;
     state.saturation = hsv.s;
     state.brightness = hsv.v;
+    state.transparency = 0;
 }
 export function setPenParam(state, param, v) {
     const n = toNumber(v);
