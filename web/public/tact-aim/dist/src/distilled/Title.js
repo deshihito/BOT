@@ -74,12 +74,10 @@ export class Title extends Sprite {
         yield* this.Check_bullet_damage();
         yield { waitSeconds: N(0.5) };
         G.Inventory_2.replace(31, "1");
-        if (B(equals(G.Festival, "1"))) {
-            /* モニター表示の切替のみ: 実行時は何もしない */
-        }
-        else {
-            /* モニター表示の切替のみ: 実行時は何もしない */
-        }
+        // フェスアクセス表示は 2026-11-22 のユーザー指示で丸ごと削除した（意図的な乖離）。
+        // 原作はここで Festival == "1" のときリスト「osamepurinフェス開催中！」
+        // （フェス会場への URL 入り）を表示し、それ以外では隠していた。
+        // リスト自体も globals から削除済み（transpile.py の生成除外を参照）。
         const _cnt1 = Math.max(0, Math.floor(N(8)));
         for (let _rep1 = 0; _rep1 < _cnt1; _rep1++) {
             yield { waitSeconds: N(0.1) };
