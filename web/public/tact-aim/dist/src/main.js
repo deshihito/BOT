@@ -192,15 +192,31 @@ setInterval(() => {
         askBox.style.display = "none";
     }
 }, 100);
-// ---- AGO パッチ: deshihito テストプレイ特典（AGO_PATCHES.md 旧7） ----
-// ユーザー名が "deshihito" の間だけ、原作の作者テストプレイ解禁
-// （uk-400 / kz-104 が "u" キーで発動するもの）と同形で、コイン 20000 /
-// キャラクターツリー全開放 / テクタイト 40 を維持する。加えて防御と
-// 耐爆の 99% 軽減が常時付くよう、護身+ を 1 つだけ常駐させる
+// ---- AGO パッチ: Fujimi 管理者モード（AGO_PATCHES.md 旧7） ----
+// ユーザー名が "Fujimi"（大文字小文字は不問）の間だけ、原作の作者
+// テストプレイ解禁（uk-400 / kz-104 が "u" キーで発動するもの）と同形で、
+// コイン 20000 / キャラクターツリー全開放 / テクタイト 40 を維持する。
+// 加えて防御と耐爆の 99% 軽減が常時付くよう、護身+ を 1 つだけ常駐させる
 // （軽減率は Buff テーブル側の AGO パッチで護身+ の係数を -0.99 に変更）。
-setInterval(() => {
-    if (rt.username !== "deshihito")
+// さらにキャラステータスを直接補正する: 攻撃力（Character_2 の +3）を
+// 100 倍、再生レート（+8）を 5 倍。キャラが変わったら元の値に戻してから
+// 掛け直し、管理者モードを抜けたら元の値に戻す。
+// 破壊レーザー / 死神の鎌 のダメージ無効化は Pen_All.js 側の AGO パッチ。
+let statBase = null;
+let statOrigAtk = null;
+let statOrigRegen = null;
+function restoreAdminStats() {
+    if (statBase === null)
         return;
+    G.Character_2.replace(Number(statBase) + 3, statOrigAtk);
+    G.Character_2.replace(Number(statBase) + 8, statOrigRegen);
+    statBase = null;
+}
+setInterval(() => {
+    if ((rt.username || "").toLowerCase() !== "fujimi") {
+        restoreAdminStats();
+        return;
+    }
     G.Money = "20000";
     G.Tektite = "40";
     // キャラクターツリー全開放: 作者解禁と同じく、各レコード（10 項目）の
@@ -227,4 +243,13 @@ setInterval(() => {
         G.Buff_Debuff.add("護身+");
         G.Buff_Debuff.add("999999");
     }
+    // 攻撃力 100 倍 / 再生 5 倍（Character_2 の現在キャラのレコードを補正）
+    if (statBase !== String(G.Character)) {
+        restoreAdminStats();
+        statBase = String(G.Character);
+        statOrigAtk = G.Character_2.item(Number(statBase) + 3);
+        statOrigRegen = G.Character_2.item(Number(statBase) + 8);
+    }
+    G.Character_2.replace(Number(statBase) + 3, Number(statOrigAtk) * 100);
+    G.Character_2.replace(Number(statBase) + 8, Number(statOrigRegen) * 5);
 }, 500);
