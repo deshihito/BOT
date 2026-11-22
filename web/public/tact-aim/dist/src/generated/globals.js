@@ -131,7 +131,6 @@ class Globals {
     Mobile_2 = new SList([]); // "Mobile"
     Blocked_player = new SList([]); // "Blocked player"
     Shop_menu = new SList([]); // "Shop menu"
-    osamepurinフェス開催中 = new SList(["https://turbowarp.org/1297721083?fps=60&hqpen"]); // "osamepurinフェス開催中！"
     My_IDs = new SList([]); // "My IDs"
     CSPID = new SList([]); // "CSPID"
     Bullet_damage = new SList([]); // "Bullet damage"
