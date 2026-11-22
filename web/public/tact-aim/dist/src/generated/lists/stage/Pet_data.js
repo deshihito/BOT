@@ -1,0 +1,2 @@
+const initial = ["ウッドポット", 10, 0, "Rank: Wood III", 1, 0, 1, "", "", "", "ストーンゴーレム", 50, 0, "Rank: Stone III", 1, 0, 2, "", "", "", "アイアンロケット", 100, 0, "Rank: Iron III", 1, 0, 0, "", "", "", "ゴールドエレメント", 150, 0, "Rank: Gold III", 1, 0, 0, "", "", "", "uk-400", 0, 0, "User name: uk-400", 1, 1, 2, "", "", "", "urukazu", 0, 0, "User name: urukazu", 1, 0, 1, "", "", "", "Takomaru-s", 0, 0, "User name: Takomaru-s", 1, 0, 2, "", "", "", "011208tree", 0, 0, "User name: 011208tree", 1, 0, 0, "", "", ""];
+export default initial;
