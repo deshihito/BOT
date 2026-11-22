@@ -172,16 +172,14 @@ export class PenLayer {
     toPx(x, y) {
         return [(x + 240) * this.scale, (180 - y) * this.scale];
     }
-    /** 線を引く。太さはペンサイズ（ステージ座標単位）、端は丸める（Scratch の描画に合わせる）。 */
+    /** 線を引く。Scratch (WebGL PenSkin) と同じクアッド描画: 線分を太さ分の
+     *  矩形として塗る。端は平らになり、継ぎ目には原作どおり重なりと欠けが出る
+     *  （丸キャップの stroke とは縁の出方が違うため、2026-11-22 に変更）。 */
     drawLine(state, x0, y0, x1, y1) {
         this.onDraw?.();
         const ctx = this.ctx;
         const [ax, ay] = this.toPx(x0, y0);
         const [bx, by] = this.toPx(x1, y1);
-        // [AGO patch] Scratch (WebGL PenSkin) と同じクアッド描画にする:
-        // 線分を「太さ分の矩形」として塗る。端は平らになり、継ぎ目は原作どおり
-        // 重なりと欠けが出る (丸キャップ+丸ジョイントの stroke とは縁の出方が違う)。
-        // TACT-AIM-distilled 本体はコピーとして無変更。詳細は AGO_PATCHES.md。
         ctx.fillStyle = penCssColor(state);
         const dx = bx - ax;
         const dy = by - ay;
@@ -202,8 +200,9 @@ export class PenLayer {
         ctx.closePath();
         ctx.fill();
     }
-    /** スタンプ: 画像をペンレイヤーへ焼き付ける。 */
-    stampImage(img, w, h, cx, cy, rotationRad, flipX, alpha) {
+    /** スタンプ: 画像をペンレイヤーへ焼き付ける。
+     *  offX/offY は回転中心ぶんのずらし（ステージ座標単位、Sprite.stamp が計算）。 */
+    stampImage(img, w, h, cx, cy, rotationRad, flipX, alpha, offX = 0, offY = 0) {
         this.onDraw?.();
         const ctx = this.ctx;
         const [px, py] = this.toPx(cx, cy);
@@ -213,7 +212,7 @@ export class PenLayer {
         if (flipX)
             ctx.scale(-1, 1);
         ctx.globalAlpha = alpha;
-        ctx.drawImage(img, (-w / 2) * this.scale, (-h / 2) * this.scale, w * this.scale, h * this.scale);
+        ctx.drawImage(img, (-w / 2 + offX) * this.scale, (-h / 2 + offY) * this.scale, w * this.scale, h * this.scale);
         ctx.restore();
     }
 }
