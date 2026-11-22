@@ -1,11 +1,11 @@
 {
   "version": 1,
-  "total": 257,
+  "total": 258,
   "counts": {
     "general": 76,
     "vc": 47,
     "game": 48,
-    "support": 85,
+    "support": 86,
     "help": 1
   },
   "game_count": 47,
@@ -1458,6 +1458,12 @@
           "label": "自動化",
           "description": "",
           "functions": [
+            {
+              "id": "support:commentgacha",
+              "value": "commentgacha",
+              "title": "コメントガチャ",
+              "description": ""
+            },
             {
               "id": "support:assist_welcome",
               "value": "assist_welcome",

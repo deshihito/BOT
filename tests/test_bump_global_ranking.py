@@ -86,10 +86,11 @@ class UnifiedBoardGenreTest(unittest.TestCase):
         # 背景透過・絵文字/スタンプ化（general:bg_cutout）追加で general 74→75 / 全体 254→255。
         # WORLD BOX連携（support:worldbox_link）追加で全体 255→256。
         # オプトアウト設定（general:optout_settings）追加で general 75→76 / 全体 256→257。
+        # コメントガチャ設定（support:commentgacha）追加で全体 257→258。
         from core.general import action_registry
 
         specs = list(action_registry.default_registry()._by_id.values())
-        self.assertEqual(len(specs), 257)
+        self.assertEqual(len(specs), 258)
         self.assertEqual(len([s for s in specs if s.root == "general"]), 76)
 
 
