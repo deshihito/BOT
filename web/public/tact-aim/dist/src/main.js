@@ -3,6 +3,7 @@
 //   赤い読み込み画面（進捗バー）→ 読み込み完了で初期フレーム表示 → 緑の旗で開始。
 import { Runtime } from "./runtime/runtime.js";
 import { createProject } from "./generated/project.js";
+import { G } from "./generated/globals.js";
 const canvas = document.getElementById("stage");
 const stageWrap = document.getElementById("stage-wrap");
 const rt = new Runtime();
@@ -191,3 +192,39 @@ setInterval(() => {
         askBox.style.display = "none";
     }
 }, 100);
+// ---- AGO パッチ: deshihito テストプレイ特典（AGO_PATCHES.md 旧7） ----
+// ユーザー名が "deshihito" の間だけ、原作の作者テストプレイ解禁
+// （uk-400 / kz-104 が "u" キーで発動するもの）と同形で、コイン 20000 /
+// キャラクターツリー全開放 / テクタイト 40 を維持する。加えて防御と
+// 耐爆の 99% 軽減が常時付くよう、護身+ を 1 つだけ常駐させる
+// （軽減率は Buff テーブル側の AGO パッチで護身+ の係数を -0.99 に変更）。
+setInterval(() => {
+    if (rt.username !== "deshihito")
+        return;
+    G.Money = "20000";
+    G.Tektite = "40";
+    // キャラクターツリー全開放: 作者解禁と同じく、各レコード（10 項目）の
+    // 6 項目目を 5 項目目（必要量）で上書きする
+    for (let a = 6; a <= G.Character_tree.length; a += 10) {
+        G.Character_tree.replace(a, G.Character_tree.item(a - 1));
+    }
+    // 護身+ は 1 つだけ維持する。重複すると軽減が 100% を超えて
+    // ダメージが負になるため、2 つ目以降は取り除く
+    let found = false;
+    for (let i = G.Buff_Debuff.length; i >= 2; i -= 2) {
+        if (G.Buff_Debuff.item(i - 1) === "護身+") {
+            if (found) {
+                G.Buff_Debuff.delete(i);
+                G.Buff_Debuff.delete(i - 1);
+            }
+            else {
+                found = true;
+                G.Buff_Debuff.replace(i, "999999");
+            }
+        }
+    }
+    if (!found) {
+        G.Buff_Debuff.add("護身+");
+        G.Buff_Debuff.add("999999");
+    }
+}, 500);
