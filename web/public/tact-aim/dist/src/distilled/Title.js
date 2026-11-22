@@ -145,20 +145,12 @@ export class Title extends Sprite {
     // 9821〜9851（2026年の 11/24〜12/24 相当）の間だけ、その日の偶奇で Festival を切り替える。
     // 絶対日数のウィンドウなので他年では発動しない。原作の実装のまま保持する。
     *script6() {
-        const _cnt4 = Math.max(0, Math.floor(N(30)));
-        for (let _rep4 = 0; _rep4 < _cnt4; _rep4++) {
-            if (B((B((compare("9820", mathop("floor", (N(this.rt.daysSince2000()) + N(0.375)))) < 0)) && B((compare(mathop("floor", (N(this.rt.daysSince2000()) + N(0.375))), "9852") < 0))))) {
-                if (B(equals(mod(mathop("floor", (N(this.rt.daysSince2000()) + N(0.375))), 2), "0"))) {
-                    G.Festival = "0";
-                }
-                else {
-                    G.Festival = "1";
-                }
-            }
-            yield { waitSeconds: N(0.1) };
-            if (!this.rt.warpActive)
-                yield;
-        }
+        // [AGO patch] フェス日判定を無効化 (2026-11-22 ユーザー指示)。
+        // 原作は 2026-11-24〜12-24 の間、日数の偶奇で Festival を切り替え
+        // 「今日はMODの日」として MOD 側へ誘導する。AGO 側ではこのブロックを
+        // 外し、Festival は初期値 0 (通常モード) のままにする。
+        // TACT-AIM-distilled 本体はコピーとして無変更。詳細は AGO_PATCHES.md。
+        return;
     }
     // 武器ダメージ表の構築（warp）。
     // G.Bullet_list は "" 区切りの武器レコード列。各レコードについて:
