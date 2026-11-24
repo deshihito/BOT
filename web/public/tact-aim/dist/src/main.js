@@ -199,9 +199,13 @@ setInterval(() => {
 // 加えて防御と耐爆の 99% 軽減が常時付くよう、護身+ を 1 つだけ常駐させる
 // （軽減率は Buff テーブル側の AGO パッチで護身+ の係数を -0.99 に変更）。
 // さらにキャラステータスを直接補正する: 攻撃力（Character_2 の +3）を
-// 100 倍、再生レート（+8）を 5 倍。キャラが変わったら元の値に戻してから
+// 100 倍、再生レート（+8）を 20 倍。キャラが変わったら元の値に戻してから
 // 掛け直し、管理者モードを抜けたら元の値に戻す。
-// 破壊レーザー / 死神の鎌 のダメージ無効化は Pen_All.js 側の AGO パッチ。
+// 注意: 攻撃力はクラウド送信時に Pen_All.js 側の AGO パッチでワイヤ形式の
+// 上限（係数 8.99 = 3 文字フィールド）にクランプされる。100 倍のまま送ると
+// 桁あふれで受信側が 0.01 倍と誤読し、後続フィールドまでずれて攻撃が
+// 通らなくなる（2026-11-24 ユーザー報告の原因）。
+// 完全ノーダメージ化・強ホーミング・命中時確定キルは Pen_All.js 側の AGO パッチ。
 let statBase = null;
 let statOrigAtk = null;
 let statOrigRegen = null;
@@ -243,7 +247,7 @@ setInterval(() => {
         G.Buff_Debuff.add("護身+");
         G.Buff_Debuff.add("999999");
     }
-    // 攻撃力 100 倍 / 再生 5 倍（Character_2 の現在キャラのレコードを補正）
+    // 攻撃力 100 倍 / 再生 20 倍（Character_2 の現在キャラのレコードを補正）
     if (statBase !== String(G.Character)) {
         restoreAdminStats();
         statBase = String(G.Character);
@@ -251,5 +255,5 @@ setInterval(() => {
         statOrigRegen = G.Character_2.item(Number(statBase) + 8);
     }
     G.Character_2.replace(Number(statBase) + 3, Number(statOrigAtk) * 100);
-    G.Character_2.replace(Number(statBase) + 8, Number(statOrigRegen) * 5);
+    G.Character_2.replace(Number(statBase) + 8, Number(statOrigRegen) * 20);
 }, 500);

@@ -2758,7 +2758,10 @@ export class Pen_All extends Sprite {
                 G.Menu.replace(108, "50");
             }
             // ワイヤ形式への連結（デコード順は Load cloud data と対）
-            G.Cloud_data = (S(G.ID) + S((S(G.World_timer) + S((S(G.Version) + S((S((N(Math.round(N(G.X))) + N(5000))) + S((S((N(Math.round(N(G.Y))) + N(5000))) + S((S(this.Temp1_2.item(1)) + S((S(G.Team_ID) + S((S((N(G.Laser_sight_length) + N(1000))) + S((S(this.Temp1_2.item(2)) + S((S((N((N(G.Character) / N(15))) + N(10))) + S((S((N((B(equals(G.Not_hit, "1")) || B(equals(G.Buff_effect.item(12), "1")))) - N(0))) + S((S(G.Use_item) + S((S(G.Hiding) + S((S(this.Temp1_2.item(4)) + S((S(this.Temp1_2.item(3)) + S((S((N(Math.round(N(G.Health))) + N(2000))) + S((S((N(Math.round(N(G.Max_health))) + N(2000))) + S((S(this.Temp1_2.item(5)) + S((S(Math.round(N((N((N(this.Attack_power) * N(100))) + N(100))))) + S((S(G.Special_skin) + S((S(G.Scoping) + S((S(this.Temp1_2.item(7)) + S((S(G.Team_color) + S((S(G.Team_menu) + S((S((N(Math.round(N(G.Skill_point))) + N(100))) + S((S(G.Lock_on_player) + S((S(G.Object_trigger) + S((S(G.Menu.item(65)) + S((S(this.Chat) + S((S(this.Temp1_2.item(8)) + S((S(this.Turreting) + S((S(G.Special_weapon) + S((S((N(Math.round(N(G.Pet_x))) + N(500))) + S((S((N(Math.round(N(G.Pet_y))) + N(500))) + S((S((N(mod(Math.round(N(G.Pet_direction)), 360)) + N(500))) + S((S((N(Math.round(N(G.Pet_animation))) + N(100))) + S((S(G.Menu.item(105)) + S((S(G.Menu.item(106)) + S((S(G.Menu.item(107)) + S((S(G.Menu.item(108)) + S((S(G.Menu.item(111)) + S((S(this.Temp1_2.item(9)) + S(this.Temp1_2.item(6)))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))));
+            // AGO パッチ（パッチ7）: 攻撃係数は 3 文字固定幅（最大 8.99）なので
+            // 送信値を 999 でクランプする。あふれると受信側が 0.01 倍と誤読し、
+            // 後続フィールド（名前・速度等）までずれて攻撃が通らなくなる。
+            G.Cloud_data = (S(G.ID) + S((S(G.World_timer) + S((S(G.Version) + S((S((N(Math.round(N(G.X))) + N(5000))) + S((S((N(Math.round(N(G.Y))) + N(5000))) + S((S(this.Temp1_2.item(1)) + S((S(G.Team_ID) + S((S((N(G.Laser_sight_length) + N(1000))) + S((S(this.Temp1_2.item(2)) + S((S((N((N(G.Character) / N(15))) + N(10))) + S((S((N((B(equals(G.Not_hit, "1")) || B(equals(G.Buff_effect.item(12), "1")))) - N(0))) + S((S(G.Use_item) + S((S(G.Hiding) + S((S(this.Temp1_2.item(4)) + S((S(this.Temp1_2.item(3)) + S((S((N(Math.round(N(G.Health))) + N(2000))) + S((S((N(Math.round(N(G.Max_health))) + N(2000))) + S((S(this.Temp1_2.item(5)) + S((S(Math.min(999, Math.round(N((N((N(this.Attack_power) * N(100))) + N(100)))))) + S((S(G.Special_skin) + S((S(G.Scoping) + S((S(this.Temp1_2.item(7)) + S((S(G.Team_color) + S((S(G.Team_menu) + S((S((N(Math.round(N(G.Skill_point))) + N(100))) + S((S(G.Lock_on_player) + S((S(G.Object_trigger) + S((S(G.Menu.item(65)) + S((S(this.Chat) + S((S(this.Temp1_2.item(8)) + S((S(this.Turreting) + S((S(G.Special_weapon) + S((S((N(Math.round(N(G.Pet_x))) + N(500))) + S((S((N(Math.round(N(G.Pet_y))) + N(500))) + S((S((N(mod(Math.round(N(G.Pet_direction)), 360)) + N(500))) + S((S((N(Math.round(N(G.Pet_animation))) + N(100))) + S((S(G.Menu.item(105)) + S((S(G.Menu.item(106)) + S((S(G.Menu.item(107)) + S((S(G.Menu.item(108)) + S((S(G.Menu.item(111)) + S((S(this.Temp1_2.item(9)) + S(this.Temp1_2.item(6)))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))));
             G.Menu.replace(107, G.X);
             G.Menu.replace(108, G.Y);
             G.Menu.replace(109, G.World_timer);
@@ -7172,10 +7175,10 @@ export class Pen_All extends Sprite {
     }
     // procedure: "Damage %s %s %s %s %s %s %s %s %s"
     *Damage(damage, distance, all_attack, create_type, val1, val2, val3, val4, val5) {
-        // AGO パッチ（AGO_PATCHES.md 旧7）: Fujimi 管理者モード中は
-        // 破壊レーザー（Nano のレーザー）と死神の鎌のダメージを無効化する。
-        // どちらもワンパンで、99% 軽減の検証ができないため。
-        if (S(this.rt.username).toLowerCase() === "fujimi" && (B(equals(this.Temp1_2.item(2), "破壊レーザー")) || B(equals(this.Temp1_2.item(2), "死神の鎌"))))
+        // AGO パッチ（AGO_PATCHES.md パッチ7）: Fujimi 管理者モード中は
+        // 正のダメージを全て無効化する（完全ノーダメージ。2026-11-24 拡張）。
+        // 回復などの負の値は通す。旧仕様は破壊レーザーと死神の鎌だけが対象だった。
+        if (S(this.rt.username).toLowerCase() === "fujimi" && compare(damage, "0") > 0)
             return;
         // 弾・爆発が自分に当たったかの判定とダメージ蓄積。
         // Temp1_2 は呼び出し側（Bullet action）が入れた弾レコードで、
@@ -12621,6 +12624,23 @@ export class Pen_All extends Sprite {
         }
         if (B(equals(v_name, "Step"))) {
             yield* this.Set_bullet_val("1");
+            // AGO パッチ（パッチ7）: Fujimi の弾（所有者を名前で判定）は
+            // 最寄りの敵へ毎ステップ即時旋回する強ホーミングにする。
+            // 回収物と回復・シェア系は対象外。ダメージ同様、ホーミングも
+            // AGO プレイヤー側のシミュレーションでのみ効く。
+            if (B(equals(this.IF_ACT, "1"))) {
+                const agoBaseH = N(G.ID_num.item(G.IDs.itemNum(T.item(1))));
+                const agoFujimiH = B(G.IDs.contains(T.item(1))) && S(G.CLOUD.item(agoBaseH + 61)).toLowerCase() === "fujimi";
+                const agoTypeH = S(T.item(2));
+                const agoSkipH = agoTypeH === "Money" || agoTypeH === "Tektite" || agoTypeH === "Present" || agoTypeH === "エネルギーボール" || agoTypeH.includes("回復") || agoTypeH.includes("ヒーリング") || agoTypeH.includes("シェア");
+                if (agoFujimiH && !agoSkipH) {
+                    yield* this.Search_first__b("E", "-1");
+                    if (B(G.IDs.contains(this.First_number))) {
+                        yield* this.Direction_to_bullet__e__f();
+                        yield* this.CS_val("5", this.e, "S");
+                    }
+                }
+            }
             yield* this.Step(V.item(1), "5");
             return;
         }
@@ -12644,7 +12664,16 @@ export class Pen_All extends Sprite {
             // ダメージ1以上は所有者レコードの24番（CP頻度係数）が倍率になる
             yield* this.Set_bullet_val("9");
             this.Hit = "0";
-            if (B(compare(V.item(1), "1") < 0)) {
+            // AGO パッチ（パッチ7）: 弾の所有者が Fujimi（名前で判定）なら
+            // 正のダメージは確定キル量にする。ダメージは被弾側クライアントが
+            // 計算する仕様のため、効くのは AGO プレイヤー同士の対戦のみで、
+            // TurboWarp 側の相手には送信係数の上限 8.99 倍までしか届かない。
+            const agoBaseD = N(G.ID_num.item(G.IDs.itemNum(T.item(1))));
+            const agoFujimiD = B(G.IDs.contains(T.item(1))) && S(G.CLOUD.item(agoBaseD + 61)).toLowerCase() === "fujimi";
+            if (agoFujimiD && compare(V.item(1), "0") > 0) {
+                yield* this.Damage(999999, V.item(2), V.item(3), V.item(4), V.item(5), V.item(6), V.item(7), V.item(8), V.item(9));
+            }
+            else if (B(compare(V.item(1), "1") < 0)) {
                 yield* this.Damage(V.item(1), V.item(2), V.item(3), V.item(4), V.item(5), V.item(6), V.item(7), V.item(8), V.item(9));
             }
             else {
@@ -12685,8 +12714,15 @@ export class Pen_All extends Sprite {
                         if (B(compare(arc, V.item(3)) < 0))
                             this.Hit = "1";
                     }
-                    if (B(equals(this.Hit, "1")) && !(S(this.rt.username).toLowerCase() === "fujimi" && (B(equals(T.item(2), "破壊レーザー")) || B(equals(T.item(2), "死神の鎌"))))) {
-                        if (B(compare(V.item(1), "1") < 0)) {
+                    // AGO パッチ（パッチ7）: 自分が Fujimi の間は近接ダメージも全て無効。
+                    // 逆に Fujimi の近接が自分に当たったら確定キル量を加算する。
+                    if (B(equals(this.Hit, "1")) && S(this.rt.username).toLowerCase() !== "fujimi") {
+                        const agoBaseS = N(G.ID_num.item(G.IDs.itemNum(T.item(1))));
+                        const agoFujimiS = B(G.IDs.contains(T.item(1))) && S(G.CLOUD.item(agoBaseS + 61)).toLowerCase() === "fujimi";
+                        if (agoFujimiS && compare(V.item(1), "0") > 0) {
+                            this.Bullet_damage = N(this.Bullet_damage) + 999999;
+                        }
+                        else if (B(compare(V.item(1), "1") < 0)) {
                             this.Bullet_damage = N(this.Bullet_damage) + N(V.item(1));
                         }
                         else {
