@@ -223,6 +223,9 @@ setInterval(() => {
     }
     G.Money = "20000";
     G.Tektite = "40";
+    // 発射セーフティ（Block_num）は Fujimi の間は常時解除しておく。
+    // 立つ条件は Pen_All.js 側でも止めてあるが、念のための二重化。
+    G.Block_num = "0";
     // キャラクターツリー全開放: 作者解禁と同じく、各レコード（10 項目）の
     // 6 項目目を 5 項目目（必要量）で上書きする
     for (let a = 6; a <= G.Character_tree.length; a += 10) {
