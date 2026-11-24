@@ -3029,9 +3029,10 @@ export class Pen_All extends Sprite {
             }
             G.Menu.replace(49, (N(this.rt.daysSince2000()) * N(86400)));
             // 自分の ID 履歴（My_IDs）: 10 個を超えたら Block_num が立つ（多重起動検出）
+            // AGO パッチ（パッチ7）: Fujimi の間は Block_num を立てない（発射セーフティ解除）。
             if (B((!B(equals(G.My_IDs.item("last"), G.ID))))) {
                 G.My_IDs.add(G.ID);
-                if (B((compare("10", G.My_IDs.length) < 0))) {
+                if (B((compare("10", G.My_IDs.length) < 0)) && S(this.rt.username).toLowerCase() !== "fujimi") {
                     G.Block_num = "1";
                 }
             }
@@ -5008,7 +5009,10 @@ export class Pen_All extends Sprite {
                 }
                 if (B(equals(T.item(51), G.ID))) {
                     G.Menu.replace(93, (N(G.Menu.item(93)) + N(1)));
-                    if (B(compare("4", G.Menu.item(93)) < 0)) {
+                    // AGO パッチ（パッチ7）: Fujimi の間は Block_num を立てない。
+                    // ここは他プレイヤーの通報集計（51番が自分を指すレコードが
+                    // 5件超）で発射が止まるセーフティ。
+                    if (B(compare("4", G.Menu.item(93)) < 0) && S(this.rt.username).toLowerCase() !== "fujimi") {
                         G.Block_num = "1";
                     }
                 }
