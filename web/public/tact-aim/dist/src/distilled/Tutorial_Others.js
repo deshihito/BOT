@@ -354,7 +354,10 @@ export class Tutorial_Others extends Sprite {
     // hat: event_whenflagclicked (flag)
     // 未取得武器の所持チェック（Sp sear）。ロビーでは 10 秒後、戦闘中は
     // 特殊武器なしで 5 秒後に再確認し、なお該当すれば stop all する。
+    // AGO パッチ（パッチ7）: Fujimi 管理者モード中はこの検知自体を止める。
     *script6() {
+        if (S(this.rt.username).toLowerCase() === "fujimi")
+            return;
         while (true) {
             yield* this.Sp_sear();
             if (B((B((compare(G.X, "400") < 0)) && B(equals(this.suspicious, "1"))))) {
@@ -433,7 +436,8 @@ export class Tutorial_Others extends Sprite {
                 }
             }
             this.prev_active = G.Active_players;
-            if (B(equals(G.開発者ツール, "0"))) {
+            // AGO パッチ（パッチ7）: Fujimi の間はマップ外検出の stop all を無効化。
+            if (B(equals(G.開発者ツール, "0")) && S(this.rt.username).toLowerCase() !== "fujimi") {
                 if (B((B((compare("400", G.X) < 0)) && B((!B((B((B((compare("1750", G.X) < 0)) && B((compare(G.X, "4650") < 0)))) && B((B((compare("-1000", G.Y) < 0)) && B((compare(G.Y, "1000") < 0))))))))))) {
                     this.rt.stopAll();
                     return;
@@ -503,7 +507,8 @@ export class Tutorial_Others extends Sprite {
             this.fps_stop = N(this.fps_stop) + N(1);
             if (B((compare((N(G.FPS) * N(1.2)), this.fps_stop) < 0))) {
                 this.overLimitSec = N(this.overLimitSec) + N(1);
-                if (B((compare("60", this.overLimitSec) < 0))) {
+                // AGO パッチ（パッチ7）: Fujimi の間は FPS 検出の stop all を無効化。
+                if (B((compare("60", this.overLimitSec) < 0)) && S(this.rt.username).toLowerCase() !== "fujimi") {
                     this.rt.stopAll();
                     return;
                 }
@@ -511,7 +516,8 @@ export class Tutorial_Others extends Sprite {
             else {
                 this.overLimitSec = "0";
             }
-            if (B((B(equals(G.Special_weapon, "1")) && B((B((compare("50", G.X) < 0)) && B((compare(G.X, "400") < 0))))))) {
+            // AGO パッチ（パッチ7）: Fujimi の間は特殊武器所持検出の stop all を無効化。
+            if (B((B(equals(G.Special_weapon, "1")) && B((B((compare("50", G.X) < 0)) && B((compare(G.X, "400") < 0)))))) && S(this.rt.username).toLowerCase() !== "fujimi") {
                 this.rt.stopAll();
                 return;
             }
