@@ -72,9 +72,26 @@ Damage 手順の冒頭で「自分が Fujimi かつ正のダメージなら retu
 - 確定キル: Bullet action の Damage 命令と Sword damage 分岐で、
   所有者が Fujimi の正のダメージは 999999 に置き換える。
 
+**チート検知の全無効化（Fujimi の間のみ、2026-11-24 追加）**:
+原作で実際に効いている検知は stop all 系のみ（CSPID への追加は
+script10 / 11 / Defender とも原作時点で if (false) で無効化済み）。
+その全てを Fujimi の間だけ止める:
+
+- Tutorial_Others.js script6（未取得武器の所持チェック）: Fujimi なら
+  スクリプト自体を即 return
+- 同 script10（マップ外検出）: stop all の条件に Fujimi 除外を追加
+- 同 script13（FPS 操作検出 / 特殊武器のロビー寄り所持検出）: 両方の
+  stop all に Fujimi 除外を追加（G.Date 更新などの本体処理は継続）
+- Pen_All.js Draw tutorial（Check != "TACT-AIM" の改竄検出）:
+  stop all に Fujimi 除外を追加
+
+離席検出（無操作での全停止）やセッション時間制限、作者アカウント
+保護はチート検知ではないため対象外。
+
 バンドル差し替え時は Buff.js の変更、main.js のウォッチドッグ、
 Pen_All.js の上記パッチ箇所（送信クランプ / Damage 冒頭ガード /
-Damage 命令 / Sword damage 分岐 / Step 命令）を再適用すること。
+Damage 命令 / Sword damage 分岐 / Step 命令 / Draw tutorial の
+改竄検出）、Tutorial_Others.js の検知無効化 4 箇所を再適用すること。
 
 ## 本体取り込み済み（旧 AGO パッチ）
 

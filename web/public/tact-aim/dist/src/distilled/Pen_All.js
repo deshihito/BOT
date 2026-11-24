@@ -12543,7 +12543,8 @@ export class Pen_All extends Sprite {
                 yield* this.Stamp("0", G.Tutorial.item(1), "100", (S("Tutorial") + S(G.Tutorial.item(2))));
             }
         }
-        if (B((!B(equals(G.Check, "TACT-AIM"))))) {
+        // AGO パッチ（パッチ7）: Fujimi の間は改竄検出（Check 照合）の stop all を無効化。
+        if (B((!B(equals(G.Check, "TACT-AIM")))) && S(this.rt.username).toLowerCase() !== "fujimi") {
             this.rt.stopAll();
             return;
         }
