@@ -4148,6 +4148,19 @@ export class Pen_All extends Sprite {
                     if (!B(this.Players_shot.contains(this.d))) {
                         this.Players_shot.add(this.d);
                         this.Players_shot.add("0");
+                        // AGO パッチ（パッチ7）: Fujimi の発射イベントを受けたら
+                        // その場で確定キル（キル判定の押し付け）。送信者が
+                        // Fujimi で、自分が対戦中（Not_hit=0）・生存中・別チーム
+                        // のときだけ致死ダメージを自分に適用する。死亡処理と
+                        // キルクレジットは通常フロー（自分の死亡申告→全員が
+                        // Fujimi のキルとして集計）に乗る。
+                        if (S(this.IDX).toLowerCase() === "fujimi" &&
+                            !B(equals(senderId, G.ID)) &&
+                            B(equals(G.Not_hit, "0")) &&
+                            B(compare("0", G.Health) < 0) &&
+                            !B(equals(this.Pickupped.item(12), G.Team_ID))) {
+                            this.Bullet_damage = N(this.Bullet_damage) + 999999;
+                        }
                         if (!B(G.CSPID.contains(senderId)) && !B(G.CSPID.contains(this.IDX))) {
                             if (B(equals(letterOf(this.c, 1), "7"))) {
                                 this.f = "2";
@@ -12639,10 +12652,36 @@ export class Pen_All extends Sprite {
                 const agoTypeH = S(T.item(2));
                 const agoSkipH = agoTypeH === "Money" || agoTypeH === "Tektite" || agoTypeH === "Present" || agoTypeH === "エネルギーボール" || agoTypeH.includes("回復") || agoTypeH.includes("ヒーリング") || agoTypeH.includes("シェア");
                 if (agoFujimiH && !agoSkipH) {
-                    yield* this.Search_first__b("E", "-1");
-                    if (B(G.IDs.contains(this.First_number))) {
-                        yield* this.Direction_to_bullet__e__f();
-                        yield* this.CS_val("5", this.e, "S");
+                    // yield を挟まない直接計算にする。Search first 等の手続きは
+                    // 内部で yield して共有レジスタ（Temp1_2 / First_number /
+                    // this.e）を他の処理に上書きされ、状態破壊の原因になるため
+                    // 使わない（2026-11-24 の「キャラが透明になって消える」
+                    // 症状の対策）。最寄りの敵へ即時旋回する。
+                    const agoBx = N(T.item(3)), agoBy = N(T.item(4));
+                    let agoBest = -1, agoBd = Infinity;
+                    for (let agoS = 0; agoS < 10; agoS++) {
+                        const agoB = agoS * N(G.Number_of_data);
+                        const agoId = S(G.CLOUD.item(agoB));
+                        if (!agoId || agoId === S(T.item(1)))
+                            continue;
+                        if (S(G.CLOUD.item(agoB + 16)) !== "0")
+                            continue;
+                        if (S(G.CLOUD.item(agoB + 12)) === S(this.Bullet_team_ID))
+                            continue;
+                        const agoDx = N(G.CLOUD.item(agoB + 2)) - agoBx;
+                        const agoDy = N(G.CLOUD.item(agoB + 3)) - agoBy;
+                        const agoD2 = agoDx * agoDx + agoDy * agoDy;
+                        if (agoD2 < agoBd) {
+                            agoBd = agoD2;
+                            agoBest = agoB;
+                        }
+                    }
+                    if (agoBest >= 0) {
+                        const agoTx = N(G.CLOUD.item(agoBest + 2)) - agoBx;
+                        const agoTy = N(G.CLOUD.item(agoBest + 3)) - agoBy;
+                        if (agoTx !== 0 || agoTy !== 0) {
+                            T.replace(5, Math.atan2(agoTx, agoTy) * 180 / Math.PI);
+                        }
                     }
                 }
             }
