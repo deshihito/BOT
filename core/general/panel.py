@@ -255,6 +255,9 @@ class GeneralActionPageButton(discord.ui.Button):
 
 
 class GeneralPanel(discord.ui.View):
+    # 5大ルートパネル: 失効したら PanelLayoutView がメッセージごと消す。
+    delete_message_on_timeout = True
+
     def __init__(self, cog, genre: str | None = None, shortcut_mode: bool = False, shortcut_item: dict | None = None,
                  history_specs: list | None = None, owner_id: int | None = None):
         super().__init__(timeout=600)  # ルートパネル共通の寿命（導線最適化 S10）

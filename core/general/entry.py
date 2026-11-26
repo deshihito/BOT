@@ -25,7 +25,7 @@ from pathlib import Path
 import discord
 from discord import app_commands
 from discord.ext import commands, tasks
-from core.support.panel_v2 import as_embed_v2, as_panel_v2, edit_panel_v2
+from core.support.panel_v2 import as_embed_v2, as_panel_v2, edit_panel_v2, track_panel_message
 from core.general import shortcut_settings as shortcuts
 from core.support import guild_settings
 from core.general import action_registry, action_usage
@@ -214,7 +214,9 @@ class GeneralCog(
             history_specs = action_usage.history_panel_specs(
                 store, interaction.guild_id, interaction.user.id, "general")
         view = GeneralPanel(self, history_specs=history_specs, owner_id=interaction.user.id)
-        await interaction.followup.send(view=as_panel_v2(view))
+        panel = as_panel_v2(view)
+        message = await interaction.followup.send(view=panel)
+        track_panel_message(panel, message)
 
 
     async def _safe_respond(self, interaction: discord.Interaction, message: str, *, ephemeral: bool = True):

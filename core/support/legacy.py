@@ -15,6 +15,11 @@ def is_interaction(source) -> bool:
     return hasattr(source, "response") and hasattr(source, "followup")
 
 
+# 一時的なステータスログ（VC参加・読み上げ開始/停止など、流れてよい通知）の
+# 自動削除までの秒数。チャンネルに残し続けるとログで埋まるため、短時間だけ出す。
+TRANSIENT_LOG_DELETE_AFTER_SECONDS = 15
+
+
 class Responder:
     """ctx / interaction の違いを吸収する。"""
 
@@ -57,8 +62,14 @@ class Responder:
             await self.source.response.defer(ephemeral=ephemeral)
 
     async def send(self, content: Any = None, *, embed=None, view=None, file=None, ephemeral: bool = False,
-                   want_message: bool = False, skip_localization: bool = False):
-        """返信する。``want_message`` のときは送ったメッセージを返す（あとで編集するため）。"""
+                   want_message: bool = False, skip_localization: bool = False,
+                   delete_after: Optional[float] = None):
+        """返信する。``want_message`` のときは送ったメッセージを返す（あとで編集するため）。
+
+        ``delete_after`` を渡すと、送信したメッセージがその秒数後に自動で
+        消える（discord.py の delete_after をそのまま各送信経路へ渡す）。
+        一時的なステータスログ用（TRANSIENT_LOG_DELETE_AFTER_SECONDS）。
+        """
         kwargs: dict[str, Any] = {}
         if content is not None:
             kwargs["content"] = content
@@ -68,6 +79,8 @@ class Responder:
             kwargs["view"] = view
         if file is not None:
             kwargs["file"] = file
+        if delete_after is not None:
+            kwargs["delete_after"] = delete_after
         if skip_localization:
             kwargs["_agobot_skip_localization"] = True
         if not self.is_interaction:

@@ -29,7 +29,7 @@ import discord.opus
 from core.vc import voice_restore
 from core.vc.voice_session import SHARED_FEATURES, VoiceBusy, get_manager
 from core.vc.voice_media import add_audio_source, has_audio_source, remove_audio_source
-from core.support.legacy import Responder
+from core.support.legacy import TRANSIENT_LOG_DELETE_AFTER_SECONDS, Responder
 from core.support.emojis import CLOCK, FAILED, MUSIC, SUCCESS, VOL
 from core.vc.music.music_activity import build_music_activity_snapshot
 
@@ -55,7 +55,8 @@ class ConnectionMixin:
                 self._acquire_music(r.guild, channel, r.user, r.channel),
                 timeout=TIMEOUT_SECONDS,
             )
-            await r.send(view=as_embed_v2(we(f"{VOL} **{channel.name}** に参加しました。")))
+            await r.send(view=as_embed_v2(we(f"{VOL} **{channel.name}** に参加しました。")),
+                         delete_after=TRANSIENT_LOG_DELETE_AFTER_SECONDS)
         except VoiceBusy as busy:
             await r.send(view=as_embed_v2(we(str(busy))), ephemeral=True)
         except asyncio.TimeoutError:
@@ -81,12 +82,14 @@ class ConnectionMixin:
             await self.voice_sessions.release(
                 guild_id, reason='stop' if session.feature == 'music' else 'leave', by=r.user,
             )
-            await r.send(view=as_embed_v2(we("👋 退出しました。")))
+            await r.send(view=as_embed_v2(we("👋 退出しました。")),
+                         delete_after=TRANSIENT_LOG_DELETE_AFTER_SECONDS)
         elif voice_client:
             # 持ち主の記録がない古い接続
             self._reset_playback(guild_id)
             await voice_client.disconnect(force=True)
-            await r.send(view=as_embed_v2(we("👋 退出しました。")))
+            await r.send(view=as_embed_v2(we("👋 退出しました。")),
+                         delete_after=TRANSIENT_LOG_DELETE_AFTER_SECONDS)
         else:
             await r.send(view=as_embed_v2(we("ボットはボイスチャンネルに参加していません。")), ephemeral=True)
 

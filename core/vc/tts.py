@@ -19,7 +19,7 @@ from core.support.emojis import FAILED
 from core.general import action_usage
 from core.general.ai import sarashina as sarashina_ai
 from core.support.usage_stats import usage_stats
-from core.support.legacy import Responder
+from core.support.legacy import TRANSIENT_LOG_DELETE_AFTER_SECONDS, Responder
 from core.vc.voice_session import VoiceBusy, feature_label, get_manager, stop_hint
 from core.vc.voice_media import add_audio_source, remove_audio_source
 from core.support.panel_v2 import as_panel_v2, edit_panel_v2, as_embed_v2
@@ -510,7 +510,7 @@ class TTSCog(commands.Cog):
             f"<#{target.id}>の発言を読み上げます（VC にいる人だけ）。\n"
             f"{voice_line}",
             title="🗣️ 読み上げを開始しました",
-        )))
+        )), delete_after=TRANSIENT_LOG_DELETE_AFTER_SECONDS)
 
     async def _stop_impl(self, r: Responder):
         guild_id = r.guild.id
@@ -529,7 +529,8 @@ class TTSCog(commands.Cog):
             remove_audio_source(vc, "tts")
         await self.voice_sessions.release(guild_id, "tts", reason="stop")
         if was_active:
-            await r.send(view=as_embed_v2(we("🔇 読み上げを停止しました。VC には残っています（退出は `/vc` →「VC接続」の退出）。")))
+            await r.send(view=as_embed_v2(we("🔇 読み上げを停止しました。VC には残っています（退出は `/vc` →「VC接続」の退出）。")),
+                         delete_after=TRANSIENT_LOG_DELETE_AFTER_SECONDS)
         else:
             await r.send("読み上げは開始されていません。", ephemeral=True)
 
@@ -543,7 +544,8 @@ class TTSCog(commands.Cog):
         if not await self.enqueue(r.guild, text, r.user.id):
             return await r.send("読み上げ待ちがいっぱいです。少し待ってからもう一度どうぞ。", ephemeral=True)
         cfg = self.get_settings(r.user.id)
-        await r.send(view=as_embed_v2(we(f"🗣️ 読み上げます（{await self._voice_display(cfg)}）")))
+        await r.send(view=as_embed_v2(we(f"🗣️ 読み上げます（{await self._voice_display(cfg)}）")),
+                     delete_after=TRANSIENT_LOG_DELETE_AFTER_SECONDS)
 
     async def _resolve_speaker(self, value: str) -> int:
         value = value.strip()

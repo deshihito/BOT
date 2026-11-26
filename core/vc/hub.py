@@ -20,7 +20,7 @@ from core.support.usage_stats import usage_stats
 from core.support.legacy import Responder
 from core.vc.voice_session import VoiceBusy, feature_label, get_manager, stop_hint
 from core.vc.voice_media import add_audio_source, remove_audio_source
-from core.support.panel_v2 import as_panel_v2, edit_panel_v2, as_embed_v2
+from core.support.panel_v2 import as_panel_v2, edit_panel_v2, as_embed_v2, track_panel_message
 
 from core.vc.common import *  # noqa: F401,F403 - shared constants
 from core.vc.common import COGS, GVC_ROOM_ACTIONS, GVC_ROOM_FORMS, LAZY_EXTENSIONS, VC_GENRE_ALIASES, VOICE_ACTIONS_BY_GENRE, VOICE_GENRES, format_elapsed, vc_genre_for_action  # noqa: F401
@@ -284,9 +284,11 @@ class VoiceHub(commands.Cog):
                               history_specs=history_specs)
         panel = as_panel_v2(view)
         if deferred:
-            await interaction.followup.send(view=panel)
+            message = await interaction.followup.send(view=panel)
+            track_panel_message(panel, message)
         elif interaction.channel is not None:
-            await interaction.channel.send(view=panel)
+            message = await interaction.channel.send(view=panel)
+            track_panel_message(panel, message)
 
     async def _trigger_denied_reason(self, interaction: discord.Interaction) -> str | None:
         """音声トリガーを操作できないときは理由を返す（support.py の権限設定と共通）。"""
@@ -460,6 +462,9 @@ class VoiceHistorySelect(discord.ui.Select):
 
 
 class VoicePanelView(discord.ui.View):
+    # 5大ルートパネル: 失効したら PanelLayoutView がメッセージごと消す。
+    delete_message_on_timeout = True
+
     def __init__(self, hub: VoiceHub, genre: str | None = None, shortcut_mode: bool = False,
                  shortcut_item: dict | None = None, owner_id: int | None = None,
                  history_specs: list | None = None):

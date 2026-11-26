@@ -138,7 +138,37 @@ class PanelLayoutView(discord.ui.LayoutView):
     def __init__(self, panel: discord.ui.View):
         super().__init__(timeout=panel.timeout)
         self.panel = panel
+        # 5大ルートパネル（/general /game /support /vc /help）だけが立てる
+        # フラグ。失効（タイムアウト）時に死んだパネルを残さず消す対象か。
+        self._delete_message_on_timeout = bool(
+            getattr(panel, "delete_message_on_timeout", False))
+        self._tracked_message = None
         self._sync()
+
+    def track_message(self, message) -> None:
+        """このパネルが載っているメッセージを覚える（失効時削除のため）。
+
+        送信直後（各ルートの入口）と、部品操作の interaction_check /
+        edit_panel_v2 経由で随時更新される。
+        """
+        if message is not None:
+            self._tracked_message = message
+
+    async def on_timeout(self) -> None:
+        """失効したルートパネルは、押せない部品を残さずメッセージごと消す。
+
+        フラグのないパネル（ゲーム進行用など）は従来どおり何もしない。
+        メッセージを特定できていない場合も安全側で何もしない。
+        """
+        if not getattr(self, "_delete_message_on_timeout", False):
+            return
+        message = getattr(self, "_tracked_message", None)
+        if message is None:
+            return
+        try:
+            await message.delete()
+        except discord.HTTPException:
+            logger.debug("panel_v2: 失効したルートパネルの削除に失敗しました", exc_info=True)
 
     # ------------------------------------------------------------------
     # 属性プロキシ
@@ -189,6 +219,10 @@ class PanelLayoutView(discord.ui.LayoutView):
         self.add_item(container)  # このときitem.viewがこのラッパーになる
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        # 失効時削除のため、このパネルが載っているメッセージを覚える。
+        message = getattr(interaction, "message", None)
+        if message is not None:
+            self._tracked_message = message
         # 元パネルに実行者制限などがあればそれを引き継ぐ
         return await self.panel.interaction_check(interaction)
 
@@ -300,6 +334,12 @@ async def edit_panel_v2(interaction: discord.Interaction, view: discord.ui.Layou
     が参照する実ファイルはこの形で送り直す必要がある（§4.2-8）。
     """
     attachments = list(files) if files else []
+    # パネル差し替え時も、載っているメッセージを引き継ぐ（失効時削除のため）。
+    track = getattr(view, "track_message", None)
+    if callable(track):
+        message = getattr(interaction, "message", None)
+        if message is not None:
+            track(message)
     if interaction.response.is_done():
         return await interaction.edit_original_response(
             content=None, embed=None, attachments=attachments, view=view,
@@ -318,6 +358,16 @@ async def edit_message_v2(message: discord.Message, view: discord.ui.LayoutView,
 
 def as_panel_v2(panel: discord.ui.View) -> PanelLayoutView:
     return PanelLayoutView(panel)
+
+
+def track_panel_message(panel, message) -> None:
+    """送信したパネルへ、そのメッセージを覚えさせる（失効時削除用）。
+
+    PanelLayoutView 以外（テストの差し替え等）では何もしない。
+    """
+    track = getattr(panel, "track_message", None)
+    if callable(track) and message is not None:
+        track(message)
 
 
 def wrap_panel_view(view):
