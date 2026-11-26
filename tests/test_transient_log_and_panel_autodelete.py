@@ -14,7 +14,8 @@ from unittest.mock import AsyncMock
 import discord
 
 from core.support.legacy import TRANSIENT_LOG_DELETE_AFTER_SECONDS, Responder
-from core.support.panel_v2 import PanelLayoutView, as_panel_v2, edit_panel_v2
+from core.support.panel_v2 import (
+    PanelLayoutView, as_panel_v2, edit_panel_v2, track_panel_from_interaction)
 from core.vc.tts import TTSCog
 from core.vc.music.connection import ConnectionMixin
 
@@ -160,6 +161,22 @@ class RootPanelTimeoutDeleteTest(unittest.IsolatedAsyncioTestCase):
             edit_original_response=AsyncMock(),
         )
         await edit_panel_v2(interaction, wrapper)
+        self.assertIs(wrapper._tracked_message, message)
+
+    async def test_track_from_interaction_without_original_response_is_noop(self):
+        # CI の /help テストのように original_response を持たない
+        # interaction でも、追跡に失敗して表示が壊れないこと。
+        wrapper = as_panel_v2(_FlaggedPanel())
+        interaction = types.SimpleNamespace()
+        await track_panel_from_interaction(wrapper, interaction)
+        self.assertIsNone(wrapper._tracked_message)
+
+    async def test_track_from_interaction_stores_original_response(self):
+        wrapper = as_panel_v2(_FlaggedPanel())
+        message = _message()
+        interaction = types.SimpleNamespace(
+            original_response=AsyncMock(return_value=message))
+        await track_panel_from_interaction(wrapper, interaction)
         self.assertIs(wrapper._tracked_message, message)
 
     async def test_root_panels_carry_the_flag(self):

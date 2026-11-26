@@ -16,7 +16,7 @@ from core.help.help.command_catalog import (build_catalog, command_key, find_com
                                   visible_commands)
 from core.help.help.command_meta import COMMAND_META
 from core.support.emojis import BACK, BOOK, LEFT, RIGHT
-from core.support.panel_v2 import as_panel_v2, edit_panel_v2, track_panel_message, wrap_panel_view
+from core.support.panel_v2 import as_panel_v2, edit_panel_v2, track_panel_from_interaction, wrap_panel_view
 
 # Discord の上限
 EMBED_TITLE = 256
@@ -519,12 +519,12 @@ class HelpCog(commands.Cog):
                 return
             panel = wrap_panel_view(CommandView(catalog, entry, owner_id=interaction.user.id))
             await interaction.response.send_message(view=panel)
-            track_panel_message(panel, await interaction.original_response())
+            await track_panel_from_interaction(panel, interaction)
             return
         view = HelpView(catalog, owner_id=interaction.user.id)
         panel = as_panel_v2(view)
         await interaction.response.send_message(view=panel)
-        track_panel_message(panel, await interaction.original_response())
+        await track_panel_from_interaction(panel, interaction)
 
     @help.autocomplete("command")
     async def help_command_autocomplete(self, interaction: discord.Interaction, current: str):

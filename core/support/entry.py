@@ -16,7 +16,7 @@ from discord.ext import commands
 from core.support import guild_settings
 from core.general import action_usage
 from core.support.usage_stats import usage_stats
-from core.support.panel_v2 import as_embed_v2, as_panel_v2, edit_panel_v2, track_panel_message
+from core.support.panel_v2 import as_embed_v2, as_panel_v2, edit_panel_v2, track_panel_from_interaction
 from core.support.common import *
 from core.support.auth_panel import *
 from core.support.roles import *
@@ -366,7 +366,7 @@ class SupportCog(
         # SupportPanelView.interaction_check で呼び出し本人に制限する。
         panel = as_panel_v2(view)
         await interaction.response.send_message(view=panel)
-        track_panel_message(panel, await interaction.original_response())
+        await track_panel_from_interaction(panel, interaction)
 
 
     async def show_bumprta_service(self, interaction: discord.Interaction, selected: str):

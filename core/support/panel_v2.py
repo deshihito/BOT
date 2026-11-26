@@ -370,6 +370,25 @@ def track_panel_message(panel, message) -> None:
         track(message)
 
 
+async def track_panel_from_interaction(panel, interaction) -> None:
+    """response.send_message で出したパネルのメッセージを original_response から覚える。
+
+    追跡は失効時削除のための補助なので、取得できない環境（モック等）や
+    失敗時は静かに諦める（パネル表示自体を壊さない）。
+    """
+    if not callable(getattr(panel, "track_message", None)):
+        return
+    original = getattr(interaction, "original_response", None)
+    if not callable(original):
+        return
+    try:
+        message = await original()
+    except Exception:
+        logger.debug("panel_v2: original_response の取得に失敗しました", exc_info=True)
+        return
+    track_panel_message(panel, message)
+
+
 def wrap_panel_view(view):
     """View を PanelLayoutView で包み、再描画用に view._v2 へ保持する。"""
     view._v2 = as_panel_v2(view)
