@@ -124,14 +124,37 @@ class FakeVoiceChannel:
         self.members = [FakeMember(7)]
 
 
+def _view_text(view):
+    """Components V2 ビューから TextDisplay のテキストを集める（テスト用）。"""
+    out = []
+
+    def walk(item):
+        content = getattr(item, "content", None)
+        if isinstance(content, str):
+            out.append(content)
+        for child in getattr(item, "children", None) or []:
+            walk(child)
+
+    for top in getattr(view, "children", []):
+        walk(top)
+    return "\n".join(out)
+
+
 class FakeTextChannel:
     def __init__(self, guild, channel_id=500):
         self.id = channel_id
         self.guild = guild
         self.sent = []
+        self.plain_contents = []
 
     async def send(self, content=None, **kwargs):
-        self.sent.append(content if content is not None else kwargs)
+        if content is not None:
+            self.plain_contents.append(content)
+            self.sent.append(content)
+        elif kwargs.get("view") is not None:
+            self.sent.append(_view_text(kwargs["view"]))
+        else:
+            self.sent.append(kwargs)
         return types.SimpleNamespace(id=12345)
 
     def text(self):
@@ -264,6 +287,8 @@ class RunnerTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.tts.calls, 1)
         self.assertEqual(self.transcribe.calls, 1)
         self.assertIn("自動開始: 読み上げ、文字起こし", self.guild.text_channel.text())
+        # まとめ通知は平文ではなく Components V2（embed）で送ること
+        self.assertEqual(self.guild.text_channel.plain_contents, [])
 
     async def test_failure_is_isolated(self):
         self.tts.fail = True

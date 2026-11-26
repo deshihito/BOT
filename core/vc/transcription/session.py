@@ -80,9 +80,9 @@ class SessionMixin:
                 logger.warning("Sarashina transcription API returned HTTP %s", ex.status)
                 if ex.status == 403 and not premium_notice_sent:
                     premium_notice_sent = True
-                    await notice_channel.send(
+                    await notice_channel.send(view=as_embed_v2(we(
                         "Sarashinaの文字起こしモデルが利用できません。APIキーの利用権限と、Sarashina側のキー設定を確認してください。"
-                    )
+                    )))
                 return
             except RuntimeError as ex:
                 if "文字起こし結果がありません" in str(ex):

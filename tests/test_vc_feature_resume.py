@@ -232,9 +232,27 @@ class RecordResumeTest(StoreTestCase, unittest.IsolatedAsyncioTestCase):
         manager_session = cog.voice_sessions.get(10)
         self.assertIsNotNone(manager_session)
         self.assertEqual(manager_session.feature, "record")
-        # 再開通知（録音告知を兼ねる）が送られている
-        self.assertTrue(any("録音を再開しました" in (content or "")
-                            for content, _kw in text.sent))
+        # 再開通知（録音告知を兼ねる）が送られている（平文ではなく V2 ビューで）
+        def _sent_text(content, kw):
+            if content:
+                return content
+            view = kw.get("view")
+            out = []
+
+            def walk(item):
+                c = getattr(item, "content", None)
+                if isinstance(c, str):
+                    out.append(c)
+                for child in getattr(item, "children", None) or []:
+                    walk(child)
+
+            for top in getattr(view, "children", []) or []:
+                walk(top)
+            return "\n".join(out)
+
+        self.assertTrue(any("録音を再開しました" in _sent_text(content, kw)
+                            for content, kw in text.sent))
+        self.assertFalse(any(content for content, _kw in text.sent))
         # エントリは継続保存される
         self.assertIn(10, vc_feature_restore.feature_entries("record"))
         # 後片付け: 停止するとエントリが消える

@@ -142,9 +142,11 @@ class SessionMixin:
         mention = getattr(user, "mention", None) or getattr(user, "display_name", "だれか")
         try:
             await r.channel.send(
-                f"🔴 **録音を開始しました**（開始: {mention}）\n"
-                f"ボイスチャンネル **{voice_channel.name}** の音声が録音されます（最長 {RECORD_LIMIT_SECONDS // 60} 分）。"
-                "録音されたくない人は退出してください。",
+                view=as_embed_v2(we(
+                    f"🔴 **録音を開始しました**（開始: {mention}）\n"
+                    f"ボイスチャンネル **{voice_channel.name}** の音声が録音されます（最長 {RECORD_LIMIT_SECONDS // 60} 分）。"
+                    "録音されたくない人は退出してください。"
+                )),
                 allowed_mentions=discord.AllowedMentions.none(),
             )
         except Exception:

@@ -26,6 +26,7 @@ from core.support.emojis import CLOCK, FAILED, MUSIC, PAUSE
 from core.vc.rec.common import *  # noqa: F401,F403 - shared constants/helpers
 from core.vc.rec.common import RECORD_LIMIT_SECONDS  # noqa: F401
 from core.vc.rec.sink import RecordingSink  # noqa: F401
+from core.support.panel_v2 import as_embed_v2
 
 logger = logging.getLogger("cogs.sio_rec")
 
@@ -118,10 +119,12 @@ class RestoreMixin:
         # 録音中であることの告知を兼ねた再開通知（開始時の _announce_recording と同じ流儀）
         try:
             await text_channel.send(
-                "🔴 **録音を再開しました**（Bot の再起動による自動再開）\n"
-                f"ボイスチャンネル **{getattr(channel, 'name', '')}** の音声が録音されます（最長 {RECORD_LIMIT_SECONDS // 60} 分）。"
-                "録音されたくない人は退出してください。\n"
-                "※ 再起動前に録音していた音声は失われています。新規の録音として開始します。",
+                view=as_embed_v2(we(
+                    "🔴 **録音を再開しました**（Bot の再起動による自動再開）\n"
+                    f"ボイスチャンネル **{getattr(channel, 'name', '')}** の音声が録音されます（最長 {RECORD_LIMIT_SECONDS // 60} 分）。"
+                    "録音されたくない人は退出してください。\n"
+                    "※ 再起動前に録音していた音声は失われています。新規の録音として開始します。"
+                )),
                 allowed_mentions=discord.AllowedMentions.none(),
             )
         except Exception:
