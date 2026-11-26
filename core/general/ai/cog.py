@@ -358,6 +358,8 @@ class AICog(commands.Cog):
             return await _reply_without_localization(ctx, "AIへの問い合わせに失敗しました。しばらくしてから再試行してください。", mention_author=False)
         except ai_deepai_code.DeepAICodeModelNotAllowedError as exc:
             return await _reply_without_localization(ctx, str(exc), mention_author=False)
+        except ai_provider_router.ModelNotAllowedError as exc:
+            return await _reply_without_localization(ctx, str(exc), mention_author=False)
         except ai_deepai_code.DeepAICodeAuthError:
             logger.warning("!ai: DeepAI Code auth error", exc_info=True)
             return await _reply_without_localization(ctx,
@@ -555,7 +557,7 @@ class AICog(commands.Cog):
             return str(exc)
         except ai_deepai_code.DeepAICodeAuthError:
             return "DeepAI Codeの認証に失敗しました。Pi の `.env` の `DEEPAI_API_KEY` を確認してください。"
-        except ai_deepai_code.DeepAICodeError as exc:
+        except (ai_deepai_code.DeepAICodeError, ai_provider_router.ModelNotAllowedError) as exc:
             return str(exc)
         except Exception:
             logger.exception("panel ai chat failed: user=%s model=%s", user_id, preferred)
