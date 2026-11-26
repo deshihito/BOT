@@ -27,7 +27,7 @@ from core.game.hub.game_guides import (
     is_preview_game,
 )
 from core.support.auto_defer import defer_if_not_done
-from core.support.panel_v2 import as_panel_v2, edit_panel_v2
+from core.support.panel_v2 import as_panel_v2, edit_panel_v2, track_panel_message
 from core.support.public_share import PublicShareView
 from core.general.user_names import resolve_display_names
 from core.leaderboard_image import (
@@ -400,6 +400,9 @@ class GameHistorySelect(discord.ui.Select):
 
 
 class GameHubView(discord.ui.View):
+    # 5大ルートパネル: 失効したら PanelLayoutView がメッセージごと消す。
+    delete_message_on_timeout = True
+
     def __init__(self, cog, shortcut_mode: bool = False, shortcut_item: dict | None = None,
                  owner_id: int | None = None, history_specs: list | None = None,
                  page: int = 0):
@@ -633,6 +636,9 @@ class JankenWagerSelect(discord.ui.Select):
 
 
 class GameDetailView(discord.ui.View):
+    # /game ハブの遷移先: ハブと同じく失効したらメッセージごと消す。
+    delete_message_on_timeout = True
+
     def __init__(self, cog, game_id: str, shortcut_mode: bool = False, shortcut_item: dict | None = None,
                  owner_id: int | None = None):
         super().__init__(timeout=600)
@@ -790,7 +796,9 @@ class GameHub(commands.Cog):
                 store, interaction.guild_id, interaction.user.id, "game")
         view = GameHubView(self, owner_id=interaction.user.id,
                            history_specs=history_specs)
-        await interaction.followup.send(view=as_panel_v2(view))
+        panel = as_panel_v2(view)
+        message = await interaction.followup.send(view=panel)
+        track_panel_message(panel, message)
 
     async def start_game(self, interaction: discord.Interaction, game_id: str, **options):
         # BOT fixer のコマンド制限（管理者は対象外）。

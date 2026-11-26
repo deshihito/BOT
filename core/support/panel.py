@@ -348,6 +348,9 @@ class TempVoicePanelGuideView(discord.ui.View):
 
 
 class SupportPanelView(discord.ui.View):
+    # 5大ルートパネル: 失効したら PanelLayoutView がメッセージごと消す。
+    delete_message_on_timeout = True
+
     def __init__(
         self,
         cog: "SupportCog",

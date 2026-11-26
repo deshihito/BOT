@@ -16,7 +16,7 @@ from core.help.help.command_catalog import (build_catalog, command_key, find_com
                                   visible_commands)
 from core.help.help.command_meta import COMMAND_META
 from core.support.emojis import BACK, BOOK, LEFT, RIGHT
-from core.support.panel_v2 import as_panel_v2, edit_panel_v2, wrap_panel_view
+from core.support.panel_v2 import as_panel_v2, edit_panel_v2, track_panel_from_interaction, wrap_panel_view
 
 # Discord の上限
 EMBED_TITLE = 256
@@ -296,6 +296,9 @@ class GuideSelect(discord.ui.Select):
 class HelpView(discord.ui.View):
     """カテゴリ選択・ページ送り・ガイド選択をまとめた画面。操作のたびに作り直す。"""
 
+    # 5大ルートパネル: 失効したら PanelLayoutView がメッセージごと消す。
+    delete_message_on_timeout = True
+
     def __init__(self, catalog: dict, category_id: str | None = None, page: int = 0,
                  shortcut_mode: bool = False, shortcut_item: dict | None = None,
                  owner_id: int | None = None):
@@ -370,6 +373,9 @@ class HelpView(discord.ui.View):
 class BackView(discord.ui.View):
     """ガイドを読んでいる画面から、カテゴリの一覧へ戻るボタン。"""
 
+    # /help の遷移先: 本体と同じく失効したらメッセージごと消す。
+    delete_message_on_timeout = True
+
     def __init__(self, catalog: dict, category_id: str | None, page: int = 0, content=None,
                  owner_id: int | None = None):
         super().__init__(timeout=VIEW_TIMEOUT)
@@ -393,6 +399,9 @@ class BackView(discord.ui.View):
 
 class CommandView(discord.ui.View):
     """1 つのコマンドの説明画面。ガイドがあれば「ガイドを読む」ボタンを出す。"""
+
+    # /help の遷移先: 本体と同じく失効したらメッセージごと消す。
+    delete_message_on_timeout = True
 
     def __init__(self, catalog: dict, entry: dict, owner_id: int | None = None):
         super().__init__(timeout=VIEW_TIMEOUT)
@@ -508,11 +517,14 @@ class HelpCog(commands.Cog):
                     f"「{clip(command, 50)}」というコマンドは見つかりませんでした。`/help` で一覧を確認してください。",
                     ephemeral=True)
                 return
-            await interaction.response.send_message(
-                view=wrap_panel_view(CommandView(catalog, entry, owner_id=interaction.user.id)))
+            panel = wrap_panel_view(CommandView(catalog, entry, owner_id=interaction.user.id))
+            await interaction.response.send_message(view=panel)
+            await track_panel_from_interaction(panel, interaction)
             return
         view = HelpView(catalog, owner_id=interaction.user.id)
-        await interaction.response.send_message(view=as_panel_v2(view))
+        panel = as_panel_v2(view)
+        await interaction.response.send_message(view=panel)
+        await track_panel_from_interaction(panel, interaction)
 
     @help.autocomplete("command")
     async def help_command_autocomplete(self, interaction: discord.Interaction, current: str):
