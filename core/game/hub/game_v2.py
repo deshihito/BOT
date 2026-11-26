@@ -112,6 +112,25 @@ class GamePanelView(discord.ui.LayoutView):
         self._cooldown = InteractionCooldown()
         self._rebuild()
 
+    async def on_error(self, interaction: discord.Interaction, error: Exception, item=None) -> None:
+        """PanelLayoutView と同じエラー可視化（自動 defer 導入とセット）。
+
+        自動 defer 済みの interaction へ素の response.* で送ろうとした
+        InteractionResponded は誤報なので握り、それ以外の例外は
+        応答済みなら followup、未応答なら response で必ず知らせる。
+        """
+        if isinstance(error, discord.InteractionResponded):
+            logger.debug("ゲームパネル: 応答済みのためエラーを握ります (%s)", error)
+            return
+        logger.exception("ゲームパネルでエラーが発生しました: %s", error)
+        try:
+            if interaction.response.is_done():
+                await interaction.followup.send(f"⚠️ 内部エラー: {error}", ephemeral=True)
+            else:
+                await interaction.response.send_message(f"⚠️ 内部エラー: {error}", ephemeral=True)
+        except discord.HTTPException:
+            logger.debug("ゲームパネル: エラー通知の送信に失敗しました", exc_info=True)
+
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         user = getattr(interaction, "user", None)
         user_id = getattr(user, "id", None)

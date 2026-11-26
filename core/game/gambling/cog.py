@@ -51,6 +51,7 @@ from core.support.messages import (
     REFUND_FAILED_CONTACT,
     gambling_action_failed,
 )
+from core.support.auto_defer import defer_if_not_done
 from core.support.panel_v2 import as_panel_v2, edit_message_v2, edit_panel_v2, wrap_panel_view as _wrap
 from cogs import general as wallet_module  # INSUFFICIENT は実行時に引く（テストの cog 再読込で同一性が崩れないため）
 
@@ -1203,40 +1204,38 @@ class GamblingCog(commands.Cog):
         return True
 
     # ------------------------------------------------------------------ 入口
-    async def show_slot(self, interaction: discord.Interaction):
-        view = SlotView(self, interaction.user.id)
+    async def _show_game_panel(self, interaction: discord.Interaction, view, *,
+                               with_files: bool = False):
+        # 残高取得（API 往復）や添付準備を応答前に走らせると初回応答の
+        # 制限を超えうるため、先に thinking defer で ACK し、パネルは
+        # followup で出す。view.message は followup の送信結果を束ねる
+        # （defer 後の original_response は元のパネルを指すため使えない）。
+        await defer_if_not_done(interaction, thinking=True)
         view._last_balance = await _fetch_balance(self, interaction.user.id)
-        await interaction.response.send_message(view=_wrap(view))
-        view.message = await interaction.original_response()
+        files = None
+        if with_files:
+            await view._prepare_files()
+            files = view.panel_files()
+        if files:
+            view.message = await interaction.followup.send(view=_wrap(view), files=files)
+        else:
+            view.message = await interaction.followup.send(view=_wrap(view))
+
+    async def show_slot(self, interaction: discord.Interaction):
+        await self._show_game_panel(interaction, SlotView(self, interaction.user.id))
 
     async def show_double(self, interaction: discord.Interaction):
-        view = DoubleView(self, interaction.user.id)
-        view._last_balance = await _fetch_balance(self, interaction.user.id)
-        await interaction.response.send_message(view=_wrap(view))
-        view.message = await interaction.original_response()
+        await self._show_game_panel(interaction, DoubleView(self, interaction.user.id))
 
     async def show_blackjack(self, interaction: discord.Interaction):
-        view = BlackjackView(self, interaction.user.id)
-        view._last_balance = await _fetch_balance(self, interaction.user.id)
-        await view._prepare_files()
-        files = view.panel_files()
-        if files:
-            await interaction.response.send_message(view=_wrap(view), files=files)
-        else:
-            await interaction.response.send_message(view=_wrap(view))
-        view.message = await interaction.original_response()
+        await self._show_game_panel(
+            interaction, BlackjackView(self, interaction.user.id), with_files=True)
 
     async def show_dice(self, interaction: discord.Interaction):
-        view = DiceView(self, interaction.user.id)
-        view._last_balance = await _fetch_balance(self, interaction.user.id)
-        await interaction.response.send_message(view=_wrap(view))
-        view.message = await interaction.original_response()
+        await self._show_game_panel(interaction, DiceView(self, interaction.user.id))
 
     async def show_duel(self, interaction: discord.Interaction):
-        view = DuelView(self, interaction.user.id)
-        view._last_balance = await _fetch_balance(self, interaction.user.id)
-        await interaction.response.send_message(view=_wrap(view))
-        view.message = await interaction.original_response()
+        await self._show_game_panel(interaction, DuelView(self, interaction.user.id))
 
     # ------------------------------------------------------------------ スロットの実行
     async def execute_slot_start(self, user_id: int, spins: int) -> str:

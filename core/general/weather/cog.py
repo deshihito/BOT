@@ -25,6 +25,7 @@ from discord.ext import commands, tasks
 
 import config
 from core.support import guild_settings
+from core.support.auto_defer import defer_if_not_done
 from core.support.panel_v2 import as_panel_v2, edit_panel_v2
 
 from . import areas as areas_mod
@@ -285,6 +286,8 @@ class WeatherView(discord.ui.View):
 
     async def change_area(self, interaction: discord.Interaction,
                           area_code: str) -> None:
+        # prepare() は外部 HTTP + 画像生成のため、先に defer で ACK する。
+        await defer_if_not_done(interaction)
         self.area_code = area_code
         self.block_code = areas_mod.OFFICE_BLOCK.get(area_code)
         self.notice = None
@@ -425,6 +428,7 @@ class WeatherScheduleView(discord.ui.View):
             self.notice = "投稿先チャンネルを選んでください。"
             self._sync_controls()
             return await self._edit(interaction)
+        await defer_if_not_done(interaction)
         store = guild_settings.get_store()
         await store.update(
             self.guild_id, guild_settings.WEATHER_SECTION,
@@ -436,6 +440,7 @@ class WeatherScheduleView(discord.ui.View):
         await self._edit(interaction)
 
     async def _on_off(self, interaction: discord.Interaction) -> None:
+        await defer_if_not_done(interaction)
         store = guild_settings.get_store()
         await store.update(self.guild_id, guild_settings.WEATHER_SECTION,
                            post_enabled=False)
@@ -445,6 +450,7 @@ class WeatherScheduleView(discord.ui.View):
         await self._edit(interaction)
 
     async def _on_back(self, interaction: discord.Interaction) -> None:
+        await defer_if_not_done(interaction)
         await self.parent.prepare()
         file = self.parent.panel_file()
         await edit_panel_v2(interaction, as_panel_v2(self.parent),

@@ -26,6 +26,7 @@ from core.game.hub.game_guides import (
     guide_for_discord,
     is_preview_game,
 )
+from core.support.auto_defer import defer_if_not_done
 from core.support.panel_v2 import as_panel_v2, edit_panel_v2
 from core.support.public_share import PublicShareView
 from core.general.user_names import resolve_display_names
@@ -711,13 +712,17 @@ class GameDetailView(discord.ui.View):
 
     @discord.ui.button(label="ランキング", style=discord.ButtonStyle.primary, row=3, custom_id="panel:game:ranking")
     async def ranking(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # ranking_board はランキング取得+表示名解決+アバター取得+PNG生成
+        # まで含む最重量級の読み込みのため、先に thinking defer で ACK
+        # して結果は followup で出す。
+        await defer_if_not_done(interaction, thinking=True)
         embed, png = await ranking_board(interaction.guild_id, self.game_id, bot=getattr(self.cog, "bot", None))
         if png is not None:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 embed=embed,
                 file=discord.File(io.BytesIO(png), filename=RANKING_BOARD_FILENAME))
         else:
-            await interaction.response.send_message(embed=embed)
+            await interaction.followup.send(embed=embed)
 
     @discord.ui.button(label="レート", style=discord.ButtonStyle.primary, row=4, custom_id="panel:game:rating")
     async def rating(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -726,6 +731,9 @@ class GameDetailView(discord.ui.View):
             return await interaction.response.send_message(
                 embed=discord.Embed(description="人狼 は現在利用できません。", color=HUB_COLOR), ephemeral=True)
         # ephemeral第2波方針: 既定で公開する（第1波の選択式から反転）。
+        # レート表の生成（集計+画像）は重いため、先に thinking defer
+        # で ACK して結果は followup で出す（ランキングと同じ形）。
+        await defer_if_not_done(interaction, thinking=True)
         board_fn = getattr(cog, "rating_board", None)
         if board_fn is not None:
             embed, png = await board_fn(interaction.user)
@@ -737,13 +745,13 @@ class GameDetailView(discord.ui.View):
             view = PublicShareView(interaction.user.id, embed,
                                    file_factory=file_factory)
             if file_factory is not None:
-                await interaction.response.send_message(
+                await interaction.followup.send(
                     embed=embed, view=view, file=file_factory())
             else:
-                await interaction.response.send_message(embed=embed, view=view)
+                await interaction.followup.send(embed=embed, view=view)
             return
         embed = await cog.rating_embed(interaction.user)
-        await interaction.response.send_message(
+        await interaction.followup.send(
             embed=embed, view=PublicShareView(interaction.user.id, embed))
 
     @discord.ui.button(label="ゲームを終了", style=discord.ButtonStyle.danger, row=4, custom_id="panel:game:end")

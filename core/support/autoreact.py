@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from .common import *
+from core.support.auto_defer import defer_if_not_done, send_or_followup
 from core.support.messages import MANAGE_GUILD_REQUIRED, SETTINGS_UPDATE_FAILED
 from .binjou import normalize_binjou_emoji
 
@@ -89,10 +90,13 @@ class AutoReactSettingsView(discord.ui.View):
             rows[str(self.channel_id)] = list(dict.fromkeys(emojis))
         else:
             rows.pop(str(self.channel_id), None)
+        # store.update（遠隔の読み直し+書込み）の前に defer で ACK し、
+        # 結果は followup で届ける（モーダル送信の応答期限対策）。
+        await defer_if_not_done(interaction, ephemeral=True, thinking=True)
         try:
             await guild_settings.get_store().update(interaction.guild_id, AUTO_REACT_SECTION, channels=rows)
             self.settings["channels"] = rows
-            await interaction.response.send_message("Auto react設定を更新しました。", ephemeral=True)
+            await interaction.followup.send("Auto react設定を更新しました。", ephemeral=True)
         except Exception:
             logger.exception("Auto react設定の保存に失敗しました")
-            await interaction.response.send_message(SETTINGS_UPDATE_FAILED, ephemeral=True)
+            await send_or_followup(interaction, SETTINGS_UPDATE_FAILED, ephemeral=True)

@@ -31,6 +31,7 @@ from discord.ext import commands, tasks
 
 import config
 from core.support import guild_settings
+from core.support.auto_defer import defer_if_not_done
 from core.support.panel_v2 import as_panel_v2, edit_panel_v2
 
 from . import feeds as feeds_mod
@@ -394,6 +395,7 @@ class NewsSettingsView(discord.ui.View):
             self.notice = "投稿先チャンネルを選んでください。"
             self._sync_controls()
             return await self._edit(interaction)
+        await defer_if_not_done(interaction)
         store = guild_settings.get_store()
         await store.update(self.guild_id, guild_settings.NEWS_SECTION,
                            enabled=True, channel_id=self.channel_id,
@@ -405,6 +407,7 @@ class NewsSettingsView(discord.ui.View):
         await self._edit(interaction)
 
     async def _on_off(self, interaction: discord.Interaction) -> None:
+        await defer_if_not_done(interaction)
         store = guild_settings.get_store()
         await store.update(self.guild_id, guild_settings.NEWS_SECTION,
                            enabled=False)

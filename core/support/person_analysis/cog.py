@@ -23,6 +23,7 @@ from core.general.user_names import resolve_display_names
 from core.leaderboard_image import fetch_avatar_bytes
 from core.support import guild_settings
 from core.support.messages import MANAGE_GUILD_REQUIRED, SETTINGS_UPDATE_FAILED
+from core.support.auto_defer import defer_if_not_done, send_or_followup
 from core.support.panel_v2 import as_panel_v2, edit_panel_v2
 from core.support.person_analysis import metrics, render
 from core.support.person_analysis import store as pa_store
@@ -332,17 +333,17 @@ class PersonAnalysisView(discord.ui.View):
             return await interaction.response.send_message(
                 MANAGE_GUILD_REQUIRED, ephemeral=True)
         new_value = not self.enabled
+        # store.update（遠隔の読み直し+書込み）の前に defer で ACK する。
+        await defer_if_not_done(interaction)
         try:
             await guild_settings.get_store().update(
                 self.guild_id, pa_store.PERSON_ANALYSIS_SECTION,
                 enabled=new_value)
         except Exception:
             logger.exception("人物分析の収集トグル更新に失敗しました")
-            return await interaction.response.send_message(
-                SETTINGS_UPDATE_FAILED, ephemeral=True)
+            return await send_or_followup(
+                interaction, SETTINGS_UPDATE_FAILED, ephemeral=True)
         self.enabled = new_value
-        if not interaction.response.is_done():
-            await interaction.response.defer()
         await self._edit(interaction)
 
     async def _on_close(self, interaction: discord.Interaction):

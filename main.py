@@ -59,6 +59,11 @@ class MyBot(commands.Bot):
         # typing intent 無効化）は core/member_access.py に集約する。
         from core.member_access import bot_client_kwargs
         super().__init__(command_prefix=config.PREFIX, **bot_client_kwargs())
+        # パネル操作の自動 ACK: 読み込みが長い callback でも初回応答の
+        # 制限（約3秒）を超えないよう、全 View のディスパッチへ
+        # defer ウォッチドッグを差し込む（core/support/auto_defer.py）。
+        from core.support.auto_defer import install_auto_defer
+        install_auto_defer()
         self.updated_notified = False
         self._restore_started = False
         self._registry_synced = False

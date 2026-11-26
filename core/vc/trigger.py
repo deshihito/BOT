@@ -14,6 +14,7 @@ import aiohttp
 import discord
 from discord import app_commands
 from discord.ext import commands
+from core.support.auto_defer import auto_defer_exempt
 from core.support.emojis import FAILED
 from core.general import action_usage
 from core.support.usage_stats import usage_stats
@@ -311,7 +312,10 @@ class VoiceTriggerPickAudioSelect(discord.ui.Select):
             )
         super().__init__(placeholder="登録する音声を選択", options=options)
 
+    @auto_defer_exempt
     async def callback(self, interaction: discord.Interaction):
+        # この callback は最後に send_modal で終わるため自動 defer と
+        # 両立しない（defer 後はモーダルを開けない）。対象外にする。
         try:
             ch_id, msg_id, att_id = self.values[0].split(":")
             channel = self.cog.bot.get_channel(int(ch_id))

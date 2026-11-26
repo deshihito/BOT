@@ -75,9 +75,16 @@ class RatingShareWiringTest(unittest.IsolatedAsyncioTestCase):
         cog = types.SimpleNamespace(bot=types.SimpleNamespace(get_cog=lambda _name: jinrou_cog))
         view = GameDetailView(cog, "jinrou")
         interaction, sent, _channel_sent = fake_interaction()
+
+        async def followup_send(content=None, **kwargs):
+            sent["content"] = content
+            sent.update(kwargs)
+
+        interaction.followup.send = AsyncMock(side_effect=followup_send)
         button = next(item for item in view.children
                       if getattr(item, "custom_id", None) == "panel:game:rating")
         await button.callback(interaction)
+        # 生成が重いため defer → followup で届くが、公開ポリシーは不変。
         self.assertNotEqual(sent.get("ephemeral"), True)
         self.assertIsInstance(sent.get("view"), PublicShareView)
         self.assertIs(sent.get("embed"), embed)

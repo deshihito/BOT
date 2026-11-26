@@ -7,6 +7,7 @@ import os
 import discord
 from core.game.hub import game_panels
 from core.game.jinrou import jinrou_snapshot
+from core.support.auto_defer import defer_if_not_done
 from core.support.emojis import FAILED, SUCCESS
 from core.game.jinrou import jinrou_guide
 from discord import app_commands
@@ -289,6 +290,9 @@ class LifecycleMixin:
         winner_is_wolf = surrender_winner_is_wolf(game, interaction.user.id)
         is_surrender = winner_is_wolf is not None
 
+        # 勝利/レート記録（DB 往復）の前に thinking defer で ACK する。
+        await defer_if_not_done(interaction, thinking=True)
+
         # 先に終了状態にして、記録処理中の二重実行・再入を防ぐ
         game.is_running = False
         game.in_night_phase = False
@@ -322,7 +326,7 @@ class LifecycleMixin:
             )
         else:
             message = f"<@{interaction.user.id}> さんがゲームを強制終了しました。"
-        await interaction.response.send_message(message)
+        await interaction.followup.send(message)
 
 
     async def start_recruit(self, interaction: discord.Interaction, mode: str = "local"):
