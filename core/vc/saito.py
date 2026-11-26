@@ -321,7 +321,7 @@ class SaitoRelay(commands.Cog):
     async def _notify(peer: Responder, text: str) -> None:
         """待っていた側への連絡はチャンネルに送る（interaction の期限切れを避ける）。"""
         try:
-            await peer.channel.send(text)
+            await peer.channel.send(view=as_embed_v2(we(text)))
         except Exception:
             logging.debug("saito notify failed", exc_info=True)
 

@@ -64,11 +64,13 @@ class FakeTextChannel:
     def __init__(self, guild, channel_id=500):
         self.id, self.guild, self.sent = channel_id, guild, []
         self.mention = f'<#{channel_id}>'
+        self.plain_contents = []
 
     async def send(self, content=None, **kwargs):
         embed = kwargs.get('embed')
         view = kwargs.get('view')
         if content is not None:
+            self.plain_contents.append(content)
             self.sent.append(content)
         elif embed is not None:
             self.sent.append(embed.description)
@@ -340,6 +342,8 @@ class ManagerTest(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(vc.is_connected())
         self.assertIsNone(self.manager.get(w.guild.id))
         self.assertIn('誰もいない', w.text.text())
+        # 退出通知は平文ではなく Components V2（embed）で送ること
+        self.assertEqual(w.text.plain_contents, [])
 
     async def test_auto_leave_cancelled_when_someone_returns(self):
         w, cleanup = self.w, Recorder()

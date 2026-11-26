@@ -25,7 +25,9 @@ import logging
 import time
 from typing import Any, Optional
 
+from core.support.embeds import we
 from core.support.legacy import Responder
+from core.support.panel_v2 import as_embed_v2
 
 logger = logging.getLogger(__name__)
 
@@ -279,7 +281,8 @@ async def on_fresh_session(bot, session, user, text_channel) -> None:
         if failed:
             lines.append(f"開始できませんでした: {'、'.join(failed)}")
         if lines:
-            await text_channel.send("\n".join(lines))
+            # まとめ通知も平文で送らず、Components V2（embed）で送る。
+            await text_channel.send(view=as_embed_v2(we("\n".join(lines))))
     except Exception:
         logger.exception("VC自動開始の処理に失敗しました (guild=%s)", getattr(session, "guild_id", "?"))
 

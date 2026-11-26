@@ -28,7 +28,9 @@ import inspect
 import logging
 import time
 from typing import Any, Callable, Optional
+from core.support.embeds import we
 from core.support.emojis import FAILED
+from core.support.panel_v2 import as_embed_v2
 
 logger = logging.getLogger(__name__)
 
@@ -407,7 +409,8 @@ class VoiceSessionManager:
                 by_label=feature_label(by_feature) if by_feature else "別の機能",
             )
             try:
-                await session.text_channel.send(text)
+                # 通知は平文で送らず、他のパネルと同じ Components V2（embed）で送る。
+                await session.text_channel.send(view=as_embed_v2(we(text)))
             except Exception:
                 logger.debug("notice send failed", exc_info=True)
 

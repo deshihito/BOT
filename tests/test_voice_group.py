@@ -314,6 +314,8 @@ class RecordingTest(Base):
         interaction = await self.voice('record', action=choice('start'))
         notices = [m for m in self.w.text.sent if isinstance(m, str) and '録音を開始しました' in m]
         self.assertEqual(len(notices), 1)
+        # お知らせは平文ではなく Components V2（embed）で送ること
+        self.assertEqual(self.w.text.plain_contents, [])
         self.assertIn('alice', notices[0])
         self.assertIn(self.w.voice.name, notices[0])
         # 返信（状態表示）は interaction に返り、お知らせは ephemeral ではなくチャンネルに出る
