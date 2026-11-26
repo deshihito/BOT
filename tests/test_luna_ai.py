@@ -1069,3 +1069,289 @@ class ChatTextTest(unittest.IsolatedAsyncioTestCase):
                 patch.object(luna.logfare, "chat_stream", fake_stream):
             with self.assertRaises(luna.logfare.LogfareHTTPError):
                 await luna._chat_text([{"role": "user", "content": "hi"}], max_tokens=800)
+
+
+class _FakeSarashinaContent:
+    def __init__(self, lines):
+        self._lines = lines
+
+    def __aiter__(self):
+        async def gen():
+            for line in self._lines:
+                yield line
+
+        return gen()
+
+
+class FakeSarashinaResponse:
+    """aiohttp レスポンスの代役。session.post() の戻りとして async CM で使う。"""
+
+    def __init__(self, status, lines=(), headers=None):
+        self.status = status
+        self.headers = headers or {}
+        self.content = _FakeSarashinaContent(lines)
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+
+class FakeSarashinaSession:
+    """aiohttp.ClientSession の代役。応答キューと送信内容をクラス変数で共有する。"""
+
+    responses: list = []
+    captured: list = []
+
+    def __init__(self, timeout=None):
+        pass
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+    def post(self, url, headers=None, json=None):
+        type(self).captured.append({"url": url, "headers": headers, "json": json})
+        return type(self).responses.pop(0)
+
+
+SARASHINA_ENV_POP = (
+    "SARASHINA_API_KEY", "SARASHINA_API_KEY_2", "SARASHINA_API_KEY_3",
+    "SARASHINA_API_KEYS", "SARASHINA_BASE_URL",
+    "LUNA_AI_MODEL", "LUNA_AI_INTEGRATION_MODEL",
+)
+
+
+class SarashinaTest(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        luna._sarashina_key_cursor = 0
+        FakeSarashinaSession.responses = []
+        FakeSarashinaSession.captured = []
+
+    def _env(self, **extra):
+        env = {"LUNA_AI_PROVIDER": "sarashina"}
+        env.update(extra)
+        return patch.dict(os.environ, env, clear=False)
+
+    def _pop_sarashina_env(self):
+        for name in SARASHINA_ENV_POP:
+            os.environ.pop(name, None)
+
+    # ---------------------------------------------------------- 選択と既定値
+
+    def test_provider_name_selects_sarashina(self):
+        with self._env():
+            self.assertEqual(luna.provider_name(), "sarashina")
+        with patch.dict(os.environ, {"LUNA_AI_PROVIDER": "SARASHINA"}):
+            self.assertEqual(luna.provider_name(), "sarashina")
+
+    def test_default_models_on_sarashina(self):
+        with self._env():
+            self._pop_sarashina_env()
+            # sarashina3-mini は提供終了予定のため後継の思考モデルが既定。
+            self.assertEqual(luna.model_name(), "sarashina3.2-mini-thinking")
+            # 統合は 60 RPM 枠の nano で、返信の 6 RPM 枠を食わない。
+            self.assertEqual(luna.integration_model_name(), "sarashina3-nano")
+
+    def test_model_env_overrides_win_on_sarashina(self):
+        with self._env(LUNA_AI_MODEL="sarashina3-nano",
+                       LUNA_AI_INTEGRATION_MODEL="custom-x"):
+            self.assertEqual(luna.model_name(), "sarashina3-nano")
+            self.assertEqual(luna.integration_model_name(), "custom-x")
+
+    # ---------------------------------------------------------- キープール
+
+    def test_api_keys_single(self):
+        with patch.dict(os.environ, {}, clear=False):
+            self._pop_sarashina_env()
+            os.environ["SARASHINA_API_KEY"] = "key-1"
+            self.assertEqual(luna._sarashina_api_keys(), ["key-1"])
+
+    def test_api_keys_numbered_and_comma_list_deduped(self):
+        with patch.dict(os.environ, {}, clear=False):
+            self._pop_sarashina_env()
+            os.environ["SARASHINA_API_KEY"] = " key-1 "
+            os.environ["SARASHINA_API_KEY_2"] = "key-2"
+            os.environ["SARASHINA_API_KEY_3"] = ""
+            os.environ["SARASHINA_API_KEYS"] = "key-3, key-1,,key-4"
+            self.assertEqual(
+                luna._sarashina_api_keys(), ["key-1", "key-2", "key-3", "key-4"])
+
+    def test_api_keys_empty_when_unset(self):
+        with patch.dict(os.environ, {}, clear=False):
+            self._pop_sarashina_env()
+            self.assertEqual(luna._sarashina_api_keys(), [])
+
+    def test_key_order_rotates_per_call(self):
+        with patch.dict(os.environ, {}, clear=False):
+            self._pop_sarashina_env()
+            os.environ["SARASHINA_API_KEY"] = "key-1"
+            os.environ["SARASHINA_API_KEY_2"] = "key-2"
+            first = [key for _i, key in luna._sarashina_key_order()]
+            second = [key for _i, key in luna._sarashina_key_order()]
+            third = [key for _i, key in luna._sarashina_key_order()]
+        self.assertEqual(first, ["key-1", "key-2"])
+        self.assertEqual(second, ["key-2", "key-1"])
+        self.assertEqual(third, ["key-1", "key-2"])
+
+    def test_config_default_and_custom_base_url(self):
+        with patch.dict(os.environ, {}, clear=False):
+            self._pop_sarashina_env()
+            os.environ["SARASHINA_API_KEY"] = "key-1"
+            keys, base_url = luna._sarashina_config()
+            self.assertEqual(keys, ["key-1"])
+            self.assertEqual(base_url, "https://api.sarashina.ai/v1")
+            os.environ["SARASHINA_BASE_URL"] = "https://example.invalid/v9/"
+            _keys, base_url = luna._sarashina_config()
+            self.assertEqual(base_url, "https://example.invalid/v9")
+
+    # ---------------------------------------------------------- ペイロード
+
+    def test_payload_thinking_model_widens_budget_and_sets_effort(self):
+        payload = luna._sarashina_payload(
+            [{"role": "user", "content": "hi"}], max_tokens=800,
+            model="sarashina3.2-mini-thinking")
+        self.assertEqual(payload["max_completion_tokens"], 4000)
+        self.assertEqual(payload["reasoning_effort"], "low")
+        self.assertNotIn("max_tokens", payload)
+        self.assertTrue(payload["stream"])
+
+    def test_payload_non_thinking_model_has_no_reasoning_effort(self):
+        payload = luna._sarashina_payload(
+            [{"role": "user", "content": "hi"}], max_tokens=4000,
+            model="sarashina3-nano")
+        self.assertEqual(payload["max_completion_tokens"], 4000)
+        self.assertNotIn("reasoning_effort", payload)
+        self.assertNotIn("max_tokens", payload)
+
+    # ---------------------------------------------------------- ストリーム
+
+    async def test_stream_posts_and_parses_only_content_deltas(self):
+        lines = [
+            'data: {"choices": [{"delta": {"reasoning_content": "考え中"}}]}'.encode(),
+            'data: {"choices": [{"delta": {"content": "まぁ"}}]}'.encode(),
+            'data: {"choices": [{"delta": {"content": "様子"}}]}'.encode(),
+            b"data: [DONE]",
+        ]
+        FakeSarashinaSession.responses = [FakeSarashinaResponse(200, lines)]
+        with self._env(SARASHINA_API_KEY="key-1"), \
+                patch.object(luna.aiohttp, "ClientSession", FakeSarashinaSession):
+            got = [delta async for delta in luna._sarashina_chat_stream(
+                [{"role": "user", "content": "hi"}], max_tokens=800)]
+        self.assertEqual(got, ["まぁ", "様子"])
+        sent = FakeSarashinaSession.captured[0]
+        self.assertEqual(sent["url"], "https://api.sarashina.ai/v1/chat/completions")
+        self.assertEqual(sent["headers"]["Authorization"], "Bearer key-1")
+        self.assertEqual(sent["json"]["model"], "sarashina3.2-mini-thinking")
+        self.assertEqual(sent["json"]["max_completion_tokens"], 4000)
+        self.assertEqual(sent["json"]["reasoning_effort"], "low")
+
+    async def test_stream_requires_key(self):
+        with patch.dict(os.environ, {}, clear=False):
+            self._pop_sarashina_env()
+            with self.assertRaises(RuntimeError):
+                async for _delta in luna._sarashina_chat_stream(
+                        [{"role": "user", "content": "hi"}], max_tokens=10):
+                    pass
+
+    async def test_stream_failover_to_next_key_on_429(self):
+        lines = ['data: {"choices": [{"delta": {"content": "返事"}}]}'.encode(),
+                 b"data: [DONE]"]
+        FakeSarashinaSession.responses = [
+            FakeSarashinaResponse(429, headers={"Retry-After": "5"}),
+            FakeSarashinaResponse(200, lines),
+        ]
+        with self._env(SARASHINA_API_KEY="key-1", SARASHINA_API_KEY_2="key-2"), \
+                patch.object(luna.aiohttp, "ClientSession", FakeSarashinaSession):
+            got = [delta async for delta in luna._sarashina_chat_stream(
+                [{"role": "user", "content": "hi"}], max_tokens=800)]
+        self.assertEqual(got, ["返事"])
+        auths = [call["headers"]["Authorization"] for call in FakeSarashinaSession.captured]
+        self.assertEqual(auths, ["Bearer key-1", "Bearer key-2"])
+
+    async def test_stream_all_keys_429_raises_429(self):
+        FakeSarashinaSession.responses = [
+            FakeSarashinaResponse(429), FakeSarashinaResponse(429),
+        ]
+        with self._env(SARASHINA_API_KEY="key-1", SARASHINA_API_KEY_2="key-2"), \
+                patch.object(luna.aiohttp, "ClientSession", FakeSarashinaSession):
+            with self.assertRaises(luna.SarashinaHTTPError) as ctx:
+                async for _delta in luna._sarashina_chat_stream(
+                        [{"role": "user", "content": "hi"}], max_tokens=800):
+                    pass
+        self.assertEqual(ctx.exception.status, 429)
+        self.assertEqual(len(FakeSarashinaSession.captured), 2)
+
+    async def test_stream_no_failover_on_non_429_error(self):
+        FakeSarashinaSession.responses = [FakeSarashinaResponse(500)]
+        with self._env(SARASHINA_API_KEY="key-1", SARASHINA_API_KEY_2="key-2"), \
+                patch.object(luna.aiohttp, "ClientSession", FakeSarashinaSession):
+            with self.assertRaises(luna.SarashinaHTTPError) as ctx:
+                async for _delta in luna._sarashina_chat_stream(
+                        [{"role": "user", "content": "hi"}], max_tokens=800):
+                    pass
+        self.assertEqual(ctx.exception.status, 500)
+        self.assertEqual(len(FakeSarashinaSession.captured), 1)
+
+    async def test_chat_text_routes_to_sarashina_with_integration_model(self):
+        seen = {}
+
+        async def fake_stream(messages, *, max_tokens, model=None):
+            seen["model"] = model
+            seen["max_tokens"] = max_tokens
+            yield "統合結果"
+
+        with self._env(), \
+                patch.object(luna, "_sarashina_chat_stream", fake_stream):
+            text, _ttft, _total = await luna._chat_text(
+                [{"role": "user", "content": "hi"}], max_tokens=4000,
+                model=luna.integration_model_name())
+        self.assertEqual(text, "統合結果")
+        self.assertEqual(seen["model"], "sarashina3-nano")
+
+    # ---------------------------------------------------------- 画像と fail-soft
+
+    async def test_images_not_supported_on_sarashina(self):
+        with self._env():
+            self.assertFalse(await luna._images_supported())
+            attachment = types.SimpleNamespace(
+                content_type="image/png", filename="x.png")
+            content = await luna._build_user_content("見て", [attachment])
+        self.assertIn("見ることはできない", content)
+
+    async def test_reply_429_fails_soft_and_removes_placeholder(self):
+        channel = FakeLoadingChannel()
+        runtime = luna._Runtime(guild_id=555, channel=channel)
+        batch = [types.SimpleNamespace(content="こんにちは", attachments=[])]
+
+        async def failing_chat(messages, *, max_tokens, model=None):
+            raise luna.SarashinaHTTPError(429, "30")
+
+        with patch.object(luna, "_client", return_value=None), \
+                patch.object(luna, "_chat_text", failing_chat), \
+                patch.object(luna, "_send_reply", new=AsyncMock()) as send_reply:
+            await luna._generate_and_send(runtime, batch)
+        send_reply.assert_not_awaited()
+        # チャンネルに出るのはローディング表示だけで、エラー文は出ない。
+        self.assertEqual(channel.sent_texts, [luna.LOADING_TEXT])
+        self.assertTrue(channel.messages[0].deleted)
+
+    async def test_integration_429_fails_soft_and_keeps_turns(self):
+        runtime = luna._Runtime(guild_id=555, channel=FakeLoadingChannel())
+        turns = [{"id": 1, "author_name": "誰か", "content": "テスト", "is_luna": False}]
+
+        async def failing_chat(messages, *, max_tokens, model=None):
+            raise luna.SarashinaHTTPError(429, "30")
+
+        with patch.object(luna, "_load_unintegrated_sync", return_value=turns), \
+                patch.object(luna, "_load_memory_sync", return_value=""), \
+                patch.object(luna, "_save_memory_sync", return_value=True) as save, \
+                patch.object(luna, "_mark_integrated_and_prune_sync") as prune, \
+                patch.object(luna, "_chat_text", failing_chat):
+            await luna._integrate_memory(runtime, object())
+        # 保存も統合済み化もしないので、ターンは次回の統合対象として残る。
+        save.assert_not_called()
+        prune.assert_not_called()
