@@ -54,6 +54,38 @@ NUMES_API_KEY=<Numes のキー>
 思考強度は KiosAPI と同じく Numes には送信しません。
 Logfare を既定のまま使う場合は、Numes モデルを選択しない限り従来の動作は変わりません。
 
+DeepAI Code は OmniRush と同じ独立ルートで、自動切替（`AI_PROVIDER_ORDER`）には組み込みません。
+公式の画像/動画 API とは別系統で、デスクトップアプリ向けエンドポイント
+`https://api.deepai.org/deepai_code` を使います。モデル一覧は `/general` の
+「チャットAIモデルを設定」を開いたときにアカウントキーで動的取得し（一覧は固定しません）、
+一覧から選んだモデルは DeepAI Code に直接送ります。
+
+```dotenv
+DEEPAI_API_KEY=<DeepAI のアカウントキー>
+```
+
+キーは `DEEPAI_CODE_API_KEY` でも指定でき、そちらが優先されます。Base URL は
+`DEEPAI_CODE_BASE_URL` で変更でき、既定は `https://api.deepai.org` です。
+キー未設定の場合は一覧に DeepAI Code は表示されません。
+
+認証は `Authorization` ではなく `Api-Key` ヘッダです。毎日の無料枠（Theos、Free で
+最大250/日、モデルにより消費量が違い、消費ゼロの unmetered モデルもあります）の付与には
+マシン指紋ヘッダ `X-DeepAI-Code-Machine` が必要で、Bot は Pi の
+`/sys/class/dmi/id/product_uuid`（読めなければ `/etc/machine-id`）を
+sha256 化した hex だけを送ります。**生のマシンID は送信もログ出力もされません。**
+指紋は (マシン, アカウント) 単位で、日次付与は1日1回です。
+課金レーン版数 `X-DeepAI-Code-Theos` は上流が版を上げることがあるため、
+候補を順に `/models` で探査して受理された値をプロセス内にキャッシュします（426 で再探査）。
+思考強度は対応 efforts の情報が目録に無いため送信しません。
+画像入力は目録の `input` に `image` を含むモデルだけ受け付けます。
+`api` が `openai-responses` のモデル（`gpt-6-astra` 等）は専用エンドポイントが
+必要なため、初版ではモデル選択に出しません。
+
+Pi 側で必要な作業: `~/BOT/.env` に `DEEPAI_API_KEY` を追加して Bot を再起動してください
+（キーはチャットに貼らないこと）。再起動後にモデル一覧へ DeepAI Code が表示されます。
+DeepAI Code への質問は同サービスへ送信され、
+[DeepAI のプライバシーポリシー](https://deepai.org/privacy-policy)に従って処理されます。
+
 ## VC文字起こし
 
 `/voice studio` の文字起こしは Logfare の `POST /audio/transcriptions` を使います。
