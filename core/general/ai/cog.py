@@ -203,10 +203,11 @@ class AICog(commands.Cog):
         auto = preferred == ai_provider_router.AUTO_MODEL
         kios_model = preferred.partition("kiosapi::")[2] if preferred.startswith("kiosapi::") else None
         apinex_model = preferred.partition("apinex::")[2] if preferred.startswith("apinex::") else None
+        numes_model = preferred.partition("numes::")[2] if preferred.startswith("numes::") else None
         omnirush_model = preferred if preferred.startswith("omnirush::") else None
         if auto and not ai_provider_router.enabled():
             return await _reply_without_localization(ctx, "AIの自動切替が未設定です。", mention_author=False)
-        if not auto and not kios_model and not apinex_model and not omnirush_model and not logfare.api_key():
+        if not auto and not kios_model and not apinex_model and not numes_model and not omnirush_model and not logfare.api_key():
             return await _reply_without_localization(ctx, "AI機能は現在利用できません。", mention_author=False)
 
         sources = []
@@ -229,6 +230,11 @@ class AICog(commands.Cog):
                 reasoning_effort = requested_effort if requested_effort in supported_efforts else None
                 model_info = None
                 images_supported = ai_provider_router.supports_images("apinex", apinex_model)
+            elif numes_model:
+                model, exact = numes_model, True
+                reasoning_effort = None
+                model_info = None
+                images_supported = False
             elif omnirush_model:
                 model, exact = omnirush_model, True
                 requested_effort = ai_preferences.get_reasoning_effort(ctx.author.id)
@@ -267,6 +273,8 @@ class AICog(commands.Cog):
                     return (await ai_provider_router.chat_with_model("kiosapi", kios_model, msgs)).text
                 if apinex_model:
                     return (await ai_provider_router.chat_with_model("apinex", apinex_model, msgs)).text
+                if numes_model:
+                    return (await ai_provider_router.chat_with_model("numes", numes_model, msgs)).text
                 if omnirush_model:
                     return await ai_omnirush.chat(omnirush_model, f"{msgs[0]['content']}\n\n{msgs[1]['content']}")
                 return await logfare.chat(model, msgs)
@@ -306,6 +314,9 @@ class AICog(commands.Cog):
                     routed = await ai_provider_router.chat_with_model(
                         "apinex", apinex_model, messages, reasoning_effort=reasoning_effort
                     )
+                    answer = routed.text
+                elif numes_model:
+                    routed = await ai_provider_router.chat_with_model("numes", numes_model, messages)
                     answer = routed.text
                 elif omnirush_model:
                     answer = await ai_omnirush.chat(
@@ -353,6 +364,7 @@ class AICog(commands.Cog):
         footer = (f"モデル: {routed.model} / 接続先: {routed.provider}（自動切替）"
                   if auto else f"モデル: {routed.model} / 接続先: KiosAPI" if kios_model
                   else f"モデル: {routed.model} / 接続先: APInex" if apinex_model
+                  else f"モデル: {routed.model} / 接続先: Numes" if numes_model
                   else f"モデル: {ai_omnirush.model_name(omnirush_model)} / 接続先: OmniRush CLI" if omnirush_model
                   else f"モデル: {model}{notice}")
         embed.set_footer(text=footer)
@@ -433,10 +445,11 @@ class AICog(commands.Cog):
         auto = preferred == ai_provider_router.AUTO_MODEL
         kios_model = preferred.partition("kiosapi::")[2] if preferred.startswith("kiosapi::") else None
         apinex_model = preferred.partition("apinex::")[2] if preferred.startswith("apinex::") else None
+        numes_model = preferred.partition("numes::")[2] if preferred.startswith("numes::") else None
         omnirush_model = preferred if preferred.startswith("omnirush::") else None
         if auto and not ai_provider_router.enabled():
             return "AIの自動切替が未設定です。"
-        if not auto and not kios_model and not apinex_model and not omnirush_model and not logfare.api_key():
+        if not auto and not kios_model and not apinex_model and not numes_model and not omnirush_model and not logfare.api_key():
             return "Logfareが未設定です。`.env` に `LOGFARE_API_KEY` を設定してください。"
         routed = None
         model = preferred
@@ -450,6 +463,8 @@ class AICog(commands.Cog):
                 requested_effort = ai_preferences.get_reasoning_effort(user_id)
                 supported_efforts = ai_provider_router.supported_reasoning_efforts("apinex", apinex_model)
                 reasoning_effort = requested_effort if requested_effort in supported_efforts else None
+            elif numes_model:
+                model, exact = numes_model, True
             elif omnirush_model:
                 model, exact = omnirush_model, True
                 requested_effort = ai_preferences.get_reasoning_effort(user_id)
@@ -489,6 +504,9 @@ class AICog(commands.Cog):
                     "apinex", apinex_model, messages, reasoning_effort=reasoning_effort
                 )
                 answer = routed.text
+            elif numes_model:
+                routed = await ai_provider_router.chat_with_model("numes", numes_model, messages)
+                answer = routed.text
             elif omnirush_model:
                 answer = await ai_omnirush.chat(
                     omnirush_model,
@@ -517,6 +535,7 @@ class AICog(commands.Cog):
         footer = (f"モデル: {routed.model} / 接続先: {routed.provider}（自動切替）"
                   if auto else f"モデル: {routed.model} / 接続先: KiosAPI" if kios_model
                   else f"モデル: {routed.model} / 接続先: APInex" if apinex_model
+                  else f"モデル: {routed.model} / 接続先: Numes" if numes_model
                   else f"モデル: {ai_omnirush.model_name(omnirush_model)} / 接続先: OmniRush CLI" if omnirush_model
                   else f"モデル: {model}{notice}")
         embed.set_footer(text=footer)

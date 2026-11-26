@@ -33,6 +33,7 @@ BASE_URLS = {
     "nvidia_nim": "https://integrate.api.nvidia.com/v1",
     "openai": "https://api.openai.com/v1",
     "apinex": "https://api.apinex.bond/v1",
+    "numes": "https://api.numes.ai/api/v1",
 }
 
 _cooldown_until: dict[str, float] = {}
@@ -132,6 +133,31 @@ async def fetch_apinex_free_models() -> list[dict[str, Any]]:
         (model for model in payload.get("data", [])
          if isinstance(model, dict) and isinstance(model.get("id"), str)
          and model["id"].startswith("free/") and model["id"].strip()),
+        key=lambda model: model["id"].lower(),
+    )
+
+
+async def fetch_numes_models() -> list[dict[str, Any]]:
+    """Numesキーで利用可能なチャットモデルを取得する。
+
+    GET /models はキーの通貨（USD/BTC）で価格付けされたモデルだけを返すため、
+    無料フィルタは付けず、返ってきた全モデルを対象にする。
+    """
+    key = (os.getenv("AI_NUMES_API_KEY", "").strip()
+           or os.getenv("NUMES_API_KEY", "").strip())
+    if not key:
+        return []
+    base_url = os.getenv("AI_NUMES_BASE_URL", "https://api.numes.ai/api/v1").strip().rstrip("/")
+    async with aiohttp.ClientSession(timeout=TIMEOUT) as session:
+        async with session.get(
+            f"{base_url}/models",
+            headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+        ) as response:
+            response.raise_for_status()
+            payload = await response.json()
+    return sorted(
+        (model for model in payload.get("data", [])
+         if isinstance(model, dict) and isinstance(model.get("id"), str) and model["id"].strip()),
         key=lambda model: model["id"].lower(),
     )
 
