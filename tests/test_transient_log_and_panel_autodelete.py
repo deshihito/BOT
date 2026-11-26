@@ -121,6 +121,27 @@ class _PlainPanel(discord.ui.View):
         return discord.Embed(title="通常パネル")
 
 
+class _OptOutPanel(discord.ui.View):
+    delete_message_on_timeout = False
+
+    def __init__(self):
+        super().__init__(timeout=600)
+
+    def embed(self):
+        return discord.Embed(title="オプトアウトパネル")
+
+
+class _OwnTimeoutPanel(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=600)
+
+    def embed(self):
+        return discord.Embed(title="独自後始末パネル")
+
+    async def on_timeout(self):
+        pass
+
+
 def _message():
     return types.SimpleNamespace(delete=AsyncMock())
 
@@ -133,8 +154,24 @@ class RootPanelTimeoutDeleteTest(unittest.IsolatedAsyncioTestCase):
         await wrapper.on_timeout()
         message.delete.assert_awaited_once()
 
-    async def test_plain_panel_not_deleted_on_timeout(self):
+    async def test_plain_panel_deleted_on_timeout_by_default(self):
+        # 一時パネルは既定で失効時削除（他の一時パネルへの展開）。
         wrapper = as_panel_v2(_PlainPanel())
+        message = _message()
+        wrapper.track_message(message)
+        await wrapper.on_timeout()
+        message.delete.assert_awaited_once()
+
+    async def test_opt_out_panel_not_deleted_on_timeout(self):
+        wrapper = as_panel_v2(_OptOutPanel())
+        message = _message()
+        wrapper.track_message(message)
+        await wrapper.on_timeout()
+        message.delete.assert_not_called()
+
+    async def test_own_timeout_panel_not_deleted_on_timeout(self):
+        # 独自 on_timeout を持つパネルは、その後始末を尊重して消さない。
+        wrapper = as_panel_v2(_OwnTimeoutPanel())
         message = _message()
         wrapper.track_message(message)
         await wrapper.on_timeout()

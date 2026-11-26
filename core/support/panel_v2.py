@@ -138,10 +138,20 @@ class PanelLayoutView(discord.ui.LayoutView):
     def __init__(self, panel: discord.ui.View):
         super().__init__(timeout=panel.timeout)
         self.panel = panel
-        # 5大ルートパネル（/general /game /support /vc /help）だけが立てる
-        # フラグ。失効（タイムアウト）時に死んだパネルを残さず消す対象か。
-        self._delete_message_on_timeout = bool(
-            getattr(panel, "delete_message_on_timeout", False))
+        # 一時パネルは失効（タイムアウト）時に、死んだ部品を残さず
+        # メッセージごと消すのが既定。明示フラグがあればそれに従い、
+        # フラグがなければ「独自の on_timeout を持つパネルだけ」を
+        # 除外する（ギャンブル・所有者プロンプト等の後始末を尊重）。
+        # timeout=None の永続設置パネルは失効自体しないので対象外。
+        explicit = getattr(panel, "delete_message_on_timeout", None)
+        if explicit is not None:
+            self._delete_message_on_timeout = bool(explicit)
+        else:
+            own_timeout = getattr(type(panel), "on_timeout", None)
+            has_own_timeout = (
+                own_timeout is not None
+                and own_timeout is not discord.ui.View.on_timeout)
+            self._delete_message_on_timeout = not has_own_timeout
         self._tracked_message = None
         self._sync()
 
@@ -155,10 +165,11 @@ class PanelLayoutView(discord.ui.LayoutView):
             self._tracked_message = message
 
     async def on_timeout(self) -> None:
-        """失効したルートパネルは、押せない部品を残さずメッセージごと消す。
+        """失効した一時パネルは、押せない部品を残さずメッセージごと消す。
 
-        フラグのないパネル（ゲーム進行用など）は従来どおり何もしない。
-        メッセージを特定できていない場合も安全側で何もしない。
+        削除対象外のパネル（明示オプトアウト／独自 on_timeout 持ち）は
+        従来どおり何もしない。メッセージを特定できていない場合も
+        安全側で何もしない。
         """
         if not getattr(self, "_delete_message_on_timeout", False):
             return
