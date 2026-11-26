@@ -9,6 +9,10 @@ PROTOCOL.md、2026-11 時点）。
 このモジュールは OmniRush と同じ「独立ルート」方式で、`AI_PROVIDER_ORDER`
 の自動切替には組み込まない。モデルは固定リストを持たず、キーが設定されて
 いる時だけ上流の目録を動的取得する。
+
+AGO に載せるのは free ティア（Theos を消費しない、`theosPerRequest` が 0）の
+モデルだけという方針のため、目録のパース段で premier モデルを除外し、
+実行段でも free でないモデルは上流へ送らずに弾く。
 """
 from __future__ import annotations
 
@@ -45,6 +49,10 @@ class DeepAICodeError(RuntimeError):
 
 class DeepAICodeAuthError(DeepAICodeError):
     """APIキーが無効、またはメール未確認などで認証できない。"""
+
+
+class DeepAICodeModelNotAllowedError(DeepAICodeError):
+    """free ティア以外のモデルが指定された（AGO では利用不可）。"""
 
 
 class DeepAICodeBusy(DeepAICodeError):
@@ -202,8 +210,25 @@ async def _models_with_lane(session: aiohttp.ClientSession) -> tuple[str, list[d
     return lane, _parse_models(payload)
 
 
+def _is_free(theos_per_request: Any) -> bool:
+    """`theosPerRequest` が 0 のモデルだけを free と判定する。
+
+    値は文字列 "0" で来る想定だが、数値 0 や "0.0" 等の表記ゆれにも
+    対応するため float 変換で判定する。変換できない値（欠落含む）は
+    コスト不明として free とみなさない（フェイルクローズ）。
+    """
+    try:
+        return float(str(theos_per_request).strip()) == 0.0
+    except (TypeError, ValueError):
+        return False
+
+
 def _parse_models(payload: Any) -> list[dict[str, Any]]:
-    """目録を正規化する。Responses 専用モデルは初版では除外する。"""
+    """目録を正規化する。
+
+    Responses 専用モデルに加え、free ティアでない（Theos を消費する
+    premier）モデルも AGO の方針としてここで除外する。
+    """
     if isinstance(payload, dict):
         raw = payload.get("data", payload.get("models", []))
     elif isinstance(payload, list):
@@ -219,6 +244,8 @@ def _parse_models(payload: Any) -> list[dict[str, Any]]:
             continue
         if str(item.get("api") or "").strip().lower() == "openai-responses":
             continue
+        if not _is_free(item.get("theosPerRequest")):
+            continue
         inputs = item.get("input") or []
         models.append({
             **item,
@@ -227,7 +254,7 @@ def _parse_models(payload: Any) -> list[dict[str, Any]]:
             "supports_images": any(
                 str(value).lower() in {"image", "images", "vision"} for value in inputs
             ) if isinstance(inputs, (list, tuple, set)) else False,
-            "free": str(item.get("theosPerRequest")) == "0",
+            "free": True,
         })
     return sorted(models, key=lambda model: model["id"].lower())
 
@@ -285,6 +312,28 @@ def supports_reasoning_efforts(model_id: str) -> list[str]:
     return []
 
 
+async def _ensure_free_model(bare: str) -> None:
+    """実行段ガード: free ティアのモデルでなければ上流へ送らずに弾く。
+
+    目録キャッシュがあればそれを使い、無ければ取得する。目録が取得
+    できない場合は free かどうか確認できないため、premier を誤って
+    通さないよう実行を止める（フェイルクローズ）。
+    """
+    models = _models_cache or await fetch_models()
+    if not models:
+        raise DeepAICodeError(
+            "DeepAI Codeのモデル一覧を確認できないため、実行できませんでした。"
+            "しばらくしてから再試行してください。"
+        )
+    match = next((model for model in models if model["id"] == bare), None)
+    if match is None or not match.get("free"):
+        raise DeepAICodeModelNotAllowedError(
+            f"モデル `{bare}` は AGO では使えません。"
+            "DeepAI Code は free ティア（Theos を消費しない）モデルだけ利用できます。"
+            "`/general` の「チャットAIモデルを設定」で選び直してください。"
+        )
+
+
 async def fetch_theos() -> dict[str, Any] | None:
     """Theos 残量を取得する。キー未設定時は None。"""
     if not api_key():
@@ -307,6 +356,7 @@ async def chat(model_id: str, messages: list[dict[str, Any]], *,
     bare = (model_id or "").removeprefix(PREFIX)
     if not bare:
         raise DeepAICodeError("DeepAI Codeのモデルが指定されていません。")
+    await _ensure_free_model(bare)
     shaped = ensure_system_message(list(messages))
     total_chars = sum(len(str(message.get("content", ""))) for message in shaped)
     if total_chars > MAX_PROMPT_CHARS:

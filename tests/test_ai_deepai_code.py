@@ -132,16 +132,34 @@ class DeepAICodeUnitTest(unittest.TestCase):
         self.assertIs(ai_deepai_code.ensure_system_message(with_developer), with_developer)
         self.assertEqual(ai_deepai_code.ensure_system_message([])[0]["role"], "system")
 
-    def test_parse_models_excludes_responses_and_marks_free_and_images(self):
+    def test_parse_models_keeps_only_free_and_excludes_responses(self):
         models = ai_deepai_code._parse_models(MODELS_PAYLOAD)
         ids = [model["id"] for model in models]
+        # free (theosPerRequest "0") だけが残る。premier と Responses 専用は除外。
+        self.assertEqual(ids, ["glm-5.3-flash"])
+        self.assertNotIn("claude-opus-5-5", ids)
+        self.assertNotIn("bare-model", ids)
         self.assertNotIn("gpt-6-astra", ids)
-        by_id = {model["id"]: model for model in models}
-        self.assertTrue(by_id["glm-5.3-flash"]["free"])
-        self.assertTrue(by_id["glm-5.3-flash"]["supports_images"])
-        self.assertFalse(by_id["claude-opus-5-5"]["free"])
-        self.assertFalse(by_id["claude-opus-5-5"]["supports_images"])
-        self.assertEqual(by_id["bare-model"]["name"], "bare-model")
+        model = models[0]
+        self.assertTrue(model["free"])
+        self.assertTrue(model["supports_images"])
+        self.assertEqual(model["name"], "GLM 5.3 Flash")
+
+    def test_parse_models_free_judgement_tolerates_value_shapes(self):
+        payload = {"data": [
+            {"id": "int-zero", "input": ["text"], "theosPerRequest": 0},
+            {"id": "float-zero", "input": ["text"], "theosPerRequest": "0.0"},
+            {"id": "paid", "input": ["text"], "theosPerRequest": "3"},
+            {"id": "missing-cost", "input": ["text"]},
+        ]}
+        ids = [model["id"] for model in ai_deepai_code._parse_models(payload)]
+        self.assertEqual(ids, ["float-zero", "int-zero"])
+        self.assertTrue(ai_deepai_code._is_free("0"))
+        self.assertTrue(ai_deepai_code._is_free(0))
+        self.assertTrue(ai_deepai_code._is_free("0.0"))
+        self.assertFalse(ai_deepai_code._is_free("15"))
+        self.assertFalse(ai_deepai_code._is_free(None))
+        self.assertFalse(ai_deepai_code._is_free("free"))
 
     def test_status_conversion(self):
         with self.assertRaises(ai_deepai_code.DeepAICodeAuthError):
@@ -208,11 +226,10 @@ class DeepAICodeAsyncTest(unittest.IsolatedAsyncioTestCase):
              patch.object(ai_deepai_code, "_request", request):
             models = await ai_deepai_code.fetch_models()
             choices = await ai_deepai_code.model_choices()
-        self.assertEqual([model["id"] for model in models],
-                         ["bare-model", "claude-opus-5-5", "glm-5.3-flash"])
-        self.assertIn({"id": "deepaicode::glm-5.3-flash",
-                       "name": "DeepAI Code · GLM 5.3 Flash"}, choices)
-        self.assertTrue(all(choice["id"].startswith("deepaicode::") for choice in choices))
+        # 一覧に出るのは free モデルだけ（premier は除外される）。
+        self.assertEqual([model["id"] for model in models], ["glm-5.3-flash"])
+        self.assertEqual(choices, [{"id": "deepaicode::glm-5.3-flash",
+                                    "name": "DeepAI Code · GLM 5.3 Flash"}])
         self.assertTrue(ai_deepai_code.supports_images("deepaicode::glm-5.3-flash"))
         self.assertFalse(ai_deepai_code.supports_images("deepaicode::claude-opus-5-5"))
         self.assertEqual(ai_deepai_code.supports_reasoning_efforts("deepaicode::glm-5.3-flash"), [])
@@ -225,7 +242,9 @@ class DeepAICodeAsyncTest(unittest.IsolatedAsyncioTestCase):
             captured.update({"method": method, "path": path, "lane": lane, **kwargs})
             return 200, {"choices": [{"message": {"content": "回答です"}}]}, {}
 
-        with patch.object(ai_deepai_code, "_resolve_lane", new_callable=AsyncMock,
+        with patch.object(ai_deepai_code, "fetch_models", new_callable=AsyncMock,
+                          return_value=ai_deepai_code._parse_models(MODELS_PAYLOAD)), \
+             patch.object(ai_deepai_code, "_resolve_lane", new_callable=AsyncMock,
                           return_value="4"), \
              patch.object(ai_deepai_code, "_request", side_effect=fake_request):
             answer = await ai_deepai_code.chat(
@@ -241,7 +260,9 @@ class DeepAICodeAsyncTest(unittest.IsolatedAsyncioTestCase):
                      (200, {"choices": [{"message": {"content": "再試行OK"}}]}, {})]
         request = AsyncMock(side_effect=responses)
         resolve = AsyncMock(side_effect=["4", "5"])
-        with patch.object(ai_deepai_code, "_resolve_lane", resolve), \
+        with patch.object(ai_deepai_code, "fetch_models", new_callable=AsyncMock,
+                          return_value=ai_deepai_code._parse_models(MODELS_PAYLOAD)), \
+             patch.object(ai_deepai_code, "_resolve_lane", resolve), \
              patch.object(ai_deepai_code, "_request", request):
             answer = await ai_deepai_code.chat(
                 "glm-5.3-flash",
@@ -249,6 +270,47 @@ class DeepAICodeAsyncTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(answer, "再試行OK")
         self.assertEqual(resolve.await_count, 2)
         self.assertEqual(request.await_count, 2)
+
+    async def test_chat_blocks_premier_model_without_upstream_call(self):
+        request = AsyncMock()
+        with patch.object(ai_deepai_code, "fetch_models", new_callable=AsyncMock,
+                          return_value=ai_deepai_code._parse_models(MODELS_PAYLOAD)), \
+             patch.object(ai_deepai_code, "_request", request):
+            with self.assertRaises(ai_deepai_code.DeepAICodeModelNotAllowedError) as raised:
+                await ai_deepai_code.chat(
+                    "deepaicode::claude-opus-5-5", [{"role": "user", "content": "質問"}])
+        self.assertIn("free", str(raised.exception))
+        request.assert_not_called()
+
+    async def test_chat_blocks_model_flagged_not_free_in_cache(self):
+        ai_deepai_code._models_cache = [{
+            "id": "claude-opus-5-5", "name": "Claude Opus 5.5",
+            "free": False, "supports_images": False,
+        }]
+        request = AsyncMock()
+        with patch.object(ai_deepai_code, "fetch_models", new_callable=AsyncMock) as fetch, \
+             patch.object(ai_deepai_code, "_request", request):
+            with self.assertRaises(ai_deepai_code.DeepAICodeModelNotAllowedError):
+                await ai_deepai_code.chat(
+                    "deepaicode::claude-opus-5-5", [{"role": "user", "content": "質問"}])
+        fetch.assert_not_called()
+        request.assert_not_called()
+
+    async def test_chat_blocks_unknown_model_and_empty_catalog(self):
+        request = AsyncMock()
+        with patch.object(ai_deepai_code, "fetch_models", new_callable=AsyncMock,
+                          return_value=ai_deepai_code._parse_models(MODELS_PAYLOAD)), \
+             patch.object(ai_deepai_code, "_request", request):
+            with self.assertRaises(ai_deepai_code.DeepAICodeModelNotAllowedError):
+                await ai_deepai_code.chat(
+                    "deepaicode::no-such-model", [{"role": "user", "content": "質問"}])
+        with patch.object(ai_deepai_code, "fetch_models", new_callable=AsyncMock,
+                          return_value=[]), \
+             patch.object(ai_deepai_code, "_request", request):
+            with self.assertRaises(ai_deepai_code.DeepAICodeError):
+                await ai_deepai_code.chat(
+                    "deepaicode::glm-5.3-flash", [{"role": "user", "content": "質問"}])
+        request.assert_not_called()
 
     async def test_ai_command_routes_to_deepai_code(self):
         ai = load_cog("ai")
@@ -265,6 +327,25 @@ class DeepAICodeAsyncTest(unittest.IsolatedAsyncioTestCase):
         embed = ctx.reply.await_args.kwargs["embed"]
         self.assertEqual(embed.description, "DeepAI Codeの回答")
         self.assertIn("DeepAI Code", embed.footer.text)
+
+    async def test_ai_command_rejects_premier_deepai_code_model(self):
+        ai = load_cog("ai")
+        ctx = SimpleNamespace(author=SimpleNamespace(id=123),
+                              message=SimpleNamespace(reference=None, attachments=[]),
+                              typing=lambda: Typing(), reply=AsyncMock())
+        error = ai_deepai_code.DeepAICodeModelNotAllowedError(
+            "モデル `claude-opus-5-5` は AGO では使えません。"
+            "DeepAI Code は free ティア（Theos を消費しない）モデルだけ利用できます。"
+        )
+        with patch.object(ai.ai_preferences, "get_model",
+                          return_value="deepaicode::claude-opus-5-5"), \
+             patch.object(ai.logfare, "api_key", return_value=None), \
+             patch.object(ai.ai_deepai_code, "chat", new_callable=AsyncMock,
+                          side_effect=error):
+            await ai.AICog.ai.callback(ai.AICog(None), ctx, prompt="質問")
+        message = ctx.reply.await_args.args[0]
+        self.assertIn("使えません", message)
+        self.assertIn("free ティア", message)
 
     async def test_general_picker_includes_deepai_code_models(self):
         general = load_cog("general")
