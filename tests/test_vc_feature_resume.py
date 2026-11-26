@@ -29,6 +29,7 @@ for _name, _value in {'BOT_API_BASE_URL': 'http://127.0.0.1:8787', 'BOT_API_KEY'
 
 import discord  # noqa: E402
 
+from core.general.ai import sarashina  # noqa: E402
 from core.vc import vc_feature_restore, voice_restore  # noqa: E402
 from core.vc.karaoke import entry as karaoke  # noqa: E402
 from core.vc.rec import entry as rec  # noqa: E402
@@ -349,11 +350,11 @@ class TranscriptionResumeTest(StoreTestCase, unittest.IsolatedAsyncioTestCase):
 
     def setUp(self):
         super().setUp()
-        self._orig_api_key = transcription.logfare.api_key
-        transcription.logfare.api_key = lambda: "dummy-key"
+        self._orig_api_key = sarashina.api_key
+        sarashina.api_key = lambda: "dummy-key"
 
     def tearDown(self):
-        transcription.logfare.api_key = self._orig_api_key
+        sarashina.api_key = self._orig_api_key
         super().tearDown()
 
     async def test_save_then_restore_resumes_with_target(self):
@@ -393,7 +394,7 @@ class TranscriptionResumeTest(StoreTestCase, unittest.IsolatedAsyncioTestCase):
         self.assertEqual(vc_feature_restore.feature_entries("transcribe"), {})
 
     async def test_no_api_key_skips_and_cleans(self):
-        transcription.logfare.api_key = lambda: None
+        sarashina.api_key = lambda: None
         cog, guild, alice, voice, text, target = self.make_cog()
         self.store.set_entry("vc_features", "10:transcribe",
                              entry(settings={"target_channel_id": 520}))

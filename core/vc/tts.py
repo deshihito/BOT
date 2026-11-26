@@ -17,6 +17,7 @@ from discord.ext import commands
 from core.support.embeds import we
 from core.support.emojis import FAILED
 from core.general import action_usage
+from core.general.ai import sarashina as sarashina_ai
 from core.support.usage_stats import usage_stats
 from core.support.legacy import Responder
 from core.vc.voice_session import VoiceBusy, feature_label, get_manager, stop_hint
@@ -58,6 +59,18 @@ TTS_IGNORE_PREFIXES = ("/", ";", "；")
 TTS_SETTINGS_PATH = Path(os.getenv("TTS_SETTINGS_PATH", "data/tts_settings.json"))
 
 
+TTS_ENGINE_VOICEVOX = "voicevox"
+
+
+TTS_ENGINE_SARASHINA = "sarashina"
+
+
+TTS_ENGINES = (TTS_ENGINE_VOICEVOX, TTS_ENGINE_SARASHINA)
+
+
+TTS_SARASHINA_DEFAULT_VOICE = sarashina_ai.DEFAULT_VOICE
+
+
 class TTSError(Exception):
     pass
 
@@ -67,6 +80,25 @@ class TTSSettings:
     speaker: int = TTS_DEFAULT_SPEAKER
     pitch: float = 0.0
     speed: float = 1.0
+    engine: str = TTS_ENGINE_VOICEVOX
+    sarashina_voice: str = TTS_SARASHINA_DEFAULT_VOICE
+
+
+def resolve_sarashina_voice(value: str) -> str:
+    """Sarashina の声を名前（完全一致優先、部分一致でも可）から解決する。"""
+    value = value.strip().lower()
+    if not value:
+        raise ValueError("Sarashina の声の名前を入力してください。")
+    if value in sarashina_ai.VOICES:
+        return value
+    matches = [name for name in sarashina_ai.VOICES if value in name]
+    if not matches:
+        raise ValueError(f"「{value}」に当てはまる Sarashina の声がありません。")
+    if len(matches) == 1:
+        return matches[0]
+    listing = ", ".join(f"`{name}`" for name in matches[:25])
+    more = f" …ほか {len(matches) - 25} 件" if len(matches) > 25 else ""
+    raise ValueError(f"「{value}」は {len(matches)} 件あります。声の名前を正確に入力してください。\n{listing}{more}")
 
 
 def _tempo_filters(tempo: float) -> list[str]:
@@ -149,10 +181,20 @@ class TTSCog(commands.Cog):
         try:
             raw = json.loads(TTS_SETTINGS_PATH.read_text(encoding="utf-8"))
             for user_id, value in raw.items():
+                # engine / sarashina_voice は後から足したフィールドなので、
+                # 無い保存データ（旧形式）でも既定値で読み込む。
+                engine = str(value.get("engine", TTS_ENGINE_VOICEVOX))
+                if engine not in TTS_ENGINES:
+                    engine = TTS_ENGINE_VOICEVOX
+                voice = str(value.get("sarashina_voice", TTS_SARASHINA_DEFAULT_VOICE))
+                if voice not in sarashina_ai.VOICES:
+                    voice = TTS_SARASHINA_DEFAULT_VOICE
                 self.settings[int(user_id)] = TTSSettings(
                     speaker=int(value.get("speaker", TTS_DEFAULT_SPEAKER)),
                     pitch=float(value.get("pitch", 0.0)),
                     speed=float(value.get("speed", 1.0)),
+                    engine=engine,
+                    sarashina_voice=voice,
                 )
         except FileNotFoundError:
             pass
@@ -180,9 +222,23 @@ class TTSCog(commands.Cog):
             return str(speakers[speaker])
         return f"話者ID {speaker}"
 
+    async def _voice_display(self, cfg: TTSSettings) -> str:
+        """設定表示用の「現在のエンジンと声」。VOICEVOX 時は従来どおり話者名だけを返す。"""
+        if cfg.engine == TTS_ENGINE_SARASHINA:
+            return f"Sarashina（{cfg.sarashina_voice}）"
+        return await self._speaker_name(cfg.speaker)
+
     async def _apply_config(self, user_id: int, speaker: int | None, pitch: float | None,
-                            speed: float | None) -> str:
+                            speed: float | None, engine: str | None = None,
+                            sarashina_voice: str | None = None) -> str:
         cfg = TTSSettings(**asdict(self.get_settings(user_id)))
+        if engine is not None:
+            engine = engine.strip().lower()
+            if engine not in TTS_ENGINES:
+                raise ValueError("エンジンは voicevox か sarashina で指定してください。")
+            cfg.engine = engine
+        if sarashina_voice is not None:
+            cfg.sarashina_voice = resolve_sarashina_voice(sarashina_voice)
         if speaker is not None:
             speakers = await self._load_speakers()
             if speakers and not (0 <= speaker < len(speakers) and speakers[speaker]):
@@ -200,6 +256,9 @@ class TTSCog(commands.Cog):
             cfg.speed = speed
         self.settings[user_id] = cfg
         self._save_settings()
+        if cfg.engine == TTS_ENGINE_SARASHINA:
+            return (f"🗣️ 読み上げ設定\nエンジン: **Sarashina**\n声: **{cfg.sarashina_voice}**\n"
+                    f"ピッチ: **{cfg.pitch:+g}** 半音 / 話速: **{cfg.speed:g}** 倍")
         return (f"🗣️ 読み上げ設定\n話者: **{await self._speaker_name(cfg.speaker)}**（ID {cfg.speaker}）\n"
                 f"ピッチ: **{cfg.pitch:+g}** 半音 / 話速: **{cfg.speed:g}** 倍")
 
@@ -267,9 +326,39 @@ class TTSCog(commands.Cog):
             fh.write(audio)
         return path
 
-    async def _synthesize_all(self, text: str, speaker: int) -> list[str]:
+    async def _synthesize_sarashina(self, text: str, voice: str) -> str:
+        """Sarashina TTS で1チャンクを合成し、wav 一時ファイルのパスを返す。
+
+        話速は VOICEVOX 時と意味を揃えるためネイティブ speed は 1.0 固定で送り、
+        ピッチ/話速は再生時の ffmpeg フィルタ（_play_file）で適用する。
+        """
+        try:
+            audio = await sarashina_ai.synthesize_speech(text, voice=voice, speed=1.0)
+        except sarashina_ai.SarashinaHTTPError as exc:
+            raise TTSError(f"Sarashina TTS が HTTP {exc.status} を返しました。") from exc
+        except RuntimeError as exc:
+            raise TTSError(str(exc)) from exc
+        fd, path = tempfile.mkstemp(prefix="tts_sarashina_", suffix=".wav")
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(audio)
+        return path
+
+    async def _synthesize_all(self, text: str, cfg: TTSSettings) -> list[str]:
+        if cfg.engine == TTS_ENGINE_SARASHINA:
+            # Sarashina は 6 RPM のため分割は最小限にする。読み上げ上限
+            # （TTS_MAX_CHARS=300字）は TTS の上限1,000字以内なので原則1リクエスト、
+            # 逐次実行する。
+            paths: list[str] = []
+            try:
+                for chunk in split_tts_text(text, limit=sarashina_ai.TTS_MAX_CHARS):
+                    paths.append(await self._synthesize_sarashina(chunk, cfg.sarashina_voice))
+            except Exception:
+                for path in paths:
+                    self._remove(path)
+                raise
+            return paths
         chunks = split_tts_text(text)
-        results = await asyncio.gather(*(self._synthesize(c, speaker) for c in chunks), return_exceptions=True)
+        results = await asyncio.gather(*(self._synthesize(c, cfg.speaker) for c in chunks), return_exceptions=True)
         errors = [r for r in results if isinstance(r, BaseException)]
         if errors:
             for r in results:
@@ -329,7 +418,7 @@ class TTSCog(commands.Cog):
                         queue.get_nowait()
                     break
                 try:
-                    paths = await self._synthesize_all(text, cfg.speaker)
+                    paths = await self._synthesize_all(text, cfg)
                 except Exception as exc:
                     logger.warning("TTS合成に失敗: %s", exc)
                     continue
@@ -413,9 +502,13 @@ class TTSCog(commands.Cog):
         target = channel or r.channel
         self.read_channels[r.guild.id] = target.id
         cfg = self.get_settings(r.user.id)
+        if cfg.engine == TTS_ENGINE_SARASHINA:
+            voice_line = f"エンジン: **Sarashina** / 声: **{cfg.sarashina_voice}** / ピッチ {cfg.pitch:+g} / 話速 {cfg.speed:g}倍"
+        else:
+            voice_line = f"話者: **{await self._speaker_name(cfg.speaker)}** / ピッチ {cfg.pitch:+g} / 話速 {cfg.speed:g}倍"
         await r.send(view=as_embed_v2(we(
             f"<#{target.id}>の発言を読み上げます（VC にいる人だけ）。\n"
-            f"話者: **{await self._speaker_name(cfg.speaker)}** / ピッチ {cfg.pitch:+g} / 話速 {cfg.speed:g}倍",
+            f"{voice_line}",
             title="🗣️ 読み上げを開始しました",
         )))
 
@@ -450,7 +543,7 @@ class TTSCog(commands.Cog):
         if not await self.enqueue(r.guild, text, r.user.id):
             return await r.send("読み上げ待ちがいっぱいです。少し待ってからもう一度どうぞ。", ephemeral=True)
         cfg = self.get_settings(r.user.id)
-        await r.send(view=as_embed_v2(we(f"🗣️ 読み上げます（{await self._speaker_name(cfg.speaker)}）")))
+        await r.send(view=as_embed_v2(we(f"🗣️ 読み上げます（{await self._voice_display(cfg)}）")))
 
     async def _resolve_speaker(self, value: str) -> int:
         value = value.strip()
@@ -470,7 +563,9 @@ class TTSCog(commands.Cog):
 
 
 class TTSSettingsModal(discord.ui.Modal, title="読み上げ設定"):
-    speaker = discord.ui.TextInput(label="話者（IDか名前の一部。例: 3 / ずんだ）", max_length=40)
+    engine = discord.ui.TextInput(label="エンジン（voicevox / sarashina）", max_length=10)
+    speaker = discord.ui.TextInput(label="話者（VOICEVOX用。IDか名前の一部。例: 3 / ずんだ）", max_length=40)
+    sarashina_voice = discord.ui.TextInput(label="Sarashinaの声（名前。例: aiku / haruka）", max_length=40)
     pitch = discord.ui.TextInput(label="ピッチ（半音 -12〜12、0が標準）", max_length=6)
     speed = discord.ui.TextInput(label="話速（0.5〜2.0、1.0が標準）", max_length=5)
 
@@ -478,17 +573,29 @@ class TTSSettingsModal(discord.ui.Modal, title="読み上げ設定"):
         super().__init__()
         self.cog = cog
         cfg = cog.get_settings(user_id)
+        self.engine.default = cfg.engine
         self.speaker.default = str(cfg.speaker)
+        self.sarashina_voice.default = cfg.sarashina_voice
         self.pitch.default = f"{cfg.pitch:g}"
         self.speed.default = f"{cfg.speed:g}"
 
     async def on_submit(self, interaction: discord.Interaction):
         r = Responder(interaction)
         try:
-            speaker = await self.cog._resolve_speaker(self.speaker.value)
+            engine = self.engine.value.strip().lower()
+            if engine not in TTS_ENGINES:
+                raise ValueError("エンジンは voicevox か sarashina で入力してください。")
             pitch = float(self.pitch.value)
             speed = float(self.speed.value)
-            message = await self.cog._apply_config(interaction.user.id, speaker, pitch, speed)
+            if engine == TTS_ENGINE_SARASHINA:
+                # Sarashina 時は話者欄ではなく声の名前で指定する（話者IDは保持する）。
+                message = await self.cog._apply_config(
+                    interaction.user.id, None, pitch, speed,
+                    engine=engine, sarashina_voice=self.sarashina_voice.value)
+            else:
+                speaker = await self.cog._resolve_speaker(self.speaker.value)
+                message = await self.cog._apply_config(
+                    interaction.user.id, speaker, pitch, speed, engine=engine)
         except ValueError as exc:
             text = str(exc)
             if text.startswith("could not convert"):

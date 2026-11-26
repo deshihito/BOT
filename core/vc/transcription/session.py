@@ -15,7 +15,7 @@ import discord.opus
 from discord.ext import commands
 from discord.ext import voice_recv
 from core.support.legacy import Responder
-from core.general.ai import logfare
+from core.general.ai import logfare, sarashina
 from core.vc import vc_feature_restore
 from core.vc.voice_session import VoiceBusy, get_manager
 from core.vc.voice_recv_patch import patch_voice_recv_client
@@ -59,7 +59,7 @@ class SessionMixin:
         session = self.sessions.get(r.guild.id)
         if session:
             await r.send(view=as_embed_v2(we(
-                f"🎙️ **Logfare {logfare.TRANSCRIPTION_MODEL} 文字起こし実行中**\n"
+                f"🎙️ **Sarashina {sarashina.TRANSCRIPTION_MODEL} 文字起こし実行中**\n"
                 f"ボイスチャンネル: **{session['vc_channel_name']}**\n"
                 f"送信先チャンネル: {session['target_channel_mention']}"
             )))
@@ -75,24 +75,24 @@ class SessionMixin:
             nonlocal premium_notice_sent
             self.last_audio[guild_id] = (display_name, audio_wav, time.time())
             try:
-                text = await logfare.transcribe_audio(audio_wav)
-            except logfare.LogfareHTTPError as ex:
-                logger.warning("Logfare transcription API returned HTTP %s", ex.status)
+                text = await sarashina.transcribe_audio(audio_wav)
+            except sarashina.SarashinaHTTPError as ex:
+                logger.warning("Sarashina transcription API returned HTTP %s", ex.status)
                 if ex.status == 403 and not premium_notice_sent:
                     premium_notice_sent = True
                     await notice_channel.send(
-                        "Logfareの文字起こしモデルが利用できません。モデルのトレーニング利用へのオプトインと、APIキーの利用権限を確認してください。"
+                        "Sarashinaの文字起こしモデルが利用できません。APIキーの利用権限と、Sarashina側のキー設定を確認してください。"
                     )
                 return
             except RuntimeError as ex:
                 if "文字起こし結果がありません" in str(ex):
                     # 雑音・息・短すぎる発話などで認識結果が空だっただけ。エラー扱いにしない
-                    logger.info("Logfare: 認識結果が空でした (user=%s)", display_name)
+                    logger.info("Sarashina: 認識結果が空でした (user=%s)", display_name)
                 else:
-                    logger.exception("Logfare transcription request failed")
+                    logger.exception("Sarashina transcription request failed")
                 return
             except Exception:
-                logger.exception("Logfare transcription request failed")
+                logger.exception("Sarashina transcription request failed")
                 return
             if not text or not text.strip():
                 return
@@ -117,7 +117,7 @@ class SessionMixin:
 
 
     async def _start_once(self, r: Responder, target_channel: discord.TextChannel | None):
-        if not logfare.api_key():
+        if not sarashina.api_key():
             return await r.send(view=as_embed_v2(we(
                 FAILED + ' ' + FEATURE_UNAVAILABLE_CONTACT
             )), ephemeral=True)
@@ -176,8 +176,8 @@ class SessionMixin:
         self._save_resume_snapshot(guild_id, vc_channel, r.channel, r.user, send_channel)
 
         await r.send(view=as_embed_v2(we(
-            f"🎙️ **{vc_channel.name}** で Logfare {logfare.TRANSCRIPTION_MODEL} による文字起こしを開始しました。\n"
-            f"音声は無音区間ごとにLogfareへ送信され、結果を {send_channel.mention} へ投稿します。\n"
+            f"🎙️ **{vc_channel.name}** で Sarashina {sarashina.TRANSCRIPTION_MODEL} による文字起こしを開始しました。\n"
+            f"音声は無音区間ごとにSarashinaへ送信され、結果を {send_channel.mention} へ投稿します。\n"
             "音楽・GVC・読み上げと同時に利用できます。利用者の音声は外部サービスで処理されます。"
         )))
 
