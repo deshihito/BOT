@@ -24,6 +24,7 @@ from core.general import user_names
 from core.general.user_names import resolve_display_names
 from core.support import guild_settings
 from core.support.messages import MANAGE_GUILD_REQUIRED, SETTINGS_UPDATE_FAILED
+from core.support.auto_defer import defer_if_not_done, send_or_followup
 from core.support.panel_v2 import as_panel_v2, edit_panel_v2
 from core.support.person_analysis.cog import message_targets
 from core.support.server_analytics import metrics, render
@@ -259,19 +260,19 @@ class ServerAnalyticsView(discord.ui.View):
             return await interaction.response.send_message(
                 MANAGE_GUILD_REQUIRED, ephemeral=True)
         new_value = not self.enabled
+        # store.update（遠隔の読み直し+書込み）の前に defer で ACK する。
+        await defer_if_not_done(interaction)
         try:
             await guild_settings.get_store().update(
                 self.guild_id, sa_store.SERVER_ANALYTICS_SECTION,
                 enabled=new_value)
         except Exception:
             logger.exception("サーバー分析の収集トグル更新に失敗しました")
-            return await interaction.response.send_message(
-                SETTINGS_UPDATE_FAILED, ephemeral=True)
+            return await send_or_followup(
+                interaction, SETTINGS_UPDATE_FAILED, ephemeral=True)
         self.enabled = new_value
         #: 切替えた時点で、その値は管理者の明示設定になる。
         self.explicit = True
-        if not interaction.response.is_done():
-            await interaction.response.defer()
         await self._edit(interaction)
 
     async def _on_ranking_toggle(self, interaction: discord.Interaction):
@@ -279,17 +280,16 @@ class ServerAnalyticsView(discord.ui.View):
             return await interaction.response.send_message(
                 MANAGE_GUILD_REQUIRED, ephemeral=True)
         new_value = not self.ranking_optout
+        await defer_if_not_done(interaction)
         try:
             await guild_settings.get_store().update(
                 self.guild_id, sa_store.SERVER_ANALYTICS_SECTION,
                 **{sa_store.RANKING_OPTOUT_KEY: new_value})
         except Exception:
             logger.exception("サーバー対抗ランキングの参加トグル更新に失敗しました")
-            return await interaction.response.send_message(
-                SETTINGS_UPDATE_FAILED, ephemeral=True)
+            return await send_or_followup(
+                interaction, SETTINGS_UPDATE_FAILED, ephemeral=True)
         self.ranking_optout = new_value
-        if not interaction.response.is_done():
-            await interaction.response.defer()
         await self._edit(interaction)
 
     async def _on_close(self, interaction: discord.Interaction):

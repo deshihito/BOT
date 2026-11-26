@@ -18,6 +18,19 @@ from core.game.hub import board_image, game_records
 from core.game.hub.board_image import render_cached, render_card_hand
 from core.game.hub.game_v2 import GamePanelView
 from core.game.highlow.highlow import HighLowGame, card_label, rank_label
+from core.support.auto_defer import defer_if_not_done
+
+
+async def _edit_panel(interaction: discord.Interaction, panel, file) -> None:
+    """パネル差し替えを、defer 済みでも届く形で送る。
+
+    画像生成（to_thread）の待ちで自動/手動 defer が先に入った場合は
+    edit_original_response、未応答なら通常の edit_message を使う。
+    """
+    if interaction.response.is_done():
+        await interaction.edit_original_response(view=panel, attachments=[file])
+    else:
+        await interaction.response.edit_message(view=panel, attachments=[file])
 
 GAME_ID = "highlow"
 
@@ -122,8 +135,7 @@ class HighLowPanel(GamePanelView):
             panel = HighLowPanel(self.cog, self.owner, game, status, prev=prev, mode="tie")
             panel.message = interaction.message
             file = await asyncio.to_thread(state_file, game, prev)
-            return await interaction.response.edit_message(
-                view=panel, attachments=[file])
+            return await _edit_panel(interaction, panel, file)
         if game.cleared:
             status = f"{card_label(prev)} → **{drawn}** … 正解！\n🎉 山札を全部当て切りました！"
             return await self.cog.finish_panel(interaction, self, status, prev=prev)
@@ -134,8 +146,7 @@ class HighLowPanel(GamePanelView):
         status = f"{card_label(prev)} → **{drawn}** … 正解！連続 **{game.streak}回**。次はこのカードより高い？低い？"
         panel = HighLowPanel(self.cog, self.owner, game, status, prev=prev, mode="play")
         file = await asyncio.to_thread(state_file, game, prev)
-        await interaction.response.edit_message(
-            view=panel, attachments=[file])
+        await _edit_panel(interaction, panel, file)
 
     async def _on_continue(self, interaction: discord.Interaction):
         if self.mode != "tie":
@@ -145,8 +156,7 @@ class HighLowPanel(GamePanelView):
                   f"連続正解は **{game.streak}回** のまま。次はこのカードより高い？低い？")
         panel = HighLowPanel(self.cog, self.owner, game, status, mode="play")
         file = await asyncio.to_thread(state_file, game)
-        await interaction.response.edit_message(
-            view=panel, attachments=[file])
+        await _edit_panel(interaction, panel, file)
 
     async def _on_stop_here(self, interaction: discord.Interaction):
         if self.mode != "tie":
@@ -189,8 +199,7 @@ class HighLow(commands.Cog):
             status += "\n" + game_records.format_highlow_line(entry, game.streak)
         done = HighLowPanel(self, panel.owner, game, status, prev=prev, mode="done")
         file = await asyncio.to_thread(state_file, game, prev)
-        await interaction.response.edit_message(
-            view=done, attachments=[file])
+        await _edit_panel(interaction, done, file)
         panel.stop()
 
     async def start_recruit(self, interaction: discord.Interaction):
@@ -198,9 +207,10 @@ class HighLow(commands.Cog):
         game = HighLowGame(rng=random.Random())
         panel = HighLowPanel(self, interaction.user, game,
                              "次のカードはこのカードより高い？低い？")
+        # 画像生成の前に thinking defer で ACK し、パネルは followup で出す。
+        await defer_if_not_done(interaction, thinking=True)
         file = await asyncio.to_thread(state_file, game)
-        await interaction.response.send_message(view=panel, file=file)
-        panel.message = await interaction.original_response()
+        panel.message = await interaction.followup.send(view=panel, file=file)
 
 
 async def setup(bot):

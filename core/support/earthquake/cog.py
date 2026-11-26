@@ -29,6 +29,7 @@ from core.support import guild_settings
 from core.support.earthquake import badge as badge_mod
 from core.support.earthquake import feed, map_render, render, store as eq_store
 from core.support.messages import SETTINGS_UPDATE_FAILED
+from core.support.auto_defer import defer_if_not_done, send_or_followup
 from core.support.panel_v2 import as_panel_v2, edit_panel_v2
 
 logger = logging.getLogger(__name__)
@@ -143,20 +144,21 @@ class EarthquakeSettingsView(discord.ui.View):
             await interaction.response.send_message(
                 ADMIN_REQUIRED, ephemeral=True)
             return False
+        # store.update は遠隔の読み直し+書込みで最悪10秒級になりうる。
+        # 応答前に走らせるのではなく、先に defer で ACK する。
+        await defer_if_not_done(interaction)
         try:
             await guild_settings.get_store().update(
                 self.guild_id, eq_store.EARTHQUAKE_SECTION, **values)
         except Exception:
             logger.exception("地震情報の設定更新に失敗しました")
-            await interaction.response.send_message(
-                SETTINGS_UPDATE_FAILED, ephemeral=True)
+            await send_or_followup(
+                interaction, SETTINGS_UPDATE_FAILED, ephemeral=True)
             return False
         settings_store = guild_settings.get_store()
         self.settings = eq_store.get_earthquake_settings(
             settings_store, self.guild_id)
         self._sync_controls()
-        if not interaction.response.is_done():
-            await interaction.response.defer()
         await edit_panel_v2(interaction, as_panel_v2(self))
         return True
 

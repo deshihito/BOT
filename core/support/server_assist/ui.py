@@ -5,6 +5,7 @@ from typing import Any
 
 import discord
 
+from core.support.auto_defer import defer_if_not_done
 from core.support.panel_v2 import as_panel_v2
 
 
@@ -153,6 +154,8 @@ class AssistChannelSelect(discord.ui.ChannelSelect):
                 if error:
                     return await interaction.response.send_message(error, ephemeral=True)
         values = {self.field: channel_id, **(self.extra or {})}
+        # update_settings は保存前に遠隔を読み直すため、先に defer で ACK する。
+        await defer_if_not_done(interaction)
         await update_settings(view.guild_id, view.feature_key, **values)
         notice = self.notice(channel_id) if callable(self.notice) else self.notice
         if self.reopen:
@@ -200,6 +203,7 @@ class AssistToggleButton(discord.ui.Button):
             error = self.require(view, interaction, value)
             if error:
                 return await interaction.response.send_message(error, ephemeral=True)
+        await defer_if_not_done(interaction)
         await update_settings(view.guild_id, view.feature_key, **{self.key: value})
         if self.notice_text is not None:
             notice = self.notice_text(value) if callable(self.notice_text) else self.notice_text

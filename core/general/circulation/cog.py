@@ -43,6 +43,7 @@ from core.general.circulation import economy_pool as economy_core
 from core.general.circulation import worldbox_chat as worldbox_chat_core
 from core.general.circulation import worldbox_discord as worldbox_discord_core
 from core.general.circulation import worldbox_economy as worldbox_economy_core
+from core.support.auto_defer import defer_if_not_done, send_or_followup
 from core.support.storage import KVStore
 from core.general.items import items as items_core
 from core.game import lottery as lottery_core
@@ -300,18 +301,24 @@ class LotteryView(discord.ui.View):
 
     @discord.ui.button(label="更新", style=discord.ButtonStyle.secondary)
     async def refresh(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # 締切到来時の settle は確定+保存+払戻しまで走りうるため、
+        # 非パネル経路（show_lottery）と同じく先に defer で ACK する。
+        await defer_if_not_done(interaction)
         await self.cog.settle_lottery()
         await _edit_panel(interaction, self, button=button)
 
     @discord.ui.button(label="宝くじを買う", style=discord.ButtonStyle.success)
     async def buy(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await defer_if_not_done(interaction)
         await self.cog.settle_lottery()
         if self.cog.lottery_store.remaining_allowance(str(interaction.user.id)) <= 0:
-            return await interaction.response.send_message(
+            return await send_or_followup(
+                interaction,
                 circulation_action_failed(
                     f"チケットは1人{lottery_core.MAX_TICKETS_PER_USER}枚までです。"),
                 ephemeral=True)
-        await interaction.response.send_message(
+        await send_or_followup(
+            interaction,
             view=_wrap(BuyLotteryView(self.cog, interaction.user.id)))
 
 

@@ -14,6 +14,7 @@ from discord.ext import commands
 from core.support import guild_settings
 from core.support.common import can_manage_guild
 from core.support.messages import MANAGE_GUILD_REQUIRED
+from core.support.auto_defer import defer_if_not_done
 from core.support.panel_v2 import as_panel_v2, edit_panel_v2
 
 logger = logging.getLogger(__name__)
@@ -418,6 +419,9 @@ class TicketAdvancedSettingsView(discord.ui.View):
         return _ticket_embed(self.settings, "詳細設定")
 
     async def save_and_refresh(self, interaction: discord.Interaction, notice: str | None = None):
+        # 基本設定側（TicketSettingsView）と揃え、保存の前に defer で
+        # ACK する（save_settings は store.update で遠隔往復する）。
+        await defer_if_not_done(interaction)
         await self.cog.save_settings(interaction.guild_id, self.settings)
         self.notice = notice
         await edit_panel_v2(interaction, as_panel_v2(self))

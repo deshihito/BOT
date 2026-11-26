@@ -17,6 +17,7 @@ from discord.ext import commands
 
 from core.general.garden import garden as core
 from core.general.garden.render import render_garden_png
+from core.support.auto_defer import defer_if_not_done
 from core.support.panel_v2 import as_panel_v2, edit_panel_v2
 
 logger = logging.getLogger(__name__)
@@ -169,6 +170,8 @@ class GardenView(discord.ui.View):
     # 操作コールバック
     # ------------------------------------------------------------------
     async def _sync_panel(self, interaction: discord.Interaction) -> None:
+        # load_async は精算+スナップショット+画像生成のため、先に defer で ACK する。
+        await defer_if_not_done(interaction)
         await self.load_async()
         self.refresh()
         await edit_panel_v2(interaction, as_panel_v2(self), files=[self.image_file()])

@@ -51,6 +51,7 @@ from core.game.hub import prison as prison_core
 from core.general.money_panel import starter as starter_core
 from core.leaderboard_image import fetch_avatar_bytes
 from core.support.messages import ACTION_FAILED_RETRY, CLAIM_FAILED_RETRY, ITEMS_NOT_LOADED, WORKSHOP_NOT_LOADED, feature_not_loaded
+from core.support.auto_defer import defer_if_not_done
 from core.support.panel_v2 import as_panel_v2, edit_message_v2, edit_panel_v2, wrap_panel_view as _wrap
 from cogs import general as wallet_module  # 定数は実行時に引く（テストの cog 再読込対策）
 
@@ -420,6 +421,9 @@ class MoneyPanelView(discord.ui.View):
         values = getattr(interaction, "data", {}).get("values") or self._select_values()
         if values:
             self.category = values[0]
+        # build_embed は残高取得+表示名解決+アバター取得+画像生成まで
+        # 含むため、先に defer で ACK してから読み込む。
+        deferred = await defer_if_not_done(interaction)
         self._cached_embed = await self.build_embed()
         self.refresh()
         container = getattr(self, "_v2", None)
@@ -427,6 +431,9 @@ class MoneyPanelView(discord.ui.View):
             container._sync()
             await edit_panel_v2(interaction, container,
                                 files=self.panel_files())
+        elif deferred or getattr(interaction.response, "is_done", lambda: False)():
+            await interaction.edit_original_response(
+                embed=self._cached_embed, view=self)
         else:
             await interaction.response.edit_message(
                 embed=self._cached_embed, view=self)

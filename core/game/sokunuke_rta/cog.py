@@ -14,6 +14,7 @@ from core import ads as partner_ads
 from core.game.hub.game_v2 import text_panel
 from core.support import guild_settings
 from core.support.messages import MANAGE_GUILD_REQUIRED
+from core.support.auto_defer import defer_if_not_done
 from core.support.panel_v2 import as_panel_v2, edit_panel_v2
 from core.general.user_names import resolve_display_names
 from core.leaderboard_image import (
@@ -515,12 +516,12 @@ class SokunukeSettingsView(discord.ui.View):
         self.add_item(reset)
 
     async def save(self, interaction: discord.Interaction, notice: str | None = None, **values):
+        # 保存と再読込（API 往復）の前に defer で ACK する。
+        await defer_if_not_done(interaction)
         await self.cog._save(self.guild_id, **values)
         self.settings = await self.cog._get_settings(self.guild_id)
         self.notice = notice
         self._sync()
-        if not interaction.response.is_done():
-            await interaction.response.defer()
         await edit_panel_v2(interaction, as_panel_v2(self))
 
     def _make_toggle(self, key: str, label: str):

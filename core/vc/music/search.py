@@ -1,4 +1,5 @@
 import discord
+from core.support.auto_defer import defer_if_not_done
 from core.support.panel_v2 import edit_message_v2, as_embed_v2, wrap_panel_view
 from discord import app_commands  # ← 追加
 from discord.ext import commands, tasks
@@ -66,9 +67,12 @@ class SearchMixin:
             selected_track = self.tracks[idx]
             state = self.cog.get_state(self.guild_id)
             state['current_ctx'] = self.ctx
+            # enqueue / 再生準備はソース解決で数秒かかりうるため、
+            # 先に thinking defer で ACK し、結果は followup で届ける。
+            await defer_if_not_done(interaction, thinking=True)
             if not await self.cog.enqueue_track(self.guild_id, (selected_track['url'], selected_track['title'], None, True),
                                                 requester_id=interaction.user.id):
-                return await interaction.response.send_message(
+                return await interaction.followup.send(
                     view=as_embed_v2(we(f"{FAILED} キューの上限（{MAX_QUEUE_SIZE}件）に達しています。")),
                     ephemeral=True,
                 )
@@ -76,9 +80,9 @@ class SearchMixin:
             vc = Responder(self.ctx).voice_client
             if vc and not has_audio_source(vc, "music") and not state['is_processing_queue'] and not state['is_paused']:
                 await self.cog.check_queue(self.guild_id)
-                await interaction.response.send_message(view=as_embed_v2(we(f"{MUSIC} **{selected_track['title']}** を再生します！")))
+                await interaction.followup.send(view=as_embed_v2(we(f"{MUSIC} **{selected_track['title']}** を再生します！")))
             else:
-                await interaction.response.send_message(view=as_embed_v2(we(f"{SUCCESS} **{selected_track['title']}** をキューに追加しました")))
+                await interaction.followup.send(view=as_embed_v2(we(f"{SUCCESS} **{selected_track['title']}** をキューに追加しました")))
                 await self.cog.update_panel(self.guild_id)
             await self.disable_all_items()
 

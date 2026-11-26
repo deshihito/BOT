@@ -136,7 +136,9 @@ class RankingButtonTest(unittest.IsolatedAsyncioTestCase):
         view = game.GameDetailView(types.SimpleNamespace(), "ngword")
         inter = FakeInteraction(host, channel)
         await game_fakes.press(view, "ranking", inter)
-        self.assertIn("サーバーランキング", inter.response.sent[0].text())
+        # ランキング生成は重いため defer → followup で届く（公開のまま）。
+        self.assertTrue(inter.response.is_done())
+        self.assertIn("サーバーランキング", inter.followup.sent[0].text())
 
 
 if __name__ == "__main__":

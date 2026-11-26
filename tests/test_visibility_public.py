@@ -57,9 +57,17 @@ class GameRankingVisibilityTest(unittest.IsolatedAsyncioTestCase):
         view = GameDetailView(types.SimpleNamespace(), "ngword")
         interaction, sent = fake_interaction()
         embed = discord.Embed(title="ranking")
+
+        async def followup_send(content=None, **kwargs):
+            sent["content"] = content
+            sent.update(kwargs)
+
+        interaction.followup.send = AsyncMock(side_effect=followup_send)
         with patch("core.game.hub.cog.ranking_board", new=AsyncMock(return_value=(embed, None))):
             button = find_button(view, custom_id="panel:game:ranking")
             await button.callback(interaction)
+        # 生成が重いため defer → followup で届くが、公開ポリシーは不変。
+        interaction.response.defer.assert_awaited_once()
         self.assertIs(sent.get("embed"), embed)
         self.assertNotEqual(sent.get("ephemeral"), True)
 
