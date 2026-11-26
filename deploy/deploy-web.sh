@@ -74,6 +74,31 @@ rm -rf "$BUILD"
 mkdir -p "$BUILD"
 cp -a "$SRC/web/." "$BUILD/"
 rm -rf "$BUILD/node_modules" "$BUILD/.next"
+
+# ビルド入力が前回デプロイ成功時と同一なら、ビルド自体をスキップする。
+# autodeploy はリポジトリ全体の HEAD で発火するため、Bot 側だけの変更でも
+# 13 分のフルリビルドが走っていた（2026-11-26 の圧迫の一因）。ビルド入力は
+# web/ のソース一式＋ Bot コードから再生成した data/*.json で、ここに
+# （読める場合は）ビルド環境変数ファイルも加える。これがバイト単位で
+# 同じなら生成物も同じになるため、現行リリースをそのまま正とし、
+# deployed-head だけを進める（呼び出し側の web-autodeploy.sh が行う）。
+# ハッシュの保存はビルド成功後にだけ行う。保存ファイルが無い初回は
+# 通常どおりビルドして保存する。
+INPUT_HASH_FILE="$ROOT/build-input.sha"
+INPUT_HASH="$(
+  {
+    (cd "$BUILD" && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum)
+    if [ -r /etc/agobot-web.env ]; then sha256sum /etc/agobot-web.env; fi
+  } | sha256sum | cut -d' ' -f1
+)"
+if [ -f "$INPUT_HASH_FILE" ] \
+  && [ "$(cat "$INPUT_HASH_FILE")" = "$INPUT_HASH" ] \
+  && [ -e "$ROOT/current" ]; then
+  echo "Web ビルド入力に変更なし（input hash: $INPUT_HASH）。ビルドをスキップする"
+  write_build_status deployed
+  exit 0
+fi
+
 cd "$BUILD"
 run_limited npm ci
 run_limited npm run build
@@ -99,6 +124,8 @@ cp -a "$BUILD/node_modules/ws/." "$RELEASE/node_modules/ws/"
 ln -sfn "$RELEASE" "$ROOT/current"
 sudo systemctl restart agobot-web
 write_build_status deployed
+# ビルド成功時にだけ入力ハッシュを保存する（次回のスキップ判定に使う）
+echo "$INPUT_HASH" > "$INPUT_HASH_FILE"
 
 # 古いリリースは新しい順に3つだけ残す（切り替え済みの current は削除対象にしない）
 cd "$ROOT/releases"
