@@ -22,7 +22,7 @@ AI_CEREBRAS_MODEL=gpt-oss-120b
 `AI_PROVIDER_ORDER` にない接続先は使用しません。
 
 組み込みの接続先は `groq`, `gemini`, `openrouter`, `cerebras`, `sambanova`,
-`deepseek`, `mistral`, `together`, `fireworks`, `nvidia_nim`, `openai`, `logfare`, `apinex` です。
+`deepseek`, `mistral`, `together`, `fireworks`, `nvidia_nim`, `openai`, `logfare`, `apinex`, `numes` です。
 各社のキーは `<PROVIDER>_API_KEY` または `AI_<PROVIDER>_API_KEY` を使います。
 `logfare` は従来の `LOGFARE_API_KEY` を使います。予備キー `LOGFARE_API_KEY_2`（さらに `LOGFARE_API_KEY_3`、カンマ区切りの `LOGFARE_API_KEYS` も可）を設定すると、Logfare が HTTP 429（日次リクエスト上限=RPD到達時）を返したときだけ自動で次のキーへ切り替わります。429 以外のエラーでは切り替えません。429 を返したキーは `Retry-After`（無ければ1時間、最大24時間）の間スキップされます。
 
@@ -37,6 +37,22 @@ AI_KIOSAPI_API_KEY=<KiosAPI のキー>
 
 モデル一覧の取得には `GET https://kiosapi.com/v1/models` を使います。
 Logfare を既定のまま使う場合は、KiosAPI モデルを選択しない限り従来の動作は変わりません。
+
+Numes も OpenAI 互換プロバイダーとして追加できます。Numes のモデル一覧は
+`/general` の「チャットAIモデルを設定」を開いたときに API キーで取得し、一覧から選んだモデルは Numes に直接送ります。
+
+```dotenv
+AI_PROVIDER_ORDER=logfare,numes
+NUMES_API_KEY=<Numes のキー>
+```
+
+モデル一覧の取得には `GET https://api.numes.ai/api/v1/models` を使います（Base URL は
+`AI_NUMES_BASE_URL` で変更でき、既定は `https://api.numes.ai/api/v1` です。キーは
+`AI_NUMES_API_KEY` でも指定できます）。
+`GET /models` はキーの通貨（USD または BTC）で価格付けされたモデルだけを返すため、
+表示されるモデルはキーの通貨で絞られます。キー未設定の場合は一覧に Numes は表示されません。
+思考強度は KiosAPI と同じく Numes には送信しません。
+Logfare を既定のまま使う場合は、Numes モデルを選択しない限り従来の動作は変わりません。
 
 ## VC文字起こし
 

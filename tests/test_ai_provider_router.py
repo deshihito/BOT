@@ -40,6 +40,16 @@ class AiProviderRouterTest(unittest.IsolatedAsyncioTestCase):
                 {"id": "gpt-6-sol", "owned_by": "GPT"},
             ]})
 
+        async def numes_models(request):
+            self.calls.append(("numes-models", request.headers.get("Authorization"), None))
+            return web.json_response({"object": "list", "data": [
+                {"id": "zeta/example-chat", "owned_by": "zeta"},
+                {"id": "alpha/example-chat", "owned_by": "alpha"},
+                {"id": 123, "owned_by": "invalid"},
+                {"id": "  ", "owned_by": "blank"},
+                "not-a-dict",
+            ]})
+
         app = web.Application()
         app.router.add_post("/first/v1/chat/completions", first)
         app.router.add_post("/second/v1/chat/completions", second)
@@ -48,6 +58,8 @@ class AiProviderRouterTest(unittest.IsolatedAsyncioTestCase):
         app.router.add_post("/kios/v1/chat/completions", second)
         app.router.add_get("/apinex/v1/models", apinex_models)
         app.router.add_post("/apinex/v1/chat/completions", second)
+        app.router.add_get("/numes/api/v1/models", numes_models)
+        app.router.add_post("/numes/api/v1/chat/completions", second)
         self.runner = web.AppRunner(app)
         await self.runner.setup()
         site = web.TCPSite(self.runner, "127.0.0.1", 0)
@@ -165,3 +177,30 @@ class AiProviderRouterTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(router.supported_reasoning_efforts("apinex", "free/glm-5.3"),
                          ["low", "medium", "high"])
         self.assertEqual(router.supported_reasoning_efforts("apinex", "free/muse-spark-1.3"), [])
+
+    async def test_numes_catalog_and_selected_model(self):
+        base = self.logfare_url.removesuffix("/logfare/v1") + "/numes/api/v1"
+        # キー未設定では一覧は空（モデル選択画面に Numes は出ない）。
+        self.assertEqual(await router.fetch_numes_models(), [])
+        with patch.dict(os.environ, {
+            "AI_NUMES_BASE_URL": base,
+            "NUMES_API_KEY": "numes-secret",
+        }):
+            models = await router.fetch_numes_models()
+            answer = await router.chat_with_model(
+                "numes", "alpha/example-chat", [{"role": "user", "content": "質問"}],
+                reasoning_effort="high",
+            )
+        # 無料フィルタなし: 通貨で絞られた全モデルを id 昇順で返し、不正な id は除く。
+        self.assertEqual([model["id"] for model in models],
+                         ["alpha/example-chat", "zeta/example-chat"])
+        self.assertEqual((answer.text, answer.provider, answer.model),
+                         ("回答", "numes", "alpha/example-chat"))
+        self.assertEqual([item[0] for item in self.calls], ["numes-models", "second"])
+        self.assertEqual(self.calls[0][1], "Bearer numes-secret")
+        payload = self.calls[1][2]
+        self.assertEqual(payload["model"], "alpha/example-chat")
+        # Numes には思考強度や予約フィールドを送らない。
+        self.assertNotIn("reasoning_effort", payload)
+        self.assertEqual(router.BASE_URLS["numes"], "https://api.numes.ai/api/v1")
+        self.assertEqual(router.supported_reasoning_efforts("numes", "alpha/example-chat"), [])

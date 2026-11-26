@@ -133,6 +133,15 @@ class AIDefaultView(discord.ui.View):
                     } for model in apinex_models)
                 except Exception:
                     logger.warning("AI設定: APInex のモデル一覧の取得に失敗しました", exc_info=True)
+                try:
+                    numes_models = await ai_provider_router.fetch_numes_models()
+                    models.extend({
+                        **model,
+                        "id": f"numes::{model['id']}",
+                        "name": f"Numes · {model['id']}",
+                    } for model in numes_models)
+                except Exception:
+                    logger.warning("AI設定: Numes のモデル一覧の取得に失敗しました", exc_info=True)
                 models.extend(ai_omnirush.model_choices())
                 if not models and logfare_error:
                     raise logfare_error
@@ -216,6 +225,8 @@ class ReasoningView(discord.ui.View):
             return None, "自動切替モデルでは、この思考強度設定を使えません。"
         if model_id.startswith("kiosapi::"):
             return None, f"モデル `{model_id.removeprefix('kiosapi::')}` はこの接続先の思考強度設定に対応していません。"
+        if model_id.startswith("numes::"):
+            return None, f"モデル `{model_id.removeprefix('numes::')}` はこの接続先の思考強度設定に対応していません。"
         if model_id.startswith("apinex::"):
             apinex_model = model_id.removeprefix("apinex::")
             efforts = ai_provider_router.supported_reasoning_efforts("apinex", apinex_model)
