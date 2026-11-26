@@ -42,9 +42,15 @@ class AiProviderRouterTest(unittest.IsolatedAsyncioTestCase):
 
         async def numes_models(request):
             self.calls.append(("numes-models", request.headers.get("Authorization"), None))
+            zero = {"prompt": "0", "completion": "0", "request": "0",
+                    "image": "0", "audio": "0"}
             return web.json_response({"object": "list", "data": [
-                {"id": "zeta/example-chat", "owned_by": "zeta"},
-                {"id": "alpha/example-chat", "owned_by": "alpha"},
+                {"id": "zeta/example-chat", "owned_by": "zeta",
+                 "pricing": {**zero, "prompt": "0.001", "completion": "0.002"}},
+                {"id": "alpha/example-chat", "owned_by": "alpha", "pricing": zero},
+                {"id": "beta/request-charged", "owned_by": "beta",
+                 "pricing": {**zero, "request": "0.01"}},
+                {"id": "gamma/no-pricing", "owned_by": "gamma"},
                 {"id": 123, "owned_by": "invalid"},
                 {"id": "  ", "owned_by": "blank"},
                 "not-a-dict",
@@ -191,16 +197,60 @@ class AiProviderRouterTest(unittest.IsolatedAsyncioTestCase):
                 "numes", "alpha/example-chat", [{"role": "user", "content": "質問"}],
                 reasoning_effort="high",
             )
-        # 無料フィルタなし: 通貨で絞られた全モデルを id 昇順で返し、不正な id は除く。
-        self.assertEqual([model["id"] for model in models],
-                         ["alpha/example-chat", "zeta/example-chat"])
+        # pricing が全て 0 の free モデルだけを返し、有料・価格不明・不正な id は除く。
+        self.assertEqual([model["id"] for model in models], ["alpha/example-chat"])
         self.assertEqual((answer.text, answer.provider, answer.model),
                          ("回答", "numes", "alpha/example-chat"))
-        self.assertEqual([item[0] for item in self.calls], ["numes-models", "second"])
+        # 呼び出しは 一覧取得 → 実行ガードの一覧確認 → チャット本体。
+        self.assertEqual([item[0] for item in self.calls],
+                         ["numes-models", "numes-models", "second"])
         self.assertEqual(self.calls[0][1], "Bearer numes-secret")
-        payload = self.calls[1][2]
+        payload = next(call[2] for call in self.calls if call[0] == "second")
         self.assertEqual(payload["model"], "alpha/example-chat")
         # Numes には思考強度や予約フィールドを送らない。
         self.assertNotIn("reasoning_effort", payload)
         self.assertEqual(router.BASE_URLS["numes"], "https://api.numes.ai/api/v1")
         self.assertEqual(router.supported_reasoning_efforts("numes", "alpha/example-chat"), [])
+
+    def test_numes_is_free_judgement(self):
+        zero = {"prompt": "0", "completion": "0.00", "request": "0",
+                "image": "0", "audio": "0"}
+        self.assertTrue(router._numes_is_free({"pricing": zero}))
+        self.assertTrue(router._numes_is_free(
+            {"pricing": {"prompt": "0", "completion": "0"}}))
+        self.assertFalse(router._numes_is_free(
+            {"pricing": {**zero, "input_cache_write": "0.5"}}))
+        self.assertFalse(router._numes_is_free(
+            {"pricing": {**zero, "prompt": "0.000001"}}))
+        self.assertFalse(router._numes_is_free({"pricing": {"prompt": "0"}}))
+        self.assertFalse(router._numes_is_free({"pricing": None}))
+        self.assertFalse(router._numes_is_free({}))
+        self.assertFalse(router._numes_is_free(
+            {"pricing": {**zero, "prompt": "not-a-number"}}))
+
+    async def test_numes_paid_model_is_blocked_at_execution(self):
+        base = self.logfare_url.removesuffix("/logfare/v1") + "/numes/api/v1"
+        with patch.dict(os.environ, {
+            "AI_NUMES_BASE_URL": base,
+            "NUMES_API_KEY": "numes-secret",
+        }):
+            with self.assertRaises(router.ModelNotAllowedError) as raised:
+                await router.chat_with_model(
+                    "numes", "zeta/example-chat", [{"role": "user", "content": "質問"}]
+                )
+        self.assertIn("free", str(raised.exception))
+        # 上流のチャット本体へは送られていない（目録確認だけ）。
+        self.assertEqual([item[0] for item in self.calls], ["numes-models"])
+
+    async def test_apinex_non_free_model_is_blocked_at_execution(self):
+        base = self.logfare_url.removesuffix("/logfare/v1") + "/apinex/v1"
+        with patch.dict(os.environ, {
+            "AI_APINEX_BASE_URL": base,
+            "AI_APINEX_API_KEY": "apinex-secret",
+        }):
+            with self.assertRaises(router.ModelNotAllowedError) as raised:
+                await router.chat_with_model(
+                    "apinex", "gpt-6-sol", [{"role": "user", "content": "質問"}]
+                )
+        self.assertIn("Free", str(raised.exception))
+        self.assertEqual(self.calls, [])

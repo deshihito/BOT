@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
 import logging
 import os
 import re
@@ -58,6 +59,10 @@ class ProviderHTTPError(RuntimeError):
     def __init__(self, status: int):
         self.status = status
         super().__init__(f"HTTP {status}")
+
+
+class ModelNotAllowedError(RuntimeError):
+    """free ティア以外のモデルが指定された（AGO では利用不可）。"""
 
 
 def logical_model() -> str:
@@ -137,11 +142,38 @@ async def fetch_apinex_free_models() -> list[dict[str, Any]]:
     )
 
 
-async def fetch_numes_models() -> list[dict[str, Any]]:
-    """Numesキーで利用可能なチャットモデルを取得する。
+_NUMES_PRICE_FIELDS = ("prompt", "completion", "request", "image", "audio",
+                       "input_cache_read", "input_cache_write")
 
-    GET /models はキーの通貨（USD/BTC）で価格付けされたモデルだけを返すため、
-    無料フィルタは付けず、返ってきた全モデルを対象にする。
+
+def _numes_is_free(model: dict[str, Any]) -> bool:
+    """Numes 目録の `pricing` が全て 0 のモデルだけを free と判定する。
+
+    pricing は正確な10進文字列で返る（公式 OpenAPI スキーマで必須）。
+    prompt / completion が無い、または価格フィールドのどれか1つでも
+    0 でない・解釈できない場合は free とみなさない（フェイルクローズ）。
+    """
+    pricing = model.get("pricing")
+    if not isinstance(pricing, dict):
+        return False
+    if "prompt" not in pricing or "completion" not in pricing:
+        return False
+    for field in _NUMES_PRICE_FIELDS:
+        if field not in pricing:
+            continue
+        try:
+            if Decimal(str(pricing[field])) != 0:
+                return False
+        except InvalidOperation:
+            return False
+    return True
+
+
+async def fetch_numes_models() -> list[dict[str, Any]]:
+    """Numesキーで利用可能な free ティアのチャットモデルを取得する。
+
+    GET /models はキーの通貨（USD/BTC）で価格付けされたモデルだけを返す。
+    その中から、目録の `pricing` が全て 0 のモデルだけを動的に選別する。
     """
     key = (os.getenv("AI_NUMES_API_KEY", "").strip()
            or os.getenv("NUMES_API_KEY", "").strip())
@@ -157,9 +189,31 @@ async def fetch_numes_models() -> list[dict[str, Any]]:
             payload = await response.json()
     return sorted(
         (model for model in payload.get("data", [])
-         if isinstance(model, dict) and isinstance(model.get("id"), str) and model["id"].strip()),
+         if isinstance(model, dict) and isinstance(model.get("id"), str) and model["id"].strip()
+         and _numes_is_free(model)),
         key=lambda model: model["id"].lower(),
     )
+
+
+async def _ensure_numes_free_model(model: str) -> None:
+    """実行段ガード: Numes の free 目録に無いモデルは上流へ送らない。
+
+    目録が取得できない場合も、free か確認できないモデルは通さない
+    （フェイルクローズ）。
+    """
+    try:
+        catalog = await fetch_numes_models()
+    except Exception as exc:
+        raise ModelNotAllowedError(
+            "Numesのモデル一覧を確認できないため、実行できませんでした。"
+            "しばらくしてから再試行してください。"
+        ) from exc
+    if model not in {item["id"] for item in catalog}:
+        raise ModelNotAllowedError(
+            f"モデル `{model}` は AGO では使えません。"
+            "Numes は free ティア（価格が 0 のモデル）だけ利用できます。"
+            "`/general` の「チャットAIモデルを設定」で選び直してください。"
+        )
 
 
 def supported_reasoning_efforts(provider: str, model: str) -> list[str]:
@@ -213,6 +267,15 @@ async def chat_with_model(provider: str, model: str, messages: list[dict[str, An
                 or BASE_URLS.get(name, "https://kiosapi.com/v1" if name == "kiosapi" else ""))
     if not key or not base_url or not model:
         raise RuntimeError("指定プロバイダーの設定がありません")
+    # free ティア限定の実行段ガード（一覧側の動的フィルタと同じ判定）。
+    if name == "numes":
+        await _ensure_numes_free_model(model)
+    elif name == "apinex" and not model.startswith("free/"):
+        raise ModelNotAllowedError(
+            f"モデル `{model}` は AGO では使えません。"
+            "APInex は Free カテゴリ（`free/` 始まり）のモデルだけ利用できます。"
+            "`/general` の「チャットAIモデルを設定」で選び直してください。"
+        )
     if reasoning_effort not in supported_reasoning_efforts(name, model):
         reasoning_effort = None
     route = Route(name, model, base_url.rstrip("/"), key)

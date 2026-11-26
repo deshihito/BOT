@@ -54,6 +54,23 @@ NUMES_API_KEY=<Numes のキー>
 思考強度は KiosAPI と同じく Numes には送信しません。
 Logfare を既定のまま使う場合は、Numes モデルを選択しない限り従来の動作は変わりません。
 
+## free ティア選別の自動化（全ルート共通方針）
+
+AGO AI に載せるのは free ティアのモデルだけです。選別はモデルIDの手作業リスト
+ではなく、各プロバイダのカタログ取得時に、カタログ側の機械可読な指標で動的に
+判定します。カタログが変われば選別結果も自動で追従します。フィルタはカタログ
+取得層に置き、モデル選択の一覧と実行段ガードの両方に効かせます（実行段は
+フェイルクローズ: 確認できないモデルは通しません）。
+
+| ルート | 判定に使うカタログ指標 | 状態 |
+|---|---|---|
+| Logfare | 公開カタログ自体が free 利用枠の一覧（`fetch_free_chat_models`）。実行時は `resolve_model` が目録在席を確認し、外れたら既定モデルへ寄せる | 動的フィルタ済み |
+| APInex | 目録の Free カテゴリ（ID の `free/` プレフィックス、`fetch_apinex_free_models`） | 動的フィルタ済み＋実行ガード |
+| Numes | 目録の `pricing`（prompt / completion / request / image / audio / キャッシュ読み書き）が全て 0 | 動的フィルタ＋実行ガード |
+| DeepAI Code | 目録の `theosPerRequest` が 0 | 動的フィルタ＋実行ガード |
+| KiosAPI | `GET /v1/models` の応答スキーマは `id` / `object` / `created` / `owned_by` のみで、グループ・価格・無料フラグが無い（公式 API リファレンスで確認）。キーのトークングループがアクセス範囲を決めるが、その情報も応答には含まれない | 動的判定の材料なし（見送り・要判断） |
+| OmniRush | CLI の固定選択肢のみで、カタログ取得や無料指標が無い | 動的判定の材料なし（見送り・要判断） |
+
 DeepAI Code は OmniRush と同じ独立ルートで、自動切替（`AI_PROVIDER_ORDER`）には組み込みません。
 公式の画像/動画 API とは別系統で、デスクトップアプリ向けエンドポイント
 `https://api.deepai.org/deepai_code` を使います。モデル一覧は `/general` の
