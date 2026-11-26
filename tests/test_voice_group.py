@@ -12,7 +12,7 @@
 - 4 個の統合入口が、各機能の実装関数を正しい引数で呼ぶこと
 - 旧コマンド（/join・!rec・!stt・!saito・!gvc join など）が登録されていないこと
 - 状態表示が、VC を使っている機能と開始した人を表示すること
-- Logfareキーが無いとき文字起こし、Voskモデルが無いときカラオケは VC に入らずに断ること
+- Sarashinaキーが無いとき文字起こし、Voskモデルが無いときカラオケは VC に入らずに断ること
 - 録音の音程解析が NameError にならず音階を返すこと
 - 録音を始めると、テキストチャンネルに全員に見えるお知らせが出ること
 """
@@ -35,6 +35,7 @@ for _name, _value in {'BOT_API_BASE_URL': 'http://127.0.0.1:8787', 'BOT_API_KEY'
 import discord  # noqa: E402
 import numpy as np  # noqa: E402
 
+from core.general.ai import sarashina  # noqa: E402
 from core.vc import vosk_model  # noqa: E402
 from core.support.legacy import Responder  # noqa: E402
 from core.vc import saito as sio_saito  # noqa: E402
@@ -269,8 +270,8 @@ class ModelMissingTest(Base):
         self.assertIsNone(self.manager.get(self.w.guild.id))
         self.assertIsNone(self.w.guild.voice_client)
 
-    async def test_transcribe_refuses_without_logfare_key(self):
-        with patch.object(sio_transcription.logfare, 'api_key', return_value=None):
+    async def test_transcribe_refuses_without_sarashina_key(self):
+        with patch.object(sarashina, 'api_key', return_value=None):
             interaction = await self.voice('transcribe', action=choice('start'))
         # 拒否文は現行では汎用の「利用できません」に統一され、キー名は出ない
         self.assertIn('この機能は現在利用できません', interaction.texts())
@@ -280,7 +281,7 @@ class ModelMissingTest(Base):
     async def test_transcribe_does_not_take_over_an_active_voice_feature(self):
         await self.rec._record_impl(Responder(self.ctx(self.w.alice)), 'start')
         active_vc = self.w.guild.voice_client
-        with patch.object(sio_transcription.logfare, 'api_key', return_value='configured'):
+        with patch.object(sarashina, 'api_key', return_value='configured'):
             interaction = await self.voice('transcribe', action=choice('start'))
         self.assertIn('録音', interaction.texts())
         self.assertEqual(self.manager.owner(self.w.guild.id), 'record')
