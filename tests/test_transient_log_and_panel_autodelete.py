@@ -9,7 +9,7 @@
 """
 import types
 import unittest
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 import discord
 
@@ -90,12 +90,17 @@ class TransientLogDeleteAfterTest(unittest.IsolatedAsyncioTestCase):
         source.send.assert_awaited_once_with(content="ログ", delete_after=15)
 
     async def test_responder_passes_delete_after_to_followup(self):
-        followup = types.SimpleNamespace(send=AsyncMock())
+        # Webhook.send は delete_after 非対応なので、followup へは渡さず
+        # wait=True で受け取ったメッセージの手動削除を予約する。
+        sent_message = types.SimpleNamespace(delete=AsyncMock())
+        followup = types.SimpleNamespace(send=AsyncMock(return_value=sent_message))
         response = types.SimpleNamespace(is_done=lambda: True)
         source = types.SimpleNamespace(response=response, followup=followup)
-        await Responder(source).send("ログ", delete_after=15)
+        with patch("core.support.legacy.schedule_message_delete") as schedule:
+            await Responder(source).send("ログ", delete_after=15)
         followup.send.assert_awaited_once_with(
-            content="ログ", ephemeral=False, delete_after=15)
+            content="ログ", ephemeral=False, wait=True)
+        schedule.assert_called_once_with(sent_message, 15)
 
     async def test_responder_omits_delete_after_by_default(self):
         source = types.SimpleNamespace(send=AsyncMock())

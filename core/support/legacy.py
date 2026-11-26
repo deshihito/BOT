@@ -8,7 +8,11 @@
 """
 from __future__ import annotations
 
+import asyncio
+import logging
 from typing import Any, Optional
+
+logger = logging.getLogger(__name__)
 
 
 def is_interaction(source) -> bool:
@@ -18,6 +22,24 @@ def is_interaction(source) -> bool:
 # 一時的なステータスログ（VC参加・読み上げ開始/停止など、流れてよい通知）の
 # 自動削除までの秒数。チャンネルに残し続けるとログで埋まるため、短時間だけ出す。
 TRANSIENT_LOG_DELETE_AFTER_SECONDS = 15
+
+
+async def _delete_message_later(message: Any, delay: float) -> None:
+    try:
+        await asyncio.sleep(delay)
+        await message.delete()
+    except Exception:
+        # 既に消えている・権限がない等は無視する（自動削除はベストエフォート）。
+        logger.debug("メッセージの自動削除に失敗しました", exc_info=True)
+
+
+def schedule_message_delete(message: Any, delay: float) -> None:
+    """``delay`` 秒後にメッセージを消すタスクを予約する。
+
+    discord.py の ``Webhook.send``（interaction.followup）は ``delete_after``
+    引数に対応していないため、followup 経由の自動削除はこちらで行う。
+    """
+    asyncio.ensure_future(_delete_message_later(message, delay))
 
 
 class Responder:
@@ -67,8 +89,9 @@ class Responder:
         """返信する。``want_message`` のときは送ったメッセージを返す（あとで編集するため）。
 
         ``delete_after`` を渡すと、送信したメッセージがその秒数後に自動で
-        消える（discord.py の delete_after をそのまま各送信経路へ渡す）。
-        一時的なステータスログ用（TRANSIENT_LOG_DELETE_AFTER_SECONDS）。
+        消える。一時的なステータスログ用（TRANSIENT_LOG_DELETE_AFTER_SECONDS）。
+        followup（Webhook）経路は discord.py の ``delete_after`` 非対応のため、
+        送信後に ``schedule_message_delete`` で手動削除する。
         """
         kwargs: dict[str, Any] = {}
         if content is not None:
@@ -87,6 +110,13 @@ class Responder:
             return await self.source.send(**kwargs)
         kwargs["ephemeral"] = ephemeral
         if self.source.response.is_done():
+            if delete_after is not None:
+                # Webhook.send は delete_after 非対応。送ってから手動で消す。
+                kwargs.pop("delete_after")
+                message = await self.source.followup.send(**kwargs, wait=True)
+                if message is not None:
+                    schedule_message_delete(message, delete_after)
+                return message if want_message else None
             if want_message:
                 kwargs["wait"] = True
             return await self.source.followup.send(**kwargs)

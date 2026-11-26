@@ -7,6 +7,7 @@ from copy import deepcopy
 from pathlib import Path
 from core.paths import DEFAULT_FONT_PATH, REPO_ROOT, asset_path
 from core.support.emojis import LEFT, RIGHT
+from core.support.legacy import schedule_message_delete
 
 import discord
 from discord.ext import commands
@@ -621,7 +622,9 @@ class Shogi(commands.Cog):
         elif s.state == "select_hand" and isinstance(pos, PieceType):
             drops = s.game.get_drop_squares(pos)
             if not drops:
-                await interaction.followup.send("打てる場所がありません。", delete_after=3)
+                # Webhook.send は delete_after 非対応のため手動で消す。
+                notice = await interaction.followup.send("打てる場所がありません。", wait=True)
+                schedule_message_delete(notice, 3)
                 return
             s.selected_drop = pos
             s.state = "select_drop_dest"
