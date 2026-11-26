@@ -356,6 +356,8 @@ class AICog(commands.Cog):
         except ai_omnirush.OmniRushError:
             logger.warning("!ai: OmniRush error", exc_info=True)
             return await _reply_without_localization(ctx, "AIへの問い合わせに失敗しました。しばらくしてから再試行してください。", mention_author=False)
+        except ai_deepai_code.DeepAICodeModelNotAllowedError as exc:
+            return await _reply_without_localization(ctx, str(exc), mention_author=False)
         except ai_deepai_code.DeepAICodeAuthError:
             logger.warning("!ai: DeepAI Code auth error", exc_info=True)
             return await _reply_without_localization(ctx,
