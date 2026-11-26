@@ -15,7 +15,7 @@ import discord.opus
 from discord.ext import commands
 from discord.ext import voice_recv
 from core.support.legacy import Responder
-from core.general.ai import logfare
+from core.general.ai import logfare, sarashina
 from core.vc import vc_feature_restore
 from core.vc.voice_session import VoiceBusy, get_manager
 from core.vc.voice_recv_patch import patch_voice_recv_client
@@ -67,8 +67,8 @@ class RestoreMixin:
 
 
     async def _restore_session(self, guild_id: int, snapshot: dict) -> bool:
-        if not logfare.api_key():
-            logger.info("guild %s: LOGFARE_API_KEY が無いため文字起こしを再開しません", guild_id)
+        if not sarashina.api_key():
+            logger.info("guild %s: SARASHINA_API_KEY が無いため文字起こしを再開しません", guild_id)
             return False
         guild = self.bot.get_guild(guild_id)
         if guild is None:
@@ -132,8 +132,8 @@ class RestoreMixin:
 
         try:
             await notice_channel.send(view=as_embed_v2(we(
-                f"🎙️ **{getattr(channel, 'name', '')}** で Logfare {logfare.TRANSCRIPTION_MODEL} による文字起こしを再開しました（Botの再起動による自動再開）。\n"
-                f"音声は無音区間ごとにLogfareへ送信され、結果を {getattr(target_channel, 'mention', '')} へ投稿します。\n"
+                f"🎙️ **{getattr(channel, 'name', '')}** で Sarashina {sarashina.TRANSCRIPTION_MODEL} による文字起こしを再開しました（Botの再起動による自動再開）。\n"
+                f"音声は無音区間ごとにSarashinaへ送信され、結果を {getattr(target_channel, 'mention', '')} へ投稿します。\n"
                 "音楽・GVC・読み上げと同時に利用できます。利用者の音声は外部サービスで処理されます。"
             )))
         except Exception:

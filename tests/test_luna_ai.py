@@ -1119,9 +1119,12 @@ class FakeSarashinaSession:
 
 
 SARASHINA_ENV_POP = (
-    "SARASHINA_API_KEY", "SARASHINA_API_KEY_2", "SARASHINA_API_KEY_3",
-    "SARASHINA_API_KEYS", "SARASHINA_BASE_URL",
-    "LUNA_AI_MODEL", "LUNA_AI_INTEGRATION_MODEL",
+    ("SARASHINA_API_KEY",)
+    + tuple(f"SARASHINA_API_KEY_{i}" for i in range(2, 11))
+    + (
+        "SARASHINA_API_KEYS", "SARASHINA_BASE_URL",
+        "LUNA_AI_MODEL", "LUNA_AI_INTEGRATION_MODEL",
+    )
 )
 
 
@@ -1179,6 +1182,15 @@ class SarashinaTest(unittest.IsolatedAsyncioTestCase):
             os.environ["SARASHINA_API_KEYS"] = "key-3, key-1,,key-4"
             self.assertEqual(
                 luna._sarashina_api_keys(), ["key-1", "key-2", "key-3", "key-4"])
+
+    def test_api_keys_numbered_up_to_10(self):
+        with patch.dict(os.environ, {}, clear=False):
+            self._pop_sarashina_env()
+            os.environ["SARASHINA_API_KEY"] = "key-1"
+            os.environ["SARASHINA_API_KEY_5"] = "key-5"
+            os.environ["SARASHINA_API_KEY_10"] = "key-10"
+            self.assertEqual(
+                luna._sarashina_api_keys(), ["key-1", "key-5", "key-10"])
 
     def test_api_keys_empty_when_unset(self):
         with patch.dict(os.environ, {}, clear=False):

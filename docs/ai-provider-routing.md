@@ -111,19 +111,21 @@ DeepAI Code への質問は同サービスへ送信され、
 
 ## VC文字起こし
 
-`/voice studio` の文字起こしは Logfare の `POST /audio/transcriptions` を使います。
-既定モデルは Deepgram Nova-3 (`nova-3`) です。変更する場合は `.env` に
-`LOGFARE_TRANSCRIPTION_MODEL` を設定します（例: `whisper-large-v3-turbo`）。
-`LOGFARE_API_KEY` が必要です。Logfareの現行モデル一覧ではNova-3とWhisper Large V3 Turboは
-いずれもトレーニング利用へのオプトインが必要なモデルとして掲載されているため、
-403の場合はLogfare側の同意設定とAPIキーの利用権限を確認してください。
+`/voice studio` の文字起こしは Sarashina の `POST /audio/transcriptions` を使います。
+モデルは `sarashina3.2-asr` です（変更する場合は `.env` に `SARASHINA_ASR_MODEL` を設定します）。
+`SARASHINA_API_KEY` が必要です。予備キー `SARASHINA_API_KEY_2` 〜 `SARASHINA_API_KEY_10`（カンマ区切りの `SARASHINA_API_KEYS` も併用可）を設定すると、Sarashina が HTTP 429（レート制限、ASR は 30 RPM）を返したときだけ自動で次のキーへ切り替わります。429 以外のエラーでは切り替えません。
+403の場合はSarashina側のAPIキーの利用権限を確認してください。
 
-API呼び出しは無音区間で区切った0.4秒以上の発話ごとに1回だけ行い、短い無音や短すぎる音声は送信しません。
+入力は16kHz・モノラル・16bit PCM の WAV で、API呼び出しは無音区間で区切った0.4秒以上の発話ごとに1回だけ行い、短い無音や短すぎる音声は送信しません。
 連続発話は最大20秒で分割し、APIエラー時の自動リトライや追加のチャット要約呼び出しは行いません。
 音楽・GVC・読み上げ・文字起こしは同じボイスチャンネル接続を共有し、PCMを合成して同時利用できます。
 4機能は同じVCチャンネルに接続している必要があり、稼働中の接続を別チャンネルへ移動させる操作は拒否します。
 文字起こしの結果は開始時に選んだテキストチャンネルへ投稿され、読み上げは開始時に選んだテキストチャンネルの発言を対象にします。
 録音・やまびこ・カラオケ・ボイスチェンジャーなど、共有対象外の機能は引き続き同時利用できません。
+
+読み上げのエンジンは VOICEVOX（既定）のほか Sarashina TTS（`sarashina3.2-tts`）も選べます。
+読み上げ設定でエンジンと声（57種の名前から選択）を切り替えます。Sarashina は 6 RPM のため、
+合成は原則1リクエスト・逐次実行にし、ピッチ/話速は VOICEVOX 時と同じく再生時の ffmpeg フィルタで適用します（ネイティブの speed は 1.0 固定で送ります）。
 
 APInex はチャットモデル選択画面に `free/` で始まるモデルだけを表示します。
 モデル一覧には `GET https://api.apinex.bond/v1/models` を使います。選択したモデルは APInex に直接送信します。
