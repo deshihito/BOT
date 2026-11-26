@@ -1,6 +1,14 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   output: "standalone",
+  experimental: {
+    // ビルドワーカーの並列数を Pi の 4 コア中 2 本までに制限する。
+    // 無制限だと静的生成ワーカーだけで CPU 150% 超・メモリ約 1GB を使い、
+    // 同居する Bot 本体（約 950MB）と合わせてスワップスラッシングを起こし
+    // Bot の応答が止まる（2026-11-26 に実測）。deploy/deploy-web.sh 側の
+    // CPU 親和性・優先度制限と対で効かせる。
+    cpus: 2,
+  },
   // Bot のリポジトリと同居するので、web/ の外のファイルは追跡しない
   outputFileTracingRoot: import.meta.dirname,
   // 旧パス・通称パスからの流入を現行ページへ寄せる（Search Console の
