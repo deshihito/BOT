@@ -266,17 +266,14 @@ class SarashinaHTTPError(RuntimeError):
 def _sarashina_api_keys() -> list[str]:
     """利用可能な Sarashina API キーを優先順に返す。
 
-    Logfare (logfare.api_keys) と同じ規約: 主キー ``SARASHINA_API_KEY``、
-    予備 ``SARASHINA_API_KEY_2`` / ``SARASHINA_API_KEY_3``、追加分
+    Logfare (logfare.api_keys) と同じ規約を _10 まで拡張: 主キー
+    ``SARASHINA_API_KEY``、予備 ``SARASHINA_API_KEY_2`` 〜 ``_10``、追加分
     ``SARASHINA_API_KEYS``（カンマ区切り）の順。空白除去・空欄除外・重複除去する。
     なおレート制限は契約主体×モデル単位のため、同一アカウントの複数キーでも
     上限自体は増えない。プールの目的はキーの使い回しと 429 時の切替先の確保。
     """
-    candidates: list[str | None] = [
-        os.getenv("SARASHINA_API_KEY"),
-        os.getenv("SARASHINA_API_KEY_2"),
-        os.getenv("SARASHINA_API_KEY_3"),
-    ]
+    candidates: list[str | None] = [os.getenv("SARASHINA_API_KEY")]
+    candidates.extend(os.getenv(f"SARASHINA_API_KEY_{i}") for i in range(2, 11))
     candidates.extend(os.getenv("SARASHINA_API_KEYS", "").split(","))
     keys: list[str] = []
     for candidate in candidates:
