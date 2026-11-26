@@ -34,6 +34,35 @@ on_exit() {
 trap on_exit EXIT
 write_build_status building
 
+# ビルドが Bot 本体を圧迫しないための資源制限（2026-11-26 の応答不良対策）。
+# Pi は 4 コア / RAM 3.7GB で、無制限の next build はワーカーだけで
+# CPU 150% 超・メモリ約 1GB を使い、Bot（約 950MB）と合わせて
+# スワップスラッシング（load 4.9・空きメモリ 92MB・iowait 24%）を起こした。
+# 重いステップは run_limited 経由にし、競合時は Bot を優先する:
+# - taskset でビルドを 2 コアに閉じ込める（残り 2 コアは常時 Bot 側に空く）
+# - nice / ionice で CPU・IO の優先度を下げる
+# - ワーカー数そのものは web/next.config.mjs の experimental.cpus=2 で
+#   削り、並列分のメモリピークを下げる
+# ハードなメモリ上限（MemoryMax 等）は systemd ユニット側の担当とし、
+# deploy/agobot-web-deploy.service.example に置いた（Pi 側はユニットの
+# 再インストールが必要）。systemd-run の user scope は Bot の実行環境に
+# ユーザーバスが無く使えないことを 2026-11-26 に実測で確認済み。
+# 制限機構が無い環境では素通しで続行し、制限の失敗でデプロイ自体を
+# 失敗させない（失敗したコミットは再試行されないため）。
+run_limited() {
+  local -a cmd=("$@")
+  if command -v ionice >/dev/null 2>&1; then
+    cmd=(ionice -c 2 -n 7 "${cmd[@]}")
+  fi
+  if command -v taskset >/dev/null 2>&1; then
+    cmd=(taskset -c 0,1 "${cmd[@]}")
+  fi
+  if command -v nice >/dev/null 2>&1; then
+    cmd=(nice -n 10 "${cmd[@]}")
+  fi
+  "${cmd[@]}"
+}
+
 # コマンド一覧データは Bot コードから再生成する
 cd "$SRC"
 venv/bin/python -m tools.export_commands --out web/data/commands.json
@@ -46,8 +75,8 @@ mkdir -p "$BUILD"
 cp -a "$SRC/web/." "$BUILD/"
 rm -rf "$BUILD/node_modules" "$BUILD/.next"
 cd "$BUILD"
-npm ci
-npm run build
+run_limited npm ci
+run_limited npm run build
 
 # リリースを組み立てる（standalone 本体 + .next/static + public）
 mkdir -p "$RELEASE"

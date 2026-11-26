@@ -6,3 +6,15 @@ After=network-online.target
 Type=oneshot
 User=luna
 ExecStart=/usr/bin/bash /home/luna/BOT/deploy/web-autodeploy.sh
+# ビルドが同居する Bot 本体を圧迫しないためのハード上限（2026-11-26 の
+# スワップスラッシング対策）。CPU は 4 コア中 2.5 コア分まで、メモリは
+# 実測ピーク約 1.1GB に余裕を見た 2G まで（超過分はビルド側がスワップ）。
+# このファイルは例示で、Pi 側はユニットの再インストール＋ daemon-reload
+# をしないと反映されない。スクリプト側の制限（deploy-web.sh の
+# run_limited と next.config の cpus=2）はリポジトリ追従で自動で効く。
+Nice=10
+CPUQuota=250%
+MemoryMax=2G
+MemorySwapMax=1G
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
