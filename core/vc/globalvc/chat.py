@@ -20,7 +20,9 @@ from core.vc.voice_session import VoiceBusy, get_manager
 from core.vc.voice_recv_patch import patch_voice_recv_client
 from core.support.messages import VOICE_NOT_JOINED, voice_connection_failed, room_not_found
 from core.vc.voice_media import add_audio_source, add_receive_sink, remove_audio_source, remove_receive_sink
+from core.support.embeds import we
 from core.support.emojis import FAILED
+from core.support.panel_v2 import as_embed_v2
 try:
     import numpy as np  # type: ignore
 except Exception:  # numpy が無い環境では純Pythonで合成する
@@ -123,9 +125,9 @@ class ChatMixin:
             logger.info("グローバルVC: ルーム %s のグロチャへ自動接続しました (channel_id=%s)",
                         room.name, channel.id)
             try:
-                await channel.send(
+                await channel.send(view=as_embed_v2(we(
                     f"🌐 ルーム **{room.name}** のグロチャにも自動接続しました"
-                    "（VC参加に連動する設定が有効なため）。")
+                    "（VC参加に連動する設定が有効なため）。")))
             except Exception:
                 logger.debug("グローバルVC: グロチャ自動接続の通知に失敗しました", exc_info=True)
             return True
