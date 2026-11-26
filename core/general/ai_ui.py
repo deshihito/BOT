@@ -142,6 +142,10 @@ class AIDefaultView(discord.ui.View):
                     } for model in numes_models)
                 except Exception:
                     logger.warning("AI設定: Numes のモデル一覧の取得に失敗しました", exc_info=True)
+                try:
+                    models.extend(await ai_deepai_code.model_choices())
+                except Exception:
+                    logger.warning("AI設定: DeepAI Code のモデル一覧の取得に失敗しました", exc_info=True)
                 models.extend(ai_omnirush.model_choices())
                 if not models and logfare_error:
                     raise logfare_error
@@ -162,7 +166,7 @@ class AIDefaultView(discord.ui.View):
                 f"現在: `{current}`\n\n"
                 f"{'チャット' if self.kind == 'chat' else '画像生成'}モデルを選べます。"
                 f"{'自動切替を選ぶと設定済みのAPIを順に使います。' if self.kind == 'chat' else ''}"
-                f"{'画像入力は対応モデルのみ利用できます。OmniRushは質問を同サービスへ送信します（[プライバシー](https://omnirush.ai/privacy)）。Logfareの一部モデルはトレーニング利用への同意が必要です。' if self.kind == 'chat' else ''}\n"
+                f"{'画像入力は対応モデルのみ利用できます。OmniRushは質問を同サービスへ送信します（[プライバシー](https://omnirush.ai/privacy)）。DeepAI Codeも質問をDeepAIへ送信します（[プライバシー](https://deepai.org/privacy-policy)）。Logfareの一部モデルはトレーニング利用への同意が必要です。' if self.kind == 'chat' else ''}\n"
                 f"モデル一覧 {self.page + 1}/{self.page_count}ページ（全{len(self.models)}件）"
             ),
             color=0xFFFFFF,
@@ -227,6 +231,8 @@ class ReasoningView(discord.ui.View):
             return None, f"モデル `{model_id.removeprefix('kiosapi::')}` はこの接続先の思考強度設定に対応していません。"
         if model_id.startswith("numes::"):
             return None, f"モデル `{model_id.removeprefix('numes::')}` はこの接続先の思考強度設定に対応していません。"
+        if model_id.startswith("deepaicode::"):
+            return None, f"モデル `{model_id.removeprefix('deepaicode::')}` はこの接続先の思考強度設定に対応していません。"
         if model_id.startswith("apinex::"):
             apinex_model = model_id.removeprefix("apinex::")
             efforts = ai_provider_router.supported_reasoning_efforts("apinex", apinex_model)

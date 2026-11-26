@@ -13,7 +13,7 @@ import discord
 from discord.ext import commands
 
 from core.general.ai import logfare
-from core.general.ai import ai_context, ai_input, ai_latex, ai_omnirush, ai_preferences, ai_provider_router
+from core.general.ai import ai_context, ai_deepai_code, ai_input, ai_latex, ai_omnirush, ai_preferences, ai_provider_router
 from core.general.ai_tools import ai_tools
 logger = logging.getLogger(__name__)
 
@@ -204,10 +204,11 @@ class AICog(commands.Cog):
         kios_model = preferred.partition("kiosapi::")[2] if preferred.startswith("kiosapi::") else None
         apinex_model = preferred.partition("apinex::")[2] if preferred.startswith("apinex::") else None
         numes_model = preferred.partition("numes::")[2] if preferred.startswith("numes::") else None
+        deepaicode_model = preferred.partition("deepaicode::")[2] if preferred.startswith("deepaicode::") else None
         omnirush_model = preferred if preferred.startswith("omnirush::") else None
         if auto and not ai_provider_router.enabled():
             return await _reply_without_localization(ctx, "AIの自動切替が未設定です。", mention_author=False)
-        if not auto and not kios_model and not apinex_model and not numes_model and not omnirush_model and not logfare.api_key():
+        if not auto and not kios_model and not apinex_model and not numes_model and not deepaicode_model and not omnirush_model and not logfare.api_key():
             return await _reply_without_localization(ctx, "AI機能は現在利用できません。", mention_author=False)
 
         sources = []
@@ -235,6 +236,16 @@ class AICog(commands.Cog):
                 reasoning_effort = None
                 model_info = None
                 images_supported = False
+            elif deepaicode_model:
+                model, exact = deepaicode_model, True
+                reasoning_effort = None
+                model_info = None
+                if has_images:
+                    try:
+                        await ai_deepai_code.fetch_models()
+                    except ai_deepai_code.DeepAICodeError:
+                        pass
+                images_supported = ai_deepai_code.supports_images(preferred)
             elif omnirush_model:
                 model, exact = omnirush_model, True
                 requested_effort = ai_preferences.get_reasoning_effort(ctx.author.id)
@@ -275,6 +286,8 @@ class AICog(commands.Cog):
                     return (await ai_provider_router.chat_with_model("apinex", apinex_model, msgs)).text
                 if numes_model:
                     return (await ai_provider_router.chat_with_model("numes", numes_model, msgs)).text
+                if deepaicode_model:
+                    return await ai_deepai_code.chat(preferred, msgs)
                 if omnirush_model:
                     return await ai_omnirush.chat(omnirush_model, f"{msgs[0]['content']}\n\n{msgs[1]['content']}")
                 return await logfare.chat(model, msgs)
@@ -318,6 +331,8 @@ class AICog(commands.Cog):
                 elif numes_model:
                     routed = await ai_provider_router.chat_with_model("numes", numes_model, messages)
                     answer = routed.text
+                elif deepaicode_model:
+                    answer = await ai_deepai_code.chat(preferred, messages)
                 elif omnirush_model:
                     answer = await ai_omnirush.chat(
                         omnirush_model,
@@ -340,6 +355,15 @@ class AICog(commands.Cog):
             )
         except ai_omnirush.OmniRushError:
             logger.warning("!ai: OmniRush error", exc_info=True)
+            return await _reply_without_localization(ctx, "AIへの問い合わせに失敗しました。しばらくしてから再試行してください。", mention_author=False)
+        except ai_deepai_code.DeepAICodeAuthError:
+            logger.warning("!ai: DeepAI Code auth error", exc_info=True)
+            return await _reply_without_localization(ctx,
+                "AI機能は現在利用できません。",
+                mention_author=False,
+            )
+        except ai_deepai_code.DeepAICodeError:
+            logger.warning("!ai: DeepAI Code error", exc_info=True)
             return await _reply_without_localization(ctx, "AIへの問い合わせに失敗しました。しばらくしてから再試行してください。", mention_author=False)
         except Exception:
             logger.exception("!ai request failed: user=%s model=%s", ctx.author.id, preferred)
@@ -365,6 +389,7 @@ class AICog(commands.Cog):
                   if auto else f"モデル: {routed.model} / 接続先: KiosAPI" if kios_model
                   else f"モデル: {routed.model} / 接続先: APInex" if apinex_model
                   else f"モデル: {routed.model} / 接続先: Numes" if numes_model
+                  else f"モデル: {ai_deepai_code.model_name(preferred)} / 接続先: DeepAI Code" if deepaicode_model
                   else f"モデル: {ai_omnirush.model_name(omnirush_model)} / 接続先: OmniRush CLI" if omnirush_model
                   else f"モデル: {model}{notice}")
         embed.set_footer(text=footer)
@@ -446,10 +471,11 @@ class AICog(commands.Cog):
         kios_model = preferred.partition("kiosapi::")[2] if preferred.startswith("kiosapi::") else None
         apinex_model = preferred.partition("apinex::")[2] if preferred.startswith("apinex::") else None
         numes_model = preferred.partition("numes::")[2] if preferred.startswith("numes::") else None
+        deepaicode_model = preferred.partition("deepaicode::")[2] if preferred.startswith("deepaicode::") else None
         omnirush_model = preferred if preferred.startswith("omnirush::") else None
         if auto and not ai_provider_router.enabled():
             return "AIの自動切替が未設定です。"
-        if not auto and not kios_model and not apinex_model and not numes_model and not omnirush_model and not logfare.api_key():
+        if not auto and not kios_model and not apinex_model and not numes_model and not deepaicode_model and not omnirush_model and not logfare.api_key():
             return "Logfareが未設定です。`.env` に `LOGFARE_API_KEY` を設定してください。"
         routed = None
         model = preferred
@@ -465,6 +491,8 @@ class AICog(commands.Cog):
                 reasoning_effort = requested_effort if requested_effort in supported_efforts else None
             elif numes_model:
                 model, exact = numes_model, True
+            elif deepaicode_model:
+                model, exact = deepaicode_model, True
             elif omnirush_model:
                 model, exact = omnirush_model, True
                 requested_effort = ai_preferences.get_reasoning_effort(user_id)
@@ -507,6 +535,8 @@ class AICog(commands.Cog):
             elif numes_model:
                 routed = await ai_provider_router.chat_with_model("numes", numes_model, messages)
                 answer = routed.text
+            elif deepaicode_model:
+                answer = await ai_deepai_code.chat(preferred, messages)
             elif omnirush_model:
                 answer = await ai_omnirush.chat(
                     omnirush_model,
@@ -520,6 +550,10 @@ class AICog(commands.Cog):
         except ai_omnirush.OmniRushUnavailable:
             return "OmniRush CLIが見つかりません。Botの実行ユーザーから利用可能か確認してください。"
         except ai_omnirush.OmniRushError as exc:
+            return str(exc)
+        except ai_deepai_code.DeepAICodeAuthError:
+            return "DeepAI Codeの認証に失敗しました。Pi の `.env` の `DEEPAI_API_KEY` を確認してください。"
+        except ai_deepai_code.DeepAICodeError as exc:
             return str(exc)
         except Exception:
             logger.exception("panel ai chat failed: user=%s model=%s", user_id, preferred)
@@ -536,6 +570,7 @@ class AICog(commands.Cog):
                   if auto else f"モデル: {routed.model} / 接続先: KiosAPI" if kios_model
                   else f"モデル: {routed.model} / 接続先: APInex" if apinex_model
                   else f"モデル: {routed.model} / 接続先: Numes" if numes_model
+                  else f"モデル: {ai_deepai_code.model_name(preferred)} / 接続先: DeepAI Code" if deepaicode_model
                   else f"モデル: {ai_omnirush.model_name(omnirush_model)} / 接続先: OmniRush CLI" if omnirush_model
                   else f"モデル: {model}{notice}")
         embed.set_footer(text=footer)
