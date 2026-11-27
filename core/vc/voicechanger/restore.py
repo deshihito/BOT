@@ -107,11 +107,7 @@ class RestoreMixin:
 
         if text_channel is not None:
             try:
-                await text_channel.send(view=as_embed_v2(we(
-                    f"🎙️ **{getattr(channel, 'name', '')}** でボイスチェンジャーを再開しました（Botの再起動による自動再開）。\n"
-                    f"{MUSIC} ピッチ: `{pitch:+.1f}` 半音\n"
-                    f"📊 `/vc のパネルからボイスチェンジャー状態` で状態を確認できます。"
-                )))
+                await text_channel.send(view=as_embed_v2(we("🎙️ ボイスチェンジャーを再開しました。")))
             except Exception:
                 logger.debug("ボイスチェンジャー: 再開通知の送信に失敗しました", exc_info=True)
         logger.info("guild %s: ボイスチェンジャーを自動再開しました", guild_id)

@@ -126,8 +126,7 @@ class ChatMixin:
                         room.name, channel.id)
             try:
                 await channel.send(view=as_embed_v2(we(
-                    f"🌐 ルーム **{room.name}** のグロチャにも自動接続しました"
-                    "（VC参加に連動する設定が有効なため）。")))
+                    f"🌐 ルーム **{room.name}** のグロチャに接続しました。")))
             except Exception:
                 logger.debug("グローバルVC: グロチャ自動接続の通知に失敗しました", exc_info=True)
             return True

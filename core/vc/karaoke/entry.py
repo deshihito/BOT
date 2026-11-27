@@ -92,9 +92,8 @@ class KaraokeCog(SessionMixin, RestoreMixin, commands.Cog):
         self._save_resume_snapshot(guild_id, vc_channel, r.channel, r.user, target_lyrics)
 
         await r.send(view=as_embed_v2(we(
-            f"🎤 **{vc_channel.name}** でカラオケを開始しました！\n\n"
-            f"📜 **お題の歌詞:**\n```\n{target_lyrics}\n```\n"
-            "歌った声がリアルタイムで字幕表示されます。終わったら `/vc のパネルからカラオケ採点` で採点！"
+            f"🎤 カラオケを開始しました！\n\n"
+            f"📜 **お題の歌詞:**\n```\n{target_lyrics}\n```"
         )), skip_localization=True)
 
     async def _restore_session(self, guild_id: int, snapshot: dict) -> bool:
@@ -155,10 +154,8 @@ class KaraokeCog(SessionMixin, RestoreMixin, commands.Cog):
 
         try:
             await text_channel.send(view=as_embed_v2(we(
-                f"🎤 **{getattr(channel, 'name', '')}** でカラオケを再開しました！（Botの再起動による自動再開）\n\n"
-                f"📜 **お題の歌詞:**\n```\n{target_lyrics}\n```\n"
-                "歌った声がリアルタイムで字幕表示されます。終わったら `/vc のパネルからカラオケ採点` で採点！\n"
-                "※ 採点の履歴はリセットされています。"
+                f"🎤 カラオケを再開しました！\n\n"
+                f"📜 **お題の歌詞:**\n```\n{target_lyrics}\n```"
             )))
         except Exception:
             logger.debug("カラオケ: 再開通知の送信に失敗しました", exc_info=True)

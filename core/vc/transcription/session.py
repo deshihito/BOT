@@ -58,11 +58,7 @@ class SessionMixin:
             return await r.send(view=as_embed_v2(we("🛑 文字起こしを停止しました。")))
         session = self.sessions.get(r.guild.id)
         if session:
-            await r.send(view=as_embed_v2(we(
-                f"🎙️ **Sarashina {sarashina.TRANSCRIPTION_MODEL} 文字起こし実行中**\n"
-                f"ボイスチャンネル: **{session['vc_channel_name']}**\n"
-                f"送信先チャンネル: {session['target_channel_mention']}"
-            )))
+            await r.send(view=as_embed_v2(we("🎙️ 文字起こし実行中")))
         else:
             await r.send(view=as_embed_v2(we(PAUSE + ' 文字起こし停止中')))
 
@@ -81,7 +77,7 @@ class SessionMixin:
                 if ex.status == 403 and not premium_notice_sent:
                     premium_notice_sent = True
                     await notice_channel.send(view=as_embed_v2(we(
-                        "Sarashinaの文字起こしモデルが利用できません。APIキーの利用権限と、Sarashina側のキー設定を確認してください。"
+                        "文字起こしが利用できません。"
                     )))
                 return
             except RuntimeError as ex:
@@ -142,8 +138,7 @@ class SessionMixin:
             )
         except VoiceBusy as busy:
             return await r.send(view=as_embed_v2(we(
-                f"{FAILED} いまVCは **{busy.session.label}** が使用中です。先にその機能を停止してから文字起こしを開始してください。\n"
-                "文字起こしは、実行中のVC機能を自動停止・切り替えしません。"
+                f"{FAILED} いまVCは **{busy.session.label}** が使用中です。"
             )))
         except Exception as e:
             return await r.send(view=as_embed_v2(we(voice_connection_failed(e))))
@@ -175,11 +170,7 @@ class SessionMixin:
         }
         self._save_resume_snapshot(guild_id, vc_channel, r.channel, r.user, send_channel)
 
-        await r.send(view=as_embed_v2(we(
-            f"🎙️ **{vc_channel.name}** で Sarashina {sarashina.TRANSCRIPTION_MODEL} による文字起こしを開始しました。\n"
-            f"音声は無音区間ごとにSarashinaへ送信され、結果を {send_channel.mention} へ投稿します。\n"
-            "音楽・GVC・読み上げと同時に利用できます。利用者の音声は外部サービスで処理されます。"
-        )))
+        await r.send(view=as_embed_v2(we("🎙️ 文字起こしを開始しました。")))
 
 
     def _cleanup(self, guild_id: int):

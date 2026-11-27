@@ -131,11 +131,7 @@ class RestoreMixin:
         self._save_resume_snapshot(guild_id, channel, notice_channel, user, target_channel)
 
         try:
-            await notice_channel.send(view=as_embed_v2(we(
-                f"🎙️ **{getattr(channel, 'name', '')}** で Sarashina {sarashina.TRANSCRIPTION_MODEL} による文字起こしを再開しました（Botの再起動による自動再開）。\n"
-                f"音声は無音区間ごとにSarashinaへ送信され、結果を {getattr(target_channel, 'mention', '')} へ投稿します。\n"
-                "音楽・GVC・読み上げと同時に利用できます。利用者の音声は外部サービスで処理されます。"
-            )))
+            await notice_channel.send(view=as_embed_v2(we("🎙️ 文字起こしを再開しました。")))
         except Exception:
             logger.debug("文字起こし: 再開通知の送信に失敗しました", exc_info=True)
         logger.info("guild %s: 文字起こしを自動再開しました", guild_id)
