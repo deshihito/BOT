@@ -95,9 +95,8 @@ class EchoMixin:
             "sink": sink, "vc": vc, "start": time.time()
         }
         await r.send(view=as_embed_v2(we(
-            f"🗣️ **{target_channel.name}** でやまびこを開始しました！\n"
-            f"{CLOCK} 遅延時間: `{delay}`秒\n"
-            f"遅延はパネルで変更できます。"
+            f"🗣️ やまびこを開始しました！\n"
+            f"{CLOCK} 遅延時間: `{delay}`秒"
         )))
 
 
