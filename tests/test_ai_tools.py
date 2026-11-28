@@ -65,9 +65,12 @@ class AIToolsTest(unittest.IsolatedAsyncioTestCase):
         ):
             self.assertIn(key, candidates)
 
-    async def test_ai_tools_is_enabled_by_default_without_legacy_d1_flag(self):
+    async def test_ai_tools_is_retired_regardless_of_env(self):
+        # 2026-11-28 一旦廃止: clef が利用不可のため env によらず常に停止。
         with patch.dict(os.environ, {}, clear=True):
-            self.assertTrue(_enabled())
+            self.assertFalse(_enabled())
+        with patch.dict(os.environ, {"AITOOLS_ENABLED": "true"}, clear=True):
+            self.assertFalse(_enabled())
         with patch.dict(os.environ, {"AITOOLS_ENABLED": "false"}, clear=True):
             self.assertFalse(_enabled())
 
@@ -137,7 +140,7 @@ class AIToolsTest(unittest.IsolatedAsyncioTestCase):
             content="<@123> VCに入って",
             reply=AsyncMock(),
         )
-        with patch.dict(os.environ, {"AITOOLS_ENABLED": "true"}), patch(
+        with patch("core.general.ai_tools.cog._enabled", return_value=True), patch(
             "cogs.general.logfare.api_key", return_value=None
         ):
             await cog.on_message(message)
@@ -157,7 +160,7 @@ class AIToolsTest(unittest.IsolatedAsyncioTestCase):
             content="<@123> VCに入って",
             reply=AsyncMock(),
         )
-        with patch.dict(os.environ, {"AITOOLS_ENABLED": "true"}), patch(
+        with patch("core.general.ai_tools.cog._enabled", return_value=True), patch(
             "cogs.general.logfare.api_key", return_value="configured"
         ), patch("cogs.general.ai_tools_router.decide_action", new_callable=AsyncMock) as decide:
             await cog.on_message(message)
@@ -225,7 +228,7 @@ class AIToolsTest(unittest.IsolatedAsyncioTestCase):
             reply=AsyncMock(),
             channel=types.SimpleNamespace(typing=AsyncMock()),
         )
-        with patch.dict(os.environ, {"AITOOLS_ENABLED": "true"}), patch(
+        with patch("core.general.ai_tools.cog._enabled", return_value=True), patch(
             "cogs.general.logfare.api_key", return_value="configured"
         ), patch(
             "cogs.general.ai_tools_router.decide_action",
@@ -380,7 +383,7 @@ class AIToolsUnavailableTest(unittest.IsolatedAsyncioTestCase):
         bot_user, message = self._mention_message()
         cog = AIToolsCog(types.SimpleNamespace(user=bot_user))
         decision = AsyncMock(side_effect=asyncio.TimeoutError())
-        with patch.dict(os.environ, {"AITOOLS_ENABLED": "true"}), patch(
+        with patch("core.general.ai_tools.cog._enabled", return_value=True), patch(
             "cogs.general.logfare.api_key", return_value="configured"
         ), patch("core.general.ai_tools.ai_tools_router.logfare.decision", decision):
             await cog.on_message(message)
@@ -395,7 +398,7 @@ class AIToolsUnavailableTest(unittest.IsolatedAsyncioTestCase):
         bot_user, message = self._mention_message()
         cog = AIToolsCog(types.SimpleNamespace(user=bot_user))
         decision = AsyncMock(side_effect=logfare.LogfareHTTPError(401))
-        with patch.dict(os.environ, {"AITOOLS_ENABLED": "true"}), patch(
+        with patch("core.general.ai_tools.cog._enabled", return_value=True), patch(
             "cogs.general.logfare.api_key", return_value="configured"
         ), patch("core.general.ai_tools.ai_tools_router.logfare.decision", decision):
             await cog.on_message(message)
@@ -408,7 +411,7 @@ class AIToolsUnavailableTest(unittest.IsolatedAsyncioTestCase):
     async def test_user_facing_decision_error_still_shows_reason(self):
         bot_user, message = self._mention_message()
         cog = AIToolsCog(types.SimpleNamespace(user=bot_user))
-        with patch.dict(os.environ, {"AITOOLS_ENABLED": "true"}), patch(
+        with patch("core.general.ai_tools.cog._enabled", return_value=True), patch(
             "cogs.general.logfare.api_key", return_value="configured"
         ), patch(
             "cogs.general.ai_tools_router.decide_action",

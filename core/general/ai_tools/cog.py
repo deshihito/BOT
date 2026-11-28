@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import logging
-import os
 import re
 from typing import Any
 
@@ -25,7 +24,11 @@ GENERIC_FAILURE_MESSAGE = (
 
 
 def _enabled() -> bool:
-    return os.getenv("AITOOLS_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
+    # 2026-11-28 一旦廃止: 判定モデル clef（Logfare）が利用不可のため、
+    # fastooler は env 設定によらず停止する。コードと候補レジストリは
+    # 復帰に備えて残す。復帰時はこの関数を AITOOLS_ENABLED の env 判定
+    # （既定 true）に戻すだけでよい。
+    return False
 
 
 def _is_miq_trigger(message, bot_user) -> bool:
@@ -249,6 +252,8 @@ class AIToolsCog(commands.Cog):
         action = action.strip().lower()
         if action not in {"", "status"}:
             return await ctx.reply("fastoolerはメンションから使う単一機能です。状態確認は `!aitools status`。", mention_author=False)
+        if not _enabled():
+            return await ctx.reply("fastoolerは現在停止中です。", mention_author=False)
         candidates = ai_tools_router.action_candidates()
         configured = bool(logfare.api_key())
         key_status = "設定済み" if configured else "未設定"
@@ -273,7 +278,7 @@ class AIToolsCog(commands.Cog):
         if _is_miq_trigger(message, self.bot.user):
             return
         if not _enabled():
-            return await message.reply("fastoolerはサーバー設定で停止中です。", mention_author=False)
+            return await message.reply("fastoolerは現在停止中です。", mention_author=False)
         invoker = _resolve_invoker(message, self.bot.user)
         if invoker is None:
             return await message.reply(

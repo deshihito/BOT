@@ -343,6 +343,10 @@ class GeneralCog(
         if value == "aitools":
             from core.general.ai_tools import ai_tools_router
             from cogs.general import _enabled as ai_tools_enabled
+            if not ai_tools_enabled():
+                embed = discord.Embed(title="fastooler", color=0x5865F2)
+                embed.description = "現在停止中です。"
+                return await interaction.response.send_message(view=as_embed_v2(embed))
             available = ai_tools_router.action_candidates()
             key_status = "設定済み" if logfare.api_key() else "未設定"
             embed = discord.Embed(title="fastooler", color=0x5865F2)

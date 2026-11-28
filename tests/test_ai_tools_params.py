@@ -247,7 +247,7 @@ class CogFlowTest(unittest.IsolatedAsyncioTestCase):
 
     def _patches(self, candidates, selected, invoke):
         return (
-            patch.dict(os.environ, {"AITOOLS_ENABLED": "true"}),
+            patch("core.general.ai_tools.cog._enabled", return_value=True),
             patch("cogs.general.logfare.api_key", return_value="configured"),
             patch.object(ai_tools_router, "action_candidates", return_value=candidates),
             patch.object(ai_tools_router, "decide_action", new_callable=AsyncMock, return_value=selected),
@@ -338,7 +338,7 @@ class RealConfirmFlowTest(unittest.IsolatedAsyncioTestCase):
 
     def _patches(self, selected, invoke):
         return (
-            patch.dict(os.environ, {"AITOOLS_ENABLED": "true"}),
+            patch("core.general.ai_tools.cog._enabled", return_value=True),
             patch("cogs.general.logfare.api_key", return_value="configured"),
             patch.object(ai_tools_router, "decide_action", new_callable=AsyncMock, return_value=selected),
             patch.object(ai_tools_router, "invoke_action", invoke),
