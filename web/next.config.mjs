@@ -24,8 +24,21 @@ const nextConfig = {
       { source: "/discord", destination: "https://discord.gg/dCAQzJUaa9", permanent: false },
     ];
   },
+  // TACT-AIM 観戦アクティビティ（独立 Bot の内蔵サーバー :8765）を
+  // /tact-aim の独立パスで公開する中継。ページ・素材・config・スナップ
+  // ショットはすべて HTTP なので rewrites のプロキシで足りる
+  // （クライアントは /snapshot をポーリングし WebSocket は使わない）。
+  // lib/subdomain.ts の 500 障害は自サーバー宛て https rewrite の話で、
+  // 別サービスの http://localhost:8765 宛ては TLS を経由しないため対象外。
+  async rewrites() {
+    return [
+      { source: "/tact-aim", destination: "http://localhost:8765/tact-aim/" },
+      { source: "/tact-aim/:path*", destination: "http://localhost:8765/tact-aim/:path*" },
+    ];
+  },
   // /games 配下だけは Discord アクティビティ（iframe 埋め込み）から開けるよう、
   // frame-ancestors で Discord ドメインを許可する。サイト全体のヘッダーは変えない。
+  // /tact-aim も観戦アクティビティの埋め込み先なので同じ許可を与える。
   async headers() {
     const frameAncestors = {
       key: "Content-Security-Policy",
@@ -35,6 +48,8 @@ const nextConfig = {
     return [
       { source: "/games", headers: [frameAncestors] },
       { source: "/games/:path*", headers: [frameAncestors] },
+      { source: "/tact-aim", headers: [frameAncestors] },
+      { source: "/tact-aim/:path*", headers: [frameAncestors] },
     ];
   },
 };
