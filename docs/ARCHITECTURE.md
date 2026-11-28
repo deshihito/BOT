@@ -16,7 +16,7 @@
   `worldbox/` `balku/` `lll/` `one-prompter/` `viewslopper/` `bgcut/`
   `online/` `three-kit/`、平置きは共通基盤 (auth / bot-api / site /
   games-catalog / gesture / sfx 等) とワーカービルド入力
-  (compute-* / chess-* — `scripts/build-workers.mjs` がパスで参照する
+  (chess-* — `scripts/build-workers.mjs` がパスで参照する
   ため平置きを維持) のみ。新規ロジックは平置きに足さず、属する
   ドメインのフォルダへ。
 - **WORLD BOX は1ジャンルとして扱う** (ユーザー決定 2026-11-16):

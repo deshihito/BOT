@@ -52,7 +52,7 @@ test("それ以外のページでは共通クロームを出す", () => {
 test("最終CTA帯は主要な公開ページで出す", () => {
   for (const path of [
     "/", "/features", "/commands", "/commands/general", "/commands/general/game",
-    "/games", "/games/chess", "/ranking", "/faq", "/compute", "/status",
+    "/games", "/games/chess", "/ranking", "/faq", "/status",
     "/jinrou/roles", "/jinrou/roles/some-role",
   ]) {
     assert.equal(m.showsCtaBand(path), true, `${path} でCTA帯が出ない`);

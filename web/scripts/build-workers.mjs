@@ -5,8 +5,8 @@
 // 成果物を出し、その実ファイルが .next/static/media に存在しないため
 // 本番で 404 になりワーカーが起動しなかった（CPU / WASM 両方）。
 // そのため、依存モジュールを TS からトランスパイルして1ファイルに
-// 同梱した自己完結ワーカーを lib/compute.worker.js /
-// lib/compute-wasm.worker.js として生成し、コミットする。
+// 同梱した自己完結ワーカーを lib/chess-cpu.worker.js として生成し、
+// コミットする。
 // 依存元を編集したら `npm run build:workers` で再生成すること
 // （npm run build の前にも prebuild で自動実行される）。
 import fs from "node:fs";
@@ -46,7 +46,7 @@ function flatten(code, allowedImports, label) {
 }
 
 const HEADER = `// このファイルは自動生成です。編集しないでください。
-// 生成元: lib/chess-perft.ts / lib/compute-wasm.ts / lib/compute-wasm-bytes.ts と
+// 生成元: lib/chess-perft.ts / lib/chess-engine.ts と
 // lib/workers-src/*.entry.js。再生成は \`npm run build:workers\`。
 // ※ ファイル名が .js でなければならない: ビルド成果物は元ファイルの拡張子を
 //   引き継ぎ、.ts だと配信サーバーが video/mp2t を返して読めなくなるため。
@@ -65,24 +65,8 @@ function buildWorker({ outName, entryName, parts }) {
 }
 
 const chessPerft = flatten(transpile("chess-perft.ts"), [], "chess-perft.ts");
-const wasmBytes = flatten(transpile("compute-wasm-bytes.ts"), [], "compute-wasm-bytes.ts");
-const computeWasm = flatten(
-  transpile("compute-wasm.ts"),
-  ["./chess-perft", "./compute-wasm-bytes"],
-  "compute-wasm.ts",
-);
 const chessEngine = flatten(transpile("chess-engine.ts"), ["./chess-perft"], "chess-engine.ts");
 
-buildWorker({
-  outName: "compute.worker.js",
-  entryName: "compute.worker.entry.js",
-  parts: [chessPerft],
-});
-buildWorker({
-  outName: "compute-wasm.worker.js",
-  entryName: "compute-wasm.worker.entry.js",
-  parts: [wasmBytes, chessPerft, computeWasm],
-});
 buildWorker({
   outName: "chess-cpu.worker.js",
   entryName: "chess-cpu.worker.entry.js",

@@ -165,7 +165,7 @@ export default function ChessClient() {
     if (workerFailedRef.current) return null;
     if (workerRef.current) return workerRef.current;
     try {
-      // /compute と同じ方式: URL を変数に切り出してから Worker に渡すと、
+      // URL を変数に切り出してから Worker に渡すと、
       // Next のビルドが lib の自己完結バンドルを静的アセットとして配信する
       // （Worker 用チャンク形式だと本番で読み込めない事故があったため）。
       const workerUrl = new URL("../../../lib/chess-cpu.worker.js", import.meta.url);
