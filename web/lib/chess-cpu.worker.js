@@ -1,5 +1,5 @@
 // このファイルは自動生成です。編集しないでください。
-// 生成元: lib/chess-perft.ts / lib/compute-wasm.ts / lib/compute-wasm-bytes.ts と
+// 生成元: lib/chess-perft.ts / lib/chess-engine.ts と
 // lib/workers-src/*.entry.js。再生成は `npm run build:workers`。
 // ※ ファイル名が .js でなければならない: ビルド成果物は元ファイルの拡張子を
 //   引き継ぎ、.ts だと配信サーバーが video/mp2t を返して読めなくなるため。

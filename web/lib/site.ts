@@ -344,13 +344,6 @@ export const UTILITY_NAV: SiteLink[] = [
 /** フッター（補完専用）。主導線の複写は置かず、役割ごとの群に分ける。 */
 export const FOOTER_GROUPS: { label: string; links: SiteLink[] }[] = [
   {
-    label: "ツール",
-    links: [
-      { href: "/one-prompter", label: "One Prompter" },
-      { href: "/compute", label: "計算に参加" },
-    ],
-  },
-  {
     label: "サポート",
     links: [
       { href: SUPPORT_SERVER_URL, label: "サポートサーバー", external: true },
