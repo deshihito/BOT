@@ -56,7 +56,7 @@ test("サイトマップの主要公開ページはすべて共通レイアウ�
   const hrefs = new Set(allLinks.map((l) => l.href));
   for (const href of [
     "/features", "/commands", "/games", "/ranking",
-    "/one-prompter", "/compute", "/status", "/credits", "/terms", "/privacy", "/faq",
+    "/status", "/credits", "/terms", "/privacy", "/faq",
   ]) {
     assert.ok(hrefs.has(href), `${href} への共通導線がない`);
   }
@@ -65,7 +65,7 @@ test("サイトマップの主要公開ページはすべて共通レイアウ�
 test("フッターは役割ごとの群に分かれ、ポリシー群は規約類だけを含む", () => {
   assert.deepEqual(
     m.FOOTER_GROUPS.map((g) => g.label),
-    ["ツール", "サポート", "サイト情報", "ポリシー", "テスト公開"],
+    ["サポート", "サイト情報", "ポリシー", "テスト公開"],
   );
   const policy = m.FOOTER_GROUPS.find((g) => g.label === "ポリシー");
   assert.deepEqual(
@@ -102,7 +102,6 @@ test("公開ページはパンくずを持ち、末尾ラベルが見出しと�
     ["commands/page.tsx", "コマンド"],
     ["games/page.tsx", "ゲーム"],
     ["ranking/page.tsx", "ランキング"],
-    ["compute/page.tsx", "計算に参加"],
     ["faq/page.tsx", "よくある質問"],
     ["status/page.tsx", "ステータス"],
     ["about/page.tsx", "運営者情報"],
